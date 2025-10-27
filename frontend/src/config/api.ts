@@ -13,23 +13,59 @@ export const DEFAULT_HEADERS = {
 
 // Configuração de endpoints
 export const ENDPOINTS = {
+  // Autenticação
   AUTH: {
     LOGIN: '/api/auth/login',
     REGISTER: '/api/auth/register',
     PROFILE: '/api/auth/profile',
     LOGOUT: '/api/auth/logout',
   },
+  
+  // Cadastros básicos
   CLIENTES: '/api/clientes',
   FORNECEDORES: '/api/fornecedores',
+  EMPRESAS: '/api/empresas',
+  
+  // Projetos e Serviços
   PROJETOS: '/api/projetos',
   SERVICOS: '/api/servicos',
+  
+  // Estoque e Materiais
+  MATERIAIS: '/api/materiais',
   MOVIMENTACOES: '/api/movimentacoes',
-  HISTORICO: '/api/historico',
+  
+  // Compras e Orçamentos
+  COMPRAS: '/api/compras',
+  ORCAMENTOS: '/api/orcamentos',
+  
+  // Vendas e Financeiro
+  VENDAS: '/api/vendas',
+  CONTAS_PAGAR: '/api/contas-pagar',
+  
+  // Fiscal
   NFE: '/api/nfe',
-  EMPRESAS: '/api/empresas',
+  CONFIG_FISCAL: '/api/configuracoes-fiscais',
+  
+  // Obras e Equipes
+  OBRAS: '/api/obras',
+  EQUIPES: '/api/equipes',
+  
+  // Relatórios
+  RELATORIOS: '/api/relatorios',
+  
+  // Dashboard
   DASHBOARD: {
     ESTATISTICAS: '/api/dashboard/estatisticas',
     GRAFICOS: '/api/dashboard/graficos',
     ALERTAS: '/api/dashboard/alertas',
   },
+  
+  // Histórico
+  HISTORICO: '/api/historico',
+  
+  // Comparação de Preços
+  COMPARACAO_PRECOS: '/api/comparacao-precos',
+  
+  // PDF
+  PDF: '/api/pdf',
 };
