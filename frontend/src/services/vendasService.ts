@@ -313,6 +313,37 @@ class VendasService {
   }
 
   /**
+   * Excluir venda permanentemente
+   */
+  async excluir(id: string) {
+    try {
+      console.log(`🗑️ Excluindo venda ${id}...`);
+      
+      const response = await axiosApiService.delete<void>(`/api/vendas/${id}`);
+      
+      if (response.success) {
+        console.log('✅ Venda excluída com sucesso');
+        return {
+          success: true,
+          message: 'Venda excluída permanentemente'
+        };
+      } else {
+        console.warn('⚠️ Erro ao excluir venda:', response);
+        return {
+          success: false,
+          error: response.error || 'Erro ao excluir venda'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao excluir venda:', error);
+      return {
+        success: false,
+        error: 'Erro de conexão ao excluir venda'
+      };
+    }
+  }
+
+  /**
    * Pagar conta a receber
    */
   async pagarConta(id: string, data: {

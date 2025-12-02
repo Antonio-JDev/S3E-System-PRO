@@ -2,11 +2,14 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import ModalEquipesDeObra from './Obras/ModalEquipesDeObra';
 import ModalAlocacaoEquipe from './Obras/ModalAlocacaoEquipe';
 import EquipesGantt from './Obras/EquipesGantt';
+import GanttChart from './Obras/GanttChart';
+import JiraBoard from './Obras/JiraBoard';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { Alocacao, Obra, Equipe } from '../types';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -42,61 +45,13 @@ interface Membro {
     role: string;
 }
 
-interface Equipe {
-    id: string;
-    nome: string;
-    tipo: 'MONTAGEM' | 'CAMPO' | 'DISTINTA';
-    membros: Membro[];
-    ativa: boolean;
-    createdAt: string;
-    updatedAt: string;
-}
-
-interface Alocacao {
-    id: string;
-    equipeId?: string | null;
-    eletricistaId?: string | null;
-    projetoId: string;
-    dataInicio: string;
-    dataFim: string;
-    dataFimPrevisto?: string;
-    status: 'Planejada' | 'EmAndamento' | 'Concluida' | 'Cancelada';
-    observacoes?: string;
-    equipe?: Equipe | null;
-    eletricista?: {
-        id: string;
-        nome: string;
-        email: string;
-        role: string;
-    } | null;
-    projeto?: any;
-}
-
-interface Obra {
-    id: string;
-    nomeObra: string;
-    status: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO';
-    dataPrevistaInicio?: string;
-    dataPrevistaFim?: string;
-    dataInicioReal?: string;
-    projeto?: {
-        titulo: string;
-        cliente?: {
-            nome: string;
-        };
-    };
-    cliente?: {
-        nome: string;
-    };
-}
-
-interface GestaoObrasProps {
+interface GanttChartProps {
     toggleSidebar: () => void;
 }
 
-type TabType = 'equipes' | 'calendario' | 'gantt';
+type TabType = 'equipes' | 'calendario' | 'timeline';
 
-const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
+const GanttChartPage: React.FC<GanttChartProps> = ({ toggleSidebar }) => {
     const [activeTab, setActiveTab] = useState<TabType>('equipes');
     const [equipes, setEquipes] = useState<Equipe[]>([]);
     const [alocacoes, setAlocacoes] = useState<Alocacao[]>([]);
@@ -349,19 +304,28 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
         }
     }, [activeTab, mesCalendario, anoCalendario]);
 
-    // Carregar obras em andamento do backend
+    // Carregar todas as obras do backend (para Gantt Chart e Jira Board)
     const loadObras = async () => {
         try {
             console.log('🔍 Carregando obras do backend...');
             const response = await axiosApiService.get<any>('/api/obras/kanban');
             
             if (response.success && response.data) {
-                // Extrair todas as obras e filtrar apenas as em andamento
+                // Extrair todas as obras de todos os status
                 const todasObras: Obra[] = [];
+                if (response.data.BACKLOG) {
+                    todasObras.push(...response.data.BACKLOG);
+                }
+                if (response.data.A_FAZER) {
+                    todasObras.push(...response.data.A_FAZER);
+                }
                 if (response.data.ANDAMENTO) {
                     todasObras.push(...response.data.ANDAMENTO);
                 }
-                console.log('✅ Obras em andamento carregadas:', todasObras);
+                if (response.data.CONCLUIDO) {
+                    todasObras.push(...response.data.CONCLUIDO);
+                }
+                console.log('✅ Obras carregadas:', todasObras.length);
                 setObras(todasObras);
             } else {
                 console.warn('⚠️ Resposta sem obras:', response);
@@ -388,7 +352,7 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
         if (activeTab === 'calendario') {
             loadObras();
             loadAlocacoes(true); // Usar endpoint de calendário
-        } else if (activeTab === 'gantt') {
+        } else if (activeTab === 'timeline') {
             loadAlocacoes(false); // Usar endpoint geral para timeline
         }
     }, [activeTab, loadAlocacoes]);
@@ -846,7 +810,7 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Gestão de Obras</h1>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">GanttChart</h1>
                         <p className="text-sm sm:text-base text-gray-500 mt-1">Gerenciamento de equipes e alocações de projetos</p>
                     </div>
                 </div>
@@ -911,9 +875,9 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
                             Calendário
                         </button>
                         <button
-                            onClick={() => setActiveTab('gantt')}
+                            onClick={() => setActiveTab('timeline')}
                             className={`py-3 px-1 border-b-2 font-semibold text-sm transition-colors duration-200 ${
-                                activeTab === 'gantt'
+                                activeTab === 'timeline'
                                     ? 'border-blue-600 text-blue-600'
                                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                             }`}
@@ -1081,574 +1045,27 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
                 </div>
             )}
 
-            {activeTab === 'calendario' && (() => {
-                const hoje = new Date();
-                const primeiroDiaMes = new Date(anoCalendario, mesCalendario, 1);
-                const ultimoDiaMes = new Date(anoCalendario, mesCalendario + 1, 0);
-                const primeiroDiaSemana = primeiroDiaMes.getDay();
-                const diasNoMes = ultimoDiaMes.getDate();
-                const nomeMes = primeiroDiaMes.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-
-                return (
-                <div className="space-y-6" key="calendario">
-                    {/* Header com Controles */}
-                    <div className="card-primary p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-900">Calendário de Alocações</h2>
-                                <p className="text-sm text-gray-500 mt-1 capitalize">
-                                    {nomeMes}
-                                </p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={irParaMesAnterior}
-                                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-semibold"
-                                >
-                                    ← Anterior
-                                </button>
-                                <button 
-                                    onClick={irParaHoje}
-                                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
-                                >
-                                    Hoje
-                                </button>
-                                <button 
-                                    onClick={irParaProximoMes}
-                                    className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-semibold"
-                                >
-                                    Próximo →
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                        {/* Calendário Principal */}
-                        <div className="lg:col-span-3">
-                            <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-6">
-                                {/* Dias da Semana */}
-                                <div className="grid grid-cols-7 gap-2 mb-4">
-                                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia) => (
-                                        <div key={dia} className="text-center text-sm font-bold text-gray-600 py-2">
-                                            {dia}
-                                        </div>
-                                    ))}
-                                </div>
-                                
-                                {/* Dias do Mês */}
-                                <div className="grid grid-cols-7 gap-2">
-                                    {Array.from({ length: 42 }, (_, i) => {
-                                        const day = i - primeiroDiaSemana + 1;
-                                        const isCurrentMonth = day > 0 && day <= diasNoMes;
-                                        const isToday = isCurrentMonth && 
-                                                      day === hoje.getDate() && 
-                                                      mesCalendario === hoje.getMonth() && 
-                                                      anoCalendario === hoje.getFullYear();
-                                        
-                                        const eventos = isCurrentMonth ? getEventosDoDia(day) : [];
-                                        
-                                        return (
-                                            <div
-                                                key={i}
-                                                className={`min-h-[80px] p-2 rounded-xl border transition-all duration-200 ${
-                                                    isCurrentMonth
-                                                        ? 'bg-white border-gray-200 hover:border-blue-400 hover:shadow-soft cursor-pointer'
-                                                        : 'bg-gray-50 border-gray-100'
-                                                } ${
-                                                    isToday ? 'ring-2 ring-blue-500 bg-blue-50' : ''
-                                                }`}
-                                            >
-                                                <div className={`text-sm font-semibold mb-1 ${
-                                                    isCurrentMonth ? (isToday ? 'text-blue-600' : 'text-gray-900') : 'text-gray-400'
-                                                }`}>
-                                                    {isCurrentMonth ? day : ''}
-                                                </div>
-                                                {eventos.length > 0 && (
-                                                    <div className="space-y-1 mt-1">
-                                                        {eventos.slice(0, 3).map((evento, idx) => (
-                                                            <div 
-                                                                key={idx}
-                                                                className={`h-1.5 ${evento.cor} rounded-full`}
-                                                                title={evento.titulo}
-                                                            ></div>
-                                                        ))}
-                                                        {eventos.length > 3 && (
-                                                            <div className="text-xs text-gray-500 font-semibold">
-                                                                +{eventos.length - 3}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {/* Sidebar com Informações */}
-                        <div className="space-y-4">
-                            {/* Legenda */}
-                            <div className="card-primary border border-gray-100 dark:border-dark-border rounded-2xl p-4 shadow-soft">
-                                <h3 className="font-bold text-gray-900 dark:text-dark-text mb-3 text-sm">Legenda</h3>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                                        <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Alocação Planejada</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                                        <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Alocação Em Andamento</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                                        <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Alocação Concluída</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                                        <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Alocação Cancelada</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-dark-border">
-                                        <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-                                        <span className="text-xs text-gray-600 dark:text-dark-text-secondary font-semibold">Obra em Andamento</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Equipes Ativas */}
-                            <div className="card-primary border border-gray-100 dark:border-dark-border rounded-2xl p-4 shadow-soft">
-                                <h3 className="font-bold text-gray-900 dark:text-dark-text mb-3 text-sm">Equipes Ativas</h3>
-                                <div className="space-y-2">
-                                    {equipes.filter(e => e.ativa).slice(0, 5).map(equipe => (
-                                        <div key={equipe.id} className="flex items-center justify-between p-2 card-secondary rounded-lg">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-semibold text-gray-800 dark:text-dark-text truncate">{equipe.nome}</p>
-                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary">{equipe.tipo}</p>
-                                            </div>
-                                            <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded-full font-semibold ml-2">
-                                                {equipe.membros?.length || 0}
-                                            </span>
-                                        </div>
-                                    ))}
-                                    {equipes.filter(e => e.ativa).length === 0 && (
-                                        <p className="text-xs text-gray-500 text-center py-4">Nenhuma equipe ativa</p>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            {/* Próximas Alocações */}
-                            <div className="card-primary border border-gray-100 dark:border-dark-border rounded-2xl p-4 shadow-soft">
-                                <h3 className="font-bold text-gray-900 mb-3 text-sm">Próximas Alocações</h3>
-                                <div className="space-y-2">
-                                    {alocacoes.filter(a => a.status !== 'Cancelada').slice(0, 3).map((alocacao) => (
-                                        <div key={alocacao.id} className={`p-2 rounded-lg ${
-                                            alocacao.status === 'EmAndamento' ? 'bg-green-50' :
-                                            alocacao.status === 'Planejada' ? 'bg-blue-50' : 'bg-orange-50'
-                                        }`}>
-                                            <p className={`text-xs font-semibold ${
-                                                alocacao.status === 'EmAndamento' ? 'text-green-800' :
-                                                alocacao.status === 'Planejada' ? 'text-blue-800' : 'text-orange-800'
-                                            }`}>
-                                                {alocacao.equipe?.nome || 'Equipe'}
-                                            </p>
-                                            <p className={`text-xs ${
-                                                alocacao.status === 'EmAndamento' ? 'text-green-600' :
-                                                alocacao.status === 'Planejada' ? 'text-blue-600' : 'text-orange-600'
-                                            }`}>
-                                                {new Date(alocacao.dataInicio).toLocaleDateString('pt-BR')} - {new Date(alocacao.dataFim).toLocaleDateString('pt-BR')}
-                                            </p>
-                                        </div>
-                                    ))}
-                                    {alocacoes.filter(a => a.status !== 'Cancelada').length === 0 && (
-                                        <p className="text-xs text-gray-500 text-center py-4">Nenhuma alocação agendada</p>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Obras em Andamento */}
-                            <div className="card-primary border border-gray-100 dark:border-dark-border rounded-2xl p-4 shadow-soft">
-                                <h3 className="font-bold text-gray-900 mb-3 text-sm">Obras em Andamento</h3>
-                                <div className="space-y-2">
-                                    {obras.slice(0, 5).map((obra) => (
-                                        <div key={obra.id} className="p-2 rounded-lg bg-purple-50 border border-purple-200">
-                                            <p className="text-xs font-semibold text-purple-800">
-                                                {obra.nomeObra}
-                                            </p>
-                                            <p className="text-xs text-purple-600">
-                                                {obra.projeto?.titulo || obra.cliente?.nome || 'Sem projeto'}
-                                            </p>
-                                            {obra.dataPrevistaInicio && (
-                                                <p className="text-xs text-purple-500 mt-1">
-                                                    Início: {new Date(obra.dataPrevistaInicio).toLocaleDateString('pt-BR')}
-                                                </p>
-                                            )}
-                                        </div>
-                                    ))}
-                                    {obras.length === 0 && (
-                                        <p className="text-xs text-gray-500 text-center py-4">Nenhuma obra em andamento</p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                );
-            })()}
-
-            {activeTab === 'gantt' && (
-                <div className="space-y-6">
-                    <EquipesGantt
-                        equipes={equipes}
-                        obras={obras}
-                        alocacoes={alocacoes}
-                        onRefresh={async () => {
-                            await Promise.all([loadEquipes(), loadAlocacoes(false), loadObras()]);
-                        }}
-                    />
-                    {/* Header */}
-                    <div className="card-primary p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-900">Timeline Gantt</h2>
-                                <p className="text-sm text-gray-500 mt-1">Visualização de alocações das equipes ao longo do tempo</p>
-                            </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={async () => {
-                                        await loadAlocacoes(false);
-                                        toast.success('Timeline atualizada!');
-                                    }}
-                                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold flex items-center gap-2"
-                                >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                    Atualizar
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Filtros de Data */}
-                    <div className="card-primary p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border">
-                        <h3 className="text-lg font-bold text-gray-900 mb-4">Filtros de Período</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Data Início
-                                </label>
-                                <input
-                                    type="date"
-                                    value={filtroDataInicio}
-                                    onChange={(e) => setFiltroDataInicio(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Data Fim
-                                </label>
-                                <input
-                                    type="date"
-                                    value={filtroDataFim}
-                                    onChange={(e) => setFiltroDataFim(e.target.value)}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                                />
-                            </div>
-                            <div className="flex items-end">
-                                <button
-                                    onClick={() => {
-                                        setFiltroDataInicio('');
-                                        setFiltroDataFim('');
-                                        toast.info('Filtros removidos');
-                                    }}
-                                    className="w-full px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-semibold"
-                                >
-                                    Limpar Filtros
-                                </button>
-                            </div>
-                        </div>
-                        {(filtroDataInicio || filtroDataFim) && (
-                            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-xl">
-                                <p className="text-sm text-blue-800">
-                                    <strong>Mostrando:</strong> {alocacoesFiltradas.length} de {alocacoes.length} alocações
-                                    {filtroDataInicio && ` a partir de ${new Date(filtroDataInicio).toLocaleDateString('pt-BR')}`}
-                                    {filtroDataFim && ` até ${new Date(filtroDataFim).toLocaleDateString('pt-BR')}`}
-                                </p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Estatísticas */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div className="bg-white p-4 rounded-2xl shadow-soft border border-gray-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center shadow-sm ring-1 ring-blue-200/50">
-                                    <UsersIcon className="w-5 h-5 text-blue-600" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-medium text-gray-500">Equipes Ativas</p>
-                                    <p className="text-xl font-bold text-gray-900">
-                                        {equipes.filter(e => e.ativa).length}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-2xl shadow-soft border border-gray-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-50 to-green-100 flex items-center justify-center shadow-sm ring-1 ring-green-200/50">
-                                    <CalendarIcon className="w-5 h-5 text-green-600" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-medium text-gray-500">Alocações Ativas</p>
-                                    <p className="text-xl font-bold text-gray-900">
-                                        {alocacoes.filter(a => a.status === 'EmAndamento').length}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-2xl shadow-soft border border-gray-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 flex items-center justify-center shadow-sm ring-1 ring-purple-200/50">
-                                    <ChartBarIcon className="w-5 h-5 text-purple-600" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-medium text-gray-500">Planejadas</p>
-                                    <p className="text-xl font-bold text-gray-900">
-                                        {alocacoes.filter(a => a.status === 'Planejada').length}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-white p-4 rounded-2xl shadow-soft border border-gray-100">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-50 to-orange-100 flex items-center justify-center shadow-sm ring-1 ring-orange-200/50">
-                                    <CalendarIcon className="w-5 h-5 text-orange-600" />
-                                </div>
-                                <div>
-                                    <p className="text-xs font-medium text-gray-500">Concluídas</p>
-                                    <p className="text-xl font-bold text-gray-900">
-                                        {alocacoes.filter(a => a.status === 'Concluida').length}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Timeline Principal */}
-                    <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-6">
-                        <h3 className="text-lg font-bold text-gray-900 mb-6">Timeline de Alocações por Equipe e Eletricista (Mensal)</h3>
-                        
-                        {equipes.length === 0 ? (
-                            <div className="text-center py-16">
-                                <UsersIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                                <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhuma equipe cadastrada</h3>
-                                <p className="text-gray-500 mb-6">Para visualizar o cronograma, é necessário cadastrar equipes primeiro.</p>
-                                <button
-                                    onClick={() => setActiveTab('equipes')}
-                                    className="bg-gradient-to-r from-blue-600 to-blue-500 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
-                                >
-                                    Gerenciar Equipes
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="space-y-6">
-                                {/* Header da Timeline - Meses */}
-                                <div className="flex items-center gap-4 mb-4 pb-4 border-b border-gray-200">
-                                    <div className="w-48 font-semibold text-sm text-gray-700">Equipe / Eletricista</div>
-                                    <div className="flex-1 grid grid-cols-12 gap-1">
-                                        {['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'].map((mes, idx) => (
-                                            <div key={idx} className="text-center text-xs font-semibold text-gray-600">
-                                                {mes}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Linhas das Equipes */}
-                                {equipes.map((equipe) => {
-                                    const equipeAlocacoes = alocacoesFiltradas.filter(a => a.equipeId === equipe.id);
-                                    
-                                    return (
-                                        <div key={equipe.id} className="flex items-center gap-4 group">
-                                            {/* Info da Equipe */}
-                                            <div className="w-48">
-                                                <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 group-hover:border-blue-300 transition-colors">
-                                                    <h4 className="font-semibold text-sm text-gray-900 truncate">{equipe.nome}</h4>
-                                                    <p className="text-xs text-gray-500 mt-0.5">{equipe.tipo}</p>
-                                                    <div className="flex items-center gap-1 mt-1">
-                                                        <UsersIcon className="w-3 h-3 text-gray-400" />
-                                                        <span className="text-xs text-gray-600">{equipe.membros?.length || 0} membros</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            {/* Timeline Grid */}
-                                            <div className="flex-1 relative h-16">
-                                                {/* Grid de fundo */}
-                                                <div className="absolute inset-0 grid grid-cols-12 gap-1">
-                                                    {Array.from({ length: 12 }).map((_, idx) => (
-                                                        <div key={idx} className="bg-gray-50 rounded border border-gray-100"></div>
-                                                    ))}
-                                                </div>
-                                                
-                                                {/* Barras de Alocação */}
-                                                {equipeAlocacoes.length > 0 ? (
-                                                    equipeAlocacoes.map((alocacao, idx) => {
-                                                        const startDate = new Date(alocacao.dataInicio);
-                                                        const endDate = new Date(alocacao.dataFim || alocacao.dataFimPrevisto || alocacao.dataInicio);
-                                                        const startMonth = startDate.getMonth();
-                                                        const endMonth = endDate.getMonth();
-                                                        const duration = endMonth - startMonth + 1;
-                                                        const left = (startMonth / 12) * 100;
-                                                        const width = (duration / 12) * 100;
-                                                        
-                                                        const colors = {
-                                                            Planejada: 'bg-blue-500',
-                                                            EmAndamento: 'bg-green-500',
-                                                            Concluida: 'bg-orange-500',
-                                                            Cancelada: 'bg-red-500'
-                                                        };
-                                                        
-                                                        return (
-                                                            <div
-                                                                key={idx}
-                                                                className={`absolute h-10 rounded-lg ${colors[alocacao.status]} shadow-md flex items-center justify-center text-white text-xs font-semibold px-2 hover:shadow-lg transition-all cursor-pointer group/bar`}
-                                                                style={{
-                                                                    left: `${left}%`,
-                                                                    width: `${width}%`,
-                                                                    top: '50%',
-                                                                    transform: 'translateY(-50%)'
-                                                                }}
-                                                                title={`${alocacao.status} - ${startDate.toLocaleDateString('pt-BR')} até ${endDate.toLocaleDateString('pt-BR')}`}
-                                                            >
-                                                                <span className="truncate">{alocacao.status}</span>
-                                                            </div>
-                                                        );
-                                                    })
-                                                ) : (
-                                                    <div className="absolute inset-0 flex items-center justify-center">
-                                                        <span className="text-xs text-gray-400">Sem alocações</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-
-                                {/* Linhas dos Eletricistas Individuais */}
-                                {(() => {
-                                    // Buscar eletricistas únicos que têm alocações
-                                    const eletricistasComAlocacoes = new Map<string, { id: string; nome: string; email: string }>();
-                                    alocacoesFiltradas.forEach(alocacao => {
-                                        if (alocacao.eletricista && !eletricistasComAlocacoes.has(alocacao.eletricista.id)) {
-                                            eletricistasComAlocacoes.set(alocacao.eletricista.id, {
-                                                id: alocacao.eletricista.id,
-                                                nome: alocacao.eletricista.nome,
-                                                email: alocacao.eletricista.email
-                                            });
-                                        }
-                                    });
-
-                                    return Array.from(eletricistasComAlocacoes.values()).map((eletricista) => {
-                                        const eletricistaAlocacoes = alocacoesFiltradas.filter(a => a.eletricistaId === eletricista.id);
-                                        
-                                        return (
-                                            <div key={eletricista.id} className="flex items-center gap-4 group">
-                                                {/* Info do Eletricista */}
-                                                <div className="w-48">
-                                                    <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-200 group-hover:border-indigo-400 transition-colors">
-                                                        <h4 className="font-semibold text-sm text-gray-900 truncate">⚡ {eletricista.nome}</h4>
-                                                        <p className="text-xs text-gray-500 mt-0.5">Eletricista Individual</p>
-                                                        <p className="text-xs text-gray-400 mt-1 truncate">{eletricista.email}</p>
-                                                    </div>
-                                                </div>
-                                                
-                                                {/* Timeline Grid */}
-                                                <div className="flex-1 relative h-16">
-                                                    {/* Grid de fundo */}
-                                                    <div className="absolute inset-0 grid grid-cols-12 gap-1">
-                                                        {Array.from({ length: 12 }).map((_, idx) => (
-                                                            <div key={idx} className="bg-gray-50 rounded border border-gray-100"></div>
-                                                        ))}
-                                                    </div>
-                                                    
-                                                    {/* Barras de Alocação */}
-                                                    {eletricistaAlocacoes.length > 0 ? (
-                                                        eletricistaAlocacoes.map((alocacao, idx) => {
-                                                            const startDate = new Date(alocacao.dataInicio);
-                                                            const endDate = new Date(alocacao.dataFim || alocacao.dataFimPrevisto || alocacao.dataInicio);
-                                                            const startMonth = startDate.getMonth();
-                                                            const endMonth = endDate.getMonth();
-                                                            const duration = endMonth - startMonth + 1;
-                                                            const left = (startMonth / 12) * 100;
-                                                            const width = (duration / 12) * 100;
-                                                            
-                                                            const colors = {
-                                                                Planejada: 'bg-blue-500',
-                                                                EmAndamento: 'bg-green-500',
-                                                                Concluida: 'bg-orange-500',
-                                                                Cancelada: 'bg-red-500'
-                                                            };
-                                                            
-                                                            return (
-                                                                <div
-                                                                    key={idx}
-                                                                    className={`absolute h-10 rounded-lg ${colors[alocacao.status]} shadow-md flex items-center justify-center text-white text-xs font-semibold px-2 hover:shadow-lg transition-all cursor-pointer group/bar`}
-                                                                    style={{
-                                                                        left: `${left}%`,
-                                                                        width: `${width}%`,
-                                                                        top: '50%',
-                                                                        transform: 'translateY(-50%)'
-                                                                    }}
-                                                                    title={`${alocacao.status} - ${startDate.toLocaleDateString('pt-BR')} até ${endDate.toLocaleDateString('pt-BR')}`}
-                                                                >
-                                                                    <span className="truncate">{alocacao.status}</span>
-                                                                </div>
-                                                            );
-                                                        })
-                                                    ) : (
-                                                        <div className="absolute inset-0 flex items-center justify-center">
-                                                            <span className="text-xs text-gray-400">Sem alocações</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        );
-                                    });
-                                })()}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Legenda */}
-                    <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-4">
-                        <h4 className="text-sm font-bold text-gray-900 mb-3">Legenda de Status</h4>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-blue-500 rounded shadow-sm"></div>
-                                <span className="text-sm text-gray-700 font-medium">Planejada</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-green-500 rounded shadow-sm"></div>
-                                <span className="text-sm text-gray-700 font-medium">Em Andamento</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-orange-500 rounded shadow-sm"></div>
-                                <span className="text-sm text-gray-700 font-medium">Concluída</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-red-500 rounded shadow-sm"></div>
-                                <span className="text-sm text-gray-700 font-medium">Cancelada</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            {activeTab === 'calendario' && (
+                <GanttChart 
+                    alocacoes={alocacoes}
+                    obras={obras}
+                    equipes={equipes}
+                />
             )}
+
+            {/* Código antigo do calendário removido - substituído por GanttChart */}
+
+            {activeTab === 'timeline' && (
+                <JiraBoard 
+                    alocacoes={alocacoes}
+                    obras={obras}
+                    onRefresh={async () => {
+                        await Promise.all([loadAlocacoes(false), loadObras()]);
+                    }}
+                />
+            )}
+
+            {/* Código antigo do gantt removido - substituído por JiraBoard */}
 
         {/* Modal de Visualizar Membros da Equipe */}
         {modalVisualizarMembros && equipeParaVisualizar && (
@@ -1709,7 +1126,7 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
                                         </div>
                                         <div className="text-right">
                                             <span className="px-3 py-1 bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-300 rounded-lg text-xs font-semibold">
-                                                {(membro as any).role || membro.funcao || 'Eletricista'}
+                                                {membro.role || 'Eletricista'}
                                             </span>
                                         </div>
                                     </div>
@@ -1995,4 +1412,4 @@ const GestaoObras: React.FC<GestaoObrasProps> = ({ toggleSidebar }) => {
     );
 };
 
-export default GestaoObras;
+export default GanttChartPage;

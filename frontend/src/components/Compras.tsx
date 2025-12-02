@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useContext, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { type PurchaseOrder, type Supplier, PurchaseStatus, type PurchaseOrderItem, type Product, CatalogItemType } from '../types';
@@ -6,7 +6,9 @@ import { parseNFeXML, readFileAsText } from '../utils/xmlParser';
 import { comprasService } from '../services/comprasService';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
-
+import { AuthContext } from '../contexts/AuthContext';
+import { canDelete } from '../utils/permissions';
+import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 // ==================== ICONS ====================
@@ -74,6 +76,7 @@ interface ComprasProps {
 }
 
 const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
+    const { user } = useContext(AuthContext)!;
     const navigate = useNavigate();
     const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -94,10 +97,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [purchaseToView, setPurchaseToView] = useState<PurchaseOrder | null>(null);
     const [purchaseToEdit, setPurchaseToEdit] = useState<PurchaseOrder | null>(null);
     const [purchaseToDelete, setPurchaseToDelete] = useState<PurchaseOrder | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     
     // Estados para recebimento de remessa
     const [isReceivingModalOpen, setIsReceivingModalOpen] = useState(false);
-    const [dataRecebimento, setDataRecebimento] = useState(new Date().toISOString().split('T')[0]);
+    // ✅ CORREÇÃO: Usar data local em vez de UTC para evitar problemas de timezone
+    const getDataLocal = () => {
+        const hoje = new Date();
+        const ano = hoje.getFullYear();
+        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+        const dia = String(hoje.getDate()).padStart(2, '0');
+        return `${ano}-${mes}-${dia}`;
+    };
+    const [dataRecebimento, setDataRecebimento] = useState(getDataLocal());
     const [itensRecebidos, setItensRecebidos] = useState<{[key: string]: boolean}>({});
     
     // Form state
@@ -140,7 +152,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [parcelas, setParcelas] = useState<Array<{ numero: string; dataVencimento: string; valor: number }>>([]);
 
     const totalProdutosCalculado = useMemo(() => {
-        return purchaseItems.reduce((total, item) => total + item.totalCost, 0);
+        return purchaseItems.reduce((total, item) => total + (item.totalCost ?? 0), 0);
     }, [purchaseItems]);
 
     const valorTotalNotaCalculado = useMemo(() => {
@@ -151,23 +163,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         return totalProdutosNum + ipiNum + freteNum + outrasNum;
     }, [valorIPI, frete, outrasDespesas, valorTotalProdutos, totalProdutosCalculado]);
 
-    // Carregar compras reais na montagem
-    useEffect(() => {
-        const load = async () => {
-            setIsLoading(true);
-            try {
-                console.log('🔍 Carregando compras...');
-                const data = await comprasService.getCompras();
-                console.log('✅ Compras carregadas:', data.length, data);
-                setPurchaseOrders(data);
-            } catch (e) {
-                console.error('❌ Erro ao carregar compras:', e);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-        load();
+    // Carregar compras reais
+    const loadPurchaseOrders = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            console.log('🔍 Carregando compras...');
+            const data = await comprasService.getCompras();
+            console.log('✅ Compras carregadas:', data.length, data);
+            setPurchaseOrders(data);
+        } catch (e) {
+            console.error('❌ Erro ao carregar compras:', e);
+        } finally {
+            setIsLoading(false);
+        }
     }, []);
+
+    useEffect(() => {
+        loadPurchaseOrders();
+    }, [loadPurchaseOrders]);
 
     const filteredPurchases = useMemo(() => {
         let filtered = purchaseOrders;
@@ -177,10 +190,12 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         }
         
         if (searchTerm) {
-            filtered = filtered.filter(purchase =>
-                purchase.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (purchase.invoiceNumber?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-            );
+            filtered = filtered.filter(purchase => {
+                const supplierName = (purchase.supplierName || '').toLowerCase();
+                const invoice = (purchase.invoiceNumber || '').toLowerCase();
+                const term = searchTerm.toLowerCase();
+                return supplierName.includes(term) || invoice.includes(term);
+            });
         }
         
         return filtered;
@@ -191,11 +206,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         if (purchase) {
             setPurchaseToEdit(purchase);
             setSelectedSupplierId(purchase.supplierId || '');
-            setPurchaseDate(purchase.orderDate);
+            setPurchaseDate(purchase.orderDate || new Date().toISOString().split('T')[0]);
             setInvoiceNumber(purchase.invoiceNumber || '');
             setStatus(purchase.status);
             setPurchaseItems(purchase.items);
-            setSupplierName(purchase.supplierName);
+            setSupplierName(purchase.supplierName || '');
         } else {
             resetForm();
         }
@@ -217,16 +232,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     };
 
     const handleOpenReceivingModal = () => {
-        setDataRecebimento(new Date().toISOString().split('T')[0]);
+        // ✅ CORREÇÃO: Sempre usar data atual local ao abrir o modal
+        const hoje = new Date();
+        const ano = hoje.getFullYear();
+        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+        const dia = String(hoje.getDate()).padStart(2, '0');
+        setDataRecebimento(`${ano}-${mes}-${dia}`);
         // Inicializar todos os itens como recebidos por padrão
         if (purchaseToView) {
             const inicialRecebidos: {[key: string]: boolean} = {};
-            purchaseToView.items.forEach((item: any, index: number) => {
-                // SEMPRE usar item.id (ID do CompraItem) que é único para cada linha
-                // Fallback para materialId-index se não houver ID
-                const itemId = (item as any).id || `${item.materialId || item.productId}-${index}`;
-                if (itemId) {
-                    inicialRecebidos[itemId] = true;
+            purchaseToView.items.forEach((item: any) => {
+                // ✅ CRÍTICO: SEMPRE usar item.id (ID do CompraItem do banco)
+                if (item.id) {
+                    inicialRecebidos[item.id] = true;
                 }
             });
             console.log(`✅ Inicializando ${Object.keys(inicialRecebidos).length} itens como marcados`, inicialRecebidos);
@@ -245,36 +263,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             return;
         }
         
-        // Mapear de CompraItem.id para Material.id
-        // O backend espera receber os materialId (produtoIds) para processar o estoque
-        const materialIds: string[] = [];
-        purchaseToView.items.forEach((item: any, index: number) => {
-            const itemId = item.id || `${item.materialId || item.productId}-${index}`;
-            if (compraItemIds.includes(itemId)) {
-                // Adicionar o materialId correspondente
-                const materialId = item.materialId || item.productId;
-                if (materialId) {
-                    materialIds.push(materialId);
-                }
-            }
-        });
-        
+        // ✅ CORREÇÃO: Enviar os IDs dos CompraItem, não os materialIds
+        // O backend precisa dos IDs dos itens da compra para processar corretamente,
+        // especialmente para itens sem materialId (que serão criados automaticamente)
         console.log('📦 Recebendo remessa:', purchaseToView.id, 'Data:', dataRecebimento);
         console.log('📦 CompraItems selecionados:', compraItemIds);
-        console.log('📦 MaterialIds para processamento:', materialIds);
         
-        if (materialIds.length === 0) {
-            toast.error('❌ Nenhum material válido para processar');
+        if (compraItemIds.length === 0) {
+            toast.error('❌ Nenhum item selecionado para processar');
             return;
         }
         
         try {
-            // Enviar materialIds para o backend processar o estoque
+            // Enviar compraItemIds para o backend processar o estoque
             await comprasService.receberRemessaParcial(
                 purchaseToView.id, 
                 PurchaseStatus.Recebido, 
                 dataRecebimento,
-                materialIds // ✅ Enviando materialIds, não compraItemIds
+                compraItemIds // ✅ Enviando IDs dos CompraItem, não materialIds
             );
             
             // Recarregar lista
@@ -285,11 +291,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             setIsReceivingModalOpen(false);
             setPurchaseToView(null);
             
-            const todosRecebidos = materialIds.length === purchaseToView.items.length;
+            const todosRecebidos = compraItemIds.length === purchaseToView.items.length;
             if (todosRecebidos) {
                 toast.success('✅ Remessa recebida com sucesso! O estoque foi atualizado.');
             } else {
-                toast.success(`✅ ${materialIds.length} de ${purchaseToView.items.length} itens recebidos! O estoque foi atualizado.`);
+                toast.success(`✅ ${compraItemIds.length} de ${purchaseToView.items.length} itens recebidos! O estoque foi atualizado.`);
             }
         } catch (error) {
             console.error('❌ Erro ao receber remessa:', error);
@@ -582,6 +588,27 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setIsModalOpen(true);
     };
 
+    // Excluir compra
+    const handleDeleteCompra = async () => {
+        if (!purchaseToDelete) return;
+
+        const response = await comprasService.excluir(purchaseToDelete.id);
+        
+        if (response.success) {
+            toast.success('Compra excluída', {
+                description: `Compra #${purchaseToDelete.invoiceNumber || purchaseToDelete.id.slice(0, 8)} foi excluída permanentemente`
+            });
+            await loadPurchaseOrders();
+        } else {
+            toast.error('Erro ao excluir', {
+                description: response.error || 'Não foi possível excluir a compra'
+            });
+        }
+
+        setShowDeleteDialog(false);
+        setPurchaseToDelete(null);
+    };
+
     return (
         <div className="min-h-screen p-4 sm:p-8">
             {/* Header */}
@@ -718,12 +745,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <span>💰</span>
                                     <span className="font-bold text-orange-700">
-                                        R$ {purchase.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {(purchase.totalAmount ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <span>📅</span>
-                                    <span>{new Date(purchase.orderDate).toLocaleDateString('pt-BR')}</span>
+                                    <span>
+                                        {new Date(purchase.orderDate || purchase.data || new Date().toISOString()).toLocaleDateString('pt-BR')}
+                                    </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <span>📦</span>
@@ -752,6 +781,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                         </svg>
                                         Receber
+                                    </button>
+                                )}
+                                {canDelete(user) && (
+                                    <button
+                                        onClick={() => {
+                                            setPurchaseToDelete(purchase);
+                                            setShowDeleteDialog(true);
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                        title="Excluir compra (apenas Desenvolvedor/Administrador)"
+                                    >
+                                        <TrashIcon className="w-4 h-4" />
+                                        Excluir
                                     </button>
                                 )}
                             </div>
@@ -783,11 +825,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <span className="font-mono text-sm text-gray-600">{purchase.invoiceNumber}</span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="text-sm text-gray-600">{new Date(purchase.orderDate).toLocaleDateString('pt-BR')}</span>
+                                            <span className="text-sm text-gray-600">
+                                                {new Date(purchase.orderDate || purchase.data || new Date().toISOString()).toLocaleDateString('pt-BR')}
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className="font-bold text-orange-700">
-                                                R$ {purchase.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                R$ {(purchase.totalAmount ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
@@ -809,6 +853,18 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
                                                 </button>
+                                                {canDelete(user) && (
+                                                    <button
+                                                        onClick={() => {
+                                                            setPurchaseToDelete(purchase);
+                                                            setShowDeleteDialog(true);
+                                                        }}
+                                                        className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                        title="Excluir compra (apenas Desenvolvedor/Administrador)"
+                                                    >
+                                                        <TrashIcon className="w-4 h-4" />
+                                                    </button>
+                                                )}
                                                 {purchase.status === PurchaseStatus.Pendente && (
                                                     <button
                                                         onClick={() => {
@@ -835,7 +891,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className="bg-white rounded-2xl shadow-strong max-w-7xl w-full max-h-[95vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
                         <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-orange-600 to-orange-700">
                             <div className="flex items-center gap-4">
@@ -1115,35 +1171,64 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <p className="text-gray-400 text-sm mt-1">Adicione produtos à sua compra</p>
                                     </div>
                                 ) : (
-                                    <div className="space-y-3">
-                                        {purchaseItems.map((item, index) => (
-                                            <div key={index} className="bg-white border border-gray-200 p-4 rounded-xl">
-                                                <div className="flex justify-between items-center">
-                                                    <div className="flex-1">
-                                                        <p className="font-semibold text-gray-900">{item.productName}</p>
-                                                        <p className="text-sm text-gray-600">
-                                                            {item.quantity} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                <div className="flex items-center gap-3">
-                                                        <p className="font-bold text-orange-700">
-                                                            R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                <div className="mt-2 text-xs text-gray-500">
-                                                    {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
-                                                    {item.sku && <span>SKU: {item.sku}</span>}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveProduct(index)}
-                                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
-                                                >
-                                                    <TrashIcon className="w-4 h-4" />
-                                                </button>
-                                                </div>
-                                            </div>
-                                        ))}
+                                    <div className="border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-dark-border">
+                                                    <tr>
+                                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Produto</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Qtd</th>
+                                                        <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Valor Unit.</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">NCM</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
+                                                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Ações</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
+                                                    {purchaseItems.map((item, index) => (
+                                                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">{item.quantity}</span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-right">
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
+                                                                    R$ {(item.unitCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
+                                                                    {item.ncm || '-'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
+                                                                    {item.sku || '-'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                <span className="font-bold text-orange-700 dark:text-orange-400 text-base">
+                                                                    R$ {(item.totalCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveProduct(index)}
+                                                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                                    title="Remover item"
+                                                                >
+                                                                    <TrashIcon className="w-4 h-4" />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                         
                                         <div className="bg-gradient-to-r from-orange-50 to-yellow-50 border-2 border-orange-200 p-4 rounded-xl">
                                             <div className="flex justify-between items-center">
@@ -1439,7 +1524,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             {/* MODAL DE VISUALIZAÇÃO */}
             {purchaseToView && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-7xl w-full max-h-[95vh] overflow-y-auto">
                         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-orange-600 to-orange-700">
                             <div>
                                 <h2 className="text-2xl font-bold text-white">Detalhes da Compra</h2>
@@ -1477,16 +1562,63 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </div>
                                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data da Compra</h4>
-                                        <p className="text-gray-900 font-medium">{new Date(purchaseToView.orderDate).toLocaleDateString('pt-BR')}</p>
+                                        <p className="text-gray-900 font-medium">
+                                            {new Date(
+                                                purchaseToView.orderDate ||
+                                                (purchaseToView as any).data ||
+                                                new Date().toISOString()
+                                            ).toLocaleDateString('pt-BR')}
+                                        </p>
                                     </div>
-                                    {purchaseToView.dataRecebimento && purchaseToView.status === PurchaseStatus.Recebido && (
-                                        <div className="bg-green-50 p-4 rounded-xl border border-green-200">
-                                            <h4 className="text-xs font-semibold text-green-600 uppercase mb-1 flex items-center gap-1">
-                                                <span>✅</span> Data de Recebimento
-                                            </h4>
-                                            <p className="text-green-900 font-bold">{new Date(purchaseToView.dataRecebimento).toLocaleDateString('pt-BR')}</p>
-                                        </div>
-                                    )}
+                                    <div
+                                        className={`p-4 rounded-xl border ${
+                                            (purchaseToView as any).dataRecebimento
+                                                ? 'bg-green-50 border-green-200'
+                                                : 'bg-gray-50 border-gray-200'
+                                        }`}
+                                    >
+                                        <h4
+                                            className={`text-xs font-semibold uppercase mb-1 flex items-center gap-1 ${
+                                                (purchaseToView as any).dataRecebimento
+                                                    ? 'text-green-600'
+                                                    : 'text-gray-500'
+                                            }`}
+                                        >
+                                            <span>✅</span> Data de Recebimento
+                                        </h4>
+                                        <p
+                                            className={
+                                                (purchaseToView as any).dataRecebimento
+                                                    ? 'text-green-900 font-bold'
+                                                    : 'text-gray-600 font-medium'
+                                            }
+                                        >
+                                            {(purchaseToView as any).dataRecebimento
+                                                ? (() => {
+                                                    // ✅ CORREÇÃO: Formatar data sem problemas de timezone
+                                                    const dataStr = (purchaseToView as any).dataRecebimento;
+                                                    if (!dataStr) return 'Ainda não recebida';
+                                                    
+                                                    // Se for string ISO, extrair apenas a data (YYYY-MM-DD)
+                                                    if (typeof dataStr === 'string' && dataStr.includes('T')) {
+                                                        const [dataPart] = dataStr.split('T');
+                                                        const [ano, mes, dia] = dataPart.split('-');
+                                                        return `${dia}/${mes}/${ano}`;
+                                                    }
+                                                    
+                                                    // Se for Date object ou outra string, tentar parsear
+                                                    const data = new Date(dataStr);
+                                                    if (isNaN(data.getTime())) return 'Data inválida';
+                                                    
+                                                    // Usar UTC para evitar problemas de timezone
+                                                    const dia = String(data.getUTCDate()).padStart(2, '0');
+                                                    const mes = String(data.getUTCMonth() + 1).padStart(2, '0');
+                                                    const ano = data.getUTCFullYear();
+                                                    return `${dia}/${mes}/${ano}`;
+                                                })()
+                                                : 'Ainda não recebida'}
+                                        </p>
+                                    </div>
                                     {(purchaseToView as any).destinatarioCNPJ && (
                                         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">CNPJ Destinatário</h4>
@@ -1511,42 +1643,57 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             {/* Itens da Compra */}
                             {purchaseToView.items && purchaseToView.items.length > 0 && (
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                        <span className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600">📦</span>
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">📦</span>
                                         Itens da Compra ({purchaseToView.items.length})
                                     </h3>
-                                    <div className="space-y-3">
-                                        {purchaseToView.items.map((item, index) => (
-                                            <div key={index} className="bg-white border border-gray-200 p-4 rounded-xl hover:shadow-md transition-shadow">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div className="flex-1">
-                                                        <p className="font-semibold text-gray-900">{item.productName}</p>
-                                                        <p className="text-sm text-gray-600 mt-1">
-                                                            {item.quantity} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="font-bold text-lg text-orange-700">
-                                                            R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                {((item as any).ncm || (item as any).sku) && (
-                                                    <div className="flex gap-4 text-xs text-gray-500 pt-2 border-t border-gray-100">
-                                                        {(item as any).ncm && (
-                                                            <span className="bg-gray-100 px-2 py-1 rounded">
-                                                                NCM: {(item as any).ncm}
-                                                            </span>
-                                                        )}
-                                                        {(item as any).sku && (
-                                                            <span className="bg-gray-100 px-2 py-1 rounded">
-                                                                SKU: {(item as any).sku}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
+                                    <div className="border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-dark-border">
+                                                    <tr>
+                                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Produto</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Qtd</th>
+                                                        <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Valor Unit.</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">NCM</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
+                                                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
+                                                    {purchaseToView.items.map((item, index) => (
+                                                        <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">{item.quantity}</span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-right">
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
+                                                                    R$ {(item.unitCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
+                                                                    {(item as any).ncm || '-'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
+                                                                    {(item as any).sku || '-'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                <span className="font-bold text-orange-700 dark:text-orange-400 text-base">
+                                                                    R$ {(item.totalCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -1607,7 +1754,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             R$ {(
                                                 (purchaseToView as any).valorTotalNota !== undefined 
                                                     ? parseFloat((purchaseToView as any).valorTotalNota || '0') 
-                                                    : purchaseToView.totalAmount
+                                                    : (purchaseToView.totalAmount ?? 0)
                                             ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
@@ -1710,7 +1857,26 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </div>
                                     {(purchaseToView as any).dataRecebimento && (
                                         <div className="text-sm text-gray-600 bg-white px-3 py-1.5 rounded-lg border border-gray-200">
-                                            📅 Recebido em: {new Date((purchaseToView as any).dataRecebimento).toLocaleDateString('pt-BR')}
+                                            📅 Recebido em: {(() => {
+                                                const dataStr = (purchaseToView as any).dataRecebimento;
+                                                if (!dataStr) return 'N/A';
+                                                
+                                                // ✅ CORREÇÃO: Formatar data sem problemas de timezone
+                                                if (typeof dataStr === 'string' && dataStr.includes('T')) {
+                                                    const [dataPart] = dataStr.split('T');
+                                                    const [ano, mes, dia] = dataPart.split('-');
+                                                    return `${dia}/${mes}/${ano}`;
+                                                }
+                                                
+                                                const data = new Date(dataStr);
+                                                if (isNaN(data.getTime())) return 'Data inválida';
+                                                
+                                                // Usar UTC para evitar problemas de timezone
+                                                const dia = String(data.getUTCDate()).padStart(2, '0');
+                                                const mes = String(data.getUTCMonth() + 1).padStart(2, '0');
+                                                const ano = data.getUTCFullYear();
+                                                return `${dia}/${mes}/${ano}`;
+                                            })()}
                                         </div>
                                     )}
                                 </div>
@@ -1752,7 +1918,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             {/* MODAL DE RECEBIMENTO DE REMESSA */}
             {isReceivingModalOpen && purchaseToView && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-200 max-h-[90vh] overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full overflow-hidden border border-gray-200 max-h-[90vh] overflow-y-auto">
                         {/* Header */}
                         <div className="p-6 bg-gradient-to-r from-green-600 to-green-700">
                             <div className="flex items-center gap-3 text-white">
@@ -1769,23 +1935,23 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                         </div>
 
                         {/* Conteúdo */}
-                        <div className="p-6 space-y-6">
+                        <div className="p-8 space-y-6">
                             {/* Informações da Compra */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                <h4 className="text-sm font-semibold text-blue-900 mb-3">Resumo da Compra</h4>
-                                <div className="space-y-2 text-sm">
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Fornecedor:</span>
-                                        <span className="font-semibold text-gray-900">{purchaseToView.supplierName}</span>
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
+                                <h4 className="text-base font-semibold text-blue-900 mb-4">Resumo da Compra</h4>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                    <div className="flex flex-col">
+                                        <span className="text-gray-600 mb-1">Fornecedor:</span>
+                                        <span className="font-semibold text-gray-900 text-base">{purchaseToView.supplierName}</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Total de Itens:</span>
-                                        <span className="font-semibold text-gray-900">{purchaseToView.items.length} produtos</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-gray-600 mb-1">Total de Itens:</span>
+                                        <span className="font-semibold text-gray-900 text-base">{purchaseToView.items.length} produtos</span>
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-600">Valor Total:</span>
-                                        <span className="font-bold text-lg text-green-700">
-                                            R$ {purchaseToView.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <div className="flex flex-col">
+                                        <span className="text-gray-600 mb-1">Valor Total:</span>
+                                        <span className="font-bold text-xl text-green-700">
+                                            R$ {(purchaseToView.totalAmount ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
                                     </div>
                                 </div>
@@ -1796,11 +1962,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 <h4 className="text-sm font-semibold text-gray-700 mb-3">
                                     📦 Itens da Compra - Marque os recebidos
                                 </h4>
-                                <div className="space-y-2 max-h-60 overflow-y-auto border border-gray-200 rounded-xl p-3 bg-gray-50">
+                                <div className="space-y-2 max-h-96 overflow-y-auto border border-gray-200 rounded-xl p-3 bg-gray-50">
                                     {purchaseToView.items.map((item: any, index) => {
-                                        // SEMPRE usar item.id (ID único do CompraItem)
-                                        // Fallback para combinação única se não houver ID
-                                        const itemId = item.id || `${item.materialId || item.productId}-${index}`;
+                                        // ✅ CRÍTICO: SEMPRE usar item.id (ID único do CompraItem do banco)
+                                        // Se não houver ID, é um erro de mapeamento - não usar fallback
+                                        if (!item.id) {
+                                            console.error('❌ Item sem ID!', item);
+                                        }
+                                        const itemId = item.id; // Sem fallback - o ID deve vir do backend
                                         
                                         return (
                                             <label
@@ -1819,12 +1988,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                     className="mt-1 w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500"
                                                 />
                                                 <div className="flex-1">
-                                                    <p className="font-semibold text-gray-900 text-sm">{item.productName}</p>
-                                                    <div className="flex gap-4 mt-1 text-xs text-gray-600">
-                                                    <span>Qtd: {item.quantity}</span>
-                                                    <span>Valor: R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                    <p className="font-semibold text-gray-900 text-base">{item.productName}</p>
+                                                    <div className="flex gap-6 mt-2 text-sm text-gray-600">
+                                                        <span className="font-medium">Qtd: <span className="text-gray-900">{item.quantity}</span></span>
+                                                        <span className="font-medium">Valor Unit.: <span className="text-gray-900">R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></span>
+                                                        <span className="font-medium">Total: <span className="text-green-700 font-bold">R$ {(item.quantity * item.unitCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></span>
+                                                    </div>
                                                 </div>
-                                            </div>
                                         </label>
                                         );
                                     })}
@@ -1834,10 +2004,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         type="button"
                                         onClick={() => {
                                             const todosTrue: {[key: string]: boolean} = {};
-                                            purchaseToView.items.forEach((item: any, index: number) => {
-                                                // Usar a mesma lógica: item.id ou fallback
-                                                const itemId = item.id || `${item.materialId || item.productId}-${index}`;
-                                                if (itemId) todosTrue[itemId] = true;
+                                            purchaseToView.items.forEach((item: any) => {
+                                                // ✅ CRÍTICO: Sempre usar item.id (sem fallback)
+                                                if (item.id) {
+                                                    todosTrue[item.id] = true;
+                                                }
                                             });
                                             console.log(`✓ Marcando todos os ${Object.keys(todosTrue).length} itens`, todosTrue);
                                             setItensRecebidos(todosTrue);
@@ -1868,7 +2039,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     type="date"
                                     value={dataRecebimento}
                                     onChange={(e) => setDataRecebimento(e.target.value)}
-                                    max={new Date().toISOString().split('T')[0]}
+                                    max={(() => {
+                                        const hoje = new Date();
+                                        const ano = hoje.getFullYear();
+                                        const mes = String(hoje.getMonth() + 1).padStart(2, '0');
+                                        const dia = String(hoje.getDate()).padStart(2, '0');
+                                        return `${ano}-${mes}-${dia}`;
+                                    })()}
                                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                 />
                                 <p className="text-xs text-gray-500 mt-1">
@@ -1913,6 +2090,21 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             )}
+
+            {/* AlertDialog de Confirmação de Exclusão */}
+            <AlertDialog
+                isOpen={showDeleteDialog}
+                onClose={() => {
+                    setShowDeleteDialog(false);
+                    setPurchaseToDelete(null);
+                }}
+                onConfirm={handleDeleteCompra}
+                title={`Excluir compra #${purchaseToDelete?.invoiceNumber || purchaseToDelete?.id.slice(0, 8) || 'N/A'}?`}
+                message={`Tem certeza que deseja excluir permanentemente esta compra? Esta ação não pode ser desfeita.`}
+                confirmText="Excluir Permanentemente"
+                cancelText="Cancelar"
+                variant="danger"
+            />
         </div>
     );
 };

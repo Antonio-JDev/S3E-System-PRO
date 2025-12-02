@@ -4,6 +4,7 @@ import { movimentacoesService, type Movimentacao } from '../services/movimentaco
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import { toast } from 'sonner';
+import { useSKey } from '../hooks/useSKey';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -330,6 +331,16 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
             });
         }
     };
+
+    // Fechar modais com tecla S
+    useSKey(isEntradaModalOpen, () => {
+        setIsEntradaModalOpen(false);
+        resetForm();
+    });
+    useSKey(isSaidaModalOpen, () => {
+        setIsSaidaModalOpen(false);
+        resetForm();
+    });
 
     if (loading) {
         return (

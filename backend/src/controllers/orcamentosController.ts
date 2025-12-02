@@ -74,6 +74,25 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
   }
 };
 
+// Obter próximo número sequencial de orçamento (apenas informativo)
+export const getProximoNumeroOrcamento = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const ultimo = await prisma.orcamento.findFirst({
+      orderBy: { numeroSequencial: 'desc' },
+      select: { numeroSequencial: true }
+    });
+
+    const proximoNumero = (ultimo?.numeroSequencial || 0) + 1;
+
+    res.json({
+      proximoNumero
+    });
+  } catch (error) {
+    console.error('Erro ao obter próximo número de orçamento:', error);
+    res.status(500).json({ error: 'Erro ao obter próximo número de orçamento' });
+  }
+};
+
 // Criar orçamento
 export const createOrcamento = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -190,6 +209,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         tipo: item.tipo,
         materialId: item.materialId,
         kitId: item.kitId,
+        cotacaoId: item.cotacaoId, // ✅ Incluir cotacaoId para itens do banco frio
         servicoNome: item.servicoNome,
         descricao: item.descricao,
         quantidade: item.quantidade,
@@ -241,7 +261,8 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         items: {
           include: {
             material: true,
-            kit: true
+            kit: true,
+            cotacao: { select: { id: true, nome: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ Incluir cotação
           }
         },
         fotos: true
@@ -611,6 +632,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
           tipo: item.tipo,
           materialId: item.materialId,
           kitId: item.kitId,
+          cotacaoId: item.cotacaoId, // ✅ Incluir cotacaoId para itens do banco frio
           servicoNome: item.servicoNome,
           descricao: item.descricao,
           quantidade: item.quantidade,
@@ -680,7 +702,8 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
         items: {
           include: {
             material: { select: { id: true, nome: true, sku: true } },
-            kit: { select: { id: true, nome: true } }
+            kit: { select: { id: true, nome: true } },
+            cotacao: { select: { id: true, nome: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ Incluir cotação
           }
         },
         fotos: true
@@ -699,6 +722,88 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
     res.status(500).json({
       success: false,
       error: 'Erro ao atualizar orçamento'
+    });
+  }
+};
+
+// Excluir orçamento (soft delete ou permanente)
+export const deleteOrcamento = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { permanent } = req.query; // ?permanent=true para exclusão permanente
+    const userRole = (req as any).user?.role?.toLowerCase(); // Role do usuário autenticado
+
+    // Verificar se orçamento existe
+    const orcamento = await prisma.orcamento.findUnique({
+      where: { id },
+      include: {
+        projeto: { select: { id: true } },
+        items: { select: { id: true } }
+      }
+    });
+
+    if (!orcamento) {
+      res.status(404).json({
+        success: false,
+        error: 'Orçamento não encontrado'
+      });
+      return;
+    }
+
+    // EXCLUSÃO PERMANENTE (apenas Admin e Desenvolvedor)
+    if (permanent === 'true') {
+      // Verificar permissões: apenas Admin e Desenvolvedor podem excluir permanentemente
+      if (!['admin', 'desenvolvedor', 'administrador'].includes(userRole)) {
+        res.status(403).json({
+          success: false,
+          error: 'Acesso negado. Apenas Administradores e Desenvolvedores podem excluir orçamentos permanentemente.'
+        });
+        return;
+      }
+
+      // Exclusão permanente - deletar do banco
+      // Primeiro deletar os items relacionados
+      await prisma.orcamentoItem.deleteMany({
+        where: { orcamentoId: id }
+      });
+
+      // Depois deletar o orçamento
+      await prisma.orcamento.delete({
+        where: { id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Orçamento excluído permanentemente do banco de dados'
+      });
+      return;
+    }
+
+    // SOFT DELETE (para outros usuários ou quando não especificado permanent)
+    // Verificar se orçamento tem projeto vinculado
+    if (orcamento.projeto) {
+      res.status(400).json({
+        success: false,
+        error: 'Não é possível desativar orçamento com projeto vinculado'
+      });
+      return;
+    }
+
+    // Soft delete - marcar como cancelado
+    await prisma.orcamento.update({
+      where: { id },
+      data: { status: 'Cancelado' }
+    });
+
+    res.json({
+      success: true,
+      message: 'Orçamento cancelado com sucesso'
+    });
+  } catch (error) {
+    console.error('Erro ao excluir orçamento:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao excluir orçamento'
     });
   }
 };

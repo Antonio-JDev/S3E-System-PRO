@@ -6,6 +6,10 @@ import { AuthContext } from '../contexts/AuthContext';
 import { ThemeToggle } from './theme-toggle';
 import { hasPermission } from '../utils/permissions';
 import { getUploadUrl } from '../config/api';
+import { queryClient } from '../lib/queryClient';
+import { dashboardService } from '../services/dashboardService';
+import { orcamentosService } from '../services/orcamentosService';
+import { vendasService } from '../services/vendasService';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -57,23 +61,85 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
         return saved === 'true';
     });
 
+    // ===== Prefetch de módulos (code splitting) e dados (React Query) =====
+    const prefetchModuleMap: Record<string, () => Promise<unknown>> = {
+        Dashboard: () => import('../components/DashboardModerno'),
+        'Orçamentos': () => import('../components/Orcamentos'),
+        Financeiro: () => import('../components/Financeiro'),
+        Vendas: () => import('../components/Vendas'),
+        Clientes: () => import('../components/ClientesModerno'),
+    };
+
+    const handlePrefetch = (viewName: string) => {
+        // Prefetch do módulo (chunk JS)
+        const importFn = prefetchModuleMap[viewName];
+        if (importFn) {
+            importFn();
+        }
+
+        // Prefetch de dados via React Query (quando fizer sentido)
+        if (viewName === 'Dashboard') {
+            queryClient.prefetchQuery({
+                queryKey: ['dashboard', 'completo'],
+                queryFn: async () => {
+                    const result = await dashboardService.getDashboardCompleto();
+                    return result.data;
+                },
+            });
+        }
+
+        if (viewName === 'Orçamentos') {
+            queryClient.prefetchQuery({
+                queryKey: ['orcamentos', 'lista'],
+                queryFn: async () => {
+                    const result = await orcamentosService.listar();
+                    return result.data;
+                },
+            });
+        }
+
+        if (viewName === 'Financeiro') {
+            queryClient.prefetchQuery({
+                queryKey: ['financeiro', 'dashboard-vendas'],
+                queryFn: async () => {
+                    const result = await vendasService.getDashboard();
+                    return result.data;
+                },
+            });
+        }
+    };
+
     // Filtrar links baseado nas permissões do usuário
     const filteredNavLinks = useMemo(() => {
+        const userRole = user?.role?.toLowerCase();
+        
         return navLinks.filter(link => {
+            // Desenvolvedor tem acesso a tudo
+            if (userRole === 'desenvolvedor') {
+                return true;
+            }
+            
             // Se o link tem devOnly=true, só mostra para desenvolvedor (legado)
-            if (link.devOnly && user?.role?.toLowerCase() !== 'desenvolvedor') {
+            if (link.devOnly && userRole !== 'desenvolvedor') {
                 return false;
             }
             
             // Se o link tem uma permissão específica, verifica se o usuário tem
             if (link.requiredPermission) {
-                return hasPermission(user?.role, link.requiredPermission);
+                // Por enquanto, se não for desenvolvedor, verifica a permissão
+                // TODO: Implementar sistema de permissões granular no futuro
+                // Por enquanto, admin e desenvolvedor têm acesso a tudo
+                if (userRole === 'admin' || userRole === 'administrador') {
+                    return true;
+                }
+                // Para outros roles, pode implementar verificação específica aqui
+                return hasPermission(user, link.requiredPermission);
             }
             
             // Links sem permissão específica são mostrados para todos
             return true;
         });
-    }, [user?.role]);
+    }, [user]);
 
     useEffect(() => {
         // Carregar logo do backend
@@ -139,7 +205,39 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                 <div className={`flex items-center ${isCollapsed ? 'flex-col' : 'space-x-3'}`}>
                     {companyLogo ? (
                         <div className="w-11 h-11 rounded-xl shadow-medium overflow-hidden flex-shrink-0 ring-2 ring-gray-100">
-                            <img src={companyLogo} alt="Logo da Empresa" className="w-full h-full object-contain" />
+                            <img 
+                                src={companyLogo} 
+                                alt="Logo da Empresa" 
+                                className="w-full h-full object-contain"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    const originalSrc = target.src;
+                                    console.error('❌ Erro ao carregar logo na sidebar:', originalSrc);
+                                    
+                                    // Extrair filename da URL
+                                    const urlParts = originalSrc.split('/');
+                                    const filename = urlParts[urlParts.length - 1];
+                                    
+                                    // Tentar endpoint específico
+                                    const alternativeUrl = import.meta.env.VITE_API_URL 
+                                        ? `${import.meta.env.VITE_API_URL}/api/configuracoes/logo/${filename}`
+                                        : `/api/configuracoes/logo/${filename}`;
+                                    
+                                    if (!target.src.includes('/api/configuracoes/logo/')) {
+                                        console.log('🔄 Tentando URL alternativa na sidebar:', alternativeUrl);
+                                        target.src = alternativeUrl;
+                                    } else {
+                                        // Se ainda falhar, usar fallback
+                                        console.error('❌ Falha ao carregar logo na sidebar, usando fallback');
+                                        target.style.display = 'none';
+                                        const parent = target.parentElement;
+                                        if (parent) {
+                                            parent.innerHTML = '<div class="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-2.5 shadow-medium ring-2 ring-blue-100"><svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></div>';
+                                        }
+                                    }
+                                }}
+                            />
                         </div>
                     ) : (
                         <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-2.5 shadow-medium ring-2 ring-blue-100">
@@ -189,6 +287,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                         e.preventDefault();
                                         onNavigate(link.name);
                                     }}
+                                    onMouseEnter={() => handlePrefetch(link.name)}
                                     className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative
                                         ${activeView === link.name
                                             ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium'
@@ -220,6 +319,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                         e.preventDefault();
                                         onNavigate(link.name);
                                     }}
+                                    onMouseEnter={() => handlePrefetch(link.name)}
                                     className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative
                                         ${activeView === link.name
                                             ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium'
@@ -251,6 +351,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                         e.preventDefault();
                                         onNavigate(link.name);
                                     }}
+                                    onMouseEnter={() => handlePrefetch(link.name)}
                                     className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative
                                         ${activeView === link.name
                                             ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium'
@@ -282,6 +383,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                         e.preventDefault();
                                         onNavigate(link.name);
                                     }}
+                                    onMouseEnter={() => handlePrefetch(link.name)}
                                     className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative
                                         ${activeView === link.name
                                             ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium'
@@ -322,6 +424,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                             e.preventDefault();
                                             onNavigate(link.name);
                                         }}
+                                        onMouseEnter={() => handlePrefetch(link.name)}
                                         className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative ${activeClass}`}
                                         title={isCollapsed ? link.name : ''}
                                     >
@@ -357,6 +460,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                                             e.preventDefault();
                                             onNavigate(link.name);
                                         }}
+                                        onMouseEnter={() => handlePrefetch(link.name)}
                                         className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-3'} py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 group relative
                                             ${activeView === link.name
                                                 ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium'

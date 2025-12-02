@@ -89,6 +89,13 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       status: req.body.status,
       items: req.body.items,
       observacoes: req.body.observacoes,
+      // Campos adicionais vindos do frontend / XML
+      valorIPI: req.body.valorIPI ?? 0,
+      valorTotalProdutos: req.body.valorTotalProdutos,
+      valorTotalNota: req.body.valorTotalNota,
+      duplicatas: req.body.duplicatas || req.body.parcelas || [],
+      statusImportacao: req.body.statusImportacao,
+      // Campos para geração de contas a pagar (fallback quando não há duplicatas)
       condicoesPagamento: req.body.condicoesPagamento,
       parcelas: req.body.parcelas,
       dataPrimeiroVencimento: req.body.dataPrimeiroVencimento ? new Date(req.body.dataPrimeiroVencimento) : undefined
@@ -173,9 +180,13 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
     const det = Array.isArray(nfe.det) ? nfe.det : nfe.det ? [nfe.det] : [];
     for (const item of det) {
       if (item && item.prod) {
+        // Garantir que NCM seja sempre string (pode vir como número do XML)
+        const ncmValue = item.prod.NCM;
+        const ncmString = ncmValue ? String(ncmValue) : '';
+        
         items.push({
           nomeProduto: item.prod.xProd || '',
-          ncm: item.prod.NCM || '',
+          ncm: ncmString,
           quantidade: parseFloat(item.prod.qCom || '0'),
           valorUnit: parseFloat(item.prod.vUnCom || '0'),
           valorTotal: parseFloat(item.prod.vProd || '0'),
@@ -275,9 +286,32 @@ export const receberRemessaParcial = async (req: Request, res: Response): Promis
       return;
     }
 
-    console.log('📦 Recebendo remessa parcial:', id, 'Produtos:', produtoIds);
+    console.log('📦 Recebendo remessa parcial:', id, 'Produtos:', produtoIds, 'Data recebida:', dataEntregaReal);
     
-    const compraAtualizada = await ComprasService.receberRemessaParcial(id, status, produtoIds);
+    // ✅ CORREÇÃO: Criar data local para evitar problemas de timezone
+    // Se dataEntregaReal for uma string YYYY-MM-DD, criar Date no timezone local
+    let dataRecebimentoFinal: Date;
+    if (dataEntregaReal) {
+      if (typeof dataEntregaReal === 'string' && dataEntregaReal.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        // String no formato YYYY-MM-DD - criar Date no timezone local
+        const [ano, mes, dia] = dataEntregaReal.split('-').map(Number);
+        dataRecebimentoFinal = new Date(ano, mes - 1, dia, 12, 0, 0); // Meio-dia para evitar problemas de timezone
+        console.log(`📅 Data processada: ${dataEntregaReal} → ${dataRecebimentoFinal.toISOString()} (${dataRecebimentoFinal.toLocaleDateString('pt-BR')})`);
+      } else {
+        dataRecebimentoFinal = new Date(dataEntregaReal);
+        console.log(`📅 Data processada (outro formato): ${dataRecebimentoFinal.toISOString()} (${dataRecebimentoFinal.toLocaleDateString('pt-BR')})`);
+      }
+    } else {
+      dataRecebimentoFinal = new Date();
+      console.log(`📅 Data não fornecida, usando data atual: ${dataRecebimentoFinal.toISOString()} (${dataRecebimentoFinal.toLocaleDateString('pt-BR')})`);
+    }
+    
+    const compraAtualizada = await ComprasService.receberRemessaParcial(
+      id,
+      status,
+      produtoIds,
+      dataRecebimentoFinal
+    );
 
     res.json({
       success: true,
@@ -324,6 +358,123 @@ export const receberComAssociacoes = async (req: Request, res: Response): Promis
     console.error('Erro ao receber compra com associações:', error);
     res.status(500).json({ 
       error: 'Erro ao receber compra com associações',
+      message: error instanceof Error ? error.message : 'Erro desconhecido'
+    });
+  }
+};
+
+// Excluir compra
+export const deleteCompra = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { permanent } = req.query; // ?permanent=true para exclusão permanente
+    const userRole = (req as any).user?.role?.toLowerCase(); // Role do usuário autenticado
+
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'ID da compra é obrigatório'
+      });
+      return;
+    }
+
+    // Verificar se compra existe
+    const compra = await prisma.compra.findUnique({
+      where: { id },
+      include: {
+        items: true
+      }
+    });
+
+    if (!compra) {
+      res.status(404).json({
+        success: false,
+        error: 'Compra não encontrada'
+      });
+      return;
+    }
+
+    // EXCLUSÃO PERMANENTE (apenas Admin e Desenvolvedor)
+    if (permanent === 'true') {
+      // Verificar permissões: apenas Admin e Desenvolvedor podem excluir permanentemente
+      if (!['admin', 'desenvolvedor', 'administrador'].includes(userRole)) {
+        res.status(403).json({
+          success: false,
+          error: 'Acesso negado. Apenas Administradores e Desenvolvedores podem excluir compras permanentemente.'
+        });
+        return;
+      }
+
+      // Exclusão permanente - deletar tudo do banco
+      await prisma.compraItem.deleteMany({
+        where: { compraId: id }
+      });
+
+      await prisma.contaPagar.deleteMany({
+        where: { compraId: id }
+      });
+
+      await prisma.compra.delete({
+        where: { id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Compra excluída permanentemente do banco de dados'
+      });
+      return;
+    }
+
+    // SOFT DELETE (para outros usuários ou quando não especificado permanent)
+    // Verificar se há contas a pagar pendentes associadas a esta compra
+    const contasPendentes = await prisma.contaPagar.findMany({
+      where: {
+        compraId: id,
+        status: 'Pendente'
+      }
+    });
+
+    if (contasPendentes.length > 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Não é possível excluir compra com contas a pagar pendentes'
+      });
+      return;
+    }
+
+    // Verificar se compra já foi recebida (status Recebida)
+    if (compra.status === 'Recebida') {
+      res.status(400).json({
+        success: false,
+        error: 'Não é possível excluir compra já recebida'
+      });
+      return;
+    }
+
+    // Excluir itens da compra
+    await prisma.compraItem.deleteMany({
+      where: { compraId: id }
+    });
+
+    // Excluir contas a pagar associadas
+    await prisma.contaPagar.deleteMany({
+      where: { compraId: id }
+    });
+
+    // Excluir compra
+    await prisma.compra.delete({
+      where: { id }
+    });
+
+    res.json({
+      success: true,
+      message: 'Compra excluída com sucesso'
+    });
+  } catch (error) {
+    console.error('Erro ao excluir compra:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Erro ao excluir compra',
       message: error instanceof Error ? error.message : 'Erro desconhecido'
     });
   }

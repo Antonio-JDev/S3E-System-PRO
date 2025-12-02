@@ -49,18 +49,30 @@ export const uploadTarefaImages = multer({
  */
 async function verificarSeUsuarioEstaNaEquipe(userId: string, equipeId: string): Promise<boolean> {
   try {
+    console.log(`🔍 [verificarSeUsuarioEstaNaEquipe] Verificando se usuário ${userId} está na equipe ${equipeId}`);
+    
     const equipe = await prisma.equipe.findUnique({
       where: { id: equipeId },
-      select: { membros: true, ativa: true }
+      select: { membros: true, ativa: true, nome: true }
     });
     
-    if (!equipe || !equipe.ativa) {
+    if (!equipe) {
+      console.log(`❌ [verificarSeUsuarioEstaNaEquipe] Equipe ${equipeId} não encontrada`);
       return false;
     }
     
-    return equipe.membros.includes(userId);
+    if (!equipe.ativa) {
+      console.log(`❌ [verificarSeUsuarioEstaNaEquipe] Equipe ${equipe.nome} (${equipeId}) não está ativa`);
+      return false;
+    }
+    
+    const isMember = equipe.membros.includes(userId);
+    console.log(`🔍 [verificarSeUsuarioEstaNaEquipe] Equipe "${equipe.nome}" tem ${equipe.membros.length} membros:`, equipe.membros);
+    console.log(`${isMember ? '✅' : '❌'} [verificarSeUsuarioEstaNaEquipe] Usuário ${userId} ${isMember ? 'É' : 'NÃO É'} membro da equipe ${equipeId}`);
+    
+    return isMember;
   } catch (error) {
-    console.error('Erro ao verificar membro da equipe:', error);
+    console.error('❌ [verificarSeUsuarioEstaNaEquipe] Erro ao verificar membro da equipe:', error);
     return false;
   }
 }
@@ -216,23 +228,64 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
     
     // Verificar se a tarefa existe e pertence ao usuário
     const tarefa = await prisma.tarefaObra.findUnique({
-      where: { id: tarefaId }
+      where: { id: tarefaId },
+      include: {
+        obra: {
+          select: {
+            id: true,
+            nomeObra: true
+          }
+        }
+      }
     });
     
     if (!tarefa) {
+      console.error(`❌ [salvarResumoTarefa] Tarefa ${tarefaId} não encontrada`);
       res.status(404).json({ success: false, error: 'Tarefa não encontrada' });
       return;
     }
     
+    console.log(`✅ [salvarResumoTarefa] Tarefa encontrada: ${tarefa.descricao}`);
+    console.log(`   - Obra: ${tarefa.obra?.nomeObra || 'N/A'} (${tarefa.obraId})`);
+    console.log(`   - Atribuída a: ${tarefa.atribuidoA || 'Nenhum'}`);
+    console.log(`   - Equipe: ${tarefa.equipeId || 'Nenhuma'}`);
+    
     const userRole = (req as any).user?.role?.toLowerCase();
     
-    // Apenas eletricista atribuído ou desenvolvedor podem registrar
-    if (userRole !== 'desenvolvedor' && tarefa.atribuidoA !== userId) {
-      res.status(403).json({ 
-        success: false, 
-        error: '🚫 Você não tem permissão para registrar atividades nesta tarefa' 
-      });
-      return;
+    console.log(`🔍 [salvarResumoTarefa] Usuário: ${userId}, Role: ${userRole}`);
+    console.log(`🔍 [salvarResumoTarefa] Tarefa ID: ${tarefaId}`);
+    console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída a: ${tarefa.atribuidoA || 'Nenhum'}, Equipe: ${tarefa.equipeId || 'Nenhuma'}`);
+    
+    // Apenas eletricista atribuído, membro da equipe ou desenvolvedor podem registrar
+    if (userRole !== 'desenvolvedor') {
+      // Verificar se é tarefa atribuída diretamente ao usuário
+      const tarefaAtribuidaDiretamente = tarefa.atribuidoA === userId;
+      console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída diretamente ao usuário: ${tarefaAtribuidaDiretamente}`);
+      
+      // Verificar se é tarefa de uma equipe onde o usuário é membro
+      let tarefaDeEquipeDoUsuario = false;
+      if (tarefa.equipeId) {
+        console.log(`🔍 [salvarResumoTarefa] Verificando se usuário é membro da equipe ${tarefa.equipeId}...`);
+        tarefaDeEquipeDoUsuario = await verificarSeUsuarioEstaNaEquipe(userId, tarefa.equipeId);
+        console.log(`🔍 [salvarResumoTarefa] Usuário é membro da equipe: ${tarefaDeEquipeDoUsuario}`);
+      } else {
+        console.log(`🔍 [salvarResumoTarefa] Tarefa não tem equipeId`);
+      }
+      
+      if (!tarefaAtribuidaDiretamente && !tarefaDeEquipeDoUsuario) {
+        console.error(`❌ [salvarResumoTarefa] Acesso negado: Usuário ${userId} não tem permissão para registrar atividades na tarefa ${tarefaId}`);
+        console.error(`   - Tarefa atribuída diretamente: ${tarefaAtribuidaDiretamente}`);
+        console.error(`   - Tarefa de equipe do usuário: ${tarefaDeEquipeDoUsuario}`);
+        res.status(403).json({ 
+          success: false, 
+          error: '🚫 Você não tem permissão para registrar atividades nesta tarefa. A tarefa deve estar atribuída a você ou a uma equipe da qual você faz parte.' 
+        });
+        return;
+      }
+      
+      console.log(`✅ [salvarResumoTarefa] Permissão concedida para usuário ${userId}`);
+    } else {
+      console.log(`✅ [salvarResumoTarefa] Desenvolvedor - Acesso universal concedido`);
     }
     
     // Processar URLs das imagens
@@ -487,7 +540,7 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
 export const atualizarTarefa = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { descricao, atribuidoA, dataPrevista, progresso, observacoes } = req.body;
+    const { descricao, atribuidoA, equipeId, dataPrevista, dataPrevistaFim, progresso, observacoes } = req.body;
     const userId = (req as any).user?.userId;
     
     const tarefa = await prisma.tarefaObra.findUnique({
@@ -510,8 +563,14 @@ export const atualizarTarefa = async (req: Request, res: Response): Promise<void
     if (atribuidoA !== undefined) {
       dataToUpdate.atribuidoA = atribuidoA || null;
     }
+    if (equipeId !== undefined) {
+      dataToUpdate.equipeId = equipeId || null;
+    }
     if (dataPrevista !== undefined) {
       dataToUpdate.dataPrevista = dataPrevista ? new Date(dataPrevista) : null;
+    }
+    if (dataPrevistaFim !== undefined) {
+      dataToUpdate.dataPrevistaFim = dataPrevistaFim ? new Date(dataPrevistaFim) : null;
     }
     
     // Atualizar tarefa

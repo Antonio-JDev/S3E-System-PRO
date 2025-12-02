@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ============================================
 # S3E System PRO - Docker Compose (Desenvolvimento)
 # ============================================
@@ -38,23 +36,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis Cache (para sessions e cache)
-  redis:
-    image: redis:7-alpine
-    container_name: s3e-redis
-    restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - s3e-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # Backend API
   backend:
     build:
@@ -67,7 +48,6 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${BACKEND_PORT:-3001}
       DATABASE_URL: postgresql://${DB_USER:-s3e_user}:${DB_PASSWORD:-s3e_password}@postgres:5432/${DB_NAME:-s3e_db}?schema=public
-      REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
@@ -91,14 +71,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - s3e-network
     command: >
       sh -c "
         npx prisma generate &&
         npx prisma migrate deploy &&
+        npm run seed &&
         npm run dev
       "
 
@@ -170,8 +149,6 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
-  redis_data:
     driver: local
   pgadmin_data:
     driver: local

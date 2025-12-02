@@ -181,32 +181,42 @@ class ClientesService {
   }
 
   /**
-   * Desativa um cliente (soft delete)
+   * Desativa um cliente (soft delete) ou exclui permanentemente
+   * @param id - ID do cliente
+   * @param permanent - Se true, exclui permanentemente (apenas dev/admin)
    */
-  async desativar(id: string) {
+  async desativar(id: string, permanent: boolean = false) {
     try {
-      console.log(`🗑️ Desativando cliente ${id}...`);
+      const action = permanent ? 'excluindo permanentemente' : 'desativando';
+      console.log(`🗑️ ${action} cliente ${id}...`);
       
-      const response = await axiosApiService.delete<Cliente>(`${ENDPOINTS.CLIENTES}/${id}`);
+      const url = permanent 
+        ? `${ENDPOINTS.CLIENTES}/${id}?permanent=true`
+        : `${ENDPOINTS.CLIENTES}/${id}`;
+      
+      const response = await axiosApiService.delete<Cliente>(url);
       
       if (response.success) {
-        console.log('✅ Cliente desativado com sucesso');
+        const message = permanent 
+          ? 'Cliente excluído permanentemente do banco de dados'
+          : 'Cliente desativado com sucesso';
+        console.log(`✅ ${message}`);
         return {
           success: true,
-          message: 'Cliente desativado com sucesso'
+          message
         };
       } else {
-        console.warn('⚠️ Erro ao desativar cliente:', response);
+        console.warn('⚠️ Erro ao desativar/excluir cliente:', response);
         return {
           success: false,
-          error: response.error || 'Erro ao desativar cliente'
+          error: response.error || 'Erro ao desativar/excluir cliente'
         };
       }
     } catch (error) {
-      console.error('❌ Erro ao desativar cliente:', error);
+      console.error('❌ Erro ao desativar/excluir cliente:', error);
       return {
         success: false,
-        error: 'Erro de conexão ao desativar cliente'
+        error: 'Erro de conexão ao desativar/excluir cliente'
       };
     }
   }

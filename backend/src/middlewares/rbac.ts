@@ -116,14 +116,32 @@ const rolePermissions: Record<UserRole, Permission[]> = {
  * Verifica se uma role tem uma permissão específica
  */
 export function hasPermission(userRole: string | undefined, permission: Permission): boolean {
-  if (!userRole) return false;
+  if (!userRole) {
+    console.log('⚠️ hasPermission: userRole é undefined');
+    return false;
+  }
   
-  const normalizedRole = userRole.toLowerCase() as UserRole;
+  // Normalizar role: remover espaços, converter para minúsculas
+  const normalizedRole = userRole.trim().toLowerCase() as UserRole;
+  console.log(`🔍 hasPermission: Role original: "${userRole}" -> Normalizado: "${normalizedRole}"`);
+  
   const permissions = rolePermissions[normalizedRole];
   
-  if (!permissions) return false;
+  if (!permissions) {
+    console.log(`⚠️ hasPermission: Role "${normalizedRole}" não encontrado no mapeamento`);
+    console.log(`🔍 Roles disponíveis:`, Object.keys(rolePermissions));
+    return false;
+  }
   
-  return permissions.includes(permission);
+  const hasAccess = permissions.includes(permission);
+  console.log(`🔍 hasPermission: Role "${normalizedRole}" tem permissão "${permission}": ${hasAccess}`);
+  if (hasAccess) {
+    console.log(`✅ hasPermission: Acesso concedido para "${normalizedRole}" com permissão "${permission}"`);
+  } else {
+    console.log(`❌ hasPermission: Acesso negado - Role "${normalizedRole}" não tem permissão "${permission}"`);
+    console.log(`🔍 Permissões disponíveis para "${normalizedRole}":`, permissions);
+  }
+  return hasAccess;
 }
 
 /**
@@ -131,11 +149,27 @@ export function hasPermission(userRole: string | undefined, permission: Permissi
  */
 export const checkPermission = (...requiredPermissions: Permission[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = (req as any).user?.role;
+    const user = (req as any).user;
+    const userRole = user?.role;
+    
+    console.log(`🔍 [RBAC] checkPermission: Verificando permissões`);
+    console.log(`🔍 [RBAC] User object completo:`, JSON.stringify(user, null, 2));
+    console.log(`🔍 [RBAC] Role extraído: "${userRole}" (tipo: ${typeof userRole})`);
+    console.log(`🔍 [RBAC] Permissões requeridas: ${requiredPermissions.join(', ')}`);
+    
+    if (!userRole) {
+      console.error('❌ [RBAC] userRole é undefined ou null');
+      res.status(403).json({ 
+        success: false, 
+        error: '🚫 Acesso negado. Role do usuário não identificado.' 
+      });
+      return;
+    }
     
     // Desenvolvedor tem acesso universal
-    if (userRole?.toLowerCase() === 'desenvolvedor') {
-      console.log('🔓 Desenvolvedor detectado - Acesso universal concedido');
+    const normalizedRoleForDev = userRole.trim().toLowerCase();
+    if (normalizedRoleForDev === 'desenvolvedor') {
+      console.log('🔓 [RBAC] Desenvolvedor detectado - Acesso universal concedido');
       next();
       return;
     }
@@ -144,15 +178,19 @@ export const checkPermission = (...requiredPermissions: Permission[]) => {
     const hasAccess = requiredPermissions.some(permission => hasPermission(userRole, permission));
     
     if (!hasAccess) {
-      console.log(`🚫 Acesso negado: Role ${userRole} não tem permissões ${requiredPermissions.join(', ')}`);
+      console.error(`🚫 [RBAC] Acesso negado: Role "${userRole}" não tem permissões ${requiredPermissions.join(', ')}`);
+      const normalizedRole = userRole.trim().toLowerCase();
+      const availablePermissions = rolePermissions[normalizedRole as UserRole] || [];
+      console.error(`🔍 [RBAC] Permissões disponíveis para "${normalizedRole}":`, availablePermissions);
+      console.error(`🔍 [RBAC] Roles disponíveis no sistema:`, Object.keys(rolePermissions));
       res.status(403).json({ 
         success: false, 
-        error: '🚫 Acesso negado. Você não tem permissão para acessar este recurso.' 
+        error: `🚫 Acesso negado. Role "${userRole}" não tem permissão para acessar este recurso.` 
       });
       return;
     }
     
-    console.log(`✅ Permissão concedida: ${userRole} pode acessar ${requiredPermissions.join(', ')}`);
+    console.log(`✅ [RBAC] Permissão concedida: ${userRole} pode acessar ${requiredPermissions.join(', ')}`);
     next();
   };
 };

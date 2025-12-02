@@ -1,290 +1,142 @@
-// Sistema de Permissões RBAC - S3E Engenharia
+/**
+ * Utilitários para verificação de permissões RBAC
+ */
 
-export type UserRole = 
-  | 'desenvolvedor' 
-  | 'admin' 
-  | 'gerente' 
-  | 'comprador' 
-  | 'engenheiro' 
-  | 'eletricista';
+export interface User {
+  role?: string;
+}
 
 export type Permission = 
-  | 'view_logs'
-  | 'view_financeiro'
-  | 'view_nfe'
-  | 'view_gerenciamento'
-  | 'view_frota'
-  | 'view_obras'
-  | 'view_movimentacoes'
-  | 'view_catalogo'
-  | 'view_comparacao_precos'
   | 'view_projetos'
+  | 'view_vendas'
+  | 'view_catalogo'
+  | 'view_movimentacoes'
+  | 'view_comparacao_precos'
+  | 'view_obras'
+  | 'view_tarefas_obra'
   | 'view_gestao_obras'
   | 'view_servicos'
-  | 'view_vendas'
-  | 'view_tarefas_obra'
-  | 'create_material'
-  | 'update_material'
-  | 'delete_material'
-  | 'deactivate_material'
-  | 'create_projeto'
-  | 'update_projeto'
-  | 'delete_projeto'
-  | 'deactivate_projeto'
-  | 'create_servico'
-  | 'update_servico'
-  | 'delete_servico'
-  | 'deactivate_servico'
-  | 'create_orcamento'
-  | 'update_orcamento'
-  | 'delete_orcamento'
-  | 'deactivate_orcamento'
-  | 'create_kit'
-  | 'update_kit'
-  | 'delete_kit'
-  | 'deactivate_kit'
-  | 'create_obra'
-  | 'update_obra'
-  | 'delete_obra'
-  | 'deactivate_obra'
-  | 'create_user'
-  | 'update_user'
-  | 'delete_user'
-  | 'universal_delete';
+  | 'view_financeiro'
+  | 'view_nfe'
+  | 'view_logs'
+  | 'view_gerenciamento';
 
-// Mapeamento de permissões por role
-const rolePermissions: Record<UserRole, Permission[]> = {
-  desenvolvedor: [
-    // Acesso universal a TUDO
-    'view_logs',
-    'view_financeiro',
-    'view_nfe',
-    'view_gerenciamento',
-    'view_frota',
-    'view_obras',
-    'view_movimentacoes',
-    'view_catalogo',
-    'view_comparacao_precos',
-    'view_projetos',
-    'view_gestao_obras',
-    'view_servicos',
-    'view_vendas',
-    'view_tarefas_obra',
-    // CRUD completo de tudo
-    'create_material', 'update_material', 'delete_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
-    'create_user', 'update_user', 'delete_user',
-    'universal_delete'
-  ],
+/**
+ * Verifica se o usuário tem permissão para excluir registros
+ * Apenas Desenvolvedor e Administrador podem excluir
+ */
+export const canDelete = (user: User | null | undefined): boolean => {
+  if (!user || !user.role) return false;
   
-  admin: [
-    // Acesso a tudo EXCETO logs
-    'view_financeiro',
-    'view_nfe',
-    'view_gerenciamento',
-    'view_frota',
-    'view_obras',
-    'view_movimentacoes',
-    'view_catalogo',
-    'view_comparacao_precos',
-    'view_projetos',
-    'view_gestao_obras',
-    'view_servicos',
-    'view_vendas',
-    // CRUD completo
-    'create_material', 'update_material', 'delete_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
-    'create_user', 'update_user', 'delete_user'
-  ],
-  
-  gerente: [
-    // Acesso a tudo EXCETO logs
-    'view_financeiro',
-    'view_nfe',
-    'view_gerenciamento',
-    'view_frota',
-    'view_obras',
-    'view_movimentacoes',
-    'view_catalogo',
-    'view_comparacao_precos',
-    'view_projetos',
-    'view_gestao_obras',
-    'view_servicos',
-    'view_vendas',
-    // CRUD completo
-    'create_material', 'update_material', 'delete_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
-    'create_user', 'update_user', 'delete_user'
-  ],
-  
-  comprador: [
-    // Acesso a quase tudo EXCETO Financeiro, NF-e
-    // Em Gerenciamento Empresarial: apenas Frota
-    'view_frota',
-    'view_obras',
-    'view_movimentacoes',
-    'view_catalogo',
-    'view_comparacao_precos',
-    'view_projetos',
-    'view_gestao_obras',
-    'view_servicos',
-    'view_vendas',
-    // CRUD sem DELETE (apenas desativação)
-    'create_material', 'update_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'deactivate_obra'
-  ],
-  
-  engenheiro: [
-    // Acesso a quase tudo EXCETO Financeiro, NF-e, Gerenciamento Empresarial
-    'view_obras',
-    'view_movimentacoes',
-    'view_catalogo',
-    'view_comparacao_precos',
-    'view_projetos',
-    'view_gestao_obras',
-    'view_servicos',
-    'view_vendas',
-    // CRUD sem DELETE (apenas desativação)
-    'create_material', 'update_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'deactivate_obra'
-  ],
-  
-  eletricista: [
-    // Acesso APENAS a Tarefas da Obra e Movimentações
-    'view_tarefas_obra',
-    'view_movimentacoes',
-    // Apenas atualizar tarefas da obra
-    'update_obra'
-  ]
+  const role = user.role.toLowerCase();
+  return role === 'desenvolvedor' || role === 'admin' || role === 'administrador';
 };
 
 /**
- * Verifica se uma role tem uma permissão específica
+ * Verifica se o usuário é Desenvolvedor
  */
-export function hasPermission(userRole: string | undefined, permission: Permission): boolean {
-  if (!userRole) return false;
-  
-  const normalizedRole = userRole.toLowerCase() as UserRole;
-  const permissions = rolePermissions[normalizedRole];
-  
-  if (!permissions) return false;
-  
-  return permissions.includes(permission);
-}
+export const isDeveloper = (user: User | null | undefined): boolean => {
+  if (!user || !user.role) return false;
+  return user.role.toLowerCase() === 'desenvolvedor';
+};
 
 /**
- * Verifica se uma role tem TODAS as permissões especificadas
+ * Verifica se o usuário é Administrador
  */
-export function hasAllPermissions(userRole: string | undefined, permissions: Permission[]): boolean {
-  return permissions.every(permission => hasPermission(userRole, permission));
-}
+export const isAdmin = (user: User | null | undefined): boolean => {
+  if (!user || !user.role) return false;
+  const role = user.role.toLowerCase();
+  return role === 'admin' || role === 'administrador';
+};
 
 /**
- * Verifica se uma role tem PELO MENOS UMA das permissões especificadas
+ * Verifica se o usuário tem uma permissão específica
+ * @param user - Usuário a verificar
+ * @param permission - Permissão necessária (ex: 'view_projetos', 'view_vendas')
+ * 
+ * IMPORTANTE: Desenvolvedor tem acesso UNIVERSAL a todas as páginas e funcionalidades
  */
-export function hasAnyPermission(userRole: string | undefined, permissions: Permission[]): boolean {
-  return permissions.some(permission => hasPermission(userRole, permission));
-}
-
-/**
- * Retorna todas as permissões de uma role
- */
-export function getRolePermissions(userRole: string | undefined): Permission[] {
-  if (!userRole) return [];
+export const hasPermission = (user: User | null | undefined, permission: Permission | string): boolean => {
+  if (!user || !user.role) return false;
+  const userRole = user.role.toLowerCase();
   
-  const normalizedRole = userRole.toLowerCase() as UserRole;
-  return rolePermissions[normalizedRole] || [];
-}
-
-/**
- * Verifica se uma role pode deletar (vs apenas desativar)
- */
-export function canDelete(userRole: string | undefined, entityType: 'material' | 'projeto' | 'servico' | 'orcamento' | 'kit' | 'obra' | 'user'): boolean {
-  if (!userRole) return false;
+  // Desenvolvedor tem acesso UNIVERSAL - sempre retorna true
+  if (userRole === 'desenvolvedor') return true;
   
-  // Desenvolvedor tem permissão universal de delete
-  if (hasPermission(userRole, 'universal_delete')) return true;
-  
-  // Admin e Gerente podem deletar
-  const normalizedRole = userRole.toLowerCase();
-  if (normalizedRole === 'admin' || normalizedRole === 'gerente') {
-    return hasPermission(userRole, `delete_${entityType}` as Permission);
+  // Admin/Administrador tem todas as permissões (exceto logs que é devOnly)
+  if (userRole === 'admin' || userRole === 'administrador') {
+    // Logs é apenas para desenvolvedor
+    if (permission === 'view_logs') return false;
+    return true;
   }
   
-  // Outras roles não podem deletar
-  return false;
-}
-
-/**
- * Verifica se uma role pode apenas desativar (não deletar)
- */
-export function canOnlyDeactivate(userRole: string | undefined, entityType: 'material' | 'projeto' | 'servico' | 'orcamento' | 'kit' | 'obra'): boolean {
-  if (!userRole) return false;
+  // Mapeamento de permissões por role
+  const rolePermissions: Record<string, Permission[]> = {
+    // Gerente: acesso amplo (quase tudo exceto logs)
+    gerente: [
+      'view_projetos',
+      'view_vendas',
+      'view_catalogo',
+      'view_movimentacoes',
+      'view_comparacao_precos',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_financeiro',
+      'view_nfe',
+      'view_gerenciamento'
+    ],
+    
+    // Engenheiro Elétrico: acesso operacional e projetos
+    engenheiro: [
+      'view_projetos',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_movimentacoes',
+      'view_catalogo',
+      'view_gerenciamento'
+    ],
+    
+    // Orcamentista: acesso comercial
+    orcamentista: [
+      'view_projetos',
+      'view_vendas',
+      'view_catalogo',
+      'view_obras',
+      'view_servicos'
+    ],
+    
+    // Compras: acesso a suprimentos
+    compras: [
+      'view_catalogo',
+      'view_movimentacoes',
+      'view_comparacao_precos',
+      'view_obras' // Para ver obras e necessidades
+    ],
+    
+    // Eletricista: acesso operacional básico
+    eletricista: [
+      'view_obras',
+      'view_tarefas_obra',
+      'view_movimentacoes'
+    ],
+    
+    // User padrão: acesso mínimo
+    user: [
+      'view_obras',
+      'view_tarefas_obra'
+    ]
+  };
   
-  const normalizedRole = userRole.toLowerCase();
-  
-  // Comprador e Engenheiro podem apenas desativar
-  if (normalizedRole === 'comprador' || normalizedRole === 'engenheiro') {
-    return hasPermission(userRole, `deactivate_${entityType}` as Permission) && 
-           !canDelete(userRole, entityType);
+  // Verificar se o role tem a permissão
+  const permissions = rolePermissions[userRole];
+  if (permissions) {
+    return permissions.includes(permission as Permission);
   }
   
+  // Se o role não estiver mapeado, retorna false (segurança)
   return false;
-}
-
-/**
- * Retorna o nome formatado da role
- */
-export function getRoleName(role: string | undefined): string {
-  if (!role) return 'Usuário';
-  
-  const roleNames: Record<string, string> = {
-    desenvolvedor: 'Desenvolvedor',
-    admin: 'Administrador',
-    gerente: 'Gerente',
-    comprador: 'Comprador',
-    engenheiro: 'Engenheiro',
-    eletricista: 'Eletricista'
-  };
-  
-  return roleNames[role.toLowerCase()] || role;
-}
-
-/**
- * Retorna um emoji representativo da role
- */
-export function getRoleEmoji(role: string | undefined): string {
-  if (!role) return '👤';
-  
-  const roleEmojis: Record<string, string> = {
-    desenvolvedor: '💻',
-    admin: '👑',
-    gerente: '📊',
-    comprador: '🛒',
-    engenheiro: '⚙️',
-    eletricista: '⚡'
-  };
-  
-  return roleEmojis[role.toLowerCase()] || '👤';
-}
-
+};

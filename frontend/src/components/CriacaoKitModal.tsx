@@ -217,12 +217,15 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     .filter((cotacao: any) => cotacao.ativo) // Só cotações ativas
                     .map((cotacao: any) => {
                         console.log(`📄 Cotação ${cotacao.id}:`, cotacao);
+                        const valorVenda = cotacao.valorVenda || (cotacao.valorUnitario || 0) * 1.4;
                         
                         return {
                             id: `cotacao_${cotacao.id}`,
                             nome: cotacao.nome || 'Item da Cotação',
                             descricao: cotacao.nome,
+                            // preco representa o valor de compra; valorVenda é o preço para o cliente
                             preco: cotacao.valorUnitario || 0,
+                            valorVenda,
                             estoque: 0, // Cotações não têm estoque físico
                             unidadeMedida: 'un',
                             _isCotacao: true,

@@ -8,16 +8,27 @@ export const API_CONFIG = {
 /**
  * Constrói a URL completa para um arquivo de upload (logo, imagem, etc.)
  * Se a URL já começar com http/https, retorna ela mesma.
- * Caso contrário, concatena com a BASE_URL da API.
+ * Caso contrário, tenta usar o endpoint específico de logo primeiro,
+ * depois tenta a URL direta via express.static.
  */
 export const getUploadUrl = (url: string): string => {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
-  // Remove a barra inicial se existir, pois vamos adicionar
+  
+  // Se for uma logo (contém /uploads/logos/), usar endpoint específico primeiro
+  if (url.includes('/uploads/logos/')) {
+    const filename = url.split('/').pop() || url;
+    // Tentar endpoint específico primeiro (mais confiável)
+    if (API_CONFIG.BASE_URL) {
+      return `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
+    }
+  }
+  
+  // Fallback: URL direta via express.static
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
-  return `${API_CONFIG.BASE_URL}${cleanUrl}`;
+  return API_CONFIG.BASE_URL ? `${API_CONFIG.BASE_URL}${cleanUrl}` : cleanUrl;
 };
 
 // Headers padrão

@@ -127,6 +127,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     const [logoSelecionada, setLogoSelecionada] = useState<string>('');
     const [loadingLogos, setLoadingLogos] = useState(false);
     
+    // Estados para Logo da Página de Login
+    const [logoLoginFile, setLogoLoginFile] = useState<File | null>(null);
+    const [logoLoginPreview, setLogoLoginPreview] = useState<string>('');
+    const [logoLoginSelecionada, setLogoLoginSelecionada] = useState<string>('');
+    
     // Estados de Configuração Fiscal
     const [certificadoPFX, setCertificadoPFX] = useState<string>('');
     const [certificadoPFXFile, setCertificadoPFXFile] = useState<File | null>(null);
@@ -180,6 +185,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             if (config?.logoUrl) {
                 setLogoSelecionada(config.logoUrl);
                 setLogoPreview(config.logoUrl);
+            }
+            // Carregar logo da página de login se existir
+            if (config?.logoLoginUrl) {
+                setLogoLoginSelecionada(config.logoLoginUrl);
+                setLogoLoginPreview(config.logoLoginUrl);
             }
         }
     }, [abaAtiva, isEletricista, config?.logoUrl, user?.role]);
@@ -260,6 +270,19 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const handleLogoLoginChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setLogoLoginFile(file);
+            // Criar preview
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setLogoLoginPreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleSalvarConfiguracoes = async () => {
         try {
             setSaving(true);
@@ -267,6 +290,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             // Se houver logo selecionada, atualizar primeiro
             if (logoSelecionada && user?.role?.toLowerCase() === 'admin') {
                 await configuracoesService.atualizarLogo(logoSelecionada);
+            }
+            
+            // Se houver logo da página de login selecionada, atualizar
+            if (logoLoginSelecionada && user?.role?.toLowerCase() === 'admin') {
+                await configuracoesService.atualizarLogoLogin(logoLoginSelecionada);
             }
             
             const response = await configuracoesService.salvarConfiguracoes(formConfig);
@@ -280,6 +308,27 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         } catch (error) {
             console.error('Erro ao salvar configurações:', error);
             toast.error('❌ Erro ao salvar configurações');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleAtualizarLogoLogin = async (logoUrl: string) => {
+        try {
+            setSaving(true);
+            const response = await configuracoesService.atualizarLogoLogin(logoUrl);
+            
+            if (response.success) {
+                setLogoLoginSelecionada(logoUrl);
+                setLogoLoginPreview(logoUrl);
+                toast.success('✅ Logo da página de login atualizada com sucesso!');
+                await loadConfiguracoes();
+            } else {
+                toast.error(`❌ ${response.error || 'Erro ao atualizar logo da página de login'}`);
+            }
+        } catch (error: any) {
+            console.error('Erro ao atualizar logo da página de login:', error);
+            toast.error('❌ Erro ao atualizar logo da página de login');
         } finally {
             setSaving(false);
         }
@@ -1337,16 +1386,54 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     {/* Preview da Logo Atual */}
                                     {logoPreview && (
                                         <div className="mb-4">
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Logo Atual:</label>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Logo Atual:</label>
                                             <div className="flex items-center gap-4">
-                                                <img 
-                                                    src={getUploadUrl(logoPreview)} 
-                                                    alt="Logo da empresa" 
-                                                    className="h-20 w-auto object-contain border border-gray-200 rounded-lg p-2 bg-gray-50"
-                                                />
+                                                <div className="relative">
+                                                    <img 
+                                                        src={getUploadUrl(logoPreview)} 
+                                                        alt="Logo da empresa" 
+                                                        className="h-20 w-auto object-contain border border-gray-200 dark:border-dark-border rounded-lg p-2 bg-gray-50 dark:bg-dark-bg"
+                                                        crossOrigin="anonymous"
+                                                        onError={(e) => {
+                                                            const target = e.target as HTMLImageElement;
+                                                            const originalSrc = target.src;
+                                                            console.error('❌ Erro ao carregar logo:', originalSrc);
+                                                            
+                                                            // Tentar URL alternativa usando endpoint específico
+                                                            const filename = logoPreview.split('/').pop() || logoPreview;
+                                                            const alternativeUrl = API_CONFIG.BASE_URL 
+                                                                ? `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`
+                                                                : `/api/configuracoes/logo/${filename}`;
+                                                            
+                                                            if (!target.src.includes('/api/configuracoes/logo/')) {
+                                                                console.log('🔄 Tentando URL alternativa:', alternativeUrl);
+                                                                target.src = alternativeUrl;
+                                                            } else {
+                                                                // Se ainda falhar, mostrar placeholder
+                                                                console.error('❌ Falha ao carregar logo mesmo com URL alternativa');
+                                                                target.style.display = 'none';
+                                                                const placeholder = target.nextElementSibling as HTMLElement;
+                                                                if (placeholder) placeholder.style.display = 'flex';
+                                                            }
+                                                        }}
+                                                        onLoad={() => {
+                                                            console.log('✅ Logo carregada com sucesso:', getUploadUrl(logoPreview));
+                                                            // Esconder placeholder quando imagem carregar
+                                                            const placeholder = document.querySelector(`[data-logo-placeholder="${logoPreview}"]`) as HTMLElement;
+                                                            if (placeholder) placeholder.style.display = 'none';
+                                                        }}
+                                                    />
+                                                    <div 
+                                                        data-logo-placeholder={logoPreview}
+                                                        className="h-20 w-20 flex items-center justify-center border border-gray-200 dark:border-dark-border rounded-lg p-2 bg-gray-50 dark:bg-dark-bg text-gray-400 text-xs text-center"
+                                                        style={{ display: 'none' }}
+                                                    >
+                                                        Erro ao carregar imagem
+                                                    </div>
+                                                </div>
                                                 <div>
-                                                    <p className="text-sm text-gray-600">Logo selecionada</p>
-                                                    <p className="text-xs text-gray-500">{logoSelecionada}</p>
+                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">Logo selecionada</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 break-all max-w-xs">{logoSelecionada}</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -1369,33 +1456,95 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                         ) : (
                                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-64 overflow-y-auto p-2 bg-gray-50 rounded-lg border border-gray-200">
                                                 {logosDisponiveis.map((logo) => (
-                                                    <button
+                                                    <div
                                                         key={logo.filename}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setLogoSelecionada(logo.url);
-                                                            setLogoPreview(logo.url);
-                                                            handleAtualizarLogo(logo.url);
-                                                        }}
-                                                        className={`relative p-2 border-2 rounded-lg transition-all ${
-                                                            logoSelecionada === logo.url
-                                                                ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
-                                                                : 'border-gray-200 hover:border-indigo-300 bg-white'
-                                                        }`}
+                                                        className="relative"
                                                     >
-                                                        <img 
-                                                            src={getUploadUrl(logo.url)}
-                                                            alt={logo.filename}
-                                                            className="w-full h-16 object-contain"
-                                                        />
-                                                        {logoSelecionada === logo.url && (
-                                                            <div className="absolute top-1 right-1 bg-indigo-500 text-white rounded-full p-1">
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                                </svg>
-                                                            </div>
-                                                        )}
-                                                    </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLogoSelecionada(logo.url);
+                                                                setLogoPreview(logo.url);
+                                                                handleAtualizarLogo(logo.url);
+                                                            }}
+                                                            className={`relative w-full p-2 border-2 rounded-lg transition-all ${
+                                                                logoSelecionada === logo.url
+                                                                    ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
+                                                                    : 'border-gray-200 hover:border-indigo-300 bg-white'
+                                                            }`}
+                                                        >
+                                                            <img 
+                                                                src={getUploadUrl(logo.url)}
+                                                                alt={logo.filename}
+                                                                className="w-full h-16 object-contain"
+                                                                crossOrigin="anonymous"
+                                                                onError={(e) => {
+                                                                    const target = e.target as HTMLImageElement;
+                                                                    const originalSrc = target.src;
+                                                                    console.error('❌ Erro ao carregar logo na lista:', originalSrc);
+                                                                    
+                                                                    // Tentar endpoint específico
+                                                                    const filename = logo.url.split('/').pop() || logo.filename;
+                                                                    const alternativeUrl = API_CONFIG.BASE_URL 
+                                                                        ? `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`
+                                                                        : `/api/configuracoes/logo/${filename}`;
+                                                                    
+                                                                    if (!target.src.includes('/api/configuracoes/logo/')) {
+                                                                        console.log('🔄 Tentando URL alternativa na lista:', alternativeUrl);
+                                                                        target.src = alternativeUrl;
+                                                                    }
+                                                                }}
+                                                            />
+                                                            {logoSelecionada === logo.url && (
+                                                                <div className="absolute top-1 right-1 bg-indigo-500 text-white rounded-full p-1">
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                                    </svg>
+                                                                </div>
+                                                            )}
+                                                        </button>
+                                                        {/* Botão de Excluir */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                if (window.confirm(`Tem certeza que deseja excluir a logo "${logo.filename}"?`)) {
+                                                                    try {
+                                                                        setSaving(true);
+                                                                        const response = await configuracoesService.deletarLogo(logo.filename);
+                                                                        if (response.success) {
+                                                                            toast.success('✅ Logo excluída com sucesso!');
+                                                                            // Remover da lista
+                                                                            setLogosDisponiveis(logosDisponiveis.filter(l => l.filename !== logo.filename));
+                                                                            // Se a logo excluída estava selecionada, limpar seleção
+                                                                            if (logoSelecionada === logo.url) {
+                                                                                setLogoSelecionada('');
+                                                                                setLogoPreview('');
+                                                                            }
+                                                                            if (logoLoginSelecionada === logo.url) {
+                                                                                setLogoLoginSelecionada('');
+                                                                                setLogoLoginPreview('');
+                                                                            }
+                                                                        } else {
+                                                                            toast.error(`❌ ${response.error || 'Erro ao excluir logo'}`);
+                                                                        }
+                                                                    } catch (error: any) {
+                                                                        console.error('Erro ao excluir logo:', error);
+                                                                        toast.error('❌ Erro ao excluir logo');
+                                                                    } finally {
+                                                                        setSaving(false);
+                                                                    }
+                                                                }
+                                                            }}
+                                                            disabled={saving}
+                                                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-all z-10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            title="Excluir logo"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
                                                 ))}
                                             </div>
                                         )}
@@ -1450,6 +1599,214 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                             </div>
                                         )}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Logo da Página de Login - Apenas Admin */}
+                            {user?.role?.toLowerCase() === 'admin' && (
+                                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-md border border-gray-200 dark:border-dark-border p-6">
+                                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">Logo da Página de Login</h3>
+                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                        Selecione uma logo específica para aparecer na página de login. Se nenhuma logo for selecionada, será exibido o texto "S3E ENGENHARIA" como fallback.
+                                    </p>
+                                    
+                                    {/* Preview da Logo Atual */}
+                                    {logoLoginPreview && (
+                                        <div className="mb-4">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Logo Atual da Página de Login:</label>
+                                            <div className="flex items-center gap-4">
+                                                <div className="relative">
+                                                    <img 
+                                                        src={getUploadUrl(logoLoginPreview)} 
+                                                        alt="Logo da página de login" 
+                                                        className="h-20 w-auto object-contain border border-gray-200 dark:border-dark-border rounded-lg p-2 bg-gray-50 dark:bg-dark-bg"
+                                                        crossOrigin="anonymous"
+                                                        onError={(e) => {
+                                                            const target = e.target as HTMLImageElement;
+                                                            const filename = logoLoginPreview.split('/').pop() || logoLoginPreview;
+                                                            const alternativeUrl = `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
+                                                            if (target.src !== alternativeUrl) {
+                                                                target.src = alternativeUrl;
+                                                            } else {
+                                                                target.style.display = 'none';
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">Logo selecionada</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 break-all max-w-xs">{logoLoginSelecionada}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {/* Seleção de Logo Existente */}
+                                    <div className="mb-4">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                            Selecionar Logo Existente:
+                                        </label>
+                                        {loadingLogos ? (
+                                            <div className="text-center py-4">
+                                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
+                                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-2">Carregando logos...</p>
+                                            </div>
+                                        ) : logosDisponiveis.length === 0 ? (
+                                            <p className="text-sm text-gray-500 dark:text-dark-text-secondary">Nenhuma logo disponível. Faça upload de uma nova logo.</p>
+                                        ) : (
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
+                                                {logosDisponiveis.map((logo) => (
+                                                    <div
+                                                        key={logo.filename}
+                                                        className="relative"
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setLogoLoginPreview(logo.url);
+                                                                handleAtualizarLogoLogin(logo.url);
+                                                            }}
+                                                            className={`relative w-full p-2 border-2 rounded-lg transition-all ${
+                                                                logoLoginSelecionada === logo.url
+                                                                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 ring-2 ring-indigo-200 dark:ring-indigo-800'
+                                                                    : 'border-gray-200 dark:border-dark-border hover:border-gray-300 dark:hover:border-gray-600'
+                                                            }`}
+                                                        >
+                                                            <img 
+                                                                src={getUploadUrl(logo.url)}
+                                                                alt={logo.filename}
+                                                                className="w-full h-16 object-contain"
+                                                                onError={(e) => {
+                                                                    const target = e.target as HTMLImageElement;
+                                                                    const filename = logo.url.split('/').pop() || logo.url;
+                                                                    target.src = `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
+                                                                }}
+                                                            />
+                                                            {logoLoginSelecionada === logo.url && (
+                                                                <div className="absolute top-1 right-1 bg-indigo-500 text-white rounded-full p-1">
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                                    </svg>
+                                                                </div>
+                                                            )}
+                                                        </button>
+                                                        {/* Botão de Excluir */}
+                                                        <button
+                                                            type="button"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                if (window.confirm(`Tem certeza que deseja excluir a logo "${logo.filename}"?`)) {
+                                                                    try {
+                                                                        setSaving(true);
+                                                                        const response = await configuracoesService.deletarLogo(logo.filename);
+                                                                        if (response.success) {
+                                                                            toast.success('✅ Logo excluída com sucesso!');
+                                                                            // Remover da lista
+                                                                            setLogosDisponiveis(logosDisponiveis.filter(l => l.filename !== logo.filename));
+                                                                            // Se a logo excluída estava selecionada, limpar seleção
+                                                                            if (logoSelecionada === logo.url) {
+                                                                                setLogoSelecionada('');
+                                                                                setLogoPreview('');
+                                                                            }
+                                                                            if (logoLoginSelecionada === logo.url) {
+                                                                                setLogoLoginSelecionada('');
+                                                                                setLogoLoginPreview('');
+                                                                            }
+                                                                        } else {
+                                                                            toast.error(`❌ ${response.error || 'Erro ao excluir logo'}`);
+                                                                        }
+                                                                    } catch (error: any) {
+                                                                        console.error('Erro ao excluir logo:', error);
+                                                                        toast.error('❌ Erro ao excluir logo');
+                                                                    } finally {
+                                                                        setSaving(false);
+                                                                    }
+                                                                }
+                                                            }}
+                                                            disabled={saving}
+                                                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-all z-10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            title="Excluir logo"
+                                                        >
+                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Upload de Nova Logo */}
+                                    <div className="mb-4">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                            Ou fazer upload de nova logo:
+                                        </label>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleLogoLoginChange}
+                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                        />
+                                        {logoLoginFile && (
+                                            <div className="mt-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        try {
+                                                            setSaving(true);
+                                                            const response = await configuracoesService.uploadLogo(logoLoginFile);
+                                                            if (response.success && response.data) {
+                                                                const logoUrl = response.data.logoUrl;
+                                                                setLogoLoginSelecionada(logoUrl);
+                                                                setLogoLoginPreview(logoUrl);
+                                                                await handleAtualizarLogoLogin(logoUrl);
+                                                                await loadLogos();
+                                                                await loadConfiguracoes();
+                                                            }
+                                                        } catch (error: any) {
+                                                            toast.error(error?.response?.data?.error || '❌ Erro ao enviar logo');
+                                                        } finally {
+                                                            setSaving(false);
+                                                        }
+                                                    }}
+                                                    disabled={saving}
+                                                    className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                                >
+                                                    {saving ? 'Enviando...' : 'Enviar Logo'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Botão para Remover Logo */}
+                                    {logoLoginSelecionada && (
+                                        <div className="mt-4">
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    try {
+                                                        setSaving(true);
+                                                        const response = await configuracoesService.atualizarLogoLogin('');
+                                                        if (response.success) {
+                                                            setLogoLoginSelecionada('');
+                                                            setLogoLoginPreview('');
+                                                            toast.success('✅ Logo da página de login removida. O fallback será exibido.');
+                                                            await loadConfiguracoes();
+                                                        }
+                                                    } catch (error: any) {
+                                                        toast.error('❌ Erro ao remover logo');
+                                                    } finally {
+                                                        setSaving(false);
+                                                    }
+                                                }}
+                                                disabled={saving}
+                                                className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-50 text-sm font-semibold"
+                                            >
+                                                Remover Logo (Usar Fallback)
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

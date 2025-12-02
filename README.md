@@ -19,13 +19,13 @@ O S3E System PRO é uma aplicação **full-stack** moderna com arquitetura de mi
 │              Backend API (Node.js + Express)               │
 │  Porta: 3001                                                │
 │  - TypeScript, Prisma ORM, JWT Auth                        │
-└──────────┬──────────────────────────┬────────────────────────┘
-           │                          │
-    ┌──────▼──────┐            ┌──────▼──────┐
-    │ PostgreSQL  │            │    Redis    │
-    │   Port:5432  │            │  Port:6379 │
-    │  (Database) │            │   (Cache)   │
-    └─────────────┘            └─────────────┘
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                ┌──────▼──────┐
+                │ PostgreSQL  │
+                │   Port:5432  │
+                │  (Database) │
+                └─────────────┘
 ```
 
 ### 📁 Estrutura de Diretórios
@@ -100,7 +100,6 @@ make dev-build
 - 🔌 **Backend API**: <http://localhost:3001>
 - 🗄️ **PgAdmin**: <http://localhost:5050> (admin@s3e.com / admin)
 - 🐘 **PostgreSQL**: localhost:5432
-- 🔴 **Redis**: localhost:6379
 
 #### Produção
 
@@ -131,7 +130,6 @@ make backup        # Fazer backup do banco de dados
 Para desenvolvimento sem Docker, você precisará ter instalado:
 - Node.js 20+
 - PostgreSQL 16+
-- Redis (opcional)
 
 #### Frontend
 
@@ -165,7 +163,7 @@ npm run seed
 npm run dev
 ```
 
-> 💡 **Recomendação**: Use Docker para desenvolvimento, pois já inclui todos os serviços (PostgreSQL, Redis, PgAdmin) configurados e prontos para uso.
+> 💡 **Recomendação**: Use Docker para desenvolvimento, pois já inclui todos os serviços (PostgreSQL, PgAdmin) configurados e prontos para uso.
 
 ## 🛠️ Stack Tecnológico
 
@@ -187,7 +185,6 @@ npm run dev
 - **TypeScript** - Tipagem estática
 - **Prisma ORM** - ORM type-safe
 - **PostgreSQL 16** - Banco de dados relacional
-- **Redis** - Cache e sessões
 - **JWT** - Autenticação stateless
 - **Puppeteer** - Geração de PDFs
 - **Multer** - Upload de arquivos

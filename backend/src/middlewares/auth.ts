@@ -12,8 +12,14 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
   try {
     console.log('🔐 Middleware auth - Headers:', req.headers.authorization);
     
-    // Extrair token do header
-    const token = extractTokenFromHeader(req.headers.authorization);
+    // Extrair token do header primeiro
+    let token = extractTokenFromHeader(req.headers.authorization);
+    
+    // Se não encontrou no header, tentar no query parameter (útil para links diretos)
+    if (!token && req.query.token) {
+      token = typeof req.query.token === 'string' ? req.query.token : req.query.token[0];
+      console.log('🔐 Token encontrado no query parameter');
+    }
     
     if (!token) {
       console.log('❌ Token não fornecido');

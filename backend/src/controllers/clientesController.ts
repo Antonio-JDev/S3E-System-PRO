@@ -217,10 +217,12 @@ export const updateCliente = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// Desativar cliente (soft delete)
+// Desativar ou excluir cliente permanentemente
 export const deleteCliente = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const { permanent } = req.query; // ?permanent=true para exclusão permanente
+    const userRole = (req as any).user?.role?.toLowerCase(); // Role do usuário autenticado
 
     // Verificar se cliente existe
     const cliente = await prisma.cliente.findUnique({
@@ -235,6 +237,30 @@ export const deleteCliente = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // EXCLUSÃO PERMANENTE (apenas Admin e Desenvolvedor)
+    if (permanent === 'true') {
+      // Verificar permissões: apenas Admin e Desenvolvedor podem excluir permanentemente
+      if (!['admin', 'desenvolvedor', 'administrador'].includes(userRole)) {
+        res.status(403).json({
+          success: false,
+          error: 'Acesso negado. Apenas Administradores e Desenvolvedores podem excluir clientes permanentemente.'
+        });
+        return;
+      }
+
+      // Exclusão permanente - deletar do banco
+      await prisma.cliente.delete({
+        where: { id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Cliente excluído permanentemente do banco de dados'
+      });
+      return;
+    }
+
+    // SOFT DELETE (para outros usuários ou quando não especificado permanent)
     // Verificar se cliente tem orçamentos, projetos ou vendas ativos
     const orcamentosAtivos = await prisma.orcamento.count({
       where: { 
@@ -276,10 +302,10 @@ export const deleteCliente = async (req: Request, res: Response): Promise<void> 
       message: 'Cliente desativado com sucesso'
     });
   } catch (error) {
-    console.error('Erro ao desativar cliente:', error);
+    console.error('Erro ao desativar/excluir cliente:', error);
     res.status(500).json({ 
       success: false,
-      error: 'Erro ao desativar cliente' 
+      error: 'Erro ao desativar/excluir cliente' 
     });
   }
 };

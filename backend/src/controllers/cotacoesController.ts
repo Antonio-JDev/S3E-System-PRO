@@ -208,6 +208,27 @@ export const deletarCotacao = async (req: Request, res: Response): Promise<void>
   try {
     const { id } = req.params;
 
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'ID da cotação é obrigatório'
+      });
+      return;
+    }
+
+    // Verificar se a cotação existe antes de deletar
+    const cotacao = await prisma.cotacao.findUnique({
+      where: { id }
+    });
+
+    if (!cotacao) {
+      res.status(404).json({
+        success: false,
+        error: 'Cotação não encontrada'
+      });
+      return;
+    }
+
     await prisma.cotacao.delete({
       where: { id }
     });
@@ -216,11 +237,22 @@ export const deletarCotacao = async (req: Request, res: Response): Promise<void>
       success: true,
       message: 'Cotação deletada com sucesso'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao deletar cotação:', error);
+    
+    // Tratar erro específico do Prisma quando registro não existe
+    if (error.code === 'P2025') {
+      res.status(404).json({
+        success: false,
+        error: 'Cotação não encontrada'
+      });
+      return;
+    }
+
     res.status(500).json({
       success: false,
-      error: 'Erro ao deletar cotação'
+      error: 'Erro ao deletar cotação',
+      message: error.message
     });
   }
 };
@@ -264,12 +296,52 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Processar cotações para preview (calcular valorVenda padrão)
+    // Buscar todas as cotações existentes para comparação
+    const cotacoesExistentes = await prisma.cotacao.findMany({
+      where: { ativo: true },
+      select: {
+        id: true,
+        nome: true,
+        ncm: true,
+        valorUnitario: true,
+        valorVenda: true,
+        fornecedorNome: true
+      }
+    });
+
+    // Criar mapa para busca rápida (nome + fornecedorNome como chave)
+    const mapaExistentes = new Map<string, typeof cotacoesExistentes[0]>();
+    cotacoesExistentes.forEach(c => {
+      const chave = `${c.nome}|${c.fornecedorNome || ''}`;
+      mapaExistentes.set(chave, c);
+    });
+
+    // Processar cotações para preview com informações de comparação
     const cotacoesPreview = jsonData.cotacoes.map((cotacao: any) => {
       const valorUnitario = parseFloat(cotacao.valorUnitario) || 0;
       const valorVenda = cotacao.valorVenda !== undefined 
         ? parseFloat(cotacao.valorVenda) 
         : valorUnitario * 1.4; // 40% de margem padrão
+
+      const chave = `${cotacao.nome}|${cotacao.fornecedorNome || ''}`;
+      const existente = mapaExistentes.get(chave);
+
+      // Determinar status da cotação
+      let status: 'novo' | 'atualizado' | 'mantido' = 'novo';
+      let valorAnterior: number | null = null;
+
+      if (existente) {
+        // Comparar valores com tolerância de 0.01 para evitar problemas de ponto flutuante
+        const valorMudou = Math.abs(existente.valorUnitario - valorUnitario) > 0.01;
+        
+        if (valorMudou) {
+          status = 'atualizado';
+          valorAnterior = existente.valorUnitario;
+        } else {
+          status = 'mantido';
+          valorAnterior = existente.valorUnitario;
+        }
+      }
 
       return {
         nome: cotacao.nome,
@@ -277,15 +349,27 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
         valorUnitario,
         valorVenda,
         fornecedorNome: cotacao.fornecedorNome || '',
-        observacoes: cotacao.observacoes || ''
+        observacoes: cotacao.observacoes || '',
+        status, // 'novo' | 'atualizado' | 'mantido'
+        valorAnterior,
+        idExistente: existente?.id || null
       };
     });
+
+    // Calcular estatísticas
+    const estatisticas = {
+      novos: cotacoesPreview.filter((c: any) => c.status === 'novo').length,
+      atualizados: cotacoesPreview.filter((c: any) => c.status === 'atualizado').length,
+      mantidos: cotacoesPreview.filter((c: any) => c.status === 'mantido').length,
+      total: cotacoesPreview.length
+    };
 
     res.json({
       success: true,
       data: {
         total: cotacoesPreview.length,
-        cotacoes: cotacoesPreview
+        cotacoes: cotacoesPreview,
+        estatisticas
       }
     });
   } catch (error) {
@@ -342,7 +426,15 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
     const resultados = {
       criados: 0,
       atualizados: 0,
-      erros: 0
+      mantidos: 0,
+      erros: 0,
+      detalhes: [] as Array<{
+        nome: string;
+        status: 'criado' | 'atualizado' | 'mantido' | 'erro';
+        valorAnterior?: number;
+        valorNovo?: number;
+        erro?: string;
+      }>
     };
 
     for (const cotacao of cotacoesParaImportar) {
@@ -361,19 +453,38 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
         });
 
         if (existente) {
-          // Atualizar - atualizar dataAtualizacao apenas se valorUnitario mudou
-          const valorUnitarioMudou = existente.valorUnitario !== valorUnitario;
-          await prisma.cotacao.update({
-            where: { id: existente.id },
-            data: {
-              valorUnitario,
-              valorVenda,
-              ncm: cotacao.ncm,
-              observacoes: cotacao.observacoes,
-              ...(valorUnitarioMudou && { dataAtualizacao: new Date() })
-            }
-          });
-          resultados.atualizados++;
+          // Comparar valores com tolerância de 0.01
+          const valorUnitarioMudou = Math.abs(existente.valorUnitario - valorUnitario) > 0.01;
+          
+          if (valorUnitarioMudou) {
+            // Atualizar - atualizar dataAtualizacao apenas se valorUnitario mudou
+            await prisma.cotacao.update({
+              where: { id: existente.id },
+              data: {
+                valorUnitario,
+                valorVenda,
+                ncm: cotacao.ncm,
+                observacoes: cotacao.observacoes,
+                dataAtualizacao: new Date()
+              }
+            });
+            resultados.atualizados++;
+            resultados.detalhes.push({
+              nome: cotacao.nome,
+              status: 'atualizado',
+              valorAnterior: existente.valorUnitario,
+              valorNovo: valorUnitario
+            });
+          } else {
+            // Manter valor existente (não atualizar)
+            resultados.mantidos++;
+            resultados.detalhes.push({
+              nome: cotacao.nome,
+              status: 'mantido',
+              valorAnterior: existente.valorUnitario,
+              valorNovo: existente.valorUnitario
+            });
+          }
         } else {
           // Criar
           await prisma.cotacao.create({
@@ -389,10 +500,20 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
             }
           });
           resultados.criados++;
+          resultados.detalhes.push({
+            nome: cotacao.nome,
+            status: 'criado',
+            valorNovo: valorUnitario
+          });
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Erro ao processar cotação:', cotacao.nome, error);
         resultados.erros++;
+        resultados.detalhes.push({
+          nome: cotacao.nome,
+          status: 'erro',
+          erro: error.message || 'Erro desconhecido'
+        });
       }
     }
 
@@ -513,26 +634,65 @@ export const deletarCotacoesEmLote = async (req: Request, res: Response): Promis
       return;
     }
 
+    // Filtrar IDs válidos (não vazios)
+    const idsValidos = ids.filter((id: string) => id && id.trim() !== '');
+
+    if (idsValidos.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Nenhum ID válido fornecido'
+      });
+      return;
+    }
+
+    // Verificar quantas cotações existem antes de deletar
+    const cotacoesExistentes = await prisma.cotacao.findMany({
+      where: {
+        id: {
+          in: idsValidos
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const idsExistentes = cotacoesExistentes.map(c => c.id);
+    const idsNaoEncontrados = idsValidos.filter((id: string) => !idsExistentes.includes(id));
+
+    // Deletar apenas as que existem
     const resultado = await prisma.cotacao.deleteMany({
       where: {
         id: {
-          in: ids
+          in: idsExistentes
         }
       }
     });
 
-    res.json({
+    // Preparar resposta com informações detalhadas
+    const resposta: any = {
       success: true,
       data: {
-        deletados: resultado.count
+        deletados: resultado.count,
+        totalSolicitados: idsValidos.length,
+        encontrados: idsExistentes.length,
+        naoEncontrados: idsNaoEncontrados.length
       },
       message: `${resultado.count} cotação(ões) deletada(s) com sucesso`
-    });
-  } catch (error) {
+    };
+
+    // Adicionar aviso se houver IDs não encontrados
+    if (idsNaoEncontrados.length > 0) {
+      resposta.aviso = `${idsNaoEncontrados.length} cotação(ões) não encontrada(s) e não foram deletadas`;
+    }
+
+    res.json(resposta);
+  } catch (error: any) {
     console.error('Erro ao deletar cotações em lote:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao deletar cotações'
+      error: 'Erro ao deletar cotações',
+      message: error.message
     });
   }
 };

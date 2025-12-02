@@ -4,7 +4,8 @@ const prisma = new PrismaClient();
 
 export interface ConfiguracaoData {
   temaPreferido?: string; // 'light' | 'dark' | 'system'
-  logoUrl?: string;
+  logoUrl?: string; // Logo geral da empresa
+  logoLoginUrl?: string; // Logo específica para página de login
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
@@ -59,6 +60,7 @@ export class ConfiguracaoService {
           id: 'sistema-config',
           temaPreferido: data.temaPreferido || 'light',
           logoUrl: data.logoUrl,
+          logoLoginUrl: data.logoLoginUrl,
           nomeEmpresa: data.nomeEmpresa || 'S3E Engenharia',
           emailContato: data.emailContato,
           telefoneContato: data.telefoneContato

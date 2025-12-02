@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { EstoqueService } from './estoque.service';
 import { ContasPagarService } from './contasPagar.service';
+import { classificarMaterialPorNome } from '../utils/materialClassifier';
 
 const prisma = new PrismaClient();
 
@@ -25,7 +26,13 @@ export interface CompraPayload {
     status: string; // Pendente, Recebido, Cancelado
     items: CompraItemPayload[];
     observacoes?: string;
-    // Campos para gerar contas a pagar
+    // Campos financeiros adicionais (XML ou preenchimento manual)
+    valorIPI?: number;
+    valorTotalProdutos?: number;
+    valorTotalNota?: number;
+    duplicatas?: Array<{ numero: string; dataVencimento: string; valor: number }>;
+    statusImportacao?: 'MANUAL' | 'XML';
+    // Campos para gerar contas a pagar (fallback quando não há duplicatas)
     condicoesPagamento?: string;
     parcelas?: number;
     dataPrimeiroVencimento?: Date;
@@ -49,6 +56,11 @@ export class ComprasService {
             status,
             items,
             observacoes,
+            valorIPI = 0,
+            valorTotalProdutos,
+            valorTotalNota,
+            duplicatas,
+            statusImportacao,
             condicoesPagamento,
             parcelas,
             dataPrimeiroVencimento
@@ -79,17 +91,31 @@ export class ComprasService {
             });
         }
 
-        // Calcular valores
-        const valorSubtotal = items.reduce((sum, item) => 
-            sum + (item.quantidade * item.valorUnit), 0
+        // Calcular valores básicos
+        const valorSubtotal = items.reduce(
+            (sum, item) => sum + (item.quantidade * item.valorUnit),
+            0
         );
-        const valorTotal = valorSubtotal + valorFrete + outrasDespesas;
+
+        // Preferência de cálculo:
+        // 1) Se vier valorTotalNota do XML, confiar nele
+        // 2) Caso contrário, somar subtotal + frete + outras + IPI (se houver)
+        let valorTotal = valorTotalNota && valorTotalNota > 0
+            ? valorTotalNota
+            : valorSubtotal + valorFrete + outrasDespesas + (valorIPI || 0);
 
         // Usar transação para garantir consistência
         return await prisma.$transaction(async (tx) => {
             // 0. CRIAR MATERIALS AUTOMATICAMENTE para itens novos
             console.log('🔍 Processando items da compra...');
-            const itemsComMaterialId = [];
+            const itemsComMaterialId: Array<{
+                materialId: string;
+                nomeProduto: string;
+                ncm: string | null;
+                quantidade: number;
+                valorUnit: number;
+                valorTotal: number;
+            }> = [];
             
             for (const item of items) {
                 let materialId = item.materialId;
@@ -99,7 +125,7 @@ export class ComprasService {
                     console.log(`🆕 Item sem materialId: "${item.nomeProduto}". Criando Material...`);
                     
                     // Tentar encontrar material existente pelo NCM ou nome
-                    let material = null;
+                    let material: { id: string; preco: number | null } | null = null;
                     if (item.ncm) {
                         material = await tx.material.findFirst({
                             where: { sku: String(item.ncm) }
@@ -125,13 +151,17 @@ export class ComprasService {
                         const random = Math.random().toString(36).substr(2, 9);
                         const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
                         
+                        // Classificar categoria automaticamente baseado no nome do produto
+                        const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
+                        
                         material = await tx.material.create({
                             data: {
                                 nome: item.nomeProduto, // ✅ Nome real do produto do XML
                                 sku: skuGerado, // ✅ SKU único gerado
                                 tipo: 'Material Elétrico', // ✅ Tipo padrão
-                                categoria: 'Material Elétrico', // ✅ Categoria padrão (pode ser melhorado)
+                                categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                 descricao: item.nomeProduto, // ✅ Usar nome do produto ao invés de texto genérico
+                                ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML (dado fiscal importante) - sempre string
                                 unidadeMedida: 'un',
                                 preco: item.valorUnit,
                                 estoque: 0, // Será atualizado depois se status = Recebido
@@ -145,7 +175,7 @@ export class ComprasService {
                     } else {
                         console.log(`🔗 Material existente encontrado: ${material.id}`);
                         // Atualizar preço se o novo for diferente
-                        if (material.preco !== item.valorUnit) {
+                        if (material.preco !== null && material.preco !== item.valorUnit) {
                             await tx.material.update({
                                 where: { id: material.id },
                                 data: {
@@ -154,23 +184,55 @@ export class ComprasService {
                                 }
                             });
                             console.log(`💰 Preço atualizado: R$ ${material.preco} → R$ ${item.valorUnit}`);
+                        } else if (material.preco === null) {
+                            // Se o material não tinha preço, atualizar
+                            await tx.material.update({
+                                where: { id: material.id },
+                                data: {
+                                    preco: item.valorUnit,
+                                    fornecedorId: fornecedor.id
+                                }
+                            });
+                            console.log(`💰 Preço definido: R$ ${item.valorUnit}`);
                         }
+                    }
+                    
+                    if (!material) {
+                        throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
                     }
                     
                     materialId = material.id;
                 }
                 
-                itemsComMaterialId.push({
-                    materialId,
-                    nomeProduto: item.nomeProduto,
-                    ncm: item.ncm ? String(item.ncm) : null,
-                    quantidade: item.quantidade,
-                    valorUnit: item.valorUnit,
-                    valorTotal: item.quantidade * item.valorUnit
-                });
+                if (materialId) {
+                    itemsComMaterialId.push({
+                        materialId,
+                        nomeProduto: item.nomeProduto,
+                        ncm: item.ncm ? String(item.ncm) : null,
+                        quantidade: item.quantidade,
+                        valorUnit: item.valorUnit,
+                        valorTotal: item.quantidade * item.valorUnit
+                    });
+                }
             }
             
             // 1. Criar compra com items (agora todos com materialId)
+            // Montar metadados financeiros/duplicatas para auditoria (xmlData)
+            const xmlMeta: any = {
+                valorSubtotal,
+                valorFrete,
+                outrasDespesas,
+                valorIPI: valorIPI || 0,
+                valorTotalProdutos: valorTotalProdutos ?? valorSubtotal,
+                valorTotalNota: valorTotal,
+                duplicatas: duplicatas || [],
+                statusImportacao: statusImportacao || 'MANUAL',
+                // Guardar também informações de pagamento para gerar contas a pagar somente no recebimento
+                condicoesPagamento: condicoesPagamento || null,
+                parcelas: parcelas || null,
+                dataPrimeiroVencimento: dataPrimeiroVencimento || null
+            };
+
             const compra = await tx.compra.create({
                 data: {
                     fornecedorId: fornecedor.id,
@@ -187,6 +249,7 @@ export class ComprasService {
                     valorTotal,
                     status,
                     observacoes,
+                    xmlData: JSON.stringify(xmlMeta),
                     items: {
                         create: itemsComMaterialId
                     }
@@ -199,57 +262,102 @@ export class ComprasService {
             
             console.log(`✅ Compra criada com ${compra.items.length} itens`);
 
-            // 2. Se status for "Recebido", atualizar estoque
-            if (status === 'Recebido') {
-                console.log('📦 Compra com status "Recebido" - Dando entrada no estoque...');
-                for (const itemData of itemsComMaterialId) {
-                    // Agora TODOS os itens têm materialId
-                    console.log(`  ➕ Entrada: ${itemData.nomeProduto} - Qtd: ${itemData.quantidade}`);
-                    await EstoqueService.incrementarEstoque(
-                        itemData.materialId,
-                        itemData.quantidade,
-                        'COMPRA',
-                        compra.id,
-                        `Compra NF: ${numeroNF} - ${itemData.nomeProduto}`
-                    );
-                }
-                console.log('✅ Estoque atualizado para todos os itens!');
-            } else {
-                console.log(`⚠️ Compra com status "${status}" - Estoque NÃO atualizado (aguardando recebimento)`);
-            }
+            // ✅ CORREÇÃO: NÃO atualizar estoque automaticamente ao criar compra
+            // O estoque só deve ser atualizado quando o usuário confirmar o recebimento
+            // através do botão "Receber Remessa" na interface
+            console.log('💤 Compra criada - estoque será atualizado quando o usuário confirmar o recebimento.');
+            console.log(`📋 Status da compra: ${status}`);
 
-            // 3. Gerar contas a pagar (sempre gerar, mesmo se for à vista com 1 parcela)
-            let contasPagar = null;
-            if (condicoesPagamento && parcelas && parcelas > 0) {
-                const dataVencimento = dataPrimeiroVencimento || new Date(dataCompra);
-                if (!dataPrimeiroVencimento) {
-                    // Se for à vista, vencimento em 7 dias; se parcelado, 30 dias
-                    dataVencimento.setDate(dataVencimento.getDate() + (parcelas === 1 ? 7 : 30));
-                }
-
-                console.log(`💰 Gerando ${parcelas} conta(s) a pagar para compra NF ${numeroNF}`);
-                
-                contasPagar = await ContasPagarService.criarContasPagarParceladas({
-                    fornecedorId: fornecedor.id,
-                    compraId: compra.id,
-                    descricao: `Compra NF ${numeroNF} - ${fornecedorNome}`,
-                    valorTotal,
-                    parcelas,
-                    dataPrimeiroVencimento: dataVencimento,
-                    observacoes: condicoesPagamento
-                });
-                
-                console.log(`✅ ${parcelas} conta(s) a pagar criada(s) com sucesso!`);
-            } else {
-                console.warn(`⚠️ Nenhuma conta a pagar gerada - Condições: ${condicoesPagamento}, Parcelas: ${parcelas}`);
-            }
+            // 3. Contas a pagar
+            // ⚠️ NOVO COMPORTAMENTO:
+            // As duplicatas / parcelas NÃO geram mais contas a pagar automaticamente aqui.
+            // ✅ As contas a pagar e o estoque só serão atualizados quando o usuário
+            // confirmar o recebimento através do botão "Receber Remessa"
+            console.log('💤 Compra criada - contas a pagar e estoque serão processados ao confirmar recebimento.');
 
             return {
                 compra,
-                contasPagar,
-                estoqueAtualizado: status === 'Recebido'
+                contasPagar: null,
+                estoqueAtualizado: false // Sempre false na criação
             };
         });
+    }
+
+    /**
+     * Gera contas a pagar para uma compra que foi marcada como "Recebido",
+     * utilizando as duplicatas ou condições de pagamento salvas em xmlData.
+     * Só gera se ainda não existirem contas vinculadas a essa compra.
+     */
+    static async gerarContasPagarAoReceberCompra(id: string) {
+        // Verificar se já existem contas a pagar vinculadas a esta compra
+        const contasExistentes = await prisma.contaPagar.count({
+            where: { compraId: id }
+        });
+
+        if (contasExistentes > 0) {
+            console.log(`💰 Já existem ${contasExistentes} conta(s) a pagar para a compra ${id}. Nada a fazer.`);
+            return;
+        }
+
+        const compra = await prisma.compra.findUnique({
+            where: { id }
+        });
+
+        if (!compra) {
+            console.warn(`⚠️ Não foi possível gerar contas a pagar: compra ${id} não encontrada.`);
+            return;
+        }
+
+        // Somente gerar contas a pagar se a compra estiver com status "Recebido"
+        if (compra.status !== 'Recebido') {
+            console.log(`💤 Compra ${id} com status "${compra.status}" - contas a pagar serão geradas apenas ao receber.`);
+            return;
+        }
+
+        // Recuperar metadados financeiros/duplicatas do xmlData
+        let xmlMeta: any = null;
+        if (compra.xmlData) {
+            try {
+                xmlMeta = JSON.parse(compra.xmlData);
+            } catch (err) {
+                console.error('❌ Erro ao parsear xmlData da compra para gerar contas a pagar:', err);
+            }
+        }
+
+        const duplicatas = xmlMeta?.duplicatas || [];
+        const condicoesPagamento = xmlMeta?.condicoesPagamento || undefined;
+        const parcelas = xmlMeta?.parcelas || undefined;
+        const dataPrimeiroVencimentoRaw = xmlMeta?.dataPrimeiroVencimento || undefined;
+        const dataPrimeiroVencimento = dataPrimeiroVencimentoRaw ? new Date(dataPrimeiroVencimentoRaw) : undefined;
+        const valorTotalNota = xmlMeta?.valorTotalNota ?? compra.valorTotal ?? compra.valorSubtotal;
+
+        let contasPagar: any = null;
+
+        if (duplicatas && Array.isArray(duplicatas) && duplicatas.length > 0) {
+            console.log(`💰 (Recebimento) Gerando contas a pagar a partir de duplicatas para compra NF ${compra.numeroNF}`);
+            contasPagar = await ContasPagarService.criarContasPagarPorDuplicatas({
+                fornecedorId: compra.fornecedorId,
+                compraId: compra.id,
+                descricao: `Compra NF ${compra.numeroNF} - ${compra.fornecedorNome}`,
+                duplicatas,
+                observacoes: condicoesPagamento
+            });
+        } else if (parcelas && parcelas > 0 && valorTotalNota && dataPrimeiroVencimento) {
+            console.log(`💰 (Recebimento) Gerando ${parcelas} conta(s) a pagar para compra NF ${compra.numeroNF}`);
+            contasPagar = await ContasPagarService.criarContasPagarParceladas({
+                fornecedorId: compra.fornecedorId,
+                compraId: compra.id,
+                descricao: `Compra NF ${compra.numeroNF} - ${compra.fornecedorNome}`,
+                valorTotal: valorTotalNota,
+                parcelas,
+                dataPrimeiroVencimento,
+                observacoes: condicoesPagamento
+            });
+        } else {
+            console.warn(`⚠️ (Recebimento) Nenhuma conta a pagar gerada para compra ${id} - sem duplicatas ou dados de parcelamento suficientes.`);
+        }
+
+        return contasPagar;
     }
 
     /**
@@ -378,7 +486,7 @@ export class ComprasService {
         // Se mudou para Recebido e antes não estava, atualizar estoque
         const deveAtualizarEstoque = novoStatus === 'Recebido' && compra.status !== 'Recebido';
 
-        return await prisma.$transaction(async (tx) => {
+        const resultado = await prisma.$transaction(async (tx) => {
             // Atualizar compra
             const compraAtualizada = await tx.compra.update({
                 where: { id },
@@ -401,7 +509,7 @@ export class ComprasService {
                         console.log(`🆕 Item sem material vinculado: "${item.nomeProduto}". Criando...`);
                         
                         // Tentar encontrar material existente
-                        let material = null;
+                        let material: { id: string } | null = null;
                         if (item.ncm) {
                             material = await tx.material.findFirst({
                                 where: { sku: String(item.ncm) }
@@ -426,13 +534,17 @@ export class ComprasService {
                             const random = Math.random().toString(36).substr(2, 9);
                             const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
                             
+                            // Classificar categoria automaticamente baseado no nome do produto
+                            const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
+                            
                             material = await tx.material.create({
                                 data: {
                                     nome: item.nomeProduto, // ✅ Campo obrigatório
                                     sku: skuGerado, // ✅ Campo obrigatório e único
                                     tipo: 'Produto', // ✅ Campo obrigatório
-                                    categoria: 'Importado XML', // ✅ Campo obrigatório
+                                    categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                     descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
+                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML - sempre string
                                     unidadeMedida: 'UN',
                                     preco: item.valorUnit,
                                     estoque: 0,
@@ -441,6 +553,10 @@ export class ComprasService {
                                 }
                             });
                             console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
+                        }
+                        
+                        if (!material) {
+                            throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
                         }
                         
                         materialIdFinal = material.id;
@@ -453,13 +569,15 @@ export class ComprasService {
                     }
                     
                     // Dar entrada no estoque
-                    await EstoqueService.incrementarEstoque(
-                        materialIdFinal,
-                        item.quantidade,
-                        'COMPRA',
-                        id,
-                        `Compra NF: ${compra.numeroNF} - Recebimento confirmado`
-                    );
+                    if (materialIdFinal) {
+                        await EstoqueService.incrementarEstoque(
+                            materialIdFinal,
+                            item.quantidade,
+                            'COMPRA',
+                            id,
+                            `Compra NF: ${compra.numeroNF} - Recebimento confirmado`
+                        );
+                    }
                 }
                 
                 console.log('✅ Todos os Materials criados e estoque atualizado!');
@@ -467,12 +585,25 @@ export class ComprasService {
 
             return compraAtualizada;
         });
+
+        // Após a transação, se a compra passou a ficar como "Recebido",
+        // gerar contas a pagar (se ainda não existirem) usando as duplicatas/condições salvas em xmlData
+        if (novoStatus === 'Recebido') {
+            await ComprasService.gerarContasPagarAoReceberCompra(id);
+        }
+
+        return resultado;
     }
 
     /**
      * Receber remessa parcial (apenas itens específicos)
      */
-    static async receberRemessaParcial(id: string, novoStatus: string, produtoIds: string[]) {
+    static async receberRemessaParcial(
+        id: string,
+        novoStatus: string,
+        produtoIds: string[],
+        dataRecebimento?: Date
+    ) {
         const compra = await prisma.compra.findUnique({
             where: { id },
             include: { items: true }
@@ -485,29 +616,48 @@ export class ComprasService {
         // Se mudou para Recebido, processar apenas os itens marcados
         const deveAtualizarEstoque = novoStatus === 'Recebido' && compra.status !== 'Recebido';
 
-        return await prisma.$transaction(async (tx) => {
+        const resultado = await prisma.$transaction(async (tx) => {
             // Atualizar compra (mantém pendente se ainda há itens não recebidos)
             const todosRecebidos = produtoIds.length === compra.items.length;
+            const dataRecebimentoParaSalvar = deveAtualizarEstoque
+                ? (dataRecebimento ?? new Date())
+                : compra.dataRecebimento;
+            
+            console.log(`📅 Salvando dataRecebimento: ${dataRecebimentoParaSalvar?.toISOString()} (${dataRecebimentoParaSalvar?.toLocaleDateString('pt-BR')})`);
+            
             const compraAtualizada = await tx.compra.update({
                 where: { id },
                 data: {
                     status: todosRecebidos ? novoStatus : 'Pendente',
-                    dataRecebimento: deveAtualizarEstoque ? new Date() : compra.dataRecebimento
+                    dataRecebimento: dataRecebimentoParaSalvar
                 },
                 include: { items: true, fornecedor: true }
             });
+            
+            console.log(`📅 Data salva no banco: ${compraAtualizada.dataRecebimento?.toISOString()} (${compraAtualizada.dataRecebimento?.toLocaleDateString('pt-BR')})`);
 
             // Atualizar estoque apenas dos itens marcados
             if (deveAtualizarEstoque) {
                 console.log('📦 Recebendo itens parciais - Processando estoque...');
                 console.log('📦 Produtos selecionados:', produtoIds);
+                console.log('📦 Total de itens na compra:', compra.items.length);
+                console.log('📦 Status da compra:', compra.status);
+                console.log('📦 Novo status:', novoStatus);
                 
-                // Filtrar apenas os itens que foram marcados para recebimento
+                // ✅ CORREÇÃO: Filtrar pelos IDs dos CompraItem, não pelos materialIds
+                // Isso permite processar itens sem materialId (que serão criados automaticamente)
                 const itensSelecionados = compra.items.filter(item => 
-                    item.materialId && produtoIds.includes(item.materialId)
+                    produtoIds.includes(item.id)
                 );
                 
                 console.log(`📦 ${itensSelecionados.length} de ${compra.items.length} itens serão processados`);
+                console.log(`📦 IDs dos itens selecionados:`, produtoIds);
+                
+                if (itensSelecionados.length === 0) {
+                    console.error('❌ ERRO: Nenhum item foi selecionado para processamento!');
+                    console.error('❌ IDs recebidos:', produtoIds);
+                    console.error('❌ IDs disponíveis:', compra.items.map(i => i.id));
+                }
                 
                 for (const item of itensSelecionados) {
                     let materialIdFinal = item.materialId;
@@ -517,7 +667,7 @@ export class ComprasService {
                         console.log(`🆕 Item sem material vinculado: "${item.nomeProduto}". Criando...`);
                         
                         // Tentar encontrar material existente
-                        let material = null;
+                        let material: { id: string } | null = null;
                         if (item.ncm) {
                             material = await tx.material.findFirst({
                                 where: { sku: String(item.ncm) }
@@ -541,13 +691,17 @@ export class ComprasService {
                             const random = Math.random().toString(36).substr(2, 9);
                             const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
                             
+                            // Classificar categoria automaticamente baseado no nome do produto
+                            const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
+                            
                             material = await tx.material.create({
                                 data: {
                                     nome: item.nomeProduto,
                                     sku: skuGerado,
                                     tipo: 'Produto',
-                                    categoria: 'Importado XML',
+                                    categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                     descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
+                                    ncm: item.ncm ? String(item.ncm) : null,
                                     unidadeMedida: 'UN',
                                     preco: item.valorUnit,
                                     estoque: 0,
@@ -556,6 +710,10 @@ export class ComprasService {
                                 }
                             });
                             console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
+                        }
+                        
+                        if (!material) {
+                            throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
                         }
                         
                         materialIdFinal = material.id;
@@ -567,14 +725,47 @@ export class ComprasService {
                         });
                     }
                     
-                    // Dar entrada no estoque
-                    await EstoqueService.incrementarEstoque(
-                        materialIdFinal,
-                        item.quantidade,
-                        'COMPRA',
-                        id,
-                        `Compra NF: ${compra.numeroNF} - Recebimento parcial confirmado`
-                    );
+                    // ✅ CORREÇÃO: Dar entrada no estoque usando a transação existente
+                    if (materialIdFinal) {
+                        // Buscar material atual para verificar estoque antes
+                        const materialAtual = await tx.material.findUnique({
+                            where: { id: materialIdFinal },
+                            select: { estoque: true, nome: true }
+                        });
+                        
+                        const estoqueAnterior = materialAtual?.estoque || 0;
+                        console.log(`📦 Material: ${materialAtual?.nome || materialIdFinal}`);
+                        console.log(`📦 Estoque anterior: ${estoqueAnterior}, Quantidade a adicionar: ${item.quantidade}`);
+                        
+                        // Incrementar estoque diretamente na transação
+                        const materialAtualizado = await tx.material.update({
+                            where: { id: materialIdFinal },
+                            data: {
+                                estoque: {
+                                    increment: item.quantidade
+                                }
+                            },
+                            select: { estoque: true, nome: true }
+                        });
+                        
+                        console.log(`✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado.estoque} (adicionado ${item.quantidade})`);
+                        
+                        // Registrar movimentação
+                        await tx.movimentacaoEstoque.create({
+                            data: {
+                                materialId: materialIdFinal,
+                                tipo: 'ENTRADA',
+                                quantidade: item.quantidade,
+                                motivo: 'COMPRA',
+                                referencia: id,
+                                observacoes: `Compra NF: ${compra.numeroNF} - Recebimento parcial confirmado`
+                            }
+                        });
+                        
+                        console.log(`✅ Movimentação registrada para material ${materialIdFinal}`);
+                    } else {
+                        console.error(`❌ materialIdFinal é null para item: ${item.nomeProduto}`);
+                    }
                     
                     console.log(`✅ Item ${item.nomeProduto} processado no estoque`);
                     
@@ -615,6 +806,14 @@ export class ComprasService {
 
             return compraAtualizada;
         });
+
+        // Se após o processamento a compra passou a ser considerada "Recebida",
+        // gerar contas a pagar (se ainda não existirem)
+        if (resultado.status === 'Recebido') {
+            await ComprasService.gerarContasPagarAoReceberCompra(id);
+        }
+
+        return resultado;
     }
 
     /**
@@ -637,7 +836,7 @@ export class ComprasService {
 
         console.log(`📦 Recebendo compra ${compra.numeroNF} com associações explícitas`);
 
-        return await prisma.$transaction(async (tx) => {
+        const resultado = await prisma.$transaction(async (tx) => {
             // Processar cada item da compra
             for (const item of compra.items) {
                 const associacao = associacoes[item.id];
@@ -657,13 +856,18 @@ export class ComprasService {
                     const random = Math.random().toString(36).substr(2, 9);
                     const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
 
+                    // Classificar categoria automaticamente baseado no nome do produto
+                    const nomeMaterial = associacao.nomeMaterial || item.nomeProduto;
+                    const categoriaClassificada = classificarMaterialPorNome(nomeMaterial, item.ncm || undefined);
+
                     const novoMaterial = await tx.material.create({
                         data: {
-                            nome: associacao.nomeMaterial || item.nomeProduto,
+                            nome: nomeMaterial,
                             sku: skuGerado,
                             tipo: 'Material Elétrico',
-                            categoria: 'Material Elétrico',
-                            descricao: associacao.nomeMaterial || item.nomeProduto,
+                            categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
+                            descricao: nomeMaterial,
+                            ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML - sempre string
                             unidadeMedida: 'un',
                             preco: item.valorUnit,
                             estoque: 0,

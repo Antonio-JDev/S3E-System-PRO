@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { toast } from 'sonner';
 import { obrasService, type Obra, type ObraKanbanData } from '../services/obrasService';
 import { axiosApiService } from '../services/axiosApi';
 import HubTarefasObra from './HubTarefasObra';
+import { AuthContext } from '../contexts/AuthContext';
+import { canDelete } from '../utils/permissions';
+import AlertDialog from './ui/AlertDialog';
 
 // Icons
 const ClockIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -22,6 +25,11 @@ const CheckCircleIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
 );
+const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.124-2.038-2.124H9.038c-1.128 0-2.038.944-2.038 2.124v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+);
 
 interface ObraKanbanProps {
     onRefresh?: () => void;
@@ -29,6 +37,7 @@ interface ObraKanbanProps {
 }
 
 const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
+    const { user } = useContext(AuthContext);
     const [kanbanData, setKanbanData] = useState<ObraKanbanData>({
         BACKLOG: [],
         A_FAZER: [],
@@ -41,6 +50,10 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
 
     // Hub de Tarefas da Obra
     const [hubObraId, setHubObraId] = useState<string | null>(null);
+    
+    // Estados para exclusão
+    const [obraToDelete, setObraToDelete] = useState<Obra | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
     // Modal de Obra de Manutenção
     const [modalManutencaoOpen, setModalManutencaoOpen] = useState(false);
@@ -136,6 +149,28 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
         }
     };
 
+    // Excluir obra
+    const handleDeleteObra = async () => {
+        if (!obraToDelete) return;
+
+        const response = await obrasService.deletarObra(obraToDelete.id);
+        
+        if (response.success) {
+            toast.success('Obra excluída', {
+                description: `Obra "${obraToDelete.nomeObra}" foi excluída permanentemente`
+            });
+            await loadObrasKanban();
+            if (onRefresh) onRefresh();
+        } else {
+            toast.error('Erro ao excluir', {
+                description: response.error || 'Não foi possível excluir a obra'
+            });
+        }
+
+        setShowDeleteDialog(false);
+        setObraToDelete(null);
+    };
+
     const handleDragStart = (e: React.DragEvent, obra: Obra) => {
         setDraggedItem(obra);
         e.dataTransfer.effectAllowed = 'move';
@@ -219,20 +254,17 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
             key={obra.id}
             draggable
             onDragStart={(e) => handleDragStart(e, obra)}
-            onClick={() => {
-                if (onNavigate) {
-                    // Navegar para página de detalhes da obra
-                    onNavigate('DetalhesObra', obra.id);
-                } else {
-                    // Fallback para modal se onNavigate não estiver disponível
-                    setHubObraId(obra.id);
-                }
-            }}
-            className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-xl p-4 mb-3 cursor-pointer hover:shadow-lg transition-all hover:border-orange-400 dark:hover:border-orange-500 hover:scale-[1.02]"
+            className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-xl p-4 mb-3 hover:shadow-lg transition-all hover:border-orange-400 dark:hover:border-orange-500"
         >
             {/* Header */}
             <div className="flex justify-between items-start mb-3">
-                <div className="flex-1">
+                <div className="flex-1 cursor-pointer" onClick={() => {
+                    if (onNavigate) {
+                        onNavigate('DetalhesObra', obra.id);
+                    } else {
+                        setHubObraId(obra.id);
+                    }
+                }}>
                     <h4 className="font-bold text-gray-900 dark:text-dark-text text-sm line-clamp-2">
                         {obra.nomeObra}
                     </h4>
@@ -243,9 +275,24 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
                         </span>
                     )}
                 </div>
-                <span className="ml-2 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded">
-                    #{obra.id.slice(0, 8)}
-                </span>
+                <div className="flex items-center gap-2">
+                    <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-bold rounded">
+                        #{obra.id.slice(0, 8)}
+                    </span>
+                    {canDelete(user) && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setObraToDelete(obra);
+                                setShowDeleteDialog(true);
+                            }}
+                            className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                            title="Excluir obra (apenas Desenvolvedor/Administrador)"
+                        >
+                            <TrashIcon className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Cliente */}
@@ -517,6 +564,21 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
                     }}
                 />
             )}
+
+            {/* AlertDialog de Confirmação de Exclusão */}
+            <AlertDialog
+                isOpen={showDeleteDialog}
+                onClose={() => {
+                    setShowDeleteDialog(false);
+                    setObraToDelete(null);
+                }}
+                onConfirm={handleDeleteObra}
+                title={`Excluir obra "${obraToDelete?.nomeObra || 'N/A'}"?`}
+                message={`Tem certeza que deseja excluir permanentemente esta obra? Esta ação não pode ser desfeita.`}
+                confirmText="Excluir Permanentemente"
+                cancelText="Cancelar"
+                variant="danger"
+            />
         </div>
     );
 };

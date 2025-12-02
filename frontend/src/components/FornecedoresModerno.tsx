@@ -1,8 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useContext } from 'react';
 import { toast } from 'sonner';
 import { fornecedoresService, type Fornecedor, type CreateFornecedorData } from '../services/fornecedoresService';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { AuthContext } from '../contexts/AuthContext';
+import { canDelete } from '../utils/permissions';
+import AlertDialog from './ui/AlertDialog';
 
 // Icons (mesmos do ClientesModerno)
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -46,6 +49,8 @@ interface FornecedoresProps {
 }
 
 const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => {
+    const { user } = useContext(AuthContext)!;
+    
     const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -61,6 +66,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [fornecedorToEdit, setFornecedorToEdit] = useState<Fornecedor | null>(null);
     const [fornecedorToDelete, setFornecedorToDelete] = useState<Fornecedor | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
     const [formState, setFormState] = useState<CreateFornecedorData>({
         nome: '',
@@ -167,18 +173,23 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
         try {
             const response = await fornecedoresService.desativar(fornecedorToDelete.id);
             if (response.success) {
+                toast.success('Fornecedor excluído', {
+                    description: `Fornecedor "${fornecedorToDelete.nome}" foi desativado com sucesso`
+                });
                 await loadFornecedores();
-                setFornecedorToDelete(null);
             } else {
-                toast.error('Erro ao desativar', {
-                    description: response.message || 'Erro ao desativar fornecedor'
+                toast.error('Erro ao excluir', {
+                    description: response.error || 'Erro ao excluir fornecedor'
                 });
             }
         } catch (err) {
-            toast.error('Erro ao desativar fornecedor', {
+            toast.error('Erro ao excluir fornecedor', {
                 description: 'Verifique sua conexão'
             });
         }
+        
+        setShowDeleteDialog(false);
+        setFornecedorToDelete(null);
     };
 
     const handleReativar = async (fornecedor: Fornecedor) => {
@@ -368,13 +379,19 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                             <PencilIcon className="w-4 h-4" />
                                             Editar
                                         </button>
-                                        <button
-                                            onClick={() => setFornecedorToDelete(fornecedor)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                        >
-                                            <TrashIcon className="w-4 h-4" />
-                                            Desativar
-                                        </button>
+                                        {canDelete(user) && (
+                                            <button
+                                                onClick={() => {
+                                                    setFornecedorToDelete(fornecedor);
+                                                    setShowDeleteDialog(true);
+                                                }}
+                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                title="Excluir fornecedor (apenas Desenvolvedor/Administrador)"
+                                            >
+                                                <TrashIcon className="w-4 h-4" />
+                                                Excluir
+                                            </button>
+                                        )}
                                     </>
                                 ) : (
                                     <button
@@ -437,12 +454,18 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                                         >
                                                             <PencilIcon className="w-4 h-4" />
                                                         </button>
-                                                        <button
-                                                            onClick={() => setFornecedorToDelete(fornecedor)}
-                                                            className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                                        >
-                                                            <TrashIcon className="w-4 h-4" />
-                                                        </button>
+                                                        {canDelete(user) && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setFornecedorToDelete(fornecedor);
+                                                                    setShowDeleteDialog(true);
+                                                                }}
+                                                                className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                                title="Excluir fornecedor (apenas Desenvolvedor/Administrador)"
+                                                            >
+                                                                <TrashIcon className="w-4 h-4" />
+                                                            </button>
+                                                        )}
                                                     </>
                                                 ) : (
                                                     <button
@@ -667,32 +690,20 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                 </div>
             )}
 
-            {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
-            {fornecedorToDelete && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-md w-full p-6">
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">Desativar Fornecedor</h3>
-                        <p className="text-gray-600 mb-6">
-                            Tem certeza que deseja desativar o fornecedor <strong>"{fornecedorToDelete.nome}"</strong>? 
-                            O fornecedor ficará inativo mas poderá ser reativado futuramente.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setFornecedorToDelete(null)}
-                                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 font-semibold"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleDelete}
-                                className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold"
-                            >
-                                Desativar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* AlertDialog de Confirmação de Exclusão */}
+            <AlertDialog
+                isOpen={showDeleteDialog}
+                onClose={() => {
+                    setShowDeleteDialog(false);
+                    setFornecedorToDelete(null);
+                }}
+                onConfirm={handleDelete}
+                title={`Excluir fornecedor "${fornecedorToDelete?.nome || 'N/A'}"?`}
+                message={`Tem certeza que deseja desativar este fornecedor? O fornecedor ficará inativo mas poderá ser reativado futuramente.`}
+                confirmText="Excluir"
+                cancelText="Cancelar"
+                variant="danger"
+            />
         </div>
     );
 };

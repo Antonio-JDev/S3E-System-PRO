@@ -42,7 +42,7 @@ echo.
 echo [2/4] Building Frontend Image...
 docker build -t %DOCKER_USER%/s3e-frontend:%VERSION% ^
   --target production ^
-  --build-arg VITE_API_URL=http://localhost:3001 ^
+  --build-arg VITE_API_URL=http://192.168.100.228:3001 ^
   -f frontend/Dockerfile ^
   ./frontend
 

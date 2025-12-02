@@ -24,6 +24,18 @@ export interface ContaPagarParceladaPayload {
     observacoes?: string;
 }
 
+export interface ContaPagarPorDuplicataPayload {
+    fornecedorId?: string;
+    compraId?: string;
+    descricao: string;
+    duplicatas: Array<{
+        numero: string;
+        dataVencimento: string;
+        valor: number;
+    }>;
+    observacoes?: string;
+}
+
 export class ContasPagarService {
     /**
      * Cria uma única conta a pagar
@@ -93,6 +105,50 @@ export class ContasPagarService {
                         dataVencimento,
                         numeroParcela: i,
                         totalParcelas: parcelas,
+                        observacoes,
+                        status: ContaStatus.Pendente
+                    }
+                });
+
+                contas.push(conta);
+            }
+
+            return contas;
+        });
+
+        return contasCriadas;
+    }
+
+    /**
+     * Cria contas a pagar baseadas nas duplicatas (valores e datas exatos do XML)
+     */
+    static async criarContasPagarPorDuplicatas(data: ContaPagarPorDuplicataPayload) {
+        const { fornecedorId, compraId, descricao, duplicatas, observacoes } = data;
+
+        if (!duplicatas || duplicatas.length === 0) {
+            throw new Error('Pelo menos uma duplicata é necessária para criar contas a pagar');
+        }
+
+        // Transação para garantir consistência
+        const contasCriadas = await prisma.$transaction(async (tx) => {
+            const contas = [];
+            const totalParcelas = duplicatas.length;
+
+            for (let i = 0; i < duplicatas.length; i++) {
+                const dup = duplicatas[i];
+                const dataVencimento = dup.dataVencimento
+                    ? new Date(dup.dataVencimento)
+                    : new Date();
+
+                const conta = await tx.contaPagar.create({
+                    data: {
+                        fornecedorId,
+                        compraId,
+                        descricao: `${descricao} - Parcela ${dup.numero || i + 1}/${totalParcelas}`,
+                        valorParcela: dup.valor,
+                        dataVencimento,
+                        numeroParcela: i + 1,
+                        totalParcelas,
                         observacoes,
                         status: ContaStatus.Pendente
                     }

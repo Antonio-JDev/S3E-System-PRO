@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useContext } from 'react';
 import { toast } from 'sonner';
 import { type MaterialItem, MaterialCategory } from '../types';
 import { materiaisService, Material } from '../services/materiaisService';
+import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import SupplierCombobox from './ui/SupplierCombobox';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { AuthContext } from '../contexts/AuthContext';
@@ -145,11 +147,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [importing, setImporting] = useState(false);
     const [showDialogFornecedor, setShowDialogFornecedor] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+    const [loadingFornecedores, setLoadingFornecedores] = useState(false);
     const [formState, setFormState] = useState<MaterialFormState>({
         name: '',
         sku: '',
         type: '',
-        category: MaterialCategory.MaterialEletrico,
+        category: MaterialCategory.ELETRICO,
         description: '',
         stock: '0',
         minStock: '5',
@@ -171,7 +175,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             setError(null);
             
             console.log('📦 Carregando materiais...');
-            const response = await materiaisService.getMateriais();
+            // ✅ CORREÇÃO: Filtrar apenas materiais ativos para não mostrar materiais excluídos
+            const response = await materiaisService.getMateriais({ ativo: true });
             
             if (response.success && response.data) {
                 // Converter dados da API para o formato do componente
@@ -180,8 +185,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     name: material.descricao,
                     sku: material.codigo,
                     type: material.categoria || 'Material',
-                    category: MaterialCategory.MaterialEletrico, // Mapear conforme necessário
+                    category: MaterialCategory.ELETRICO, // Mapear conforme necessário
                     description: material.descricao,
+                    ncm: material.ncm, // ✅ NCM do material (dado fiscal)
                     stock: material.estoque,
                     minStock: material.estoqueMinimo,
                     unitOfMeasure: material.unidade,
@@ -194,7 +200,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         ? { id: material.fornecedor.id, name: material.fornecedor.nome } 
                         : { id: '', name: 'Sem fornecedor' }
                 }));
-                
+
+                // ✅ CORREÇÃO: Exibir TODOS os materiais ativos, independente do estoque
+                // O filtro por estoque zerado pode ser aplicado depois pelo usuário
                 setMaterials(materialsData);
                 console.log(`✅ ${materialsData.length} materiais carregados`);
             } else {
@@ -262,8 +270,26 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         return ((valorVenda - precoCusto) / precoCusto) * 100;
     };
 
+    // Carregar fornecedores
+    const loadFornecedores = async () => {
+        try {
+            setLoadingFornecedores(true);
+            const response = await fornecedoresService.listar({ ativo: true });
+            if (response.success && response.data) {
+                setFornecedores(response.data);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar fornecedores:', error);
+        } finally {
+            setLoadingFornecedores(false);
+        }
+    };
+
     // Handlers
     const handleOpenModal = (item: MaterialItem | null = null) => {
+        // Carregar fornecedores quando abrir o modal
+        loadFornecedores();
+        
         if (item) {
             setItemToEdit(item);
             setFormState({
@@ -292,7 +318,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 name: '',
                 sku: '',
                 type: '',
-                category: MaterialCategory.MaterialEletrico,
+                category: MaterialCategory.ELETRICO,
                 description: '',
                 stock: '0',
                 minStock: '5',
@@ -347,6 +373,17 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 ? calcularPorcentagemLucro(precoCusto, valorVenda) 
                 : 0;
 
+            // Verificar se o nome do fornecedor corresponde a um fornecedor existente
+            let fornecedorIdFinal = formState.supplierId;
+            if (!fornecedorIdFinal && formState.supplierName) {
+                const fornecedorExistente = fornecedores.find(
+                    f => f.nome.toLowerCase() === formState.supplierName.toLowerCase()
+                );
+                if (fornecedorExistente) {
+                    fornecedorIdFinal = fornecedorExistente.id;
+                }
+            }
+
             const materialData = {
                 codigo: formState.sku,
                 descricao: formState.name,
@@ -358,7 +395,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 estoque: parseFloat(formState.stock),
                 estoqueMinimo: parseFloat(formState.minStock),
                 categoria: formState.type,
-                fornecedorId: formState.supplierId || undefined
+                fornecedorId: fornecedorIdFinal || undefined
             };
 
             if (itemToEdit) {
@@ -422,12 +459,18 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         try {
             setShowDeleteDialog(false);
             const materialNome = itemToDelete.name;
-            const response = await materiaisService.deleteMaterial(itemToDelete.id);
+            // ✅ CORREÇÃO: Passar ?permanent=true para excluir permanentemente (apenas admin/dev)
+            const response = await materiaisService.deleteMaterial(itemToDelete.id, true);
             if (response.success) {
+                // ✅ CORREÇÃO: Remover imediatamente da lista antes de recarregar
+                setMaterials(prev => prev.filter(m => m.id !== itemToDelete.id));
+                
                 toast.success('Material excluído com sucesso!', {
-                    description: `O material "${materialNome}" foi excluído do sistema. Ele permanecerá no histórico de compras e contas a pagar.`,
+                    description: `O material "${materialNome}" foi excluído permanentemente do sistema.`,
                 });
                 setItemToDelete(null);
+                
+                // Recarregar para garantir sincronização com o backend
                 await loadMaterials();
             } else {
                 toast.error('Erro ao excluir material', {
@@ -920,11 +963,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
     const getCategoryIcon = (category: MaterialCategory) => {
         switch (category) {
-            case MaterialCategory.MaterialEletrico:
+            case MaterialCategory.ELETRICO:
                 return '⚡';
-            case MaterialCategory.Ferramenta:
+            case MaterialCategory.FERRAMENTA:
                 return '🔧';
-            case MaterialCategory.Insumo:
+            case MaterialCategory.OUTRO:
                 return '📦';
             default:
                 return '📦';
@@ -1152,9 +1195,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                             className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-teal-500 dark:focus:ring-teal-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         >
                             <option value="Todos">Todas as Categorias</option>
-                            <option value={MaterialCategory.MaterialEletrico}>Material Elétrico</option>
-                            <option value={MaterialCategory.Ferramenta}>Ferramentas</option>
-                            <option value={MaterialCategory.Insumo}>Insumo</option>
+                            <option value={MaterialCategory.ELETRICO}>Material Elétrico</option>
+                            <option value={MaterialCategory.FERRAMENTA}>Ferramentas</option>
+                            <option value={MaterialCategory.SEGURANCA}>Segurança</option>
+                            <option value={MaterialCategory.OUTRO}>Outros</option>
                         </select>
                     </div>
 
@@ -1470,35 +1514,35 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
-                            <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-teal-50 to-blue-50">
+                        <div className="modal-header bg-gradient-to-r from-teal-50 to-blue-50 dark:from-slate-800 dark:to-slate-900">
                             <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100">
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100 dark:ring-teal-900/50">
                                     {itemToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
                                 </div>
                                 <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900">
+                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">
                                         {itemToEdit ? 'Editar Material' : 'Novo Material'}
                                     </h2>
-                                    <p className="text-sm text-gray-600 mt-1">
+                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
                                         {itemToEdit ? 'Atualize as informações do material' : 'Adicione um novo material ao estoque'}
                                     </p>
                                 </div>
                             </div>
                             <button
                                 onClick={handleCloseModal}
-                                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                className="absolute top-4 right-4 p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
                             >
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                        <form onSubmit={handleSubmit} className="modal-body space-y-6">
                             {/* Informações Básicas */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Nome do Material *
                                     </label>
                                     <input
@@ -1506,62 +1550,63 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         value={formState.name}
                                         onChange={(e) => setFormState({...formState, name: e.target.value})}
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="Ex: Cabo Flexível 2,5mm"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         SKU
                                     </label>
                                     <input
                                         type="text"
                                         value={formState.sku}
                                         onChange={(e) => setFormState({...formState, sku: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="Ex: CAB-2.5-FLEX"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Tipo
                                     </label>
                                     <input
                                         type="text"
                                         value={formState.type}
                                         onChange={(e) => setFormState({...formState, type: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="Ex: Cabo, Disjuntor, Tomada"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Categoria *
                                     </label>
                                     <select
                                         value={formState.category}
                                         onChange={(e) => setFormState({...formState, category: e.target.value as MaterialCategory})}
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="select-field"
                                     >
-                                        <option value={MaterialCategory.MaterialEletrico}>Material Elétrico</option>
-                                        <option value={MaterialCategory.Ferramenta}>Ferramentas</option>
-                                        <option value={MaterialCategory.Insumo}>Insumo</option>
+                                        <option value={MaterialCategory.ELETRICO}>Material Elétrico</option>
+                                        <option value={MaterialCategory.FERRAMENTA}>Ferramentas</option>
+                                        <option value={MaterialCategory.SEGURANCA}>Segurança</option>
+                                        <option value={MaterialCategory.OUTRO}>Outros</option>
                                     </select>
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Unidade de Medida *
                                     </label>
                                     <select
                                         value={formState.unitOfMeasure}
                                         onChange={(e) => setFormState({...formState, unitOfMeasure: e.target.value})}
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="select-field"
                                     >
                                         <option value="un">Unidade</option>
                                         <option value="m">Metro</option>
@@ -1573,14 +1618,14 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 </div>
 
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Descrição
                                     </label>
                                     <textarea
                                         value={formState.description}
                                         onChange={(e) => setFormState({...formState, description: e.target.value})}
                                         rows={3}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="textarea-field"
                                         placeholder="Descrição detalhada do material..."
                                     />
                                 </div>
@@ -1590,7 +1635,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Estoque Atual *
                                     </label>
                                     <input
@@ -1600,13 +1645,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         required
                                         min="0"
                                         step="0.01"
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="0"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Estoque Mínimo *
                                     </label>
                                     <input
@@ -1616,16 +1661,16 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         required
                                         min="0"
                                         step="0.01"
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="5"
                                     />
                                 </div>
 
 
                                 <div className="flex items-end">
-                                    <div className="w-full bg-teal-50 border border-teal-200 p-3 rounded-xl">
-                                        <p className="text-sm font-medium text-teal-800">Valor Total em Estoque:</p>
-                                        <p className="text-lg font-bold text-teal-900">
+                                    <div className="w-full bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 p-3 rounded-xl">
+                                        <p className="text-sm font-medium text-teal-800 dark:text-teal-300">Valor Total em Estoque:</p>
+                                        <p className="text-lg font-bold text-teal-900 dark:text-teal-200">
                                             R$ {((parseFloat(formState.stock) || 0) * (parseFloat(formState.price) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
@@ -1634,13 +1679,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
 
                             {/* Preços: Custo, Venda e Lucro */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-                                <h3 className="text-lg font-semibold text-blue-900 mb-4">💲 Informações de Preço</h3>
+                            <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
+                                <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-300 mb-4">💲 Informações de Preço</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Preço de Custo (R$) *
-                                            <span className="text-xs text-gray-500 font-normal block mt-1">Última compra</span>
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Última compra</span>
                                         </label>
                                         <input
                                             type="number"
@@ -1660,15 +1705,15 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             required
                                             min="0"
                                             step="0.01"
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                            className="input-field"
                                             placeholder="0,00"
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Valor de Venda (R$)
-                                            <span className="text-xs text-gray-500 font-normal block mt-1">Usado em orçamentos</span>
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado em orçamentos</span>
                                         </label>
                                         <input
                                             type="number"
@@ -1687,80 +1732,78 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             }}
                                             min="0"
                                             step="0.01"
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                            className="input-field"
                                             placeholder="0,00"
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Porcentagem de Lucro (%)
-                                            <span className="text-xs text-gray-500 font-normal block mt-1">Calculado automaticamente</span>
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Calculado automaticamente</span>
                                         </label>
                                         <input
                                             type="number"
                                             value={formState.porcentagemLucro}
                                             readOnly
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 cursor-not-allowed"
+                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-gray-800 cursor-not-allowed text-gray-700 dark:text-dark-text"
                                             placeholder="0,00"
                                         />
                                         {parseFloat(formState.porcentagemLucro) > 0 && (
-                                            <p className="text-xs text-green-600 mt-1 font-medium">
+                                            <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium">
                                                 Lucro de R$ {((parseFloat(formState.valorVenda) || 0) - (parseFloat(formState.price) || 0)).toFixed(2)}
                                             </p>
                                         )}
                                     </div>
                                 </div>
-                                <button
-                                    onClick={handleFecharHistorico}
-                                    className="text-white/80 hover:text-white hover:bg-white/20 rounded-lg p-2 transition-all"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
                             </div>
 
                             {/* Localização e Fornecedor */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Localização no Estoque
                                     </label>
                                     <input
                                         type="text"
                                         value={formState.location}
                                         onChange={(e) => setFormState({...formState, location: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                                        className="input-field"
                                         placeholder="Ex: Estoque A1, Prateleira 3"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Fornecedor
                                     </label>
-                                    <input
-                                        type="text"
+                                    <SupplierCombobox
                                         value={formState.supplierName}
-                                        onChange={(e) => setFormState({...formState, supplierName: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
-                                        placeholder="Nome do fornecedor"
+                                        onChange={(nome, supplierId) => {
+                                            setFormState({
+                                                ...formState,
+                                                supplierName: nome,
+                                                supplierId: supplierId
+                                            });
+                                        }}
+                                        fornecedores={fornecedores}
+                                        loading={loadingFornecedores}
+                                        placeholder="Selecione ou digite o nome do fornecedor"
                                     />
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+                            <div className="modal-footer">
                                 <button
                                     type="button"
                                     onClick={handleCloseModal}
-                                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
+                                    className="btn-secondary"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-8 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-700 hover:to-teal-600 transition-all shadow-medium font-semibold"
+                                    className="btn-primary"
                                 >
                                     {itemToEdit ? 'Atualizar' : 'Adicionar'} Material
                                 </button>
@@ -2126,6 +2169,15 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">SKU</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">{materialParaVisualizar.sku}</p>
+                                </div>
+                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">NCM</h3>
+                                    <p className="text-gray-900 dark:text-white font-mono font-medium">
+                                        {materialParaVisualizar.ncm || 'N/A'}
+                                    </p>
+                                    {materialParaVisualizar.ncm && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Nomenclatura Comum do Mercosul</p>
+                                    )}
                                 </div>
                                 <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">Categoria</h3>

@@ -1,732 +1,588 @@
-// FIX: Import 'React' to resolve 'React.ReactNode' not being found.
-import React from 'react';
-
-export enum MovementType {
-  Entrada = 'Entrada',
-  Saida = 'Saída',
+export interface Membro {
+    id: string;
+    nome: string;
+    email: string;
+    role: string;
 }
 
-export enum StockLevel {
-  Sufficient = 'sufficient',
-  Low = 'low',
-  Critical = 'critical',
+export interface Equipe {
+    id: string;
+    nome: string;
+    tipo: 'MONTAGEM' | 'CAMPO' | 'DISTINTA';
+    membros: Membro[];
+    ativa: boolean;
+    createdAt: string;
+    updatedAt: string;
 }
 
-export interface Movement {
-  id: number;
-  name: string;
-  details: string;
-  quantity: number;
-  type: MovementType;
-  date: string;
-  stockLevel: StockLevel;
+export interface Alocacao {
+    id: string;
+    equipeId?: string | null;
+    eletricistaId?: string | null;
+    projetoId: string;
+    dataInicio: string;
+    dataFim: string;
+    dataFimPrevisto?: string;
+    status: 'Planejada' | 'EmAndamento' | 'Concluida' | 'Cancelada';
+    observacoes?: string;
+    equipe?: Equipe | null;
+    eletricista?: {
+        id: string;
+        nome: string;
+        email: string;
+        role: string;
+    } | null;
+    projeto?: any;
 }
 
-export interface StatCardData {
-  title: string;
-  value: string;
-  subtitle: string;
-  subtitleIcon: React.ReactNode;
-  icon: React.ReactNode;
-  color: string;
+export interface Obra {
+    id: string;
+    nomeObra: string;
+    status: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO';
+    dataPrevistaInicio?: string;
+    dataPrevistaFim?: string;
+    dataInicioReal?: string;
+    projeto?: {
+        titulo: string;
+        cliente?: {
+            nome: string;
+        };
+    };
+    cliente?: {
+        nome: string;
+    };
 }
 
-// Project & Budget Types
-export enum ProjectType {
-    Tecnico = 'Projeto Técnico',
-    Laudo = 'Laudo Técnico',
-    SPDA = 'SPDA',
-    Montagem = 'Montagem de Quadro',
-    CompletoComObra = 'Projeto Completo com Obra',
+// Tipos para Catálogo
+export enum CatalogItemType {
+    Produto = 'Produto',
+    Kit = 'Kit',
+    Servico = 'Servico'
 }
 
-// Project Management Types
-export enum ProjectStatus {
-    Planejamento = 'Planejamento',
-    EmExecucao = 'Em Execução',
-    ControleQualidade = 'Controle de Qualidade',
-    Concluido = 'Concluído',
-    Cancelado = 'Cancelado',
+export interface Product {
+    id: string;
+    name: string;
+    description?: string;
+    price: number;
+    category?: string;
+    type: CatalogItemType.Produto;
+    createdAt?: string;
+    updatedAt?: string;
 }
 
+export interface Kit {
+    id: string;
+    nome: string;
+    descricao?: string;
+    preco?: number;
+    tipo?: string;
+    ativo?: boolean;
+    items?: KitProduct[];
+    itensFaltantes?: any[];
+    temItensCotacao?: boolean;
+    statusEstoque?: string;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface KitProduct {
+    id?: string;
+    materialId: string;
+    quantidade: number;
+    material?: any;
+}
+
+export interface Service {
+    id: string;
+    nome: string;
+    descricao?: string;
+    preco?: number;
+    tipo?: ServiceType;
+    ativo?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export enum ServiceType {
+    INSTALACAO = 'INSTALACAO',
+    MANUTENCAO = 'MANUTENCAO',
+    CONSULTORIA = 'CONSULTORIA',
+    OUTRO = 'OUTRO'
+}
+
+export interface ServiceCatalogItem {
+    id: string;
+    name: string;
+    description?: string;
+    price: number;
+    category?: string;
+    type: CatalogItemType.Servico;
+    serviceType?: ServiceType;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface KitService {
+    id?: string;
+    servicoId: string;
+    quantidade: number;
+    servico?: any;
+}
+
+export interface KitConfiguration {
+    nome: string;
+    descricao?: string;
+    items: KitProduct[];
+    servicos?: KitService[];
+    precoSugerido?: number;
+}
+
+export interface MaterialItem {
+    id: string;
+    nome: string;
+    name: string; // Alias para compatibilidade
+    sku?: string;
+    tipo?: string;
+    type?: string; // Alias para compatibilidade
+    categoria?: string;
+    category?: string | MaterialCategory; // Alias para compatibilidade
+    descricao?: string;
+    description?: string; // Alias para compatibilidade
+    ncm?: string;
+    unidadeMedida?: string;
+    unitOfMeasure?: string; // Alias para compatibilidade
+    preco?: number;
+    price?: number; // Alias para compatibilidade
+    valorVenda?: number;
+    porcentagemLucro?: number;
+    estoque?: number;
+    stock?: number; // Alias para compatibilidade
+    estoqueMinimo?: number;
+    minStock?: number; // Alias para compatibilidade
+    localizacao?: string;
+    location?: string; // Alias para compatibilidade
+    imagemUrl?: string;
+    imageUrl?: string; // Alias para compatibilidade
+    fornecedorId?: string;
+    supplierId?: string; // Alias para compatibilidade
+    fornecedor?: {
+        id: string;
+        nome: string;
+    };
+    supplier?: { // Alias para compatibilidade
+        id: string;
+        nome: string;
+        name?: string;
+    };
+    supplierName?: string; // Alias para compatibilidade
+    ativo?: boolean;
+}
+
+// Materiais vinculados a projetos (BOM)
 export enum ProjectMaterialStatus {
-    Pendente = 'Pendente',
     Alocado = 'Alocado',
-    EmFalta = 'Em Falta',
+    Pendente = 'Pendente',
+    EmFalta = 'Em falta'
 }
 
 export interface ProjectMaterial {
+    id: string;
     materialId: string;
-    name: string;
-    sku: string;
     requiredQuantity: number;
     status: ProjectMaterialStatus;
+    material?: MaterialItem;
 }
 
-export enum ProjectStageStatus {
-    AFazer = 'A Fazer',
-    EmAndamento = 'Em Andamento',
-    Concluido = 'Concluido',
-}
-
-export interface ProjectStage {
-    id: string;
-    title: string;
-    status: ProjectStageStatus;
-    dueDate?: string;
-    assignedMemberId?: string;
-    assignedMemberName?: string;
-    highlight?: 'paused' | 'cancelled' | null;
-    linkedAdminStageId?: string; // Vinculo com etapa administrativa
-}
-
-// Administrative Stages (10 fixed stages for project tracking)
-export enum AdminStageStatus {
-    Pending = 'pending',
-    Completed = 'completed',
-    Overdue = 'overdue',
-}
-
-export interface AdminStage {
+export interface CatalogItem {
     id: string;
     name: string;
-    order: number; // 1-10
-    status: AdminStageStatus;
-    deadline: string; // ISO date string
-    startedAt: string; // When project started or when manually triggered
-    completedAt?: string;
-    extendedDeadline?: string;
-    extensionReason?: string;
+    description?: string;
+    price: number;
+    category?: string;
+    type: CatalogItemType;
+    createdAt?: string;
+    updatedAt?: string;
+    temItensCotacao?: boolean;
+    itensFaltantes?: any[];
+    statusEstoque?: string;
+    isActive?: boolean;
 }
 
-export enum QCCheckStatus {
+// Tipos para Movimentações
+export enum MovementType {
+    Entrada = 'ENTRADA',
+    Saida = 'SAIDA',
+    Ajuste = 'AJUSTE'
+}
+
+export interface StockMovement {
+    id: string;
+    materialId: string;
+    tipo: MovementType;
+    quantidade: number;
+    motivo?: string;
+    motivoMovimentacao?: string;
+    referencia?: string;
+    observacoes?: string;
+    data?: string;
+    createdAt: string;
+    material?: MaterialItem;
+    usuarioId?: string;
+}
+
+export enum StockLevel {
+    CRITICO = 'CRITICO',
+    BAIXO = 'BAIXO',
+    NORMAL = 'NORMAL',
+    ALTO = 'ALTO'
+}
+
+// Tipos para Compras
+export enum PurchaseStatus {
     Pendente = 'Pendente',
-    Aprovado = 'Aprovado',
-    Reprovado = 'Reprovado',
+    Recebido = 'Recebido',
+    Cancelado = 'Cancelado'
 }
 
-export interface QualityCheckItem {
+export interface PurchaseOrderItem {
+    id?: string;
+    // Campos usados no modelo antigo de compra
+    materialId?: string;
+    quantidade?: number;
+    precoUnitario?: number;
+    subtotal?: number;
+    material?: MaterialItem;
+    // Campos usados nas telas/serviços atuais de compras
+    productId?: string;
+    productName?: string;
+    quantity?: number;
+    unitCost?: number;
+    totalCost?: number;
+    ncm?: string;
+    sku?: string;
+}
+
+export interface PurchaseOrder {
     id: string;
-    description: string;
-    status: QCCheckStatus;
+    // Campos originais
+    fornecedorId?: string;
+    numero?: string;
+    data?: string;
+    status: PurchaseStatus;
+    valorTotal?: number;
+    observacoes?: string;
+    items: PurchaseOrderItem[];
+    fornecedor?: Supplier;
+    createdAt?: string;
+    updatedAt?: string;
+    // Campos usados pelas telas/serviços atuais (compatíveis com backend modernizado)
+    supplierId?: string;
+    supplierName?: string;
+    orderDate?: string;
+    invoiceNumber?: string;
+    totalAmount?: number;
     notes?: string;
+    // Data efetiva de recebimento da remessa
+    dataRecebimento?: string | null;
 }
 
-// FIX: Add ProjectAttachment interface for project files.
-export interface ProjectAttachment {
+export interface Supplier {
     id: string;
-    fileName: string;
-    fileUrl: string;
-    uploadedAt: string;
+    nome: string;
+    razaoSocial?: string;
+    cnpj?: string;
+    cpf?: string;
+    email?: string;
+    telefone?: string;
+    endereco?: string;
+    categoria?: SupplierCategory;
+    ativo?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export enum SupplierCategory {
+    ELETRICO = 'ELETRICO',
+    CONSTRUCAO = 'CONSTRUCAO',
+    GERAL = 'GERAL'
+}
+
+// Tipos para Materiais
+export enum MaterialCategory {
+    ELETRICO = 'ELETRICO',
+    FERRAMENTA = 'FERRAMENTA',
+    SEGURANCA = 'SEGURANCA',
+    OUTRO = 'OUTRO'
+}
+
+// Tipos para Projetos
+export enum ProjectStatus {
+    PLANEJAMENTO = 'PLANEJAMENTO',
+    ANDAMENTO = 'ANDAMENTO',
+    CONCLUIDO = 'CONCLUIDO',
+    CANCELADO = 'CANCELADO'
 }
 
 export interface Project {
     id: string;
-    name: string;
-    clientId: string;
-    clientName: string;
-    budgetId?: string;
-    documentNumber?: string;
-    projectType: ProjectType;
-    startDate: string;
-    endDate: string;
-    responsibleUserId: string;
-    responsibleUserName: string;
-    description: string;
+    titulo: string;
+    descricao?: string;
+    clienteId: string;
     status: ProjectStatus;
-    progress: number;
-    billOfMaterials: ProjectMaterial[];
-    stages: ProjectStage[];
-    adminStages: AdminStage[]; // 10 fixed administrative stages
-    qualityChecks: QualityCheckItem[];
-    obraStarted?: boolean;
-    // FIX: Add optional attachments property to Project interface.
-    attachments?: ProjectAttachment[];
-    assignedObraTeamMemberId?: string;
-    assignedObraTeamMemberName?: string;
+    dataInicio?: string;
+    dataFim?: string;
+    cliente?: {
+        id: string;
+        nome: string;
+    };
+    createdAt?: string;
+    updatedAt?: string;
 }
 
+export interface ProjectStage {
+    id: string;
+    projetoId: string;
+    nome: string;
+    descricao?: string;
+    ordem: number;
+    status: ProjectStageStatus;
+    dataInicio?: string;
+    dataFim?: string;
+}
 
+export enum ProjectStageStatus {
+    NAO_INICIADO = 'NAO_INICIADO',
+    EM_ANDAMENTO = 'EM_ANDAMENTO',
+    CONCLUIDO = 'CONCLUIDO'
+}
+
+// Etapas administrativas do projeto (checklist interno)
+export enum AdminStageStatus {
+    Pending = 'Pending',
+    InProgress = 'InProgress',
+    Completed = 'Completed'
+}
+
+export interface AdminStage {
+    id: string;
+    projectId: string;
+    name: string;
+    description?: string;
+    order: number;
+    status: AdminStageStatus;
+    completedAt?: string | null;
+}
+
+// Itens de controle de qualidade em projetos
+export enum QCCheckStatus {
+    Pendente = 'Pendente',
+    Aprovado = 'Aprovado',
+    Reprovado = 'Reprovado'
+}
+
+export interface QualityCheckItem {
+    id: string;
+    projectId: string;
+    description: string;
+    status: QCCheckStatus;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+// Tipos para Usuários
+export interface User {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export enum UserRole {
+    ADMIN = 'admin',
+    GERENTE = 'gerente',
+    ENGENHEIRO = 'engenheiro',
+    ELETRICISTA = 'eletricista',
+    DESENVOLVEDOR = 'desenvolvedor'
+}
+
+export interface AuthState {
+    user: User | null;
+    token: string | null;
+    isAuthenticated: boolean;
+}
+
+// Tipos para Orçamentos/Vendas
 export enum BudgetStatus {
-  Pendente = 'Pendente',
-  Aprovado = 'Aprovado',
-  Recusado = 'Recusado',
+    RASCUNHO = 'RASCUNHO',
+    ENVIADO = 'ENVIADO',
+    APROVADO = 'APROVADO',
+    REJEITADO = 'REJEITADO',
+    CONVERTIDO = 'CONVERTIDO',
+    // Status usados no módulo de CRM/Clientes
+    Aprovado = 'Aprovado',
+    Pendente = 'Pendente',
+    Recusado = 'Recusado'
 }
 
-// Client CRM Types
+// Tipos para Clientes (módulo legado simples)
+export interface Cliente {
+    id: string;
+    nome: string;
+    razaoSocial?: string;
+    cpfCnpj?: string;
+    email?: string;
+    telefone?: string;
+    endereco?: string;
+    cidade?: string;
+    estado?: string;
+    cep?: string;
+    ativo?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+// ================= CRM / Clientes Modernos =================
+
 export enum ClientType {
     PessoaFisica = 'Pessoa Física',
-    PessoaJuridica = 'Pessoa Jurídica',
+    PessoaJuridica = 'Pessoa Jurídica'
 }
 
 export enum ClientStatus {
     Ativo = 'Ativo',
     Inativo = 'Inativo',
     Potencial = 'Potencial',
-    Retroativo = 'Retroativo', // A client from a past period being re-registered
+    Retroativo = 'Retroativo'
 }
 
 export enum ContactPreference {
-    Email = 'Email',
     Telefone = 'Telefone',
+    Email = 'Email',
     WhatsApp = 'WhatsApp',
+    Nenhuma = 'Nenhuma'
 }
 
 export enum ClientSource {
-    Site = 'Site',
-    Instagram = 'Instagram',
-    Google = 'Google',
     Indicacao = 'Indicação',
+    Google = 'Google',
+    RedesSociais = 'Redes sociais',
+    Site = 'Site',
+    Outro = 'Outro'
 }
 
-export interface ClientProjectHistory {
-    projectId: string;
-    projectName: string;
-    date: string;
-}
-
-// CRM - Sales Management
 export enum OpportunityStatus {
     Qualificacao = 'Qualificação',
-    Proposta = 'Proposta Enviada',
-    Negociacao = 'Em Negociação',
+    Proposta = 'Proposta',
+    Negociacao = 'Negociação',
     Ganha = 'Ganha',
-    Perdida = 'Perdida',
+    Perdida = 'Perdida'
+}
+
+export enum InteractionType {
+    Reuniao = 'Reunião',
+    Ligacao = 'Ligação',
+    Email = 'E-mail',
+    Visita = 'Visita',
+    Outro = 'Outro'
+}
+
+export enum ProjectType {
+    Obra = 'Obra',
+    Manutencao = 'Manutenção',
+    Consultoria = 'Consultoria',
+    Outro = 'Outro'
 }
 
 export interface Opportunity {
     id: string;
+    clientId: string;
     title: string;
     value: number;
     status: OpportunityStatus;
     createdDate: string;
-    closeDate?: string;
-}
-
-export enum SalesOrderStatus {
-    NaoIniciado = 'Não Iniciado',
-    EmAndamento = 'Em Andamento',
-    Concluido = 'Concluido',
-    Cancelado = 'Cancelado',
-}
-
-export interface SalesOrder {
-    id: string;
-    budgetId: string; // Linked from an approved budget
-    title: string;
-    value: number;
-    status: SalesOrderStatus;
-    startDate: string;
-    endDate?: string;
-}
-
-// CRM - Customer Service & Support
-export enum InteractionType {
-    Telefone = 'Telefone',
-    Email = 'Email',
-    Reuniao = 'Reunião',
-    WhatsApp = 'WhatsApp',
-    Suporte = 'Ticket de Suporte',
 }
 
 export interface Interaction {
     id: string;
+    clientId: string;
+    date: string;
     type: InteractionType;
     summary: string;
-    date: string;
     user: string;
 }
 
+export interface Budget {
+    id: string;
+    clientId: string;
+    projectName: string;
+    total: number;
+    status: BudgetStatus;
+}
+
+export interface ProjectHistoryItem {
+    projectId: string;
+    projectName: string;
+    date: string;
+    type?: ProjectType;
+}
 
 export interface Client {
     id: string;
     name: string;
     type: ClientType;
-    document?: string; // CPF ou CNPJ
+    document?: string;
     contactPerson?: string;
     phone?: string;
     email?: string;
     address?: string;
     notes?: string;
-    // CRM Fields
     status: ClientStatus;
     contactPreference: ContactPreference;
     source: ClientSource;
-    projectHistory: ClientProjectHistory[];
-    // CRM - Sales & Service
+    createdAt?: string;
+    updatedAt?: string;
     opportunities: Opportunity[];
-    salesOrders: SalesOrder[];
+    salesOrders?: any[];
     interactions: Interaction[];
+    projectHistory: ProjectHistoryItem[];
 }
 
-
-export interface Material {
-    id: number;
-    name: string;
-    price: number;
+// Tipos para Dashboard
+export interface StatCardData {
+    title: string;
+    value: string | number;
+    change?: number;
+    trend?: 'up' | 'down' | 'neutral';
+    icon?: React.ReactNode;
 }
 
-export interface BudgetMaterial {
-    materialId: string;
-    name: string;
-    quantity: number;
-    price: number;
-}
-
-export interface BudgetService {
-    serviceId: string;
-    name: string;
-    price: number;
-}
-
-export interface BudgetImage {
-    name: string;
-    dataUrl: string;
-}
-
-export interface Budget {
-  id: string;
-  clientName: string;
-  clientId: string; // Changed to string to match new Client ID
-  projectName: string;
-  projectType: ProjectType;
-  description: string;
-  materials: BudgetMaterial[];
-  services: BudgetService[];
-  images: BudgetImage[];
-  date: string;
-  subtotal: number;
-  discount: number;
-  taxes: number;
-  total: number;
-  paymentTerms: string;
-  status: BudgetStatus;
-}
-
-
-// Catalog Types
-export enum CatalogItemType {
-  Produto = 'Produto',
-  Kit = 'Kit',
-  Servico = 'Servico',
-}
-
-export interface Product {
-    id: string;
-    type: CatalogItemType.Produto;
-    name: string;
-    sku: string;
-    description: string;
-    price: number;
-    stock: number;
-    imageUrl?: string;
-    category?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    isActive?: boolean;
-    temItensCotacao?: boolean;
-    itensFaltantes?: any[];
-    statusEstoque?: string;
-}
-
-export interface KitProduct {
-    productId: string;
-    name: string;
-    price: number;
-    quantity: number;
-}
-
-export enum ServiceType {
-    Consultoria = 'Consultoria',
-    Instalacao = 'Instalação',
-    Manutencao = 'Manutenção',
-    LaudoTecnico = 'Laudo Técnico',
-    Outro = 'Outro',
-}
-
-export interface Service {
-    id: string;
-    name: string;
-    internalCode: string;
-    description: string;
-    type: ServiceType;
-    price: number;
-    category?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    isActive?: boolean;
-}
-
-export interface ServiceCatalogItem {
-    id: string;
-    type: CatalogItemType.Servico;
-    name: string;
-    description: string;
-    price: number;
-    category?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    isActive?: boolean;
-    internalCode?: string;
-}
-
-
-export interface KitService {
-    serviceId: string;
-    name: string;
-    price: number;
-}
-
-export interface KitConfiguration {
-    kitType: '' | 'medidores' | 'comando' | 'quadro-eletrico' | 'subestacoes';
-    // Medidores path
-    medidores?: {
-        materialType: '' | 'aluminio' | 'policarbonato';
-        numMedidores: number;
-        // Aluminio
-        quadroAluminioId?: string;
-        // Policarbonato
-        caixasPolicarbonato?: { id: string; quantity: number }[];
-    };
-    // Comando path
-    comando?: {
-        assemblyType: '' | 'servico' | 'propria';
-        baseQuadroId?: string;
-        items?: KitProduct[];
-    };
-    // Subestações path
-    subestacoes?: {
-        tipo: 'aerea' | 'abrigada' | '';
-        postoTransformacao?: {
-            potencia?: string;
-            tensao?: string;
-            items: KitProduct[];
-        };
-        aterramento?: {
-            items: KitProduct[];
-        };
-        iluminacao?: {
-            items: KitProduct[];
-        };
-        cabineMedicao?: {
-            items: KitProduct[];
-        };
-        condutores?: {
-            items: KitProduct[];
-        };
-        camposPersonalizados?: {
-            nome: string;
-            items: KitProduct[];
-        }[];
-    };
-    // Disjuntor Geral
-    disjuntorGeralId?: string;
-    disjuntorGeralTipo?: '' | 'caixa-moldada' | 'din';
-    disjuntorGeralPolaridade?: '' | 'monopolar' | 'bipolar' | 'tripolar';
-    // Disjuntores Individuais
-    disjuntoresIndividuais?: {
-        id: string;
-        quantityPerMeter: number;
-    }[];
-    disjuntoresIndividuaisPolaridade?: '' | 'monopolar' | 'bipolar' | 'tripolar';
-    // Cabos
-    cabos?: {
-        type: 'flexivel' | 'rigido' | '';
-        items: { id: string; quantity: number }[];
-    };
-    // DPS
-    dpsId?: string;
-    dpsClasse?: '' | 'classe1' | 'classe2';
-    dpsConfig?: {
-        quantidade: number;
-        tcmQuantidade: number;
-        caboTerraComprimento: number;
-        caboTerraBitola: string;
-        barramentoPenteQuantidade: number;
-        disjuntoresDPS?: { id: string; name: string; quantity: number }[];
-    };
-    // Acabamentos
-    acabamentos?: {
-        hasBornes: boolean;
-        parafusos?: { id: string; quantity: number }[];
-        arruelas?: { id: string; quantity: number }[];
-        terminais?: {
-            type: 'compressao' | 'tubular' | '';
-            id?: string;
-            quantity: number;
-        };
-        terminaisTubulares?: {
-            quantity: number;
-            items?: { id: string; tipo: string; cor: string; quantity: number }[];
-        };
-        curvaBox?: {
-            quantity: number;
-        };
-    }
-}
-
-export interface Kit {
-    id: string;
-    type: CatalogItemType.Kit;
-    name: string;
-    description: string;
-    products: KitProduct[];
-    services: KitService[];
-    price: number;
-    imageUrl?: string;
-    configuration?: KitConfiguration;
-    category?: string;
-    createdAt?: string;
-    updatedAt?: string;
-    isActive?: boolean;
-    temItensCotacao?: boolean;
-    itensFaltantes?: any[];
-    statusEstoque?: string;
-}
-
-export type CatalogItem = Product | Kit | ServiceCatalogItem;
-
-// Stock Movement Types
-export interface StockMovement {
-  id: string;
-  materialId?: string;
-  materialName?: string;
-  product?: {
-    id: string;
-    name: string;
-    sku: string;
-  };
-  quantity: number;
-  type: MovementType;
-  date: string;
-  responsible: string;
-  notes?: string;
-  reason?: string;
-}
-
-// History Log Types
-export enum ActionType {
-    Create = 'Create',
-    Update = 'Update',
-    Delete = 'Delete',
-    MovementIn = 'MovementIn',
-    MovementOut = 'MovementOut',
-}
-
-export enum ModuleType {
-    Orçamentos = 'Orçamentos',
-    Catálogo = 'Catálogo',
-    Estoque = 'Estoque',
-    Sistema = 'Sistema',
-    Compras = 'Compras',
-    Materiais = 'Materiais',
-    Projetos = 'Projetos',
-    Clientes = 'Clientes',
-    Obras = 'Obras',
-    Servicos = 'Serviços',
-}
-
-export interface HistoryLog {
-  id: string;
-  action: string;
-  details: string;
-  user: string;
-  timestamp: Date;
-  module: ModuleType;
-  type: ActionType;
-}
-
-// Purchase Types
-export enum SupplierCategory {
-    MaterialEletrico = 'Material Elétrico',
-    Insumo = 'Insumo',
-    Ferramenta = 'Ferramenta',
-}
-
-export interface Supplier {
-    id: string;
-    name: string;
-    cnpj?: string;
-    stateRegistration?: string;
-    website?: string;
-    contactPerson?: string;
-    phone?: string;
-    email?: string;
-    address?: string;
-    categories?: SupplierCategory[];
-    bankDetails?: string;
-    notes?: string;
-}
-
-export interface PurchaseOrderItem {
-    productId: string;
-    productName: string;
-    quantity: number;
-    unitCost: number;
-    totalCost: number;
-    ncm?: string;
-    sku?: string;
-}
-
-export enum PurchaseStatus {
-    Pendente = 'Pendente',
-    Recebido = 'Recebido',
-    Cancelado = 'Cancelado',
-}
-
-export interface Installment {
-    dueDate: string;
-    value: number;
-}
-
-export interface Duplicata {
-    numero: string;
-    dataVencimento: string;
-    valor: number;
-}
-
-export interface PurchaseOrder {
-    id: string;
-    supplierId?: string;
-    supplierName: string;
-    supplier?: {
-        id: string;
-        name: string;
-    };
-    orderDate: string;
-    date?: string;
-    items: PurchaseOrderItem[];
-    totalAmount: number;
-    totalValue?: number;
-    status: PurchaseStatus;
-    invoiceNumber?: string;
-    paymentMethod?: string;
-    installments?: Installment[];
-    paymentTerms?: string;
-    notes?: string;
-    frete?: number;
-    outrasDespesas?: number;
-    condicoesPagamento?: string;
-    parcelas?: number;
-    dataPrimeiroVencimento?: string;
-    dataRecebimento?: string | null; // Data de recebimento da compra
-    destinatarioCNPJ?: string;
-    statusImportacao?: string;
-    valorIPI?: number;
-    valorTotalProdutos?: number;
-    valorTotalNota?: number;
-    duplicatas?: Duplicata[];
-    fullVendorDetails?: {
-        name: string;
-        cnpj: string;
-        address: string;
-    };
-}
-
-// Materials Page Types
-export enum MaterialCategory {
-    MaterialEletrico = 'Material Elétrico',
-    Insumo = 'Insumo',
-    Ferramenta = 'Ferramenta',
-}
-
-export enum MaterialClassification {
-    Insumo = 'Insumo',
-    Produto = 'Produto',
-    Ambos = 'Ambos (Insumo/Produto)',
-}
-
-export interface MaterialItem {
-    id: string;
-    name: string; // Descrição Técnica
-    sku: string; // Código
-    type: string; // Categoria (e.g., 'Cabos', 'Disjuntores')
-    subType?: 'Disjuntor Geral' | 'Disjuntor Individual' | 'Cabo Flexível' | 'Cabo Rígido' | 'DPS' | 'Borne' | 'Parafuso' | 'Terminal de Compressão' | 'Terminal Tubular';
-    properties?: {
-        amperage?: number;
-        breakingCapacity?: string; // e.g., '6KA'
-        voltage?: string;
-        material?: string; // e.g. 'Cobre'
-        dimensions?: string; // e.g., '3.5x40mm'
-    };
-    category: MaterialCategory; // Classificação
-    description: string; // Especificações Técnicas
-    stock: number;
-    minStock: number;
-    unitOfMeasure: string; // e.g., 'un', 'm', 'rolo'
-    location: string; // e.g., 'Prateleira A-3'
-    imageUrl?: string;
-    supplierId?: string;
-    supplierName?: string;
-    supplier?: { id: string; name: string }; // Objeto supplier do backend
-
-    price: number; // Preço de custo (última compra)
-    valorVenda?: number; // Preço de venda (usado em orçamentos)
-    porcentagemLucro?: number; // Porcentagem de lucro ((valorVenda - price) / price * 100)
-    estoque?: number; // Quantidade em estoque (alias para stock)
-}
-
-
-// User Management Types
-export enum UserRole {
-    Admin = 'Admin',
-    Engenheiro = 'Engenheiro',
-    Tecnico = 'Técnico',
-    DesenhistaIndustrial = 'Desenhista Industrial',
-    Desenvolvedor = 'Desenvolvedor',
-}
-
-export interface User {
-    id: string;
-    name: string;
-    email: string;
-    role: UserRole;
-    phone?: string;
-    avatar?: string;
-}
-
-// Theme Types
-export type Theme = 'light' | 'dark';
-
-// Auth Types
-export interface AuthState {
-    user: User | null;
-    token: string | null;
-    isAuthenticated: boolean;
-    isLoading: boolean;
-}
-
-// Price Comparison Types
+// Tipos para Atualização de Preços
 export enum PriceComparisonStatus {
-    Higher = 'Higher',      // Novo preço maior
-    Lower = 'Lower',        // Novo preço menor
-    Equal = 'Equal',        // Preços iguais
-    NoHistory = 'NoHistory' // Sem histórico de compra
+    PENDENTE = 'PENDENTE',
+    ATUALIZADO = 'ATUALIZADO',
+    ERRO = 'ERRO'
 }
 
 export interface PriceComparisonItem {
     id: string;
-    materialCode: string;
-    materialName: string;
-    unit: string;
-    quantity: number;
-    currentPrice: number | null;      // Preço atual (última compra ou estoque)
-    newPrice: number | null;          // Preço do novo orçamento
-    difference: number | null;        // Diferença em %
-    differenceValue: number | null;   // Diferença em R$
+    materialId: string;
+    materialNome: string;
+    precoAtual: number;
+    precoNovo: number;
+    diferenca: number;
+    percentualDiferenca: number;
     status: PriceComparisonStatus;
-    supplierName?: string;
-    lastPurchaseDate?: string;
-    stockQuantity?: number;
+    fornecedor?: string;
+    dataAtualizacao?: string;
 }
 
 export interface PriceComparisonImport {
-    id: string;
-    fileName: string;
-    uploadDate: string;
-    supplierName: string;
-    itemsCount: number;
-    totalValue: number;
     items: PriceComparisonItem[];
-    status: 'pending' | 'approved' | 'rejected';
+    totalItens: number;
+    itensAtualizados: number;
+    itensComErro: number;
+    dataImportacao: string;
 }

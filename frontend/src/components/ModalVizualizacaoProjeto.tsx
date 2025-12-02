@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
-import { etapasAdminService, type EtapaAdmin, type ListaEtapasResponse } from '../services/etapasAdminService';
+import { alocacaoMateriaisService } from '../services/alocacaoMateriaisService';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -60,7 +60,7 @@ export interface ProjetoDetalhe {
   createdAt?: string;
 }
 
-type Aba = 'Visão Geral' | 'Materiais' | 'EtapasAdmin' | 'Kanban' | 'Qualidade';
+type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Qualidade';
 
 interface ModalVizualizacaoProjetoProps {
   projeto: ProjetoDetalhe;
@@ -75,22 +75,12 @@ interface ModalVizualizacaoProjetoProps {
   onNavigate?: (view: string, ...args: any[]) => void; // navegar para outras páginas
 }
 
-const TABS: Aba[] = ['Visão Geral', 'Materiais', 'EtapasAdmin', 'Kanban', 'Qualidade'];
+const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Qualidade'];
 
 const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate }) => {
   const [activeTab, setActiveTab] = useState<Aba>(initialTab);
   const [loadingAcao, setLoadingAcao] = useState(false);
 
-  // Etapas Admin
-  const [etapasResp, setEtapasResp] = useState<ListaEtapasResponse | null>(null);
-  const [loadingEtapas, setLoadingEtapas] = useState(false);
-  const [erroEtapas, setErroEtapas] = useState<string | null>(null);
-  const [etapaModalOpen, setEtapaModalOpen] = useState(false);
-  const [etapaEditando, setEtapaEditando] = useState<EtapaAdmin | null>(null);
-  const [etapaForm, setEtapaForm] = useState({ nome: '', dataPrevista: '', tipo: '' });
-
-  // Modal adiar
-  const [adiarAberto, setAdiarAberto] = useState<{ etapa: EtapaAdmin | null; novaData: string; justificativa: string }>({ etapa: null, novaData: '', justificativa: '' });
 
   // Tasks Kanban
   interface Task {
@@ -112,6 +102,9 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const [documentos, setDocumentos] = useState<Array<{ id: string; nome: string; tipo: string; url: string }>>([]);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [documentoVisualizar, setDocumentoVisualizar] = useState<{ id: string; nome: string; tipo: string; url: string } | null>(null);
+  const [uploadForm, setUploadForm] = useState({ tipo: 'ART', observacoes: '', arquivo: null as File | null });
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Estado para orçamento completo
   const [orcamentoCompleto, setOrcamentoCompleto] = useState<OrcamentoRef | null>(null);
@@ -141,10 +134,19 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     onConfirm: () => {}
   });
 
+  // Estados para alocação de materiais
+  const [materialParaAlocar, setMaterialParaAlocar] = useState<{
+    item: OrcamentoItemRef;
+    materialId: string;
+    quantidade: number;
+    nomeMaterial: string;
+    estoqueDisponivel: number;
+  } | null>(null);
+  const [confirmarAlocacaoOpen, setConfirmarAlocacaoOpen] = useState(false);
+  const [alocacoesPorItem, setAlocacoesPorItem] = useState<Record<string, string>>({}); // itemId -> status de alocação
+  const [materiaisAlocados, setMateriaisAlocados] = useState<Set<string>>(new Set()); // Set de materialIds já alocados
+
   useEffect(() => {
-    if (isOpen && activeTab === 'EtapasAdmin') {
-      carregarEtapas();
-    }
     if (isOpen && activeTab === 'Kanban') {
       carregarUsuarios();
       carregarTasks();
@@ -157,6 +159,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
     if (isOpen && activeTab === 'Visão Geral') {
       carregarObraVinculada();
+      carregarDocumentos();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, activeTab, projeto?.id]);
@@ -226,6 +229,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
             console.log('Nenhuma venda encontrada para este orçamento');
           }
         }
+        
+        // Se houver obra vinculada, carregar materiais alocados e atualizar estado
+        if (obraVinculada?.id) {
+          await carregarMateriaisAlocados(obraVinculada.id);
+        }
       }
     } catch (error) {
       console.error('Erro ao carregar orçamento completo:', error);
@@ -239,39 +247,185 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       setLoadingObra(true);
       const response = await axiosApiService.get<any>(`/api/obras/projeto/${projeto.id}`);
       if (response.success && response.data) {
-        setObraVinculada({ 
+        const obra = {
           id: response.data.id, 
           nome: response.data.nome || response.data.nomeObra || 'Obra vinculada'
-        });
+        };
+        setObraVinculada(obra);
+        
+        // Carregar materiais já alocados para esta obra
+        await carregarMateriaisAlocados(obra.id);
       } else {
         setObraVinculada(null);
+        setMateriaisAlocados(new Set());
       }
     } catch (error) {
       console.error('Erro ao carregar obra vinculada:', error);
       setObraVinculada(null);
+      setMateriaisAlocados(new Set());
     } finally {
       setLoadingObra(false);
     }
   }
 
-  async function carregarEtapas() {
+  async function carregarMateriaisAlocados(obraId: string) {
     try {
-      setLoadingEtapas(true);
-      setErroEtapas(null);
-      const res = await etapasAdminService.listar(projeto.id);
-      if (res.success && res.data) {
-        setEtapasResp(res.data);
+      const response = await alocacaoMateriaisService.listarMateriaisObra(obraId);
+      if (response.success && response.data) {
+        // Criar um Set com os IDs dos materiais já alocados
+        const materiaisIds = new Set(
+          response.data.map((mov: any) => mov.materialId || mov.material?.id).filter(Boolean)
+        );
+        setMateriaisAlocados(materiaisIds);
+        console.log(`✅ Materiais já alocados carregados: ${materiaisIds.size} materiais`);
+        
+        // Atualizar estado de alocação por item baseado nos materiais alocados
+        if (orcamentoCompleto?.items) {
+          const novasAlocacoes: Record<string, string> = {};
+          orcamentoCompleto.items.forEach((item: any) => {
+            if (item.material?.id && materiaisIds.has(item.material.id)) {
+              novasAlocacoes[item.id] = 'Alocado';
+            }
+          });
+          setAlocacoesPorItem(prev => ({ ...prev, ...novasAlocacoes }));
+        }
       } else {
-        setErroEtapas('Falha ao carregar etapas');
-        setEtapasResp(null);
+        setMateriaisAlocados(new Set());
       }
-    } catch (e) {
-      setErroEtapas('Erro ao carregar etapas');
-      setEtapasResp(null);
-    } finally {
-      setLoadingEtapas(false);
+    } catch (error) {
+      console.error('Erro ao carregar materiais alocados:', error);
+      setMateriaisAlocados(new Set());
     }
   }
+
+  async function handleAlocacaoChange(item: OrcamentoItemRef, value: string) {
+    // Se não for "Reservar do estoque", apenas atualizar o estado local
+    if (value !== 'Reservar do estoque') {
+      setAlocacoesPorItem(prev => ({
+        ...prev,
+        [item.id]: value
+      }));
+      return;
+    }
+
+    // Verificar se há obra vinculada
+    if (!obraVinculada?.id) {
+      toast.error('Obra não encontrada', {
+        description: 'É necessário ter uma obra vinculada ao projeto para alocar materiais.'
+      });
+      setAlocacoesPorItem(prev => ({
+        ...prev,
+        [item.id]: 'Não alocado'
+      }));
+      return;
+    }
+
+    // Verificar se o item tem material (não pode alocar itens de banco frio ou sem material)
+    if (!item.material?.id || item.tipo?.toUpperCase() === 'COTACAO') {
+      toast.error('Material não pode ser alocado', {
+        description: 'Apenas materiais do estoque real podem ser alocados. Itens do banco frio precisam ser comprados primeiro.'
+      });
+      setAlocacoesPorItem(prev => ({
+        ...prev,
+        [item.id]: 'Não alocado'
+      }));
+      return;
+    }
+
+    const quantidadeNecessaria = Number(item.quantidade ?? 0);
+    const estoqueDisponivel = Number(item.material?.estoque ?? 0);
+    const nomeMaterial = item.material?.nome || 'Material';
+
+    // Verificar se há estoque suficiente
+    if (estoqueDisponivel < quantidadeNecessaria) {
+      toast.error('Estoque insuficiente', {
+        description: `${nomeMaterial}: Disponível ${estoqueDisponivel}, Necessário ${quantidadeNecessaria}`
+      });
+      setAlocacoesPorItem(prev => ({
+        ...prev,
+        [item.id]: 'Não alocado'
+      }));
+      return;
+    }
+
+    // Preparar dados para confirmação
+    setMaterialParaAlocar({
+      item,
+      materialId: item.material.id,
+      quantidade: quantidadeNecessaria,
+      nomeMaterial,
+      estoqueDisponivel
+    });
+    setConfirmarAlocacaoOpen(true);
+  }
+
+  async function confirmarAlocacao() {
+    if (!materialParaAlocar || !obraVinculada?.id) {
+      toast.error('Erro ao alocar material');
+      return;
+    }
+
+    try {
+      console.log('🔄 [ModalProjeto] Iniciando alocação de material:', {
+        obraId: obraVinculada.id,
+        materialId: materialParaAlocar.materialId,
+        quantidade: materialParaAlocar.quantidade
+      });
+
+      const response = await alocacaoMateriaisService.alocarMaterialParaObra(
+        obraVinculada.id,
+        {
+          materialId: materialParaAlocar.materialId,
+          quantidade: materialParaAlocar.quantidade,
+          projetoId: projeto.id
+        }
+      );
+
+      console.log('📥 [ModalProjeto] Resposta da alocação:', response);
+
+      if (response.success) {
+        console.log('✅ [ModalProjeto] Alocação bem-sucedida, mostrando toast de sucesso');
+        toast.success('✅ Material alocado com sucesso!', {
+          description: `${materialParaAlocar.nomeMaterial} foi alocado para a obra "${obraVinculada.nome || 'vinculada'}".`
+        });
+
+        // Adicionar material ao Set de materiais alocados
+        setMateriaisAlocados(prev => new Set([...prev, materialParaAlocar.materialId]));
+
+        // Atualizar estado de alocação
+        setAlocacoesPorItem(prev => ({
+          ...prev,
+          [materialParaAlocar.item.id]: 'Alocado'
+        }));
+
+        // Recarregar orçamento para atualizar estoque
+        await carregarOrcamentoCompleto();
+
+        // Fechar dialog
+        setConfirmarAlocacaoOpen(false);
+        setMaterialParaAlocar(null);
+      } else {
+        console.error('❌ [ModalProjeto] Alocação falhou:', response.error);
+        toast.error('Erro ao alocar material', {
+          description: response.error || 'Não foi possível alocar o material.'
+        });
+        setAlocacoesPorItem(prev => ({
+          ...prev,
+          [materialParaAlocar.item.id]: 'Não alocado'
+        }));
+      }
+    } catch (error: any) {
+      console.error('❌ [ModalProjeto] Erro ao alocar material:', error);
+      toast.error('Erro ao alocar material', {
+        description: error?.message || 'Ocorreu um erro ao processar a alocação.'
+      });
+      setAlocacoesPorItem(prev => ({
+        ...prev,
+        [materialParaAlocar.item.id]: 'Não alocado'
+      }));
+    }
+  }
+
 
   async function carregarCliente() {
     if (!projeto.cliente?.id) return;
@@ -289,6 +443,81 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       toast.error('❌ Erro ao carregar dados do cliente');
     } finally {
       setLoadingCliente(false);
+    }
+  }
+
+  async function carregarDocumentos() {
+    try {
+      const response = await axiosApiService.get<any[]>(`/api/projetos/${projeto.id}/documentos`);
+      if (response.success && response.data) {
+        const docs = Array.isArray(response.data) ? response.data : [];
+        // URL base da API deve vir do VITE_API_URL (produção)
+        const baseUrl = import.meta.env.VITE_API_URL;
+        if (!baseUrl) {
+          console.error('VITE_API_URL não está definido. Configure a URL da API para produção.');
+        }
+
+        // Obter token do localStorage para passar na URL
+        const token = localStorage.getItem('token');
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+
+        setDocumentos(
+          docs.map((doc: any) => ({
+            id: doc.id,
+            nome: doc.nome,
+            tipo: doc.tipo,
+            url: `${baseUrl || ''}/api/projetos/${projeto.id}/documentos/${doc.id}/visualizar${tokenParam}`
+          }))
+        );
+      }
+    } catch (error) {
+      console.error('Erro ao carregar documentos:', error);
+      setDocumentos([]);
+    }
+  }
+
+  async function handleUploadDocumento(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (!uploadForm.arquivo) {
+      toast.error('Selecione um arquivo');
+      return;
+    }
+
+    try {
+      setUploading(true);
+      
+      const formData = new FormData();
+      formData.append('arquivo', uploadForm.arquivo);
+      formData.append('tipo', uploadForm.tipo);
+      if (uploadForm.observacoes) {
+        formData.append('observacoes', uploadForm.observacoes);
+      }
+
+      const response = await axiosApiService.post(`/api/projetos/${projeto.id}/documentos`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      if (response.success) {
+        toast.success('✅ Documento enviado com sucesso!');
+        setUploadModalOpen(false);
+        setUploadForm({ tipo: 'ART', observacoes: '', arquivo: null });
+        await carregarDocumentos();
+        if (onRefresh) onRefresh();
+      } else {
+        toast.error('❌ Erro ao enviar documento', {
+          description: response.error || 'Tente novamente'
+        });
+      }
+    } catch (error: any) {
+      console.error('Erro ao fazer upload:', error);
+      toast.error('❌ Erro ao enviar documento', {
+        description: error.message || 'Tente novamente'
+      });
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -379,99 +608,16 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       setLoadingAcao(true);
       await axiosApiService.put(`${ENDPOINTS.PROJETOS}/${projeto.id}/status`, { status: 'EXECUCAO' });
       if (onRefresh) onRefresh();
-      setActiveTab('EtapasAdmin');
-      await carregarEtapas();
+      setActiveTab('Kanban');
     } finally {
       setLoadingAcao(false);
     }
   }
 
-  async function handleConcluirEtapa(etapa: EtapaAdmin) {
-    await etapasAdminService.concluir(projeto.id, etapa.id);
-    await carregarEtapas();
-    if (onRefresh) onRefresh(); // Atualizar progresso do projeto
-  }
-
-  async function handleAdiarEnviar() {
-    if (!adiarAberto.etapa) return;
-    await etapasAdminService.estenderPrazo(
-      projeto.id,
-      adiarAberto.etapa.id,
-      adiarAberto.novaData,
-      adiarAberto.justificativa
-    );
-    setAdiarAberto({ etapa: null, novaData: '', justificativa: '' });
-    await carregarEtapas();
-  }
-
-  // CRUD de Etapas Admin
-  async function handleCriarEtapa() {
-    setEtapaEditando(null);
-    setEtapaForm({ nome: '', dataPrevista: '', tipo: '' });
-    setEtapaModalOpen(true);
-  }
-
-  async function handleEditarEtapa(etapa: EtapaAdmin) {
-    setEtapaEditando(etapa);
-    setEtapaForm({
-      nome: etapa.nome || etapa.tipo,
-      dataPrevista: new Date(etapa.dataPrevista).toISOString().slice(0, 16),
-      tipo: etapa.tipo
-    });
-    setEtapaModalOpen(true);
-  }
-
-  async function handleSalvarEtapa(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      if (etapaEditando) {
-        // Editar etapa existente
-        await etapasAdminService.atualizar(projeto.id, etapaEditando.id, {
-          nome: etapaForm.nome,
-          dataPrevista: etapaForm.dataPrevista
-        });
-        toast.success('✅ Etapa atualizada com sucesso!');
-      } else {
-        // Criar nova etapa
-        await etapasAdminService.criar(projeto.id, {
-          nome: etapaForm.nome,
-          dataPrevista: etapaForm.dataPrevista,
-          tipo: etapaForm.tipo || 'PERSONALIZADA'
-        });
-        toast.success('✅ Etapa criada com sucesso!');
-      }
-      setEtapaModalOpen(false);
-      await carregarEtapas();
-      if (onRefresh) onRefresh();
-    } catch (error: any) {
-      toast.error(`❌ Erro ao salvar etapa: ${error?.message || 'Erro desconhecido'}`);
-    }
-  }
-
-
   // Fechar modais com ESC
-  useEscapeKey(etapaModalOpen, () => setEtapaModalOpen(false));
   useEscapeKey(taskModalOpen, () => setTaskModalOpen(false));
   useEscapeKey(uploadModalOpen, () => setUploadModalOpen(false));
   useEscapeKey(clienteModalOpen, () => setClienteModalOpen(false));
-
-  async function handleExcluirEtapa(etapa: EtapaAdmin) {
-    setAlertConfig({
-      title: '🗑️ Excluir Etapa',
-      description: `Deseja realmente excluir a etapa "${etapa.nome || etapa.tipo}"? Esta ação não pode ser desfeita.`,
-      onConfirm: async () => {
-        try {
-          await etapasAdminService.excluir(projeto.id, etapa.id);
-          toast.success('✅ Etapa excluída com sucesso!');
-          await carregarEtapas();
-          if (onRefresh) onRefresh();
-        } catch (error: any) {
-          toast.error(`❌ Erro ao excluir etapa: ${error?.message || 'Erro desconhecido'}`);
-        }
-      }
-    });
-    setAlertOpen(true);
-  }
 
   // Funções de Tasks
   function handleAbrirModalTask(task?: Task) {
@@ -591,36 +737,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     setAlertOpen(true);
   }
 
-  // Calcular tempo decorrido desde criação da etapa
-  function calcularTempoDecorrido(dataCriacao: string): { horas: number; atrasada: boolean; cor: string; texto: string } {
-    const agora = new Date();
-    const criacao = new Date(dataCriacao);
-    const diferencaMs = agora.getTime() - criacao.getTime();
-    const horas = Math.floor(diferencaMs / (1000 * 60 * 60));
-    const atrasada = horas > 24;
-    
-    let cor = 'text-green-600';
-    let texto = `${horas}h`;
-    
-    if (horas > 24) {
-      cor = 'text-red-600 font-bold';
-      const dias = Math.floor(horas / 24);
-      texto = `${dias}d ${horas % 24}h ⚠️`;
-    } else if (horas > 18) {
-      cor = 'text-orange-600';
-    } else if (horas > 12) {
-      cor = 'text-yellow-600';
-    }
-    
-    return { horas, atrasada, cor, texto };
-  }
-
-  // Calcular progresso do projeto baseado em Etapas Admin + Tasks + Obras
+  // Calcular progresso do projeto baseado em Tasks Kanban + Obras
   const progressoProjeto = useMemo(() => {
-    // Etapas Admin concluídas
-    const etapasTotal = etapasResp?.etapas?.length || 0;
-    const etapasConcluidas = etapasResp?.etapas?.filter(e => e.concluida).length || 0;
-    
     // Tasks concluídas
     const tasksTotal = tasks.length;
     const tasksConcluidas = tasks.filter(t => t.status === 'Concluído').length;
@@ -631,15 +749,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     const obrasConcluidas = projeto.status === 'CONCLUIDO' ? 1 : 0;
     
     // Calcular totais
-    const totalItens = etapasTotal + tasksTotal + obrasTotal;
-    const totalConcluidos = etapasConcluidas + tasksConcluidas + obrasConcluidas;
+    const totalItens = tasksTotal + obrasTotal;
+    const totalConcluidos = tasksConcluidas + obrasConcluidas;
     
     const percentual = totalItens > 0 ? Math.round((totalConcluidos / totalItens) * 100) : 0;
     
     return {
       percentual,
-      etapasTotal,
-      etapasConcluidas,
       tasksTotal,
       tasksConcluidas,
       obrasTotal,
@@ -647,7 +763,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       totalItens,
       totalConcluidos
     };
-  }, [etapasResp, tasks, projeto.status]);
+  }, [tasks, projeto.status]);
 
   async function handleIniciarObra() {
 
@@ -905,15 +1021,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
 
                   {/* Detalhes do Progresso */}
-                  <div className="grid grid-cols-3 gap-4">
-                    {/* Etapas Admin */}
-                    <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                      <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Etapas Admin</div>
-                      <div className="text-lg font-bold text-blue-700 dark:text-blue-400">
-                        {progressoProjeto.etapasConcluidas}/{progressoProjeto.etapasTotal}
-                      </div>
-                    </div>
-                    
+                  <div className="grid grid-cols-2 gap-4">
                     {/* Tasks */}
                     <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
                       <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Tasks Kanban</div>
@@ -938,7 +1046,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       <span>
-                        O progresso é calculado com base em: <strong>Etapas Admin concluídas</strong> + <strong>Tasks concluídas</strong> + <strong>Obras concluídas</strong>
+                        O progresso é calculado com base em: <strong>Tasks concluídas</strong> + <strong>Obras concluídas</strong>
                       </span>
                     </p>
                   </div>
@@ -1170,7 +1278,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                             </div>
                             <div className="flex items-center gap-1">
                               <button
-                                onClick={() => setDocumentoVisualizar(doc)}
+                                onClick={() => {
+                                  // Abrir documento em nova aba
+                                  window.open(doc.url, '_blank');
+                                }}
                                 className="p-2 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                                 title="Visualizar documento"
                               >
@@ -1387,11 +1498,31 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                               )}
                             </td>
                             <td className="px-6 py-4 text-sm align-top">
-                              <select className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white">
-                                <option>Não alocado</option>
-                                <option>Reservar do estoque</option>
-                                <option>Solicitar compra</option>
-                              </select>
+                              {alocacoesPorItem[item.id] === 'Alocado' || (item.material?.id && materiaisAlocados.has(item.material.id)) ? (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border-2 border-green-300 dark:border-green-700 rounded-lg">
+                                  <svg className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <span className="text-green-700 dark:text-green-300 font-semibold">Alocado</span>
+                                </div>
+                              ) : (
+                                <select
+                                  value={alocacoesPorItem[item.id] || 'Não alocado'}
+                                  onChange={(e) => handleAlocacaoChange(item, e.target.value)}
+                                  disabled={!item.material?.id || isBancoFrio || !obraVinculada?.id || (item.material?.id && materiaisAlocados.has(item.material.id))}
+                                  className={`px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white ${
+                                    (!item.material?.id || isBancoFrio || !obraVinculada?.id || (item.material?.id && materiaisAlocados.has(item.material.id)))
+                                      ? 'opacity-50 cursor-not-allowed'
+                                      : ''
+                                  }`}
+                                >
+                                  <option>Não alocado</option>
+                                  <option disabled={!possuiEstoque || !item.material?.id || isBancoFrio || (item.material?.id && materiaisAlocados.has(item.material.id))}>
+                                    Reservar do estoque
+                                  </option>
+                                  <option>Solicitar compra</option>
+                                </select>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1414,172 +1545,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
             </div>
           )}
 
-          {activeTab === 'EtapasAdmin' && (
-              <div className="space-y-6 animate-fade-in">
-              <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                    </svg>
-                    Etapas Administrativas
-                  </h3>
-                  <div className="flex items-center gap-3">
-                    <button 
-                      onClick={handleCriarEtapa} 
-                      className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium flex items-center gap-2"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Criar Etapa
-                    </button>
-                    <button 
-                      onClick={carregarEtapas} 
-                      className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-medium"
-                    >
-                      🔄 Atualizar
-                    </button>
-                  </div>
-              </div>
-
-                {loadingEtapas && (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                      <p className="text-gray-600 dark:text-gray-400">Carregando etapas...</p>
-                    </div>
-                  </div>
-                )}
-                
-                {erroEtapas && (
-                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-200 dark:border-red-800 rounded-2xl p-6">
-                    <p className="text-red-800 dark:text-red-300 font-medium">⚠️ {erroEtapas}</p>
-                  </div>
-                )}
-
-                {!loadingEtapas && !erroEtapas && (
-                  <>
-                    {etapasResp?.etapas && etapasResp.etapas.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {etapasResp.etapas.map((etapa) => {
-                  const atrasada = etapa.atrasada;
-                      const realizada = etapa.concluida;
-                      const tempoDecorrido = calcularTempoDecorrido(etapa.createdAt || etapa.dataPrevista);
-                      
-                  return (
-                        <div 
-                          key={etapa.id} 
-                          className={`rounded-2xl border-2 p-6 shadow-soft transition-all ${
-                            atrasada && !realizada 
-                              ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20' 
-                              : realizada
-                              ? 'border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-                              : 'border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between mb-3 gap-3">
-                            <div className="flex items-start gap-3 flex-1">
-                              {/* Checkbox para concluir */}
-                              <input
-                                type="checkbox"
-                                checked={realizada}
-                                onChange={() => {
-                                  if (!realizada) {
-                                    setAlertConfig({
-                                      title: '✅ Concluir Etapa',
-                                      description: `Deseja marcar a etapa "${etapa.nome || etapa.tipo}" como concluída?`,
-                                      onConfirm: async () => {
-                                        await handleConcluirEtapa(etapa);
-                                        toast.success('✅ Etapa concluída com sucesso!');
-                                      }
-                                    });
-                                    setAlertOpen(true);
-                                  }
-                                }}
-                                disabled={realizada}
-                                className="mt-1 w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-                                title={realizada ? 'Etapa concluída' : 'Marcar como concluída'}
-                              />
-                              <div className="flex-1">
-                                <h4 className="font-bold text-gray-900 dark:text-white">{etapa.nome || etapa.tipo}</h4>
-                              </div>
-                            </div>
-                            <span className={`text-xs px-3 py-1.5 rounded-full font-semibold whitespace-nowrap ${
-                              realizada 
-                                ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300' 
-                                : atrasada 
-                                ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' 
-                                : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300'
-                            }`}>
-                              {realizada ? '✓ Concluída' : atrasada ? '⚠ Atrasada' : '⏳ Pendente'}
-                        </span>
-                      </div>
-                          <div className="space-y-2 mb-4">
-                            <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                              </svg>
-                              {new Date(etapa.dataPrevista).toLocaleString('pt-BR')}
-                            </div>
-                            {!realizada && (
-                              <div className={`text-sm flex items-center gap-2 ${tempoDecorrido.cor}`}>
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <span className="font-semibold">⏱️ {tempoDecorrido.texto}</span>
-                                {tempoDecorrido.atrasada && (
-                                  <span className="text-xs bg-red-100 dark:bg-red-900/40 px-2 py-1 rounded-full">
-                                    +24h
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          disabled={realizada}
-                          onClick={() => setAdiarAberto({ etapa, novaData: '', justificativa: '' })}
-                              className="flex-1 px-3 py-2 bg-white dark:bg-dark-card border-2 border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400 text-sm font-semibold rounded-lg hover:bg-blue-50 dark:hover:bg-dark-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Adiar prazo"
-                            >
-                              ⏰ Adiar
-                            </button>
-                            <button
-                              disabled={realizada}
-                              onClick={() => handleEditarEtapa(etapa)}
-                              className="px-3 py-2 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-600 dark:text-gray-400 text-sm font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-dark-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Editar etapa"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              disabled={realizada}
-                              onClick={() => handleExcluirEtapa(etapa)}
-                              className="px-3 py-2 bg-white dark:bg-dark-card border-2 border-red-300 dark:border-red-600 text-red-600 dark:text-red-400 text-sm font-semibold rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Excluir etapa"
-                            >
-                              🗑️
-                        </button>
-                      </div>
-                    </div>
-                  );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <div className="w-16 h-16 bg-gray-100 dark:bg-dark-bg rounded-full flex items-center justify-center mx-auto mb-4">
-                          <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                          </svg>
-                        </div>
-                        <p className="text-gray-500 dark:text-gray-400 font-medium">Nenhuma etapa administrativa cadastrada</p>
-                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">Clique em "Criar Etapa" para adicionar uma nova etapa</p>
-                      </div>
-                    )}
-                  </>
-                )}
-            </div>
-          )}
 
           {activeTab === 'Kanban' && (
               <div className="space-y-6 animate-fade-in">
@@ -1976,83 +1941,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           </div>
         </div>
 
-        {/* Modal Adiar */}
-        {adiarAberto.etapa && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="w-full max-w-md bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden">
-              {/* Header */}
-              <div className="relative px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-yellow-600 to-orange-600">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-              </div>
-                  <h3 className="text-lg font-bold text-white">Adiar Prazo</h3>
-                </div>
-                <button 
-                  onClick={() => setAdiarAberto({ etapa: null, novaData: '', justificativa: '' })} 
-                  className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                {/* Nome da Etapa */}
-                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Etapa</p>
-                  <p className="font-bold text-gray-900 dark:text-white">{adiarAberto.etapa.nome || adiarAberto.etapa.tipo}</p>
-                </div>
-
-                {/* Nova Data */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    📅 Nova Data e Hora
-                  </label>
-                  <input
-                    type="datetime-local"
-                    value={adiarAberto.novaData}
-                    onChange={(e) => setAdiarAberto(prev => ({ ...prev, novaData: e.target.value }))}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white"
-                  />
-                </div>
-
-                {/* Justificativa */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    📝 Justificativa *
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={adiarAberto.justificativa}
-                    onChange={(e) => setAdiarAberto(prev => ({ ...prev, justificativa: e.target.value }))}
-                    placeholder="Explique o motivo do adiamento do prazo..."
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white"
-                  />
-                </div>
-
-                {/* Botões */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-dark-border">
-                  <button 
-                    onClick={() => setAdiarAberto({ etapa: null, novaData: '', justificativa: '' })} 
-                    className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    onClick={handleAdiarEnviar} 
-                    className="px-6 py-2.5 bg-gradient-to-r from-yellow-600 to-orange-600 text-white font-semibold rounded-xl hover:from-yellow-700 hover:to-orange-700 transition-all shadow-medium"
-                  >
-                    ⏰ Confirmar Adiamento
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Modal de Task */}
         {taskModalOpen && (
@@ -2202,13 +2090,18 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
+              <form onSubmit={handleUploadDocumento} className="p-6 space-y-4">
                 {/* Tipo de Documento */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     📋 Tipo de Documento
                   </label>
-                  <select className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 dark:bg-dark-bg dark:text-white">
+                  <select 
+                    value={uploadForm.tipo}
+                    onChange={(e) => setUploadForm({ ...uploadForm, tipo: e.target.value })}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 dark:bg-dark-bg dark:text-white"
+                  >
                     <option value="ART">ART - Anotação de Responsabilidade Técnica</option>
                     <option value="TRT">TRT - Termo de Responsabilidade Técnica</option>
                     <option value="PROJETO">Projeto Elétrico</option>
@@ -2223,12 +2116,43 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     📎 Arquivo
                   </label>
-                  <div className="border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl p-8 text-center hover:border-purple-400 dark:hover:border-purple-600 transition-all cursor-pointer">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (file.size > 20 * 1024 * 1024) {
+                          toast.error('Arquivo muito grande', { description: 'O tamanho máximo é 20MB' });
+                          return;
+                        }
+                        setUploadForm({ ...uploadForm, arquivo: file });
+                      }
+                    }}
+                    className="hidden"
+                    required
+                  />
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl p-8 text-center hover:border-purple-400 dark:hover:border-purple-600 transition-all cursor-pointer"
+                  >
                     <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    <p className="text-gray-600 dark:text-gray-400 font-medium">Clique para selecionar arquivo</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">PDF, DOC, DOCX até 20MB</p>
+                    {uploadForm.arquivo ? (
+                      <div>
+                        <p className="text-gray-900 dark:text-white font-medium">{uploadForm.arquivo.name}</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          {(uploadForm.arquivo.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-gray-600 dark:text-gray-400 font-medium">Clique para selecionar arquivo</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">PDF, DOC, DOCX, JPG, PNG até 20MB</p>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -2239,6 +2163,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </label>
                   <textarea
                     rows={3}
+                    value={uploadForm.observacoes}
+                    onChange={(e) => setUploadForm({ ...uploadForm, observacoes: e.target.value })}
                     placeholder="Adicione observações sobre o documento..."
                     className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 dark:bg-dark-bg dark:text-white"
                   />
@@ -2247,122 +2173,29 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 {/* Botões */}
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-dark-border">
                   <button 
-                    onClick={() => setUploadModalOpen(false)} 
-                    className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button 
-                    onClick={() => {
-                      toast.info('📤 Funcionalidade de upload será implementada em breve');
-                      setUploadModalOpen(false);
-                    }}
-                    className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium"
-                  >
-                    📤 Fazer Upload
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Criar/Editar Etapa Admin */}
-        {etapaModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="w-full max-w-lg bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden">
-              {/* Header */}
-              <div className="relative px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-green-600 to-emerald-600">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-bold text-white">
-                    {etapaEditando ? '✏️ Editar Etapa' : '➕ Nova Etapa'}
-                  </h3>
-                </div>
-                <button 
-                  onClick={() => setEtapaModalOpen(false)} 
-                  className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <form onSubmit={handleSalvarEtapa} className="p-6 space-y-4">
-                {/* Nome da Etapa */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    📋 Nome da Etapa *
-                  </label>
-                  <input
-                    type="text"
-                    value={etapaForm.nome}
-                    onChange={(e) => setEtapaForm({ ...etapaForm, nome: e.target.value })}
-                    required
-                    placeholder="Ex: Aprovação de Documentação"
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 dark:bg-dark-bg dark:text-white"
-                  />
-                </div>
-
-                {/* Data Prevista */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    📅 Data/Hora Prevista *
-                  </label>
-                  <input
-                    type="datetime-local"
-                    value={etapaForm.dataPrevista}
-                    onChange={(e) => setEtapaForm({ ...etapaForm, dataPrevista: e.target.value })}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 dark:bg-dark-bg dark:text-white"
-                  />
-                </div>
-
-                {/* Tipo (apenas para criação) */}
-                {!etapaEditando && (
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                      🏷️ Tipo
-                    </label>
-                    <select
-                      value={etapaForm.tipo}
-                      onChange={(e) => setEtapaForm({ ...etapaForm, tipo: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 dark:bg-dark-bg dark:text-white"
-                    >
-                      <option value="PERSONALIZADA">Personalizada</option>
-                      <option value="DOCUMENTACAO">Documentação</option>
-                      <option value="TECNICA">Técnica</option>
-                      <option value="FINANCEIRA">Financeira</option>
-                      <option value="APROVACAO">Aprovação</option>
-                    </select>
-                  </div>
-                )}
-
-                {/* Botões */}
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-dark-border">
-                  <button 
                     type="button"
-                    onClick={() => setEtapaModalOpen(false)} 
-                    className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all"
+                    onClick={() => {
+                      setUploadModalOpen(false);
+                      setUploadForm({ tipo: 'ART', observacoes: '', arquivo: null });
+                    }}
+                    disabled={uploading}
+                    className="px-6 py-2.5 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all disabled:opacity-50"
                   >
                     Cancelar
                   </button>
                   <button 
                     type="submit"
-                    className="px-6 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium"
+                    disabled={uploading || !uploadForm.arquivo}
+                    className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    💾 {etapaEditando ? 'Atualizar' : 'Criar'} Etapa
+                    {uploading ? '📤 Enviando...' : '📤 Fazer Upload'}
                   </button>
                 </div>
               </form>
             </div>
           </div>
         )}
+
 
         {/* Modal de Visualizar Documento */}
         {documentoVisualizar && (
@@ -2559,6 +2392,62 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 className="bg-blue-600 hover:bg-blue-700"
               >
                 Confirmar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* AlertDialog para Confirmação de Alocação de Material */}
+        <AlertDialog open={confirmarAlocacaoOpen} onOpenChange={setConfirmarAlocacaoOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirmar Alocação de Material</AlertDialogTitle>
+              {materialParaAlocar && (
+                <div className="space-y-2 mt-2">
+                  <AlertDialogDescription asChild>
+                    <div>
+                      <p>
+                        <strong>Material:</strong> {materialParaAlocar.nomeMaterial}
+                      </p>
+                      <p>
+                        <strong>Quantidade necessária:</strong> {materialParaAlocar.quantidade} {materialParaAlocar.item.material?.unidadeMedida || 'un'}
+                      </p>
+                      <p>
+                        <strong>Estoque disponível:</strong> {materialParaAlocar.estoqueDisponivel} {materialParaAlocar.item.material?.unidadeMedida || 'un'}
+                      </p>
+                    </div>
+                  </AlertDialogDescription>
+                  <div className="mt-4">
+                    <p className="font-semibold text-orange-600 dark:text-orange-400">
+                      Esta ação dará baixa imediata no estoque e alocará o material para a obra "{obraVinculada?.nome || 'obra vinculada'}".
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                      Deseja confirmar a alocação?
+                    </p>
+                  </div>
+                </div>
+              )}
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel 
+                onClick={() => {
+                  setConfirmarAlocacaoOpen(false);
+                  if (materialParaAlocar) {
+                    setAlocacoesPorItem(prev => ({
+                      ...prev,
+                      [materialParaAlocar.item.id]: 'Não alocado'
+                    }));
+                  }
+                  setMaterialParaAlocar(null);
+                }}
+              >
+                Cancelar
+              </AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={confirmarAlocacao}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                Confirmar Alocação
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

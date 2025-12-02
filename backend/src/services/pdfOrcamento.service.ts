@@ -170,8 +170,8 @@ export class PDFOrcamentoService {
             left: 0;
             right: 0;
             width: 100%;
-            height: 100px;
-            min-height: 100px;
+            height: 110px;
+            min-height: 110px;
             background: transparent;
             z-index: -2;
             pointer-events: none;
@@ -202,7 +202,7 @@ export class PDFOrcamentoService {
             .page-top-spacer {
                 position: fixed !important;
                 top: 0 !important;
-                height: 100px !important;
+                height: 110px !important;
                 display: block !important;
             }
 
@@ -214,16 +214,16 @@ export class PDFOrcamentoService {
                 display: block !important;
             }
 
-            /* Garantir margin-top de 100px e margin-bottom de 80px em TODAS as páginas */
+            /* Garantir margin-top de 110px e margin-bottom de 80px em TODAS as páginas */
             @page {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
             }
 
             @page :first {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
@@ -231,12 +231,12 @@ export class PDFOrcamentoService {
 
             /* Garantir que TODAS as páginas subsequentes também tenham as margens */
             @page :left {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
             @page :right {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
@@ -244,7 +244,7 @@ export class PDFOrcamentoService {
             body > .page {
                 padding-top: 110px;
                 padding-bottom: 80px;
-                min-height: calc(100vh - 100px - 80px);
+                min-height: calc(100vh - 110px - 80px);
             }
 
             /* Quando descrição técnica quebra para nova página, o spacer fixo cuida do espaçamento */
@@ -310,12 +310,12 @@ export class PDFOrcamentoService {
         /* === PÁGINA === */
         .page {
             max-width: 100%;
-            margin: 0;
+            margin: 0 15px;
 
-            padding: 110px 10px 90px 10px;
+            padding: 110px 15px 80px 15px;
             position: relative;
             background: transparent;
-            min-height: calc(100vh - 100px - 80px);
+            min-height: calc(100vh - 110px - 80px);
         }
 
         /* Adicionar padding-top em elementos que podem começar após quebra de página */
@@ -327,26 +327,26 @@ export class PDFOrcamentoService {
 
         /* Garantir padding-top e padding-bottom em todas as páginas após quebra de página */
         @media print {
-            /* Aplicar margin-top de 100px e margin-bottom de 80px em TODAS as páginas */
+            /* Aplicar margin-top de 110px e margin-bottom de 80px em TODAS as páginas */
             @page {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
             /* Primeira página também deve ter as margens */
             @page :first {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
             /* Garantir que TODAS as páginas subsequentes também tenham as margens */
             @page :left {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
             @page :right {
-                margin-top: 100px !important;
+                margin-top: 110px !important;
                 margin-bottom: 80px !important;
             }
 
@@ -402,7 +402,7 @@ export class PDFOrcamentoService {
         .itens-section,
         .totais-section,
         .pagamento-section {
-            margin-bottom: 12px;
+            margin-bottom: 8px;
         }
 
         /* === TABELA DE ITENS === */
@@ -415,10 +415,9 @@ export class PDFOrcamentoService {
             page-break-before: always;
             break-before: page;
             padding-top: 110px;
-
             padding-bottom: 80px;
             position: relative;
-            min-height: calc(100vh - 100px - 80px);
+            min-height: calc(100vh - 110px - 80px);
         }
 
         /* Descrições podem quebrar se muito longas */
@@ -436,9 +435,9 @@ export class PDFOrcamentoService {
         .descricao-section::before {
             content: "";
             display: block;
-            height: 100px;
+            height: 110px;
             position: absolute;
-            top: -100px;
+            top: -110px;
             left: 0;
             width: 100%;
             pointer-events: none;
@@ -473,8 +472,8 @@ export class PDFOrcamentoService {
             .observacoes-section:not(:first-child)::before {
                 content: "";
                 display: block;
-                height: 100px;
-                margin-top: -100px;
+                height: 110px;
+                margin-top: -110px;
                 visibility: hidden;
             }
 
@@ -489,92 +488,106 @@ export class PDFOrcamentoService {
 
         /* === TÍTULO DO ORÇAMENTO === */
         .orcamento-title {
-            background: rgba(30, 64, 175, 0.95);
-            color: white;
-            padding: 12px 15px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            background: transparent;
+            color: #1e293b;
+            padding: 8px 0;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #1e293b;
         }
 
         .orcamento-title h1 {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: bold;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
 
         .orcamento-details {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            font-size: 8px;
+            gap: 8px;
+            font-size: 10px;
         }
 
         .detail-item label {
             display: block;
-            opacity: 0.8;
+            opacity: 0.7;
             margin-bottom: 2px;
+            font-size: 9px;
         }
 
         .detail-item strong {
-            font-size: 9px;
+            font-size: 10px;
         }
 
         /* === SEÇÃO CLIENTE === */
         .cliente-section {
-            background: rgba(248, 250, 252, 0.85);
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            border-left: 4px solid #1e40af;
+            background: transparent;
+            padding: 6px 0;
+            margin-bottom: 8px;
+            border: none;
         }
 
         .section-title {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
-            color: #1e40af;
-            margin-bottom: 8px;
+            color: #1e293b;
+            margin-bottom: 4px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
         }
 
         .cliente-info {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            font-size: 16px; /* Aumentado de 8.5px para 16px */
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .cliente-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .cliente-info-label {
+            font-size: 10px;
+            color: #64748b;
+            font-weight: normal;
+        }
+
+        .cliente-info-value {
+            font-weight: bold;
+            color: #1e293b;
         }
 
         /* === ENDEREÇOS === */
         .addresses-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 8px;
+            margin-bottom: 8px;
         }
 
         .address-box {
-            background: rgba(248, 250, 252, 0.85);
-            padding: 10px;
-            border-radius: 6px;
-            border-left: 4px solid #0891b2;
+            background: transparent;
+            padding: 6px 0;
+            border: none;
         }
 
         /* === DESCRIÇÕES === */
         .descricao-section {
-            background: rgba(255, 255, 255, 0.9);
-            padding: 15px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            border-left: 4px solid #0284c7;
-            border: 1px solid #e2e8f0;
+            background: transparent;
+            padding: 12px 0;
+            margin-bottom: 16px;
+            border: none;
         }
 
         .descricao-content {
             color: #1e293b;
-            font-size: 16px; /* Aumentado de 9px para 16px */
+            font-size: 12px;
             line-height: 1.6;
-            margin-top: 8px;
+            margin-top: 6px;
         }
 
         .descricao-section.projeto {
@@ -621,22 +634,23 @@ export class PDFOrcamentoService {
         table.itens-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
-            font-size: 16px; /* Aumentado de 9px para 16px */
+            margin-top: 8px;
+            font-size: 12px;
         }
 
         table.itens-table thead {
-            background: rgba(30, 64, 175, 0.95);
-            color: white;
+            background: transparent;
+            color: #1e293b;
         }
 
         table.itens-table th {
-            padding: 8px 6px;
+            padding: 6px 4px;
             text-align: left;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-size: 14px; /* Aumentado de 8px para 14px */
+            letter-spacing: 0.3px;
+            font-size: 12px;
+            border-bottom: 1px solid #cbd5e1;
         }
 
         table.itens-table th:nth-child(2),
@@ -647,9 +661,10 @@ export class PDFOrcamentoService {
         }
 
         table.itens-table td {
-            padding: 8px 6px;
+            padding: 6px 4px;
             border-bottom: 1px solid #e2e8f0;
-            font-size: 16px; /* Aumentado de 8.5px para 16px */
+            font-size: 12px;
+            background: transparent;
         }
 
         table.itens-table td:nth-child(2),
@@ -660,11 +675,11 @@ export class PDFOrcamentoService {
         }
 
         table.itens-table tbody tr:hover {
-            background: rgba(248, 250, 252, 0.5);
+            background: transparent;
         }
 
         table.itens-table tbody tr {
-            background: rgba(255, 255, 255, 0.7);
+            background: transparent;
         }
 
         .item-tipo {
@@ -683,26 +698,25 @@ export class PDFOrcamentoService {
 
         /* === TOTAIS === */
         .totais-section {
-            background: rgba(219, 234, 254, 0.9);
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
+            background: transparent;
+            padding: 8px 0;
+            margin-bottom: 8px;
         }
 
         .totais-row {
             display: flex;
             justify-content: space-between;
-            padding: 6px 0;
-            font-size: 16px; /* Aumentado de 9px para 16px */
+            padding: 4px 0;
+            font-size: 12px;
         }
 
         .totais-row.total-final {
-            border-top: 2px solid #1e40af;
-            margin-top: 6px;
-            padding-top: 8px;
-            font-size: 18px; /* Aumentado de 12px para 18px */
+            border-top: 2px solid #1e293b;
+            margin-top: 4px;
+            padding-top: 6px;
+            font-size: 14px;
             font-weight: bold;
-            color: #1e40af;
+            color: #1e293b;
         }
 
         /* === FORMA DE PAGAMENTO === */
@@ -713,47 +727,46 @@ export class PDFOrcamentoService {
         table.pagamento-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 8px;
-            font-size: 16px; /* Aumentado de 8.5px para 16px */
+            margin-top: 6px;
+            font-size: 12px;
         }
 
         table.pagamento-table thead {
-            background: rgba(241, 245, 249, 0.9);
+            background: transparent;
             color: #1e293b;
         }
 
         table.pagamento-table tbody tr {
-            background: rgba(255, 255, 255, 0.7);
+            background: transparent;
         }
 
         table.pagamento-table th {
-            padding: 6px;
+            padding: 4px;
             text-align: left;
             font-weight: 600;
-            border-bottom: 2px solid #cbd5e1;
-            font-size: 14px; /* Aumentado de 8px para 14px */
+            border-bottom: 1px solid #cbd5e1;
+            font-size: 12px;
         }
 
         table.pagamento-table td {
-            padding: 6px;
+            padding: 4px;
             border-bottom: 1px solid #e2e8f0;
-            font-size: 16px; /* Adicionado */
+            font-size: 12px;
         }
 
         /* === OBSERVAÇÕES === */
         .observacoes-section {
-            background: rgba(254, 243, 199, 0.85);
-            padding: 15px;
-            border-radius: 6px;
-            border-left: 4px solid #f59e0b;
-            margin-bottom: 20px;
+            background: transparent;
+            padding: 12px 0;
+            border: none;
+            margin-bottom: 16px;
         }
 
         .observacoes-content {
-            color: #78350f;
-            font-size: 16px; /* Aumentado de 9px para 16px */
+            color: #1e293b;
+            font-size: 12px;
             line-height: 1.6;
-            margin-top: 8px;
+            margin-top: 6px;
         }
 
 
@@ -798,7 +811,7 @@ export class PDFOrcamentoService {
     <div class="page">
         <!-- Título do Orçamento -->
         <div class="orcamento-title">
-            <h1>ORÇAMENTO DE VENDA #${orcamento.numeroSequencial}</h1>
+            <h1>${orcamento.titulo || `ORÇAMENTO DE VENDA #${orcamento.numeroSequencial}`}</h1>
             <div class="orcamento-details">
                 <div class="detail-item">
                     <label>Cliente:</label>
@@ -816,17 +829,46 @@ export class PDFOrcamentoService {
                     <label>Status:</label>
                     <strong>${orcamento.status}</strong>
                 </div>
+                ${orcamento.previsaoInicio && orcamento.previsaoTermino ? `
+                <div class="detail-item">
+                    <label>Prazo de Entrega:</label>
+                    <strong>${new Date(orcamento.previsaoInicio).toLocaleDateString('pt-BR')} a ${new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}</strong>
+                </div>
+                ` : orcamento.previsaoTermino ? `
+                <div class="detail-item">
+                    <label>Prazo de Entrega:</label>
+                    <strong>${new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}</strong>
+                </div>
+                ` : ''}
             </div>
         </div>
 
         <!-- Cliente -->
         <div class="cliente-section">
-            <div class="section-title">📋 Dados do Cliente</div>
+            <div class="section-title">Dados do Cliente</div>
             <div class="cliente-info">
-                <div><strong>Nome:</strong> ${orcamento.cliente.nome}</div>
-                ${orcamento.cliente.cpfCnpj ? `<div><strong>CPF/CNPJ:</strong> ${orcamento.cliente.cpfCnpj}</div>` : ''}
-                ${orcamento.cliente.email ? `<div><strong>Email:</strong> ${orcamento.cliente.email}</div>` : ''}
-                ${orcamento.cliente.telefone ? `<div><strong>Telefone:</strong> ${orcamento.cliente.telefone}</div>` : ''}
+                <div class="cliente-info-item">
+                    <div class="cliente-info-label">Nome:</div>
+                    <div class="cliente-info-value">${orcamento.cliente.nome}</div>
+                </div>
+                ${orcamento.cliente.cpfCnpj ? `
+                <div class="cliente-info-item">
+                    <div class="cliente-info-label">CPF/CNPJ:</div>
+                    <div class="cliente-info-value">${orcamento.cliente.cpfCnpj}</div>
+                </div>
+                ` : ''}
+                ${orcamento.cliente.email ? `
+                <div class="cliente-info-item">
+                    <div class="cliente-info-label">Email:</div>
+                    <div class="cliente-info-value">${orcamento.cliente.email}</div>
+                </div>
+                ` : ''}
+                ${orcamento.cliente.telefone ? `
+                <div class="cliente-info-item">
+                    <div class="cliente-info-label">Telefone:</div>
+                    <div class="cliente-info-value">${orcamento.cliente.telefone}</div>
+                </div>
+                ` : ''}
             </div>
         </div>
 
@@ -835,28 +877,29 @@ export class PDFOrcamentoService {
         <div class="addresses-row">
             ${orcamento.cliente.endereco ? `
             <div class="address-box">
-                <div class="section-title">📍 Endereço de Cobrança</div>
-                <div style="font-size: 16px; line-height: 1.6;">
+                <div class="section-title">Endereço de Cobrança</div>
+                <div style="font-size: 12px; line-height: 1.4;">
                     ${orcamento.cliente.endereco}
                 </div>
             </div>
             ` : ''}
             ${orcamento.enderecoObra ? `
             <div class="address-box">
-                <div class="section-title">🏗️ Endereço da Obra</div>
-                <div style="font-size: 16px; line-height: 1.6;">
-                    ${orcamento.enderecoObra}<br>
-                    ${orcamento.bairro ? `Bairro: ${orcamento.bairro}<br>` : ''}
-                    ${orcamento.cidade ? `${orcamento.cidade} - ` : ''}${orcamento.cep || ''}
+                <div class="section-title">Endereço da Obra</div>
+                <div style="font-size: 12px; line-height: 1.4;">
+                    ${orcamento.enderecoObra}${orcamento.bairro ? `, ${orcamento.bairro}` : ''}${orcamento.cidade ? ` - ${orcamento.cidade}` : ''}${orcamento.cep ? ` - ${orcamento.cep}` : ''}
                 </div>
             </div>
             ` : ''}
         </div>
         ` : ''}
 
+        <!-- Linha separadora -->
+        <hr style="margin: 12px 0; border: none; border-top: 1px solid #000000;" />
+
         <!-- Itens do Orçamento -->
         <div class="itens-section">
-            <div class="section-title">📦 Itens do Orçamento</div>
+            <div style="font-size: 10px; color: #1e293b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px;">Itens do Orçamento</div>
             <table class="itens-table">
                 <thead>
                     <tr>
@@ -903,7 +946,7 @@ export class PDFOrcamentoService {
                         return `
                         <tr>
                             <td>
-                                <div><strong>${nomeItem}</strong></div>
+                                <div>${nomeItem}</div>
                             </td>
                             <td>UN</td>
                             <td>${item.quantidade.toFixed(2)}</td>
@@ -943,7 +986,7 @@ export class PDFOrcamentoService {
         <!-- Forma de Pagamento -->
         ${orcamento.condicaoPagamento ? `
         <div class="pagamento-section">
-            <div class="section-title">💳 Forma / Condições de Pagamento</div>
+            <div class="section-title">Forma / Condições de Pagamento</div>
             <table class="pagamento-table">
                 <thead>
                     <tr>
@@ -968,12 +1011,12 @@ export class PDFOrcamentoService {
                 return `
                 <!-- Descrição Geral (na primeira página) -->
                 <div class="descricao-section" style="margin-bottom: 12px;">
-                    <div class="section-title">📄 Descrição Geral</div>
+                    <div class="section-title">Descrição Geral</div>
                     <div class="descricao-content">${orcamento.descricao}</div>
                 </div>
                 ${orcamento.observacoes ? `
                 <div class="observacoes-section">
-                    <div class="section-title">⚠️ Observações Importantes</div>
+                    <div class="section-title">Observações Importantes</div>
                     <div class="observacoes-content">${orcamento.observacoes}</div>
                 </div>
                 ` : ''}
@@ -986,21 +1029,21 @@ export class PDFOrcamentoService {
                 <div class="descricoes-wrapper">
                     ${orcamento.descricao ? `
                     <div class="descricao-section">
-                        <div class="section-title">📄 Descrição Geral</div>
+                        <div class="section-title">Descrição Geral</div>
                         <div class="descricao-content">${orcamento.descricao}</div>
                     </div>
                     ` : ''}
                     
                     ${orcamento.descricaoProjeto ? `
                     <div class="descricao-section projeto">
-                        <div class="section-title">🔧 Descrição Técnica do Projeto</div>
+                        <div class="section-title">Descrição Técnica do Projeto</div>
                         <div class="descricao-content">${orcamento.descricaoProjeto}</div>
                     </div>
                     ` : ''}
                     
                     ${orcamento.observacoes ? `
                     <div class="observacoes-section">
-                        <div class="section-title">⚠️ Observações Importantes</div>
+                        <div class="section-title">Observações Importantes</div>
                         <div class="observacoes-content">${orcamento.observacoes}</div>
                     </div>
                     ` : ''}
@@ -1012,7 +1055,7 @@ export class PDFOrcamentoService {
             if (orcamento.observacoes && !orcamento.descricao && !orcamento.descricaoProjeto) {
                 return `
                 <div class="observacoes-section" style="margin-bottom: 12px;">
-                    <div class="section-title">⚠️ Observações Importantes</div>
+                    <div class="section-title">Observações Importantes</div>
                     <div class="observacoes-content">${orcamento.observacoes}</div>
                 </div>
                 `;
@@ -1025,6 +1068,7 @@ export class PDFOrcamentoService {
 </html>
         `;
 
+        console.log('✅ HTML do orçamento gerado com sucesso (versão atualizada - sem backgrounds, fonte 12px, padding 110px, margin 15px)');
         return html;
     }
 

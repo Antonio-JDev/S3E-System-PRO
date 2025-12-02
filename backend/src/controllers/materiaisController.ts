@@ -5,6 +5,7 @@ import PDFDocument from 'pdfkit';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { classificarMaterialPorNome, normalizarCategoria, isCategoriaValida } from '../utils/materialClassifier';
 
 const prisma = new PrismaClient();
 
@@ -43,7 +44,14 @@ export const getMateriais = async (req: Request, res: Response): Promise<void> =
     
     const where: any = {};
     if (categoria) where.categoria = categoria;
-    if (ativo !== undefined) where.ativo = ativo === 'true';
+    // ✅ CORREÇÃO: Filtrar por ativo: true por padrão (mostrar apenas materiais ativos)
+    // Se ativo for explicitamente 'false', mostrar apenas inativos
+    // Se não for especificado, mostrar apenas ativos
+    if (ativo !== undefined) {
+      where.ativo = ativo === 'true';
+    } else {
+      where.ativo = true; // Por padrão, mostrar apenas materiais ativos
+    }
 
     const materiais = await prisma.material.findMany({
       where,
@@ -93,8 +101,25 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
 // Criar material
 export const createMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
+    let { categoria, nome, ...rest } = req.body;
+    
+    // Normalizar categoria se fornecida
+    if (categoria) {
+      categoria = normalizarCategoria(categoria);
+    }
+    
+    // Se categoria não fornecida ou inválida, classificar automaticamente
+    if (!categoria || !isCategoriaValida(categoria)) {
+      categoria = classificarMaterialPorNome(nome || '');
+      console.log(`🔍 Categoria auto-classificada: "${categoria}" para "${nome}"`);
+    }
+    
     const material = await prisma.material.create({
-      data: req.body
+      data: {
+        ...rest,
+        nome,
+        categoria
+      }
     });
 
     res.status(201).json(material);
@@ -108,10 +133,34 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
 export const updateMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    let { categoria, nome, ...rest } = req.body;
+
+    // Normalizar categoria se fornecida
+    if (categoria) {
+      categoria = normalizarCategoria(categoria);
+    }
+
+    // Se categoria não fornecida ou inválida, classificar automaticamente
+    if (!categoria || !isCategoriaValida(categoria)) {
+      // Buscar nome atual do material se não foi fornecido
+      if (!nome) {
+        const materialAtual = await prisma.material.findUnique({
+          where: { id },
+          select: { nome: true }
+        });
+        nome = materialAtual?.nome || '';
+      }
+      categoria = classificarMaterialPorNome(nome);
+      console.log(`🔍 Categoria auto-classificada na atualização: "${categoria}" para "${nome}"`);
+    }
 
     const material = await prisma.material.update({
       where: { id },
-      data: req.body
+      data: {
+        ...rest,
+        ...(nome && { nome }),
+        categoria
+      }
     });
 
     res.json(material);
@@ -125,6 +174,8 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
 export const deleteMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const { permanent } = req.query; // ?permanent=true para exclusão permanente
+    const userRole = (req as any).user?.role?.toLowerCase(); // Role do usuário autenticado
 
     // Verificar se o material existe
     const material = await prisma.material.findUnique({
@@ -142,6 +193,32 @@ export const deleteMaterial = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // EXCLUSÃO PERMANENTE (apenas Admin e Desenvolvedor)
+    if (permanent === 'true') {
+      // Verificar permissões: apenas Admin e Desenvolvedor podem excluir permanentemente
+      if (!['admin', 'desenvolvedor', 'administrador'].includes(userRole)) {
+        res.status(403).json({
+          success: false,
+          error: 'Acesso negado. Apenas Administradores e Desenvolvedores podem excluir materiais permanentemente.'
+        });
+        return;
+      }
+
+      // Exclusão permanente - deletar do banco
+      // Nota: Isso pode quebrar referências em compras, orçamentos, etc.
+      // Mas desenvolvedor/admin tem permissão para fazer isso
+      await prisma.material.delete({
+        where: { id }
+      });
+
+      res.json({ 
+        success: true,
+        message: 'Material excluído permanentemente do banco de dados' 
+      });
+      return;
+    }
+
+    // SOFT DELETE (para outros usuários ou quando não especificado permanent)
     // Verificar se há registros relacionados em compras ou contas a pagar
     // Mesmo que haja, vamos fazer soft delete (desativar) para manter histórico
     // O material não será excluído fisicamente, apenas desativado
@@ -364,13 +441,16 @@ export const corrigirNomesGenericos = async (req: Request, res: Response): Promi
       });
 
       if (compraItem && compraItem.nomeProduto && !compraItem.nomeProduto.includes('Produto importado')) {
+        // Classificar categoria automaticamente baseado no nome do produto
+        const categoriaClassificada = classificarMaterialPorNome(compraItem.nomeProduto);
+        
         // Atualizar com o nome real do produto
         await prisma.material.update({
           where: { id: material.id },
           data: {
             nome: compraItem.nomeProduto,
             descricao: compraItem.nomeProduto,
-            categoria: 'Material Elétrico' // Atualizar categoria também
+            categoria: categoriaClassificada // ✅ Categoria classificada automaticamente
           }
         });
         console.log(`✅ Material ${material.id} atualizado: "${compraItem.nomeProduto}"`);

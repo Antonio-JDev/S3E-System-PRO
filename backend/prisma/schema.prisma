@@ -81,7 +81,8 @@ model PDFTemplate {
 model ConfiguracaoSistema {
   id              String   @id @default("sistema-config") // ID fixo para garantir registro único
   temaPreferido   String   @default("light") // light, dark, system
-  logoUrl         String? // URL da logo/perfil da empresa
+  logoUrl         String? // URL da logo/perfil da empresa (uso geral)
+  logoLoginUrl    String? // URL da logo específica para a página de login
   nomeEmpresa     String   @default("S3E Engenharia")
   emailContato    String?
   telefoneContato String?
@@ -147,6 +148,7 @@ model Material {
   tipo          String // Tipo do material
   categoria     String // MaterialEletrico, Insumo, Ferramenta
   descricao     String?
+  ncm           String? // Nomenclatura Comum do Mercosul (dado fiscal)
   estoque       Float   @default(0)
   estoqueMinimo Float   @default(5)
   unidadeMedida String  @default("un")
@@ -383,6 +385,7 @@ model Projeto {
   etapasAdmin  EtapaAdmin[]
   tarefasCampo TarefaCampo[]
   obra         Obra? // Relação 1:1 com Obra (quando projeto vai para execução)
+  documentos   ProjetoDocumento[]
 
   @@map("projetos")
 }
@@ -436,6 +439,26 @@ model Task {
   projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
 
   @@map("tasks")
+}
+
+model ProjetoDocumento {
+  id          String   @id @default(uuid())
+  projetoId   String
+  tipo        String // ART, TRT, PROJETO, MEMORIAL, CONTRATO, OUTRO
+  nome        String // Nome do arquivo original
+  nomeArquivo String // Nome do arquivo salvo no servidor
+  url         String // URL do arquivo (caminho relativo)
+  observacoes String?
+  tamanho     Int? // Tamanho do arquivo em bytes
+  mimeType    String? // Tipo MIME do arquivo
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@index([projetoId])
+  @@index([tipo])
+  @@map("projeto_documentos")
 }
 
 model TarefaCampo {

@@ -4,6 +4,9 @@ import { authenticate, authorize } from '../middlewares/auth';
 
 const router = Router();
 
+// NOTA: A rota /logo/:filename está definida diretamente no app.ts como pública
+// para garantir que funcione sem autenticação (necessário para página de login)
+
 // Todas as rotas requerem autenticação
 router.use(authenticate);
 
@@ -35,12 +38,22 @@ router.post('/upload-logo', authorize('admin'), uploadLogo, ConfiguracaoControll
  */
 router.get('/logos', authorize('admin'), ConfiguracaoController.listarLogos);
 
+// NOTA: A rota DELETE /logo/:filename está definida diretamente no app.ts
+// ANTES da rota GET pública para ter prioridade e garantir que funcione corretamente
+
 /**
  * @route PUT /api/configuracoes/logo
  * @desc Atualiza a logo da empresa selecionando uma logo existente
  * @access Admin only
  */
 router.put('/logo', authorize('admin'), ConfiguracaoController.atualizarLogo);
+
+/**
+ * @route PUT /api/configuracoes/logo-login
+ * @desc Atualiza a logo da página de login selecionando uma logo existente
+ * @access Admin only
+ */
+router.put('/logo-login', authorize('admin'), ConfiguracaoController.atualizarLogoLogin);
 
 /**
  * @route GET /api/configuracoes/usuarios

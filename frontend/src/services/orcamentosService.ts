@@ -255,19 +255,29 @@ class OrcamentosServiceClass {
   }
 
   /**
-   * Excluir orçamento
+   * Excluir orçamento (soft delete ou permanente)
+   * @param id - ID do orçamento
+   * @param permanent - Se true, exclui permanentemente (apenas dev/admin)
    */
-  async excluir(id: string) {
+  async excluir(id: string, permanent: boolean = false) {
     try {
-      console.log(`🗑️ Excluindo orçamento ${id}...`);
+      const action = permanent ? 'excluindo permanentemente' : 'excluindo';
+      console.log(`🗑️ ${action} orçamento ${id}...`);
       
-      const response = await axiosApiService.delete<void>(`/api/orcamentos/${id}`);
+      const url = permanent 
+        ? `/api/orcamentos/${id}?permanent=true`
+        : `/api/orcamentos/${id}`;
+      
+      const response = await axiosApiService.delete<void>(url);
       
       if (response.success) {
-        console.log('✅ Orçamento excluído com sucesso');
+        const message = permanent 
+          ? 'Orçamento excluído permanentemente do banco de dados'
+          : 'Orçamento cancelado com sucesso';
+        console.log(`✅ ${message}`);
         return {
           success: true,
-          message: 'Orçamento excluído com sucesso'
+          message
         };
       } else {
         console.warn('⚠️ Erro ao excluir orçamento:', response);

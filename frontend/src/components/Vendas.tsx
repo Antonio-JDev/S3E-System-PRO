@@ -6,6 +6,9 @@ import { BudgetStatus } from '../types';
 import { vendasService, type Venda, type DashboardVendas } from '../services/vendasService';
 import { orcamentosService } from '../services/orcamentosService';
 import { clientesService } from '../services/clientesService';
+import AlertDialog from './ui/AlertDialog';
+import ActionsDropdown from './ui/ActionsDropdown';
+import { canDelete } from '../utils/permissions';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -64,6 +67,11 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
 );
+const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+);
 const DocumentArrowDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m.75 12l3 3m0 0l3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -120,6 +128,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
     });
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Confirmação de venda
+    const [confirmVendaOpen, setConfirmVendaOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     
@@ -144,6 +155,14 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         vendas: any[];
         erros: string[];
     } | null>(null);
+
+    // Estados para busca e filtros de orçamentos
+    const [buscaOrcamento, setBuscaOrcamento] = useState('');
+    const [filtroCliente, setFiltroCliente] = useState('');
+
+    // Estados para exclusão
+    const [vendaToDelete, setVendaToDelete] = useState<Venda | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
     // Carregar dados iniciais
     const loadData = async () => {
@@ -274,6 +293,40 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         return orcamentosAprovados.find(orc => orc.id === vendaForm.orcamentoId) || null;
     }, [vendaForm.orcamentoId, orcamentosAprovados]);
 
+    // Orçamentos filtrados para exibição
+    const orcamentosFiltrados = useMemo(() => {
+        let filtrados = orcamentosAprovados;
+
+        // Filtro por busca (título, cliente, número)
+        if (buscaOrcamento.trim()) {
+            const buscaLower = buscaOrcamento.toLowerCase();
+            filtrados = filtrados.filter(orc => 
+                orc.titulo?.toLowerCase().includes(buscaLower) ||
+                orc.cliente?.nome?.toLowerCase().includes(buscaLower) ||
+                orc.numeroSequencial?.toString().includes(buscaLower) ||
+                orc.id?.toLowerCase().includes(buscaLower)
+            );
+        }
+
+        // Filtro por cliente
+        if (filtroCliente) {
+            filtrados = filtrados.filter(orc => orc.clienteId === filtroCliente);
+        }
+
+        return filtrados;
+    }, [orcamentosAprovados, buscaOrcamento, filtroCliente]);
+
+    // Lista de clientes únicos para filtro
+    const clientesUnicos = useMemo(() => {
+        const clientesMap = new Map();
+        orcamentosAprovados.forEach(orc => {
+            if (orc.cliente && !clientesMap.has(orc.cliente.id)) {
+                clientesMap.set(orc.cliente.id, orc.cliente);
+            }
+        });
+        return Array.from(clientesMap.values());
+    }, [orcamentosAprovados]);
+
     // Cálculos financeiros automáticos
     const calculosFinanceiros = useMemo(() => {
         const valorTotal = orcamentoSelecionado?.precoVenda || 0;
@@ -316,8 +369,42 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         'Boleto parcelado'
     ];
 
-    const handleSubmitVenda = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const getItemTipoVenda = (item: any) => String(item?.tipo || '').toUpperCase();
+    const getItemNomeVenda = (item: any): string => {
+        const tipo = getItemTipoVenda(item);
+        if ((tipo === 'COTACAO' || tipo === 'BANCO_FRIO') && (item.cotacao?.nome || item.nome)) {
+            return item.cotacao?.nome || item.nome;
+        }
+        if (tipo === 'MATERIAL' && (item.material?.nome || item.materialNome)) {
+            return item.material?.nome || item.materialNome;
+        }
+        if (tipo === 'KIT' && item.kit?.nome) {
+            return item.kit.nome;
+        }
+        if (tipo === 'SERVICO') {
+            return item.servicoNome || item.descricao || 'Serviço';
+        }
+        return item.nome || item.descricao || item.material?.nome || item.cotacao?.nome || 'Item';
+    };
+    const getItemDataBancoFrioVenda = (item: any): string | null => {
+        const tipo = getItemTipoVenda(item);
+        if (tipo === 'COTACAO' || tipo === 'BANCO_FRIO' || item.cotacaoId || item.cotacao) {
+            return (
+                item.cotacao?.dataAtualizacao ||
+                item.cotacao?.updatedAt ||
+                item.dataAtualizacaoCotacao ||
+                item.dataImportacao ||
+                item.cotacao?.createdAt ||
+                null
+            );
+        }
+        return null;
+    };
+
+    const handleSubmitVenda = async (e?: React.FormEvent) => {
+        if (e) {
+            e.preventDefault();
+        }
         if (!orcamentoSelecionado) return;
 
         setIsSubmitting(true);
@@ -348,7 +435,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
 
             if (response.success) {
                 console.log('✅ Venda realizada com sucesso');
-                toast.error(response.message || '✅ Venda registrada com sucesso!');
+                toast.success(response.message || '✅ Venda registrada com sucesso!');
                 
                 // Resetar formulário
                 setVendaForm({
@@ -396,6 +483,27 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    // Excluir venda
+    const handleDeleteVenda = async () => {
+        if (!vendaToDelete) return;
+
+        const response = await vendasService.excluir(vendaToDelete.id);
+        
+        if (response.success) {
+            toast.success('Venda excluída', {
+                description: `Venda do cliente "${vendaToDelete.cliente?.nome || 'N/A'}" foi excluída permanentemente`
+            });
+            await loadData();
+        } else {
+            toast.error('Erro ao excluir', {
+                description: response.error || 'Não foi possível excluir a venda'
+            });
+        }
+
+        setShowDeleteDialog(false);
+        setVendaToDelete(null);
     };
 
     // Funções de Exportação/Importação
@@ -765,61 +873,192 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            <form onSubmit={handleSubmitVenda} className="p-6 space-y-6">
-                {/* SEÇÃO 1: Seleção de Orçamento */}
+            <form
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!orcamentoSelecionado) {
+                        toast.error('Selecione um orçamento antes de registrar a venda.');
+                        return;
+                    }
+                    setConfirmVendaOpen(true);
+                }}
+                className="p-6 space-y-6"
+            >
+                {/* SEÇÃO 1: Seleção de Orçamento - Layout Otimizado */}
                 <div>
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📋</span>
                         Seleção do Orçamento/Projeto
                     </h3>
-                    <div className="bg-white border border-gray-200 rounded-xl p-6">
-                        {!vendaForm.orcamentoId && (
-                            <div className="mb-4 bg-blue-50 border-2 border-blue-300 rounded-xl p-4 flex items-start gap-3">
-                                <span className="text-2xl">ℹ️</span>
-                                <div>
-                                    <p className="text-sm font-semibold text-blue-900 mb-1">
-                                        Selecione um Orçamento para Começar
-                                    </p>
-                                    <p className="text-xs text-blue-700">
-                                        Após selecionar um orçamento aprovado, as demais seções do formulário (Informações do Projeto, Condições Financeiras, Documentos e Observações) serão exibidas automaticamente.
-                                    </p>
-                                </div>
+                    
+                    {orcamentosAprovados.length === 0 ? (
+                        <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-6 flex items-start gap-3">
+                            <span className="text-2xl">⚠️</span>
+                            <div>
+                                <p className="text-sm font-semibold text-orange-900 mb-1">
+                                    Nenhum Orçamento Aprovado Disponível
+                                </p>
+                                <p className="text-xs text-orange-700">
+                                    Para criar uma venda, você precisa primeiro aprovar um orçamento na página de <strong>Orçamentos</strong>. Vá até lá, selecione um orçamento em status "Pendente" e aprove-o para que ele apareça aqui.
+                                </p>
                             </div>
-                        )}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                    Orçamento Aprovado *
-                                </label>
-                                <select
-                                    value={vendaForm.orcamentoId}
-                                    onChange={(e) => setVendaForm({...vendaForm, orcamentoId: e.target.value})}
-                                    required
-                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                                >
-                                    <option value="">Selecione um orçamento aprovado para converter em venda</option>
-                                    {orcamentosAprovados.map(orc => (
-                                        <option key={orc.id} value={orc.id}>
-                                            {orc.titulo} - {orc.cliente?.nome} - R$ {orc.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </option>
-                                    ))}
-                                </select>
-                                {orcamentosAprovados.length === 0 && (
-                                    <div className="mt-3 bg-orange-50 border-2 border-orange-300 rounded-xl p-4 flex items-start gap-3">
-                                        <span className="text-2xl">⚠️</span>
-                                        <div>
-                                            <p className="text-sm font-semibold text-orange-900 mb-1">
-                                                Nenhum Orçamento Aprovado Disponível
-                                            </p>
-                                            <p className="text-xs text-orange-700">
-                                                Para criar uma venda, você precisa primeiro aprovar um orçamento na página de <strong>Orçamentos</strong>. Vá até lá, selecione um orçamento em status "Pendente" e aprove-o para que ele apareça aqui.
-                                            </p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Painel de Busca e Filtros - Lado Esquerdo */}
+                            <div className="lg:col-span-1 space-y-4">
+                                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-5">
+                                    <h4 className="text-sm font-bold text-blue-900 mb-4 flex items-center gap-2">
+                                        <MagnifyingGlassIcon className="w-5 h-5" />
+                                        Buscar Orçamento
+                                    </h4>
+                                    
+                                    {/* Campo de Busca */}
+                                    <div className="mb-4">
+                                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                            🔍 Pesquisar
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={buscaOrcamento}
+                                                onChange={(e) => setBuscaOrcamento(e.target.value)}
+                                                placeholder="Título, cliente, número..."
+                                                className="w-full px-4 py-3 pl-10 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                            />
+                                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                                         </div>
+                                    </div>
+
+                                    {/* Filtro por Cliente */}
+                                    {clientesUnicos.length > 0 && (
+                                        <div>
+                                            <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                                👤 Filtrar por Cliente
+                                            </label>
+                                            <select
+                                                value={filtroCliente}
+                                                onChange={(e) => setFiltroCliente(e.target.value)}
+                                                className="w-full px-4 py-3 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                            >
+                                                <option value="">Todos os clientes</option>
+                                                {clientesUnicos.map(cliente => (
+                                                    <option key={cliente.id} value={cliente.id}>
+                                                        {cliente.nome}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {/* Estatísticas */}
+                                    <div className="mt-4 pt-4 border-t border-blue-200">
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="text-gray-600">Total encontrado:</span>
+                                            <span className="font-bold text-blue-700">{orcamentosFiltrados.length} de {orcamentosAprovados.length}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {!vendaForm.orcamentoId && (
+                                    <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-4">
+                                        <p className="text-xs text-blue-800 font-medium">
+                                            💡 <strong>Dica:</strong> Use a busca para encontrar rapidamente o orçamento desejado. Clique em um card para selecionar.
+                                        </p>
                                     </div>
                                 )}
                             </div>
+
+                            {/* Lista de Orçamentos - Lado Direito */}
+                            <div className="lg:col-span-2">
+                                <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
+                                    <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                        <span>📋</span>
+                                        Orçamentos Aprovados ({orcamentosFiltrados.length})
+                                    </h4>
+                                    
+                                    {orcamentosFiltrados.length === 0 ? (
+                                        <div className="text-center py-12">
+                                            <p className="text-gray-500 font-medium mb-2">Nenhum orçamento encontrado</p>
+                                            <p className="text-sm text-gray-400">Tente ajustar os filtros de busca</p>
+                                        </div>
+                                    ) : (
+                                        <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                            {orcamentosFiltrados.map((orcamento) => {
+                                                const isSelecionado = vendaForm.orcamentoId === orcamento.id;
+                                                return (
+                                                    <div
+                                                        key={orcamento.id}
+                                                        onClick={() => setVendaForm({...vendaForm, orcamentoId: orcamento.id})}
+                                                        className={`p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
+                                                            isSelecionado
+                                                                ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-400 shadow-md'
+                                                                : 'bg-gray-50 border-gray-200 hover:border-green-300'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 mb-2">
+                                                                    <h5 className={`font-bold text-lg truncate ${isSelecionado ? 'text-green-800' : 'text-gray-900'}`}>
+                                                                        {orcamento.titulo || 'Sem título'}
+                                                                    </h5>
+                                                                    {isSelecionado && (
+                                                                        <span className="px-2 py-1 bg-green-500 text-white text-xs font-bold rounded-lg">
+                                                                            ✓ Selecionado
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                
+                                                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                                                    <div>
+                                                                        <span className="text-gray-600">Cliente:</span>
+                                                                        <p className="font-semibold text-gray-900">{orcamento.cliente?.nome || 'N/A'}</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-gray-600">Nº Orçamento:</span>
+                                                                        <p className="font-mono text-gray-900">#{orcamento.numeroSequencial || orcamento.id?.slice(0, 8)}</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-gray-600">Itens:</span>
+                                                                        <p className="font-semibold text-gray-900">{orcamento.items?.length || 0} item(s)</p>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span className="text-gray-600">Data:</span>
+                                                                        <p className="text-gray-900">
+                                                                            {new Date(orcamento.createdAt || orcamento.dataCriacao || Date.now()).toLocaleDateString('pt-BR')}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div className="text-right">
+                                                                <p className="text-2xl font-bold text-green-600">
+                                                                    R$ {(orcamento.precoVenda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </p>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setVendaForm({...vendaForm, orcamentoId: orcamento.id});
+                                                                    }}
+                                                                    className={`mt-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                                                                        isSelecionado
+                                                                            ? 'bg-green-600 text-white'
+                                                                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                                                    }`}
+                                                                >
+                                                                    {isSelecionado ? '✓ Selecionado' : 'Selecionar'}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* SEÇÃO 2: Informações do Projeto (Read-Only) */}
@@ -903,11 +1142,15 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         
                                         {/* Linhas de Itens */}
                                         <div className="divide-y divide-gray-200">
-                                            {orcamentoSelecionado.items.map((item: any, index: number) => (
+                                            {orcamentoSelecionado.items.map((item: any, index: number) => {
+                                                const nomeItem = getItemNomeVenda(item);
+                                                const dataFrio = getItemDataBancoFrioVenda(item);
+                                                const isBancoFrio = getItemTipoVenda(item) === 'COTACAO' || getItemTipoVenda(item) === 'BANCO_FRIO' || item.cotacaoId || item.cotacao;
+                                                return (
                                                 <div key={index} className="px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 transition-colors">
                                                     <div className="col-span-5">
-                                                        <p className="font-semibold text-gray-900">{item.nome || item.descricao || item.material?.nome || item.material?.descricao || item.servicoNome || 'Material'}</p>
-                                                        {item.descricao && item.nome && (
+                                                        <p className="font-semibold text-gray-900">{nomeItem}</p>
+                                                        {item.descricao && item.descricao !== nomeItem && (
                                                             <p className="text-xs text-gray-500 mt-1">{item.descricao}</p>
                                                         )}
                                                         {item.sku && (
@@ -916,10 +1159,15 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                             </span>
                                                         )}
                                                         {/* Flag de Banco Frio */}
-                                                        {(item.tipo === 'COTACAO' || item.cotacaoId) && (
+                                                        {isBancoFrio && (
                                                             <div className="mt-1 inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">
                                                                 <span>❄️</span>
                                                                 <span>Banco Frio</span>
+                                                                {dataFrio && (
+                                                                    <span className="text-blue-500">
+                                                                        • {new Date(dataFrio).toLocaleDateString('pt-BR')}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         )}
                                                     </div>
@@ -954,7 +1202,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                         </span>
                                                     </div>
                                                 </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
 
                                         {/* Footer com Total */}
@@ -1257,9 +1506,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         {venda.status}
                                     </span>
                                 </div>
-                                <div className="flex justify-end">
+                                <div className="flex justify-end gap-2">
                                     <button
-
                                         onClick={() => abrirModalVisualizarVendaCompleto(venda)}
                                         className="px-4 py-2 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-semibold flex items-center gap-2"
                                         title="Visualizar detalhes da venda"
@@ -1267,6 +1515,19 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         <EyeIcon className="w-5 h-5" />
                                         Visualizar
                                     </button>
+                                    {canDelete(user) && (
+                                        <button
+                                            onClick={() => {
+                                                setVendaToDelete(venda);
+                                                setShowDeleteDialog(true);
+                                            }}
+                                            className="px-4 py-2 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 transition-all font-semibold flex items-center gap-2"
+                                            title="Excluir venda (apenas Desenvolvedor/Administrador)"
+                                        >
+                                            <TrashIcon className="w-5 h-5" />
+                                            Excluir
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1555,51 +1816,49 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
                 <div className="flex gap-3">
-                    <button
-                        onClick={loadData}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-semibold disabled:opacity-50"
-                        title="Recarregar dados"
-                    >
-                        <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        {loading ? 'Carregando...' : 'Atualizar'}
-                    </button>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={handleExportTemplate}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all font-semibold shadow-md"
-                            title="Exportar template vazio para preenchimento"
-                        >
-                            <DocumentArrowDownIcon className="w-5 h-5" />
-                            Template
-                        </button>
-                        <button
-                            onClick={handleExportData}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                            disabled={vendas.length === 0}
-                            title="Exportar todas as vendas"
-                        >
-                            <DocumentArrowDownIcon className="w-5 h-5" />
-                            Exportar
-                        </button>
-                        <button
-                            onClick={handleImportClick}
-                            disabled={importing}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white rounded-xl hover:from-emerald-700 hover:to-emerald-600 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                            title="Importar vendas do arquivo JSON"
-                        >
-                            <DocumentArrowUpIcon className="w-5 h-5" />
-                            {importing ? 'Importando...' : 'Importar'}
-                        </button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".json"
-                            onChange={handleImportFile}
-                            style={{ display: 'none' }}
-                        />
+                    <ActionsDropdown
+                        actions={[
+                            {
+                                label: loading ? 'Carregando...' : 'Atualizar',
+                                onClick: loadData,
+                                icon: (
+                                    <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ),
+                                disabled: loading,
+                                variant: 'info'
+                            },
+                            {
+                                label: 'Template',
+                                onClick: handleExportTemplate,
+                                icon: <DocumentArrowDownIcon className="w-4 h-4" />,
+                                variant: 'primary'
+                            },
+                            {
+                                label: 'Exportar',
+                                onClick: handleExportData,
+                                icon: <DocumentArrowDownIcon className="w-4 h-4" />,
+                                disabled: vendas.length === 0,
+                                variant: 'info'
+                            },
+                            {
+                                label: importing ? 'Importando...' : 'Importar',
+                                onClick: handleImportClick,
+                                icon: <DocumentArrowUpIcon className="w-4 h-4" />,
+                                disabled: importing,
+                                variant: 'success'
+                            }
+                        ]}
+                        label="Ações"
+                    />
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportFile}
+                        style={{ display: 'none' }}
+                    />
                     <button
                         onClick={() => setActiveTab('nova')}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
@@ -1607,7 +1866,6 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                         <PlusIcon className="w-5 h-5" />
                         Nova Venda
                     </button>
-                    </div>
                 </div>
             </header>
 
@@ -2115,6 +2373,36 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             )}
+
+            {/* AlertDialog de Confirmação de Venda */}
+            <AlertDialog
+                isOpen={confirmVendaOpen}
+                onClose={() => setConfirmVendaOpen(false)}
+                onConfirm={async () => {
+                    await handleSubmitVenda();
+                    setConfirmVendaOpen(false);
+                }}
+                title="Validou os dados do orçamento? Confirmar venda?"
+                message="Esta venda será registrada com base no orçamento selecionado e nas condições financeiras definidas. Confirme se todos os dados estão corretos antes de prosseguir."
+                confirmText="Confirmar Venda"
+                cancelText="Cancelar"
+                variant="info"
+            />
+
+            {/* AlertDialog de Confirmação de Exclusão */}
+            <AlertDialog
+                isOpen={showDeleteDialog}
+                onClose={() => {
+                    setShowDeleteDialog(false);
+                    setVendaToDelete(null);
+                }}
+                onConfirm={handleDeleteVenda}
+                title={`Excluir venda do cliente "${vendaToDelete?.cliente?.nome || 'N/A'}"?`}
+                message={`Tem certeza que deseja excluir permanentemente esta venda? Esta ação não pode ser desfeita.`}
+                confirmText="Excluir Permanentemente"
+                cancelText="Cancelar"
+                variant="danger"
+            />
         </div>
     );
 };

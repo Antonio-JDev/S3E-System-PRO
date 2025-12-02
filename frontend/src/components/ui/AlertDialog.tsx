@@ -9,6 +9,7 @@ interface AlertDialogProps {
     confirmText?: string;
     cancelText?: string;
     variant?: 'info' | 'warning' | 'danger' | 'success';
+    children?: React.ReactNode;
 }
 
 const AlertDialog: React.FC<AlertDialogProps> = ({
@@ -19,7 +20,8 @@ const AlertDialog: React.FC<AlertDialogProps> = ({
     message,
     confirmText = 'Confirmar',
     cancelText = 'Cancelar',
-    variant = 'info'
+    variant = 'info',
+    children
 }) => {
     if (!isOpen) return null;
 
@@ -71,11 +73,15 @@ const AlertDialog: React.FC<AlertDialogProps> = ({
                     </div>
                 </div>
 
-                {/* Message */}
+                {/* Message / Custom Body */}
                 <div className="p-6">
-                    <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
-                        {message}
-                    </p>
+                    {children ? (
+                        children
+                    ) : (
+                        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                            {message}
+                        </p>
+                    )}
                 </div>
 
                 {/* Buttons */}

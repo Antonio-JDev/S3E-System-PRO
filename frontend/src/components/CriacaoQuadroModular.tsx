@@ -1836,25 +1836,6 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                         </div>
                     </div>
                     
-                    {/* Informação sobre Fonte de Dados */}
-                    <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border-2 border-white/20">
-                        <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                                <p className="text-sm font-semibold text-white mb-1">💡 Fonte de Dados</p>
-                                <p className="text-xs text-gray-200">
-                                    Você pode selecionar itens tanto do <strong className="text-white">estoque real</strong> quanto do <strong className="text-white">banco frio (cotações)</strong> em qualquer etapa.
-                                    Itens do banco frio serão marcados com ❄️ e precisam ser comprados antes de usar o quadro em obras.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="mt-3 p-3 bg-yellow-500/20 border border-yellow-400/30 rounded-lg">
-                            <p className="text-sm text-yellow-100">
-                                <strong>⚠️ Atenção:</strong> Itens de cotações (banco frio) não estão em estoque físico. 
-                                Será necessário realizar a compra antes de iniciar o projeto.
-                            </p>
-                        </div>
-                    </div>
-                    
                     {/* Barra de progresso */}
                     <div className="flex gap-2 mt-4">
                         {ETAPAS.map((etapa) => (

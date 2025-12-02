@@ -45,6 +45,36 @@ export interface ParsedXMLData {
 
 class ComprasService {
   /**
+   * Excluir compra permanentemente
+   */
+  async excluir(id: string) {
+    try {
+      console.log(`🗑️ Excluindo compra ${id}...`);
+      
+      const response = await axiosApiService.delete<void>(`/api/compras/${id}`);
+      
+      if (response.success) {
+        console.log('✅ Compra excluída com sucesso');
+        return {
+          success: true,
+          message: 'Compra excluída permanentemente'
+        };
+      } else {
+        console.warn('⚠️ Erro ao excluir compra:', response);
+        return {
+          success: false,
+          error: response.error || 'Erro ao excluir compra'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao excluir compra:', error);
+      return {
+        success: false,
+        error: 'Erro de conexão ao excluir compra'
+      };
+    }
+  }
+  /**
    * Converte o DTO do backend em um PurchaseOrder usado na UI
    */
   mapCompraToPurchaseOrder(compraDTO: any): PurchaseOrder {
@@ -56,14 +86,19 @@ class ComprasService {
       invoiceNumber: compraDTO.numeroNF || compraDTO.invoiceNumber,
       status: (compraDTO.status as any) || 'Pendente',
       items: (compraDTO.items || compraDTO.itens || []).map((it: any) => ({
+        id: it.id, // ✅ CRÍTICO: Preservar o ID do CompraItem para processamento no backend
         productId: it.materialId || it.productId || it.id || '',
         productName: it.nomeProduto || it.productName || it.nome || 'Item',
         quantity: it.quantidade || it.quantity || 0,
         unitCost: it.valorUnit || it.precoUnitario || it.unitCost || 0,
-        totalCost: (it.quantidade || it.quantity || 0) * (it.valorUnit || it.precoUnitario || it.unitCost || 0)
+        totalCost: (it.quantidade || it.quantity || 0) * (it.valorUnit || it.precoUnitario || it.unitCost || 0),
+        materialId: it.materialId, // Preservar materialId também
+        nomeProduto: it.nomeProduto || it.productName || it.nome // Preservar nome original
       })),
       totalAmount: compraDTO.valorTotal || compraDTO.totalAmount || 0,
-      notes: compraDTO.observacoes || compraDTO.notes || ''
+      notes: compraDTO.observacoes || compraDTO.notes || '',
+      // Data de recebimento real da remessa, quando já recebida
+      dataRecebimento: compraDTO.dataRecebimento || compraDTO.dataEntregaReal || null
     } as PurchaseOrder;
   }
   /**
@@ -118,12 +153,13 @@ class ComprasService {
   async receberRemessaParcial(
     id: string, 
     status: 'Pendente' | 'Aprovado' | 'Recebido' | 'Cancelado', 
-    dataEntregaReal: string,
+    dataRecebimento: string,
     produtoIds: string[]
   ) {
+    // ✅ CORREÇÃO: Backend espera dataEntregaReal, mas semanticamente é dataRecebimento
     return axiosApiService.put<Compra>(`/api/compras/${id}/receber-parcial`, { 
       status,
-      dataEntregaReal,
+      dataEntregaReal: dataRecebimento, // Backend usa dataEntregaReal mas é a data de recebimento
       produtoIds
     });
   }

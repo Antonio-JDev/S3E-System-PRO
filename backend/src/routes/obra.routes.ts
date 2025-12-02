@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { ObraController } from '../controllers/obraController';
+import { AlocacaoMateriaisController } from '../controllers/alocacaoMateriaisController';
 import { authenticate, authorize } from '../middlewares/auth';
 
 const router = Router();
@@ -42,6 +43,22 @@ router.get('/projeto/:projetoId', ObraController.getObraPorProjeto);
  * @access Authenticated
  */
 router.get('/verificar-estoque/:projetoId', ObraController.verificarEstoque);
+
+/**
+ * @route POST /api/obras/:obraId/materiais/alocar
+ * @desc Aloca um material do estoque para uma obra
+ * @access Authenticated
+ * IMPORTANTE: Esta rota deve vir ANTES de /:id para evitar conflito de roteamento
+ */
+router.post('/:obraId/materiais/alocar', AlocacaoMateriaisController.alocarMaterialParaObra);
+
+/**
+ * @route GET /api/obras/:obraId/materiais
+ * @desc Lista todos os materiais alocados para uma obra
+ * @access Authenticated
+ * IMPORTANTE: Esta rota deve vir ANTES de /:id para evitar conflito de roteamento
+ */
+router.get('/:obraId/materiais', AlocacaoMateriaisController.listarMateriaisObra);
 
 /**
  * @route GET /api/obras/:id

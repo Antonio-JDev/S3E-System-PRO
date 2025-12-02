@@ -6,6 +6,7 @@ export interface Material {
   codigo: string;
   descricao: string;
   unidade: string;
+  ncm?: string; // Nomenclatura Comum do Mercosul (dado fiscal)
 
   preco: number; // Preço de custo (última compra)
   valorVenda?: number; // Preço de venda (usado em orçamentos)
@@ -191,11 +192,16 @@ class MateriaisService {
   /**
    * Deletar material
    */
-  async deleteMaterial(id: string) {
+  async deleteMaterial(id: string, permanent: boolean = false) {
     try {
-      console.log('🗑️ Deletando material:', id);
+      console.log('🗑️ Deletando material:', id, permanent ? '(permanente)' : '(soft delete)');
       
-      const response = await axiosApiService.delete<void>(`${ENDPOINTS.MATERIAIS}/${id}`);
+      // ✅ CORREÇÃO: Passar ?permanent=true para exclusão permanente
+      const url = permanent 
+        ? `${ENDPOINTS.MATERIAIS}/${id}?permanent=true`
+        : `${ENDPOINTS.MATERIAIS}/${id}`;
+      
+      const response = await axiosApiService.delete<void>(url);
       
       if (response.success) {
         console.log('✅ Material deletado com sucesso');

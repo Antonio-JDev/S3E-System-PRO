@@ -22,7 +22,6 @@ import protectedRoutes from './routes/protected.routes';
 import alocacaoRoutes from './routes/alocacao.routes';
 import equipesRoutes from './routes/equipes.routes';
 import alocacoesEquipeRoutes from './routes/alocacoes';
-import etapasAdminRoutes from './routes/etapasAdmin.routes';
 import clientesRoutes from './routes/clientes';
 import fornecedoresRoutes from './routes/fornecedores';
 import projetosRoutes from './routes/projetos';
@@ -80,19 +79,71 @@ app.use(helmet({
 app.use(cors(corsOptions));
 app.use(morgan('dev'));
 
-// Servir arquivos estáticos (uploads) com CORS habilitado
-// No Docker, process.cwd() é /app, então /app/uploads
-// Em desenvolvimento local, pode ser backend/ ou raiz do projeto
-const cwd = process.cwd();
-let uploadsPath = path.join(cwd, 'uploads');
+// ROTA DELETE: Deletar logos (DEVE VIR ANTES da rota GET para ter prioridade)
+// Esta rota requer autenticação de admin
+app.delete('/api/configuracoes/logo/:filename', async (req, res) => {
+  console.log('🗑️  Rota DELETE de logo chamada:', req.params.filename);
+  try {
+    // Importar middlewares de autenticação
+    const { authenticate, authorize } = await import('./middlewares/auth');
+    
+    // Aplicar autenticação primeiro
+    authenticate(req, res, () => {
+      // Depois aplicar autorização de admin
+      authorize('admin')(req, res, async () => {
+        try {
+          const { ConfiguracaoController } = await import('./controllers/configuracaoController');
+          await ConfiguracaoController.deletarLogo(req, res);
+        } catch (error: any) {
+          console.error('❌ Erro ao deletar logo:', error);
+          if (!res.headersSent) {
+            res.status(500).json({ success: false, message: 'Erro ao deletar logo', error: error.message });
+          }
+        }
+      });
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao processar delete logo:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Erro ao processar requisição', error: error.message });
+    }
+  }
+});
 
-// Verificar se o diretório existe, se não, tentar alternativas
-if (!fs.existsSync(uploadsPath)) {
-  const altPath = path.join(cwd, 'backend', 'uploads');
-  if (fs.existsSync(altPath)) {
-    uploadsPath = altPath;
+// ROTA PÚBLICA: Servir logos (DEVE VIR DEPOIS da rota DELETE)
+// Esta rota é pública para funcionar na página de login e em outros contextos sem autenticação
+// IMPORTANTE: Esta rota funciona tanto em localhost quanto em produção (IP ou domínio)
+app.get('/api/configuracoes/logo/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const { ConfiguracaoController } = await import('./controllers/configuracaoController');
+    await ConfiguracaoController.servirLogo(req, res);
+  } catch (error: any) {
+    console.error('Erro ao servir logo:', error);
+    res.status(500).json({ success: false, message: 'Erro ao servir logo', error: error.message });
+  }
+});
+
+// Servir arquivos estáticos (uploads) com CORS habilitado
+// Em produção (Docker), process.cwd() será /app e o volume está mapeado em /app/uploads
+// Em desenvolvimento local, usamos backend/uploads
+const cwd = process.cwd();
+let uploadsPath: string;
+
+if (cwd.endsWith('backend')) {
+  // Ambiente de desenvolvimento: backend/ é o CWD
+  uploadsPath = path.join(cwd, 'uploads');
+} else {
+  // Ambiente Docker/raiz do monorepo: garantir o uso de /app/uploads (volume) ou backend/uploads
+  const dockerUploads = path.join(cwd, 'uploads');
+  const localBackendUploads = path.join(cwd, 'backend', 'uploads');
+
+  if (fs.existsSync(dockerUploads)) {
+    uploadsPath = dockerUploads;
+  } else if (fs.existsSync(localBackendUploads)) {
+    uploadsPath = localBackendUploads;
   } else {
-    // Criar o diretório se não existir (Docker)
+    uploadsPath = dockerUploads;
     fs.mkdirSync(uploadsPath, { recursive: true });
   }
 }
@@ -100,11 +151,11 @@ if (!fs.existsSync(uploadsPath)) {
 console.log('📁 Servindo uploads de:', uploadsPath);
 
 // Middleware para adicionar headers CORS aos arquivos estáticos
+// IMPORTANTE: Permitir qualquer origem para uploads (incluindo IPs em produção)
 app.use('/uploads', (req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
+  // Permitir qualquer origem para uploads (funciona com IPs em produção)
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -121,7 +172,8 @@ const uploadRoutes = [
   '/api/materiais/importar-precos',
   '/api/cotacoes/importar',
   '/api/configuracoes/upload-logo',
-  '/api/obras/tarefas/resumo' // Rota de upload de fotos de tarefas
+  '/api/obras/tarefas/resumo', // Rota de upload de fotos de tarefas
+  '/api/projetos' // Rotas de upload de documentos de projetos
 ];
 
 // Body parsers COM EXCEÇÃO para rotas de upload (apenas se for multipart/form-data)
@@ -204,7 +256,6 @@ app.use('/api/configuracoes-fiscais', configFiscalRoutes);
 app.use('/api/obras', alocacaoRoutes);
 app.use('/api/equipes', equipesRoutes);
 app.use('/api/alocacoes', alocacoesEquipeRoutes);
-app.use('/api/projetos/etapas-admin', etapasAdminRoutes);
 app.use('/api/pessoas', pessoasRoutes);
 app.use('/api/clientes', clientesRoutes);
 app.use('/api/fornecedores', fornecedoresRoutes);

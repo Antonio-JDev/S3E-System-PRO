@@ -1,15 +1,40 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
 import { DEFAULT_LOGO_URL, COMPANY_NAME, SYSTEM_NAME } from '../config/constants';
+import { getUploadUrl } from '../config/api';
+import { configuracoesService } from '../services/configuracoesService';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loginLogoUrl, setLoginLogoUrl] = useState<string | null>(null);
+  const [showFallback, setShowFallback] = useState(false);
   const { login, isLoading: authLoading } = useContext(AuthContext)!;
   const navigate = useNavigate();
+
+  // Carregar logo da página de login ao montar o componente
+  useEffect(() => {
+    const loadLoginLogo = async () => {
+      try {
+        const response = await configuracoesService.getConfiguracoes();
+        if (response.success && response.data?.logoLoginUrl) {
+          setLoginLogoUrl(response.data.logoLoginUrl);
+        } else {
+          // Se não houver logo, mostrar fallback
+          setShowFallback(true);
+        }
+      } catch (error) {
+        console.error('Erro ao carregar logo da página de login:', error);
+        // Em caso de erro, mostrar fallback
+        setShowFallback(true);
+      }
+    };
+
+    loadLoginLogo();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,29 +70,41 @@ const Login: React.FC = () => {
         <div className="text-center mb-8 animate-fade-in">
           {/* Logo da Empresa */}
           <div className="inline-flex items-center justify-center mb-[2px]">
-            <img 
-              src={DEFAULT_LOGO_URL}
-              alt={COMPANY_NAME}
-              className="h-40 w-auto object-contain drop-shadow-2xl"
-              crossOrigin="anonymous"
-              onLoad={() => console.log('✅ Logo carregada com sucesso')}
-              onError={(e) => {
-                console.error('❌ Erro ao carregar logo:', DEFAULT_LOGO_URL);
-                console.log('Tentando URL alternativa...');
-                // Tentar URL relativa através do proxy
-                const target = e.currentTarget;
-                if (!target.src.includes('/api/uploads')) {
-                  target.src = '/api/uploads/logos/logo-branca.png';
-                } else {
-                  // Se ainda falhar, mostrar fallback
-                  target.style.display = 'none';
-                  const fallback = document.createElement('div');
-                  fallback.className = 'text-white text-5xl font-bold tracking-wider drop-shadow-lg';
-                  fallback.textContent = 'S3E ENGENHARIA';
-                  target.parentElement!.appendChild(fallback);
-                }
-              }}
-            />
+            {loginLogoUrl && !showFallback ? (
+              <img 
+                src={getUploadUrl(loginLogoUrl)}
+                alt={COMPANY_NAME}
+                className="h-40 w-auto object-contain drop-shadow-2xl"
+                crossOrigin="anonymous"
+                onLoad={() => {
+                  console.log('✅ Logo da página de login carregada com sucesso');
+                  setShowFallback(false);
+                }}
+                onError={(e) => {
+                  console.error('❌ Erro ao carregar logo da página de login:', getUploadUrl(loginLogoUrl));
+                  const target = e.currentTarget;
+                  // Tentar URL alternativa usando endpoint específico
+                  const filename = loginLogoUrl.split('/').pop() || loginLogoUrl;
+                  const alternativeUrl = import.meta.env.VITE_API_URL 
+                    ? `${import.meta.env.VITE_API_URL}/api/configuracoes/logo/${filename}`
+                    : `/api/configuracoes/logo/${filename}`;
+                  
+                  if (!target.src.includes('/api/configuracoes/logo/')) {
+                    console.log('🔄 Tentando URL alternativa:', alternativeUrl);
+                    target.src = alternativeUrl;
+                  } else {
+                    // Se ainda falhar, mostrar fallback
+                    console.log('⚠️ Exibindo fallback "S3E ENGENHARIA"');
+                    target.style.display = 'none';
+                    setShowFallback(true);
+                  }
+                }}
+              />
+            ) : (
+              <div className="text-white text-5xl font-bold tracking-wider drop-shadow-lg">
+                S3E ENGENHARIA
+              </div>
+            )}
           </div>
           <p className="text-blue-200 text-lg font-medium tracking-wide">{SYSTEM_NAME}</p>
         </div>

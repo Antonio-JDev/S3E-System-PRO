@@ -1,7 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useContext } from 'react';
 import { toast } from 'sonner';
 import { clientesService, type Cliente, type CreateClienteData } from '../services/clientesService';
-
+import { AuthContext } from '../contexts/AuthContext';
+import { canDelete } from '../utils/permissions';
+import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
 // ==================== ICONS ====================
@@ -46,6 +48,8 @@ interface ClientesProps {
 }
 
 const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
+    const { user } = useContext(AuthContext)!;
+    
     const [clientes, setClientes] = useState<Cliente[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -56,6 +60,8 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [clienteToEdit, setClienteToEdit] = useState<Cliente | null>(null);
     const [clienteToDelete, setClienteToDelete] = useState<Cliente | null>(null);
+    const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [deletePermanent, setDeletePermanent] = useState(false); // true = permanente, false = soft delete
 
     const [formState, setFormState] = useState<CreateClienteData>({
         nome: '',
@@ -185,24 +191,33 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
         if (!clienteToDelete) return;
         
         try {
-            console.log(`🗑️ Desativando cliente ${clienteToDelete.id}...`);
+            const action = deletePermanent ? 'Excluindo permanentemente' : 'Desativando';
+            console.log(`🗑️ ${action} cliente ${clienteToDelete.id}...`);
             
-            const response = await clientesService.desativar(clienteToDelete.id);
+            const response = await clientesService.desativar(clienteToDelete.id, deletePermanent);
             
             if (response.success) {
-                console.log('✅ Cliente desativado com sucesso');
+                console.log('✅ Cliente processado com sucesso');
+                const message = deletePermanent 
+                    ? `Cliente "${clienteToDelete.nome}" foi excluído permanentemente do banco de dados`
+                    : `Cliente "${clienteToDelete.nome}" foi desativado com sucesso`;
+                toast.success(deletePermanent ? 'Cliente excluído' : 'Cliente desativado', {
+                    description: message
+                });
                 await loadClientes();
-                setClienteToDelete(null);
-                toast.success('Cliente desativado!', { description: 'O cliente foi desativado com sucesso' });
             } else {
-                const errorMsg = response.error || 'Erro ao desativar cliente';
-                console.warn('⚠️ Erro ao desativar:', errorMsg);
-                toast.error('Erro ao desativar', { description: errorMsg });
+                const errorMsg = response.error || 'Erro ao processar cliente';
+                console.warn('⚠️ Erro:', errorMsg);
+                toast.error('Erro ao excluir', { description: errorMsg });
             }
         } catch (err) {
-            console.error('❌ Erro crítico ao desativar:', err);
-            toast.error('Erro de conexão', { description: 'Não foi possível desativar o cliente' });
+            console.error('❌ Erro crítico:', err);
+            toast.error('Erro de conexão', { description: 'Não foi possível excluir o cliente' });
         }
+        
+        setShowDeleteDialog(false);
+        setClienteToDelete(null);
+        setDeletePermanent(false);
     };
 
     const handleReativar = async (cliente: Cliente) => {
@@ -441,13 +456,49 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                                             <PencilIcon className="w-4 h-4" />
                                             Editar
                                         </button>
-                                        <button
-                                            onClick={() => setClienteToDelete(cliente)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                        >
-                                            <TrashIcon className="w-4 h-4" />
-                                            Desativar
-                                        </button>
+                                        {canDelete(user) ? (
+                                            // Desenvolvedor/Admin: dois botões
+                                            <>
+                                                <button
+                                                    onClick={() => {
+                                                        setClienteToDelete(cliente);
+                                                        setDeletePermanent(false);
+                                                        setShowDeleteDialog(true);
+                                                    }}
+                                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
+                                                    title="Desativar cliente (pode ser reativado)"
+                                                >
+                                                    <ArrowPathIcon className="w-4 h-4" />
+                                                    Desativar
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setClienteToDelete(cliente);
+                                                        setDeletePermanent(true);
+                                                        setShowDeleteDialog(true);
+                                                    }}
+                                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                    title="Excluir permanentemente do banco de dados"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                    Excluir
+                                                </button>
+                                            </>
+                                        ) : (
+                                            // Outros usuários: apenas desativar
+                                            <button
+                                                onClick={() => {
+                                                    setClienteToDelete(cliente);
+                                                    setDeletePermanent(false);
+                                                    setShowDeleteDialog(true);
+                                                }}
+                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
+                                                title="Desativar cliente"
+                                            >
+                                                <ArrowPathIcon className="w-4 h-4" />
+                                                Desativar
+                                            </button>
+                                        )}
                                     </>
                                 ) : (
                                     <button
@@ -659,31 +710,25 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
             )}
 
             {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
-            {clienteToDelete && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-md w-full p-6">
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">Desativar Cliente</h3>
-                        <p className="text-gray-600 mb-6">
-                            Tem certeza que deseja desativar o cliente <strong>"{clienteToDelete.nome}"</strong>? 
-                            O cliente ficará inativo mas poderá ser reativado futuramente.
-                        </p>
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setClienteToDelete(null)}
-                                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 font-semibold"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={handleDelete}
-                                className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold"
-                            >
-                                Desativar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* AlertDialog de Confirmação de Exclusão */}
+            <AlertDialog
+                isOpen={showDeleteDialog}
+                onClose={() => {
+                    setShowDeleteDialog(false);
+                    setClienteToDelete(null);
+                    setDeletePermanent(false);
+                }}
+                onConfirm={handleDelete}
+                title={deletePermanent 
+                    ? `Excluir permanentemente cliente "${clienteToDelete?.nome || 'N/A'}"?`
+                    : `Desativar cliente "${clienteToDelete?.nome || 'N/A'}"?`}
+                message={deletePermanent 
+                    ? `Tem certeza que deseja excluir permanentemente o cliente "${clienteToDelete?.nome}"? Esta ação não pode ser desfeita e removerá o registro do banco de dados.`
+                    : `Tem certeza que deseja desativar este cliente? O cliente ficará inativo mas poderá ser reativado futuramente.`}
+                confirmText={deletePermanent ? "Excluir Permanentemente" : "Desativar"}
+                cancelText="Cancelar"
+                variant={deletePermanent ? "danger" : "warning"}
+            />
         </div>
     );
 };

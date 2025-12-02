@@ -130,12 +130,9 @@ export class DynamicPDFService {
                     border-bottom: 1px solid #e0e0e0;
                 }
                 
-                tr:nth-child(even) {
-                    background-color: #f9f9f9;
-                }
+                /* Removido background alternado das linhas */
                 
                 .total-row {
-                    background-color: ${design.colors.accent}33 !important;
                     font-weight: bold;
                     font-size: 16px;
                 }
@@ -173,10 +170,21 @@ export class DynamicPDFService {
                 }
                 
                 .info-box {
-                    background: ${design.colors.primary}15;
                     border-left: 4px solid ${design.colors.primary};
                     padding: 12px;
                     margin: 15px 0;
+                }
+                
+                /* Controle de quebra de página */
+                .description-summary {
+                    page-break-after: avoid;
+                    page-break-inside: avoid;
+                    page-break-before: avoid;
+                }
+                
+                .description-technical {
+                    page-break-before: always;
+                    page-break-inside: auto;
                 }
             </style>
         </head>
@@ -213,19 +221,20 @@ export class DynamicPDFService {
                     <strong>Data:</strong> ${orcamentoData.data} | <strong>Validade:</strong> ${orcamentoData.validade}
                 </div>
                 
+                <!-- Descrição Resumida (sempre na primeira página) -->
+                ${orcamentoData.projeto.descricao ? `
+                    <div class="description-summary">
+                        <h2>Descrição do Projeto</h2>
+                        <p>${orcamentoData.projeto.descricao}</p>
+                    </div>
+                ` : ''}
+                
                 <!-- Dados do Cliente -->
                 <h2>Cliente</h2>
                 <p><strong>${orcamentoData.cliente.nome}</strong></p>
                 <p>CPF/CNPJ: ${orcamentoData.cliente.cpfCnpj}</p>
-                ${orcamentoData.cliente.endereco ? `<p>Endereço: ${orcamentoData.cliente.endereco}</p>` : ''}
+                ${orcamentoData.projeto.enderecoObra ? `<p>Endereço da Obra: ${orcamentoData.projeto.enderecoObra}${orcamentoData.projeto.bairro ? ', ' + orcamentoData.projeto.bairro : ''}${orcamentoData.projeto.cidade ? ', ' + orcamentoData.projeto.cidade : ''}${orcamentoData.projeto.cep ? ' - CEP: ' + orcamentoData.projeto.cep : ''}</p>` : ''}
                 ${orcamentoData.cliente.telefone ? `<p>Telefone: ${orcamentoData.cliente.telefone}</p>` : ''}
-                
-                <!-- Dados do Projeto -->
-                ${orcamentoData.projeto.enderecoObra ? `
-                    <h2>Local da Obra</h2>
-                    <p>${orcamentoData.projeto.enderecoObra}</p>
-                    <p>${orcamentoData.projeto.bairro ? orcamentoData.projeto.bairro + ', ' : ''}${orcamentoData.projeto.cidade || ''} - ${orcamentoData.projeto.cep || ''}</p>
-                ` : ''}
                 
                 <!-- Itens do Orçamento -->
                 <h2>Itens do Orçamento</h2>
@@ -243,12 +252,12 @@ export class DynamicPDFService {
                     <tbody>
                         ${orcamentoData.items.map(item => `
                             <tr>
-                                ${content.showItemCodes ? `<td>${item.codigo || '-'}</td>` : ''}
-                                <td>${item.nome}${content.showTechnicalDescriptions && item.descricao ? `<br><small style="color: #666;">${item.descricao}</small>` : ''}</td>
-                                <td>${item.unidade}</td>
-                                <td>${item.quantidade}</td>
-                                <td>R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                <td>R$ ${item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                ${content.showItemCodes ? `<td style="font-size: 14px;">${item.codigo || '-'}</td>` : ''}
+                                <td style="font-size: 14px;">${item.nome}${content.showTechnicalDescriptions && item.descricao ? `<br><small style="color: #666; font-size: 12px;">${item.descricao}</small>` : ''}</td>
+                                <td style="font-size: 14px;">${item.unidade}</td>
+                                <td style="font-size: 14px;">${item.quantidade}</td>
+                                <td style="font-size: 14px;">R$ ${item.valorUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                <td style="font-size: 14px;">R$ ${item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -291,12 +300,14 @@ export class DynamicPDFService {
                 ` : ''}
                 
                 ${orcamentoData.observacoes && content.showTechnicalDescriptions ? `
-                    <h2>Observações</h2>
-                    <p>${orcamentoData.observacoes}</p>
+                    <div class="description-technical">
+                        <h2>Descrição Técnica e Observações</h2>
+                        <p>${orcamentoData.observacoes}</p>
+                    </div>
                 ` : ''}
                 
                 ${content.includeSafetyWarnings ? `
-                    <div class="info-box" style="background: #FEF3C7; border-left-color: #F59E0B; margin-top: 20px;">
+                    <div class="info-box" style="border-left-color: #F59E0B; margin-top: 20px;">
                         <strong>⚠️ Avisos de Segurança:</strong><br>
                         • Todos os serviços devem ser executados por profissionais qualificados.<br>
                         • Siga as normas técnicas NBR 5410 e NR-10.<br>

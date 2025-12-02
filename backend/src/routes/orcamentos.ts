@@ -6,7 +6,9 @@ import {
   updateOrcamento,
   updateOrcamentoStatus,
   aprovarOrcamento,
-  recusarOrcamento
+  recusarOrcamento,
+  deleteOrcamento,
+  getProximoNumeroOrcamento
 } from '../controllers/orcamentosController';
 import { PDFOrcamentoController } from '../controllers/pdfOrcamentoController';
 import { authenticate } from '../middlewares/auth';
@@ -22,6 +24,7 @@ router.get('/:id/pdf/download', PDFOrcamentoController.gerarPDFDownload);
 router.get('/:id/pdf/html', PDFOrcamentoController.gerarHTML);
 router.get('/:id/pdf/preview', PDFOrcamentoController.gerarPreview);
 
+router.get('/proximo-numero', getProximoNumeroOrcamento);
 router.get('/', getOrcamentos);
 router.get('/:id', getOrcamentoById);
 router.post('/', createOrcamento);
@@ -29,6 +32,7 @@ router.put('/:id', updateOrcamento);
 router.patch('/:id/status', updateOrcamentoStatus);
 router.post('/:id/aprovar', aprovarOrcamento);
 router.post('/:id/recusar', recusarOrcamento);
+router.delete('/:id', deleteOrcamento);
 
 export default router;
 

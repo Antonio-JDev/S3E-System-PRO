@@ -108,8 +108,9 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
     const [iniciandoExecucao, setIniciandoExecucao] = useState<string | null>(null); // ID da obra sendo iniciada
     const [tarefaHistorico, setTarefaHistorico] = useState<TarefaObra | null>(null); // Tarefa para visualizar histórico
 
-    // Verificar permissão
-    const canView = hasPermission(user?.role, 'view_tarefas_obra');
+    // Verificar permissão - Desenvolvedor tem acesso universal a todas as páginas
+    const userRole = user?.role?.toLowerCase();
+    const canView = userRole === 'desenvolvedor' || hasPermission(user, 'view_tarefas_obra');
 
     useEffect(() => {
         if (canView) {

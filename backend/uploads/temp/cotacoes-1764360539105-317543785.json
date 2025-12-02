@@ -1,0 +1,92 @@
+{
+  "versao": "1.0",
+  "geradoEm": "2025-11-25T15:12:57.462Z",
+  "empresa": "S3E Engenharia Elétrica",
+  "instrucoes": "Preencha os campos das cotações abaixo. Mantenha a estrutura do JSON.",
+  "cotacoes": [
+    {
+      "nome": "CHAPA EXP. PERF. MALHA 12X25 1,50X1000X2000 - GALV",
+      "ncm": "72085200",
+      "valorUnitario": 158.21,
+      "fornecedorNome": "Andraco Comercio e Atacadode aço Ltda Epp",
+      "observacoes": "Cotação válida por 30 dias"
+    },
+    {
+      "nome": "CHAPA EXP. PERF. MALHA 12X25 1,50X1000X3000 - GALV",
+      "ncm": "72085200",
+      "valorUnitario": 276.04,
+      "fornecedorNome": "Andraco Comercio e Atacadode aço Ltda Epp",
+      "observacoes": "Cotação válida por 30 dias"
+    },
+    {
+      "nome": "Policarbonato 6MM 1000x800MM",
+      "ncm": "39205100",
+      "valorUnitario": 177.33,
+      "fornecedorNome": "Day Brasil",
+      "observacoes": ""
+    },
+    {
+      "nome": "Barramento de cobre 1.1/4 x 5/16 (31,75 x 7,94MM)",
+      "ncm": "74071000",
+      "valorUnitario": 361.60,
+      "fornecedorNome": "ANGLO INDÚSTRIA E COMÉRCIO DE METAIS LTDA",
+      "observacoes": ""
+    },
+    {
+      "nome": "Barramento de cobre 5/8 x 1/8 (15,87 x 3,18MM) ",
+      "ncm": "74071000",
+      "valorUnitario": 72.00,
+      "fornecedorNome": "ANGLO INDÚSTRIA E COMÉRCIO DE METAIS LTDA",
+      "observacoes": ""
+    },
+    {
+      "nome": "Barramento Tipo Pente Monopolar DIN 63A ",
+      "ncm": "85369090",
+      "valorUnitario": 28.00,
+      "fornecedorNome": "CCA IND. E COM. DE MATERIAIS ELETRICOS LTDA (Sibratec) ",
+      "observacoes": ""
+    },
+    {
+      "nome": "Disjuntor monopolar 25A - 10ka",
+      "ncm": "85362000",
+      "valorUnitario": 100.5,
+      "fornecedorNome": "Fornecedor Exemplo Ltda",
+      "observacoes": "Cotação válida por 30 dias"
+    },
+    {
+      "nome": "Terminal olhal Compressão p cabo 150MM",
+      "ncm": "85369090",
+      "valorUnitario": 15,
+      "fornecedorNome": "CCA IND. E COM. DE MATERIAIS ELETRICOS LTDA (Sibratec) ",
+      "observacoes": ""
+    },
+    {
+      "nome": "Parafuso inox 2cm  ",
+      "ncm": "73181500",
+      "valorUnitario": 0.50,
+      "fornecedorNome": "COREMMA LTDA",
+      "observacoes": ""
+    },
+    {
+      "nome": "Parafuso inox 7cm ",
+      "ncm": "73181500",
+      "valorUnitario": 1.50,
+      "fornecedorNome": "COREMMA LTDA",
+      "observacoes": ""
+    },
+    {
+      "nome": "Luminárias modelo tartaruga",
+      "ncm": "94051990",
+      "valorUnitario": 30.00,
+      "fornecedorNome": "",
+      "observacoes": ""
+    },
+    {
+      "nome": "Parafuso inox3/8 com 7CM",
+      "ncm": "73181500",
+      "valorUnitario": 2.30,
+      "fornecedorNome": "COREMMA LTDA",
+      "observacoes": ""
+    }
+  ]
+}

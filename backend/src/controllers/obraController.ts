@@ -524,9 +524,11 @@ export class ObraController {
       const obra = await obraService.buscarObraPorProjeto(projetoId);
 
       if (!obra) {
-        res.status(404).json({ 
+        // Retornar 200 com success: false (não é um erro, é um estado válido - projeto sem obra ainda)
+        res.status(200).json({ 
           success: false, 
-          message: 'Obra não encontrada para este projeto' 
+          message: 'Obra não encontrada para este projeto',
+          data: null
         });
         return;
       }

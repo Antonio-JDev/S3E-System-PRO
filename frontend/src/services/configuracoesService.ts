@@ -3,7 +3,8 @@ import { axiosApiService } from './axiosApi';
 export interface ConfiguracaoSistema {
   id: string;
   temaPreferido: string; // 'light' | 'dark' | 'system'
-  logoUrl?: string;
+  logoUrl?: string; // Logo geral da empresa
+  logoLoginUrl?: string; // Logo específica para página de login
   nomeEmpresa: string;
   emailContato?: string;
   telefoneContato?: string;
@@ -76,6 +77,20 @@ class ConfiguracoesService {
    */
   async atualizarLogo(logoUrl: string) {
     return axiosApiService.put<ConfiguracaoSistema>('/api/configuracoes/logo', { logoUrl });
+  }
+
+  /**
+   * Atualiza a logo da página de login selecionando uma logo existente
+   */
+  async atualizarLogoLogin(logoUrl: string) {
+    return axiosApiService.put<ConfiguracaoSistema>('/api/configuracoes/logo-login', { logoUrl });
+  }
+
+  /**
+   * Deleta uma logo do servidor
+   */
+  async deletarLogo(filename: string) {
+    return axiosApiService.delete(`/api/configuracoes/logo/${filename}`);
   }
 
   /**

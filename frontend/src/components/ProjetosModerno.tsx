@@ -5,7 +5,6 @@ import TeamManagerModal from './TeamManagerModal';
 import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
 import { clientesService, type Cliente } from '../services/clientesService';
 import { orcamentosService, type Orcamento } from '../services/orcamentosService';
-import { etapasAdminService, type EtapaAdmin } from '../services/etapasAdminService';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import { AuthContext } from '../contexts/AuthContext';
@@ -142,7 +141,7 @@ interface ProjetosProps {
     onViewObra?: (obraId: string) => void;
 }
 
-type ViewModalTab = 'geral' | 'etapasAdmin' | 'materiais' | 'etapas' | 'qualidade';
+type ViewModalTab = 'geral' | 'materiais' | 'etapas' | 'qualidade';
 
 const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, onViewBudget, onViewSale, onViewClient, onViewObra }) => {
     // ==================== AUTH ====================
@@ -187,8 +186,6 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
     
     // Estados do modal de visualização
     const [viewModalActiveTab, setViewModalActiveTab] = useState<ViewModalTab>('geral');
-    const [etapasAdmin, setEtapasAdmin] = useState<EtapaAdmin[]>([]);
-    const [resumoEtapasAdmin, setResumoEtapasAdmin] = useState<any>(null);
     const [materiais, setMateriais] = useState<Material[]>([]);
     const [etapas, setEtapas] = useState<Etapa[]>([]);
     const [qualityChecks, setQualityChecks] = useState<QualityCheck[]>([]);
@@ -196,7 +193,6 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
     
     // Estado para extensão de prazo
     const [extendPrazoModalOpen, setExtendPrazoModalOpen] = useState(false);
-    const [etapaToExtend, setEtapaToExtend] = useState<EtapaAdmin | null>(null);
     const [extendFormState, setExtendFormState] = useState({
         novaData: '',
         motivo: ''
@@ -372,8 +368,6 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         setProjetoToView(projeto);
         setViewModalActiveTab('geral');
         
-        // Carregar etapas admin do backend
-        await loadEtapasAdmin(projeto.id);
         
         // Inicializar dados mockados para demonstração
         setMateriais([
@@ -399,95 +393,6 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         setIsViewModalOpen(true);
     };
 
-    const loadEtapasAdmin = async (projetoId: string) => {
-        try {
-            const response = await etapasAdminService.listar(projetoId);
-            
-            if (response.success && response.data) {
-                setEtapasAdmin(response.data.etapas);
-                setResumoEtapasAdmin(response.data.resumo);
-            } else {
-                // Se não existir, tentar inicializar
-                const initResponse = await etapasAdminService.inicializar(projetoId);
-                if (initResponse.success) {
-                    await loadEtapasAdmin(projetoId); // Recarregar após inicializar
-                }
-            }
-        } catch (err) {
-            console.error('Erro ao carregar etapas admin:', err);
-            setEtapasAdmin([]);
-        }
-    };
-
-    const handleConcluirEtapaAdmin = async (etapa: EtapaAdmin) => {
-        if (!projetoToView) return;
-        
-        try {
-            const response = await etapasAdminService.concluir(projetoToView.id, etapa.id);
-            
-            if (response.success) {
-                await loadEtapasAdmin(projetoToView.id);
-            } else {
-                toast.error('Erro ao concluir etapa');
-            }
-        } catch (err) {
-            console.error('Erro ao concluir etapa:', err);
-            alert('Erro ao concluir etapa');
-        }
-    };
-
-    const handleOpenExtendPrazoModal = (etapa: EtapaAdmin) => {
-        setEtapaToExtend(etapa);
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        setExtendFormState({
-            novaData: tomorrow.toISOString().split('T')[0],
-            motivo: ''
-        });
-        setExtendPrazoModalOpen(true);
-    };
-
-    const handleSubmitExtendPrazo = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!etapaToExtend || !projetoToView) return;
-
-        if (extendFormState.motivo.trim().length < 10) {
-            toast.error('Motivo muito curto', {
-                description: 'O motivo deve ter pelo menos 10 caracteres'
-            });
-            return;
-        }
-
-        try {
-            const response = await etapasAdminService.estenderPrazo(
-                projetoToView.id,
-                etapaToExtend.id,
-                extendFormState.novaData,
-                extendFormState.motivo
-            );
-
-            if (response.success) {
-                await loadEtapasAdmin(projetoToView.id);
-                setExtendPrazoModalOpen(false);
-                setEtapaToExtend(null);
-            } else {
-                toast.error('Erro ao estender prazo');
-            }
-        } catch (err) {
-            console.error('Erro ao estender prazo:', err);
-            alert('Erro ao estender prazo');
-        }
-    };
-
-    const getEtapaAdminColor = (etapa: EtapaAdmin) => {
-        if (etapa.concluida) {
-            return 'bg-green-500 border-green-600 text-white hover:bg-green-600';
-        }
-        if (etapa.atrasada) {
-            return 'bg-red-500 border-red-600 text-white hover:bg-red-600';
-        }
-        return 'bg-gray-300 border-gray-400 text-gray-700 hover:bg-gray-400';
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1251,7 +1156,6 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                     initialTab={
                         viewModalActiveTab === 'geral' ? 'Visão Geral' :
                         viewModalActiveTab === 'materiais' ? 'Materiais' :
-                        viewModalActiveTab === 'etapasAdmin' ? 'EtapasAdmin' :
                         viewModalActiveTab === 'etapas' ? 'Kanban' : 'Qualidade'
                     }
                 />

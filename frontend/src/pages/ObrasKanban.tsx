@@ -4,6 +4,7 @@ import ObraKanban from '../components/ObraKanban';
 import { obrasService } from '../services/obrasService';
 import { projetosService, type Projeto } from '../services/projetosService';
 import { axiosApiService } from '../services/axiosApi';
+import { useSKey } from '../hooks/useSKey';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -122,6 +123,9 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
         setRefreshKey(prev => prev + 1);
         carregarObrasKanban(); // Recarregar estatísticas também
     };
+
+    // Fechar modal com tecla S
+    useSKey(isModalNovaObraOpen, () => setIsModalNovaObraOpen(false));
 
     // Calcular estatísticas baseadas nas obras do Kanban
     const stats = useMemo(() => {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -9,41 +9,46 @@ import ResetPassword from './pages/ResetPassword';
 // Editor WYSIWYG Jodit
 import 'jodit/es2021/jodit.min.css';
 import Sidebar from './components/Sidebar';
-import Dashboard from './components/DashboardModerno';
-import DashboardAPI from './components/DashboardAPI';
-import Orcamentos from './components/Orcamentos';
-import Catalogo from './components/Catalogo';
-import Movimentacoes from './components/Movimentacoes';
-import Logs from './components/Logs';
-import Compras from './components/Compras';
-import Materiais from './components/Materiais';
-import Fornecedores from './components/Fornecedores';
-import FornecedoresAPI from './components/FornecedoresAPI';
-import FornecedoresModerno from './components/FornecedoresModerno';
-import Clientes from './components/Clientes';
-import ClientesAPI from './components/ClientesAPI';
-import ClientesModerno from './components/ClientesModerno';
-import Projetos from './components/Projetos';
-import ProjetosAPI from './components/ProjetosAPI';
-import ProjetosModerno from './components/ProjetosModerno';
-import Obras from './components/Obras';
-import Servicos from './components/Servicos';
-import Financeiro from './components/Financeiro';
-import EmissaoNFe from './components/EmissaoNFe';
-import Configuracoes from './components/Configuracoes';
-import AtualizacaoPrecos from './components/AtualizacaoPrecos';
-import Vendas from './components/Vendas';
-import Cotacoes from './components/Cotacoes';
 import ObrasKanban from './pages/ObrasKanban';
 import NovaCompraPage from './pages/NovaCompraPage';
 import DetalhesObra from './pages/DetalhesObra';
+import EditarOrcamentoPage from './pages/EditarOrcamentoPage';
 // import SettingsModal from './components/SettingsModal'; // DESCONTINUADO - Substituído por página Configuracoes.tsx
-import GestaoObras from './components/GestaoObras';
+import GanttChartPage from './components/GestaoObras';
 import TarefasObra from './components/TarefasObra';
 import GerenciamentoEmpresarial from './components/GerenciamentoEmpresarial';
 import { type Project } from './types';
 import { Toaster } from './components/ui/sonner';
 import MobileMenuButton from './components/MobileMenuButton';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+
+// ====== Lazy-loaded modules principais (code splitting) ======
+const Dashboard = lazy(() => import('./components/DashboardModerno'));
+const DashboardAPI = lazy(() => import('./components/DashboardAPI'));
+const Orcamentos = lazy(() => import('./components/Orcamentos'));
+const Catalogo = lazy(() => import('./components/Catalogo'));
+const Movimentacoes = lazy(() => import('./components/Movimentacoes'));
+const Logs = lazy(() => import('./components/Logs'));
+const Compras = lazy(() => import('./components/Compras'));
+const Materiais = lazy(() => import('./components/Materiais'));
+const Fornecedores = lazy(() => import('./components/Fornecedores'));
+const FornecedoresAPI = lazy(() => import('./components/FornecedoresAPI'));
+const FornecedoresModerno = lazy(() => import('./components/FornecedoresModerno'));
+const Clientes = lazy(() => import('./components/Clientes'));
+const ClientesAPI = lazy(() => import('./components/ClientesAPI'));
+const ClientesModerno = lazy(() => import('./components/ClientesModerno'));
+const Projetos = lazy(() => import('./components/Projetos'));
+const ProjetosAPI = lazy(() => import('./components/ProjetosAPI'));
+const ProjetosModerno = lazy(() => import('./components/ProjetosModerno'));
+const Obras = lazy(() => import('./components/Obras'));
+const Servicos = lazy(() => import('./components/Servicos'));
+const Financeiro = lazy(() => import('./components/Financeiro'));
+const EmissaoNFe = lazy(() => import('./components/EmissaoNFe'));
+const Configuracoes = lazy(() => import('./components/Configuracoes'));
+const AtualizacaoPrecos = lazy(() => import('./components/AtualizacaoPrecos'));
+const Vendas = lazy(() => import('./components/Vendas'));
+const Cotacoes = lazy(() => import('./components/Cotacoes'));
 
 const MainApp: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -147,7 +152,7 @@ const MainApp: React.FC = () => {
       case 'Tarefas da Obra':
         return <TarefasObra toggleSidebar={toggleSidebar} />;
       case 'Gestão de Obras':
-        return <GestaoObras toggleSidebar={toggleSidebar} />;
+        return <GanttChartPage toggleSidebar={toggleSidebar} />;
       case 'Financeiro':
         return <Financeiro toggleSidebar={toggleSidebar} />;
       case 'Vendas':
@@ -186,7 +191,20 @@ const MainApp: React.FC = () => {
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-bg relative">
         {/* Botão Hambúrguer para Mobile - aparece apenas quando sidebar está fechada em mobile */}
         {!isSidebarOpen && <MobileMenuButton onClick={toggleSidebar} isOpen={isSidebarOpen} />}
-        {renderActiveView()}
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+                <p className="text-gray-600 dark:text-dark-text-secondary text-sm">
+                  Carregando módulo...
+                </p>
+              </div>
+            </div>
+          }
+        >
+          {renderActiveView()}
+        </Suspense>
       </main>
       {/* SettingsModal DESCONTINUADO - Substituído por página Configuracoes.tsx */}
       {/* <SettingsModal 
@@ -254,7 +272,20 @@ const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: 
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-bg relative">
         {/* Botão Hambúrguer para Mobile - aparece apenas quando sidebar está fechada em mobile */}
         {!isSidebarOpen && <MobileMenuButton onClick={toggleSidebar} isOpen={isSidebarOpen} />}
-        {React.cloneElement(children as React.ReactElement, { toggleSidebar })}
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
+                <p className="text-gray-600 dark:text-dark-text-secondary text-sm">
+                  Carregando página...
+                </p>
+              </div>
+            </div>
+          }
+        >
+          {React.cloneElement(children as React.ReactElement, { toggleSidebar })}
+        </Suspense>
       </main>
     </div>
   );
@@ -265,34 +296,52 @@ const App: React.FC = () => {
     <Router>
       <ThemeProvider>
         <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/compras" element={
-              <ProtectedRoute>
-                <StandalonePageWrapper>
-                  <Compras toggleSidebar={() => {}} />
-                </StandalonePageWrapper>
-              </ProtectedRoute>
-            } />
-            <Route path="/compras/nova" element={
-              <ProtectedRoute>
-                <StandalonePageWrapper>
-                  <NovaCompraPage toggleSidebar={() => {}} />
-                </StandalonePageWrapper>
-              </ProtectedRoute>
-            } />
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <MainApp />
-                </ProtectedRoute>
-              }
-            />
-          </Routes>
-          <Toaster position="top-right" expand={false} richColors closeButton />
+          <QueryClientProvider client={queryClient}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route
+                path="/compras"
+                element={
+                  <ProtectedRoute>
+                    <StandalonePageWrapper>
+                      <Compras toggleSidebar={() => {}} />
+                    </StandalonePageWrapper>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/compras/nova"
+                element={
+                  <ProtectedRoute>
+                    <StandalonePageWrapper>
+                      <NovaCompraPage toggleSidebar={() => {}} />
+                    </StandalonePageWrapper>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/orcamentos/editar/:id"
+                element={
+                  <ProtectedRoute>
+                    <StandalonePageWrapper activeView="Orçamentos">
+                      <EditarOrcamentoPage toggleSidebar={() => {}} />
+                    </StandalonePageWrapper>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/*"
+                element={
+                  <ProtectedRoute>
+                    <MainApp />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+            <Toaster position="top-right" expand={false} richColors closeButton />
+          </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>
     </Router>

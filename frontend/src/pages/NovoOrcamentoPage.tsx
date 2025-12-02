@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { toast } from 'sonner';
 import { orcamentosService, type CreateOrcamentoData } from '../services/orcamentosService';
 import { clientesService } from '../services/clientesService';
+import { empresasService, Empresa } from '../services/empresasService';
 import { servicosService, type Servico } from '../services/servicosService';
 import { quadrosService } from '../services/quadrosService';
 import { axiosApiService } from '../services/axiosApi';
@@ -57,6 +58,9 @@ interface Cliente {
     email?: string;
     telefone?: string;
     endereco?: string;
+    cidade?: string;
+    estado?: string;
+    cep?: string;
     ativo: boolean;
 }
 
@@ -110,6 +114,7 @@ interface OrcamentoItem {
     custoUnit: number;
     precoUnit: number;
     subtotal: number;
+    precoEditadoManual?: boolean; // Flag para indicar se o preço foi editado manualmente
 }
 
 interface Foto {
@@ -130,7 +135,22 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const authContext = useContext(AuthContext);
     const userId = authContext?.user?.id || null;
     
+    // Função para calcular data padrão de validade (30 dias a partir de hoje)
+    const calcularDataValidadePadrao = (): string => {
+        const hoje = new Date();
+        const dataValidade = new Date(hoje);
+        dataValidade.setDate(hoje.getDate() + 30);
+        
+        // Formatar para YYYY-MM-DD (formato do input type="date")
+        const ano = dataValidade.getFullYear();
+        const mes = String(dataValidade.getMonth() + 1).padStart(2, '0');
+        const dia = String(dataValidade.getDate()).padStart(2, '0');
+        
+        return `${ano}-${mes}-${dia}`;
+    };
+    
     const [clientes, setClientes] = useState<Cliente[]>([]);
+    const [empresas, setEmpresas] = useState<Empresa[]>([]);
     const [materiais, setMateriais] = useState<Material[]>([]);
     const [servicos, setServicos] = useState<Servico[]>([]);
     const [quadros, setQuadros] = useState<Quadro[]>([]);
@@ -144,6 +164,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     // Estados para rascunho
     const [showRascunhoDialog, setShowRascunhoDialog] = useState(false);
     const [rascunhoEncontrado, setRascunhoEncontrado] = useState<any>(null);
+    
+    // Estado para controlar se está usando endereço do cliente
+    const [usandoEnderecoCliente, setUsandoEnderecoCliente] = useState(false);
 
     // Form state
     const [formState, setFormState] = useState({
@@ -151,7 +174,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         titulo: '',
         descricao: '',
         descricaoProjeto: '',
-        validade: '',
+        validade: calcularDataValidadePadrao(), // Data padrão de 30 dias
         bdi: 20,
         observacoes: '',
         empresaCNPJ: '',
@@ -289,6 +312,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         limparRascunho();
         setShowRascunhoDialog(false);
         setRascunhoEncontrado(null);
+        // Resetar formState com data padrão de validade
+        setFormState(prev => ({
+            ...prev,
+            validade: calcularDataValidadePadrao()
+        }));
         toast.info('Rascunho descartado', {
             description: 'Iniciando novo orçamento'
         });
@@ -326,13 +354,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const loadInitialData = async () => {
         try {
             setLoading(true);
-            const [clientesRes, materiaisRes, servicosRes, quadrosRes, kitsRes, cotacoesRes] = await Promise.all([
+            const [clientesRes, materiaisRes, servicosRes, quadrosRes, kitsRes, cotacoesRes, empresasRes] = await Promise.all([
                 clientesService.listar(),
                 axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
                 servicosService.listar({ ativo: true }),
                 quadrosService.listar(),
                 axiosApiService.get(ENDPOINTS.KITS), // Carregar kits
-                axiosApiService.get('/api/cotacoes') // Carregar cotações
+                axiosApiService.get('/api/cotacoes'), // Carregar cotações
+                empresasService.listar({ ativo: true })
             ]);
 
             if (clientesRes.success && clientesRes.data) {
@@ -374,6 +403,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 const cotacoesArray = Array.isArray(cotacoesRes.data) ? cotacoesRes.data : [];
                 setCotacoes(cotacoesArray);
                 setCotacoesBancoFrio(cotacoesArray); // Cotações para comparação
+            }
+
+            if (empresasRes.success && empresasRes.data) {
+                setEmpresas(Array.isArray(empresasRes.data) ? empresasRes.data : []);
+            } else {
+                setEmpresas([]);
             }
         } catch (err) {
             console.error('Erro ao carregar dados:', err);
@@ -555,11 +590,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             }
             
 
-            // Usar valorVenda se disponível, caso contrário usar preco com BDI
+            // Usar valorVenda se disponível, senão usar preco (preço de compra)
             const precoVenda = material.valorVenda || material.preco;
-            const precoComBDI = material.valorVenda 
-                ? material.valorVenda 
-                : material.preco * (1 + formState.bdi / 100);
+            const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
 
             const newItem: OrcamentoItem = {
                 tipo: 'MATERIAL',
@@ -569,9 +602,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 unidadeMedida: material.unidadeMedida,
                 quantidade: qtd,
                 custoUnit: material.preco,
-
-                precoUnit: precoComBDI,
-                subtotal: precoComBDI * qtd
+                precoBase: precoBase, // Base do preço de venda (sem BDI)
+                precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
+                subtotal: precoBase * (1 + formState.bdi / 100) * qtd
             };
             
             setItems(prev => [...prev, newItem]);
@@ -582,6 +615,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         
         // Adicionar cotação se fornecida
         if (cotacao) {
+            // Usar valorVenda se disponível; senão, aplicar markup padrão de 40% sobre o valor da cotação
+            const valorVenda = cotacao.valorVenda || (cotacao.valorUnitario || 0) * 1.4;
+            const precoBase = valorVenda;
+
             const newItem: OrcamentoItem = {
                 tipo: 'COTACAO',
                 cotacaoId: cotacao.id,
@@ -590,8 +627,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 unidadeMedida: cotacao.unidadeMedida || 'UN',
                 quantidade: qtd,
                 custoUnit: cotacao.valorUnitario || 0,
-                precoUnit: (cotacao.valorUnitario || 0) * (1 + formState.bdi / 100),
-                subtotal: (cotacao.valorUnitario || 0) * (1 + formState.bdi / 100) * qtd,
+                precoBase: precoBase, // Base do preço de venda (sem BDI)
+                precoUnit: precoBase * (1 + formState.bdi / 100),
+                subtotal: precoBase * (1 + formState.bdi / 100) * qtd,
                 dataAtualizacaoCotacao: cotacao.dataAtualizacao
             };
             
@@ -674,11 +712,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
     // Adicionar material do estoque ao orçamento
     const handleAddItem = (material: Material, manterModalAberto = false) => {
-
-        // Usar valorVenda se disponível, caso contrário usar preco com BDI
-        const precoComBDI = material.valorVenda 
-            ? material.valorVenda 
-            : material.preco * (1 + formState.bdi / 100);
+        // Usar valorVenda se disponível, senão usar preco (preço de compra)
+        const precoVenda = material.valorVenda || material.preco;
+        const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
 
         const newItem: OrcamentoItem = {
             tipo: 'MATERIAL',
@@ -688,9 +724,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             unidadeMedida: material.unidadeMedida,
             quantidade: 1,
             custoUnit: material.preco,
-
-            precoUnit: precoComBDI,
-            subtotal: precoComBDI
+            precoBase: precoBase, // Base do preço de venda (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
+            subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -873,30 +909,113 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const handleUpdateItemQuantity = (index: number, quantidade: number) => {
         setItems(prev => prev.map((item, i) => {
             if (i === index) {
-                const precoUnit = item.custoUnit * (1 + formState.bdi / 100);
                 return {
                     ...item,
                     quantidade,
-                    precoUnit,
-                    subtotal: precoUnit * quantidade
+                    subtotal: item.precoUnit * quantidade
                 };
             }
             return item;
         }));
     };
 
-    // Atualizar BDI e recalcular preços
+    // Atualizar preço unitário do item (valor de venda editável)
+    const handleUpdateItemPrice = (index: number, novoPrecoUnit: number) => {
+        if (novoPrecoUnit < 0) {
+            toast.error('Valor inválido', {
+                description: 'O valor unitário não pode ser negativo'
+            });
+            return;
+        }
+
+        setItems(prev => prev.map((item, i) => {
+            if (i === index) {
+                return {
+                    ...item,
+                    precoUnit: novoPrecoUnit,
+                    subtotal: novoPrecoUnit * item.quantidade,
+                    precoEditadoManual: true // Marcar como editado manualmente
+                };
+            }
+            return item;
+        }));
+    };
+
+    // Atualizar BDI e recalcular preços (apenas para itens não editados manualmente)
     const handleBdiChange = (newBdi: number) => {
         setFormState(prev => ({ ...prev, bdi: newBdi }));
 
         setItems(prev => prev.map(item => {
-            const precoUnit = item.custoUnit * (1 + newBdi / 100);
+            // Se o preço foi editado manualmente, não recalcular com BDI
+            if (item.precoEditadoManual) {
+                return item;
+            }
+            
+            // Usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
+            const basePreco = item.precoBase !== undefined ? item.precoBase : item.custoUnit;
+            const precoUnit = basePreco * (1 + newBdi / 100);
             return {
                 ...item,
                 precoUnit,
                 subtotal: precoUnit * item.quantidade
             };
         }));
+    };
+
+    // Selecionar endereço do cliente
+    const selecionarEnderecoCliente = () => {
+        if (!formState.clienteId) {
+            toast.error('Selecione um cliente primeiro', {
+                description: 'É necessário selecionar um cliente para usar o endereço cadastrado'
+            });
+            return;
+        }
+
+        const clienteSelecionado = clientes.find(c => c.id === formState.clienteId);
+        
+        if (!clienteSelecionado) {
+            toast.error('Cliente não encontrado');
+            return;
+        }
+
+        if (!clienteSelecionado.endereco) {
+            toast.warning('Cliente sem endereço cadastrado', {
+                description: 'Este cliente não possui endereço cadastrado. Você pode preencher manualmente.'
+            });
+            return;
+        }
+
+        // Preencher campos com dados do cliente
+        setFormState(prev => ({
+            ...prev,
+            enderecoObra: clienteSelecionado.endereco || '',
+            cidade: clienteSelecionado.cidade || '',
+            bairro: '', // Cliente não tem bairro separado, mas pode ter no endereço
+            cep: clienteSelecionado.cep || ''
+        }));
+
+        setUsandoEnderecoCliente(true);
+        
+        toast.success('Endereço do cliente aplicado', {
+            description: 'Os campos foram preenchidos com o endereço cadastrado do cliente'
+        });
+    };
+
+    // Limpar e permitir endereço diferente
+    const usarEnderecoDiferente = () => {
+        setFormState(prev => ({
+            ...prev,
+            enderecoObra: '',
+            cidade: '',
+            bairro: '',
+            cep: ''
+        }));
+        
+        setUsandoEnderecoCliente(false);
+        
+        toast.info('Endereço limpo', {
+            description: 'Você pode preencher um endereço diferente para a obra'
+        });
     };
 
     // Salvar orçamento
@@ -1002,6 +1121,31 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
     };
 
+    const [proximoNumero, setProximoNumero] = useState<number | null>(null);
+    const [carregandoNumero, setCarregandoNumero] = useState<boolean>(false);
+    const [erroNumero, setErroNumero] = useState<string | null>(null);
+
+    // Carregar próximo número sequencial do orçamento (informativo)
+    useEffect(() => {
+        const carregarProximoNumero = async () => {
+            try {
+                setCarregandoNumero(true);
+                setErroNumero(null);
+                const response = await axiosApiService.get<{ proximoNumero: number }>('/api/orcamentos/proximo-numero');
+                if (response.success && response.data?.proximoNumero) {
+                    setProximoNumero(response.data.proximoNumero);
+                }
+            } catch (error) {
+                console.error('Erro ao obter próximo número de orçamento:', error);
+                setErroNumero('Não foi possível carregar o próximo número');
+            } finally {
+                setCarregandoNumero(false);
+            }
+        };
+
+        carregarProximoNumero();
+    }, []);
+
     if (loading) {
         return (
             <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg flex items-center justify-center">
@@ -1045,7 +1189,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="mb-8">
-                <div className="flex items-center gap-4 mb-6">
+                <div className="flex items-center gap-4 mb-4 sm:mb-6">
                     <button
                         onClick={handleCancelar}
                         className="btn-secondary flex items-center gap-2"
@@ -1053,11 +1197,22 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         <ArrowLeftIcon className="w-5 h-5" />
                         Voltar
                     </button>
-                    <div className="flex-1">
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">
-                            Novo Orçamento
-                        </h1>
-                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-2">
+                            <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">
+                                Novo Orçamento
+                            </h1>
+                            <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-3 py-1 text-xs sm:text-sm font-medium text-blue-700 dark:text-blue-300">
+                                Nº do orçamento:&nbsp;
+                                <span className="font-semibold">
+                                    {carregandoNumero && 'Carregando...'}
+                                    {!carregandoNumero && proximoNumero && `#${proximoNumero}`}
+                                    {!carregandoNumero && !proximoNumero && !erroNumero && 'Em definição'}
+                                    {!carregandoNumero && !!erroNumero && 'Indisponível'}
+                                </span>
+                            </span>
+                        </div>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-2">
                             Crie uma nova proposta comercial
                         </p>
                     </div>
@@ -1082,13 +1237,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                 CNPJ da Empresa Executora
                             </label>
-                            <input
-                                type="text"
+                            <select
                                 value={formState.empresaCNPJ}
                                 onChange={(e) => setFormState(prev => ({ ...prev, empresaCNPJ: e.target.value }))}
-                                className="input-field"
-                                placeholder="Selecione o CNPJ"
-                            />
+                                className="select-field"
+                            >
+                                <option value="">Selecione o CNPJ</option>
+                                {empresas
+                                    .filter(emp => emp.ativo)
+                                    .map(emp => (
+                                        <option key={emp.id} value={emp.cnpj}>
+                                            {(emp.nomeFantasia || emp.razaoSocial) + ' - ' + emp.cnpj}
+                                        </option>
+                                    ))}
+                            </select>
                         </div>
 
                         <div>
@@ -1097,7 +1259,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             </label>
                             <select
                                 value={formState.clienteId}
-                                onChange={(e) => setFormState(prev => ({ ...prev, clienteId: e.target.value }))}
+                                onChange={(e) => {
+                                    setFormState(prev => ({ ...prev, clienteId: e.target.value }));
+                                    // Limpar estado de endereço quando mudar cliente
+                                    if (usandoEnderecoCliente) {
+                                        setUsandoEnderecoCliente(false);
+                                    }
+                                }}
                                 className="select-field"
                             >
                                 <option value="">Selecione um cliente</option>
@@ -1138,13 +1306,51 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                 Endereço da Obra (Rua e Número)
                             </label>
-                            <input
-                                type="text"
-                                value={formState.enderecoObra}
-                                onChange={(e) => setFormState(prev => ({ ...prev, enderecoObra: e.target.value }))}
-                                className="input-field"
-                                placeholder="Ex: Rua das Flores, 123"
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={formState.enderecoObra}
+                                    onChange={(e) => {
+                                        setFormState(prev => ({ ...prev, enderecoObra: e.target.value }));
+                                        setUsandoEnderecoCliente(false);
+                                    }}
+                                    className="input-field flex-1"
+                                    placeholder="Ex: Rua das Flores, 123"
+                                    disabled={usandoEnderecoCliente}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={selecionarEnderecoCliente}
+                                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                                    title="Usar endereço cadastrado do cliente"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                                    </svg>
+                                    Selecionar do Cliente
+                                </button>
+                                {usandoEnderecoCliente && (
+                                    <button
+                                        type="button"
+                                        onClick={usarEnderecoDiferente}
+                                        className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                                        title="Usar endereço diferente"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                        </svg>
+                                        Endereço Diferente
+                                    </button>
+                                )}
+                            </div>
+                            {usandoEnderecoCliente && (
+                                <p className="mt-1 text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Usando endereço cadastrado do cliente
+                                </p>
+                            )}
                         </div>
 
                         <div>
@@ -1327,10 +1533,38 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Valor Unit.</label>
-                                            <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">
-                                                R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
+                                            <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">
+                                                Valor Unit. (R$)
+                                                {item.precoEditadoManual && (
+                                                    <span className="ml-1 text-blue-600 dark:text-blue-400" title="Valor editado manualmente">
+                                                        ✏️
+                                                    </span>
+                                                )}
+                                            </label>
+                                            <input
+                                                type="number"
+                                                value={item.precoUnit.toFixed(2)}
+                                                onChange={(e) => {
+                                                    const novoValor = parseFloat(e.target.value) || 0;
+                                                    handleUpdateItemPrice(index, novoValor);
+                                                }}
+                                                onBlur={(e) => {
+                                                    // Garantir que o valor seja formatado corretamente ao sair do campo
+                                                    const valor = parseFloat(e.target.value) || 0;
+                                                    if (valor !== item.precoUnit) {
+                                                        handleUpdateItemPrice(index, valor);
+                                                    }
+                                                }}
+                                                min="0"
+                                                step="0.01"
+                                                className="input-field text-sm"
+                                                placeholder="0.00"
+                                            />
+                                            {!item.precoEditadoManual && (
+                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
+                                                    Clique para editar
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div>

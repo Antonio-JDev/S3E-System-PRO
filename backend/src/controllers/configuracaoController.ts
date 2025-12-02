@@ -12,8 +12,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     // Determinar pasta base (pode estar rodando da raiz ou da pasta backend)
     const cwd = process.cwd();
-    const isBackendFolder = cwd.endsWith('backend');
-    const uploadDir = isBackendFolder 
+    const uploadDir = cwd.endsWith('backend')
       ? path.join(cwd, 'uploads', 'logos')
       : path.join(cwd, 'backend', 'uploads', 'logos');
     
@@ -81,7 +80,7 @@ export class ConfiguracaoController {
    */
   static async salvarConfiguracoes(req: Request, res: Response): Promise<void> {
     try {
-      const { temaPreferido, logoUrl, nomeEmpresa, emailContato, telefoneContato } = req.body;
+      const { temaPreferido, logoUrl, logoLoginUrl, nomeEmpresa, emailContato, telefoneContato } = req.body;
 
       // Validação básica
       if (temaPreferido && !['light', 'dark', 'system'].includes(temaPreferido)) {
@@ -95,6 +94,7 @@ export class ConfiguracaoController {
       const configuracoes = await configuracaoService.salvarConfiguracoes({
         temaPreferido,
         logoUrl,
+        logoLoginUrl,
         nomeEmpresa,
         emailContato,
         telefoneContato
@@ -149,6 +149,75 @@ export class ConfiguracaoController {
       res.status(500).json({
         success: false,
         message: 'Erro ao fazer upload do logo',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * DELETE /api/configuracoes/logo/:filename
+   * Deleta uma logo do servidor
+   * Requer: Admin
+   */
+  static async deletarLogo(req: Request, res: Response): Promise<void> {
+    try {
+      const { filename } = req.params;
+      
+      console.log('🗑️  Deletar logo chamado:', filename);
+
+      if (!filename) {
+        res.status(400).json({
+          success: false,
+          message: 'Nome do arquivo é obrigatório'
+        });
+        return;
+      }
+
+      // Determinar caminho do arquivo
+      const cwd = process.cwd();
+      const logosDir = cwd.endsWith('backend')
+        ? path.join(cwd, 'uploads', 'logos')
+        : path.join(cwd, 'backend', 'uploads', 'logos');
+      
+      const logoPath = path.join(logosDir, filename);
+
+      // Verificar se arquivo existe
+      if (!fs.existsSync(logoPath)) {
+        res.status(404).json({
+          success: false,
+          message: 'Logo não encontrada'
+        });
+        return;
+      }
+
+      // Verificar se a logo está sendo usada
+      const logoUrl = `/uploads/logos/${filename}`;
+      const configuracoes = await configuracaoService.getConfiguracoes();
+      
+      // Se a logo estiver sendo usada como logoUrl ou logoLoginUrl, remover a referência
+      if (configuracoes.logoUrl === logoUrl) {
+        await configuracaoService.salvarConfiguracoes({ logoUrl: null });
+        console.log('⚠️ Logo removida da configuração logoUrl');
+      }
+      
+      if (configuracoes.logoLoginUrl === logoUrl) {
+        await configuracaoService.salvarConfiguracoes({ logoLoginUrl: null });
+        console.log('⚠️ Logo removida da configuração logoLoginUrl');
+      }
+
+      // Deletar arquivo
+      fs.unlinkSync(logoPath);
+      console.log('✅ Logo deletada:', filename);
+
+      res.status(200).json({
+        success: true,
+        message: 'Logo deletada com sucesso'
+      });
+    } catch (error: any) {
+      console.error('Erro ao deletar logo:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao deletar logo',
         error: error.message
       });
     }
@@ -251,6 +320,168 @@ export class ConfiguracaoController {
       res.status(500).json({
         success: false,
         message: 'Erro ao atualizar logo',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * PUT /api/configuracoes/logo-login
+   * Atualiza a logo da página de login selecionando uma logo existente
+   * Requer: Admin
+   */
+  static async atualizarLogoLogin(req: Request, res: Response): Promise<void> {
+    try {
+      const { logoUrl } = req.body;
+
+      // Se logoUrl for vazio, remover a logo (usar fallback)
+      if (logoUrl === '' || logoUrl === null || logoUrl === undefined) {
+        const configuracoes = await configuracaoService.salvarConfiguracoes({ logoLoginUrl: null });
+        res.status(200).json({
+          success: true,
+          data: configuracoes,
+          message: 'Logo da página de login removida. O fallback será exibido.'
+        });
+        return;
+      }
+
+      // Validar se a logo existe
+      const cwd = process.cwd();
+      const isBackendFolder = cwd.endsWith('backend');
+      const logosDir = isBackendFolder 
+        ? path.join(cwd, 'uploads', 'logos')
+        : path.join(cwd, 'backend', 'uploads', 'logos');
+      
+      const filename = path.basename(logoUrl);
+      const logoPath = path.join(logosDir, filename);
+
+      if (!fs.existsSync(logoPath)) {
+        res.status(404).json({
+          success: false,
+          message: 'Logo não encontrada'
+        });
+        return;
+      }
+
+      // Salvar URL no banco de dados
+      const configuracoes = await configuracaoService.salvarConfiguracoes({ logoLoginUrl: logoUrl });
+
+      res.status(200).json({
+        success: true,
+        data: configuracoes,
+        message: 'Logo da página de login atualizada com sucesso'
+      });
+    } catch (error: any) {
+      console.error('Erro ao atualizar logo da página de login:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao atualizar logo da página de login',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/configuracoes/logo/:filename
+   * Serve a imagem do logo com headers corretos
+   * NÃO requer autenticação (para funcionar na página de login)
+   */
+  static async servirLogo(req: Request, res: Response): Promise<void> {
+    try {
+      const { filename } = req.params;
+
+      if (!filename) {
+        res.status(400).json({
+          success: false,
+          message: 'Nome do arquivo é obrigatório'
+        });
+        return;
+      }
+
+      // Determinar caminho do arquivo
+      const cwd = process.cwd();
+      const isBackendFolder = cwd.endsWith('backend');
+      const logosDir = isBackendFolder 
+        ? path.join(cwd, 'uploads', 'logos')
+        : path.join(cwd, 'backend', 'uploads', 'logos');
+      
+      // Criar diretório se não existir
+      if (!fs.existsSync(logosDir)) {
+        console.log('📁 Criando diretório de logos:', logosDir);
+        fs.mkdirSync(logosDir, { recursive: true });
+      }
+      
+      const logoPath = path.join(logosDir, filename);
+
+      console.log('🔍 Tentando servir logo:', {
+        filename,
+        cwd,
+        isBackendFolder,
+        logosDir,
+        logoPath,
+        exists: fs.existsSync(logoPath)
+      });
+
+      // Verificar se arquivo existe
+      if (!fs.existsSync(logoPath)) {
+        console.error('❌ Logo não encontrada:', logoPath);
+        res.status(404).json({
+          success: false,
+          message: 'Logo não encontrada',
+          path: logoPath
+        });
+        return;
+      }
+
+      // Determinar Content-Type baseado na extensão
+      const ext = path.extname(filename).toLowerCase();
+      const contentTypes: { [key: string]: string } = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+        '.gif': 'image/gif'
+      };
+
+      const contentType = contentTypes[ext] || 'application/octet-stream';
+
+      // Configurar headers CORS e Content-Type
+      // IMPORTANTE: Permitir todas as origens para funcionar tanto em localhost quanto em produção (IP ou domínio)
+      // Isso é necessário porque a rota de logo é pública e pode ser acessada de qualquer origem
+      const origin = req.headers.origin;
+      
+      // Sempre permitir qualquer origem para logos (público)
+      // Isso funciona tanto para localhost quanto para IPs em produção (ex: https://192.168.100.228:3001)
+      res.setHeader('Access-Control-Allow-Origin', origin || '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache por 1 ano
+
+      console.log('✅ Servindo logo:', filename, 'Content-Type:', contentType, 'Origin:', origin || 'undefined (permitindo todas)');
+
+      // Enviar arquivo usando path absoluto
+      const absolutePath = path.resolve(logoPath);
+      res.sendFile(absolutePath, (err) => {
+        if (err) {
+          console.error('❌ Erro ao enviar arquivo:', err);
+          if (!res.headersSent) {
+            res.status(500).json({
+              success: false,
+              message: 'Erro ao enviar arquivo',
+              error: err.message
+            });
+          }
+        }
+      });
+    } catch (error: any) {
+      console.error('❌ Erro ao servir logo:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao servir logo',
         error: error.message
       });
     }

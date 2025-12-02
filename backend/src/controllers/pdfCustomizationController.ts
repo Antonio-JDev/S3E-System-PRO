@@ -12,8 +12,7 @@ const prisma = new PrismaClient();
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const cwd = process.cwd();
-        const isBackendFolder = cwd.endsWith('backend');
-        const uploadDir = isBackendFolder 
+        const uploadDir = cwd.endsWith('backend')
             ? path.join(cwd, 'uploads', 'pdf-customization')
             : path.join(cwd, 'backend', 'uploads', 'pdf-customization');
         

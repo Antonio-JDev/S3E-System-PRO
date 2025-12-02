@@ -63,9 +63,13 @@ export const parseNFeXML = (xmlContent: string): ParsedNFeData | null => {
     
     for (const item of det) {
       if (item && item.prod) {
+        // Garantir que NCM seja sempre string (pode vir como número do XML)
+        const ncmValue = item.prod.NCM;
+        const ncmString = ncmValue ? String(ncmValue) : '';
+        
         items.push({
           nomeProduto: item.prod.xProd || '',
-          ncm: item.prod.NCM || '',
+          ncm: ncmString,
           quantidade: parseFloat(item.prod.qCom || '0'),
           valorUnit: parseFloat(item.prod.vUnCom || '0'),
           valorTotal: parseFloat(item.prod.vProd || '0')

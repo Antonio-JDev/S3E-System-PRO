@@ -60,9 +60,6 @@ seed: ## Popular banco com dados de exemplo
 db-shell: ## Abrir shell do PostgreSQL
 	docker-compose exec postgres psql -U s3e_user -d s3e_db
 
-redis-shell: ## Abrir shell do Redis
-	docker-compose exec redis redis-cli
-
 backend-shell: ## Abrir shell no container do backend
 	docker-compose exec backend sh
 

@@ -5,7 +5,6 @@ const prisma = new PrismaClient();
 export class ProjetosService {
   /**
    * Cria Projeto a partir de um Orçamento, aprova o orçamento
-   * e inicializa 9 etapas administrativas padrão com prazo de 24h
    */
   async criarProjetoAPartirDoOrcamento(orcamentoId: string) {
     // Verifica orçamento
@@ -37,40 +36,6 @@ export class ProjetosService {
       }
     });
 
-    // Inicializar 9 etapas admin padrão com 24h
-    const TIPOS_ETAPAS = [
-      'ABERTURA_SR',
-      'EMITIR_ART',
-      'CONCLUIR_PROJETO_TECNICO',
-      'PROTOCOLAR_PROJETO',
-      'APROVACAO_PROJETO',
-      'RELACAO_MATERIAIS',
-      'ORGANIZAR_REVISAR',
-      'GERAR_ACERVO_TECNICO',
-      'REALIZAR_VISTORIA'
-    ];
-
-    const agora = new Date();
-    const in24h = new Date(agora.getTime() + 24 * 60 * 60 * 1000);
-
-    await prisma.$transaction(
-      TIPOS_ETAPAS.map((tipo, idx) =>
-        prisma.etapaAdmin.create({
-          data: {
-            projetoId: projeto.id,
-            tipo,
-            ordem: idx + 1,
-            concluida: false,
-            dataInicio: agora,
-            dataPrevista: in24h,
-            // manter compatibilidade com campos solicitados
-            nome: tipo,
-            dataExpiracao: in24h,
-            realizada: false
-          }
-        })
-      )
-    );
 
     return projeto;
   }
@@ -319,7 +284,6 @@ export class ProjetosService {
       include: {
         cliente: { select: { id: true, nome: true } },
         orcamento: { select: { id: true, precoVenda: true, status: true } },
-        etapasAdmin: true,
         alocacoes: true,
         tasks: true
       },
@@ -344,41 +308,6 @@ export class ProjetosService {
     return projetos;
   }
 
-  /** Concluir/adiar etapa admin com validação */
-  async gerenciarEtapaAdmin(projetoId: string, etapaId: string, acao: 'concluir' | 'adiar', justificativa?: string) {
-    const etapa = await prisma.etapaAdmin.findUnique({ where: { id: etapaId } });
-    if (!etapa || etapa.projetoId !== projetoId) throw new Error('Etapa não encontrada para o projeto');
-
-    if (acao === 'concluir') {
-      await prisma.etapaAdmin.update({
-        where: { id: etapaId },
-        data: { concluida: true, realizada: true, dataConclusao: new Date() }
-      });
-    } else {
-      if (!justificativa || justificativa.trim().length < 5) {
-        throw new Error('Justificativa obrigatória para adiar');
-      }
-      const nova = new Date();
-      nova.setHours(nova.getHours() + 24);
-      await prisma.etapaAdmin.update({
-        where: { id: etapaId },
-        data: { dataPrevista: nova, dataExpiracao: nova, motivoExtensao: justificativa, justificativa }
-      });
-    }
-
-    // Verificar se todas concluídas
-    const etapas = await prisma.etapaAdmin.findMany({ where: { projetoId } });
-    const todasConcluidas = etapas.every(e => e.concluida);
-    if (todasConcluidas) {
-      // Notificar sistema: aqui registramos nota na descrição do projeto
-      await prisma.projeto.update({
-        where: { id: projetoId },
-        data: { descricao: `${(await prisma.projeto.findUnique({ where: { id: projetoId }, select: { descricao: true } }))?.descricao ?? ''}\n[INFO] Etapas administrativas concluídas. Pronto para próxima fase.` }
-      });
-    }
-
-    return { success: true };
-  }
 }
 
 export const projetosService = new ProjetosService();

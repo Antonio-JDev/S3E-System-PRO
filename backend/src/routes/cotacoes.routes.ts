@@ -53,16 +53,20 @@ router.get('/template', gerarTemplate);
 router.get('/exportar', exportarCotacoes);
 
 // Rotas de importação
+// Preview aceita apenas arquivo
 router.post('/preview-importacao', upload.single('arquivo'), previewImportacao);
+// Importar aceita arquivo OU JSON no body (quando vem do preview)
+// Multer permite que o arquivo seja opcional quando vem JSON no body
 router.post('/importar', upload.single('arquivo'), importarCotacoes);
 
 // Rotas CRUD
+// IMPORTANTE: Rotas específicas (como /bulk) devem vir ANTES de rotas com parâmetros (/:id)
 router.get('/', listarCotacoes);
-router.get('/:id', buscarCotacao);
 router.post('/', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), criarCotacao);
+router.delete('/bulk', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), deletarCotacoesEmLote);
+router.get('/:id', buscarCotacao);
 router.put('/:id', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), atualizarCotacao);
 router.delete('/:id', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), deletarCotacao);
-router.delete('/bulk', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), deletarCotacoesEmLote);
 
 export default router;
 

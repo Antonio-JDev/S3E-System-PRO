@@ -11,6 +11,8 @@ import {
 } from './ui/alert-dialog';
 import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
+import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { useSKey } from '../hooks/useSKey';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -94,6 +96,16 @@ interface CotacaoPreview {
   valorVenda: number;
   fornecedorNome: string;
   observacoes: string;
+  status?: 'novo' | 'atualizado' | 'mantido';
+  valorAnterior?: number | null;
+  idExistente?: string | null;
+}
+
+interface ImportacaoEstatisticas {
+  novos: number;
+  atualizados: number;
+  mantidos: number;
+  total: number;
 }
 
 interface CotacoesProps {
@@ -118,13 +130,25 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   
   // Preview de importação
   const [cotacoesPreview, setCotacoesPreview] = useState<CotacaoPreview[]>([]);
+  const [estatisticasImportacao, setEstatisticasImportacao] = useState<ImportacaoEstatisticas | null>(null);
+  const [resumoModalOpen, setResumoModalOpen] = useState(false);
   
   // Seleção de itens
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
+  const [deleteBulkDialogOpen, setDeleteBulkDialogOpen] = useState(false);
+  
+  // Fechar modais com tecla S
+  useSKey(viewModalOpen, () => setViewModalOpen(false));
+  useSKey(editModalOpen, () => setEditModalOpen(false));
+  useSKey(importModalOpen, () => setImportModalOpen(false));
+  useSKey(previewModalOpen, () => setPreviewModalOpen(false));
+  useSKey(createModalOpen, () => setCreateModalOpen(false));
+  useSKey(resumoModalOpen, () => setResumoModalOpen(false));
   
   // Form states
   const [formData, setFormData] = useState({
@@ -136,12 +160,35 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     observacoes: ''
   });
   
+  const [createFormData, setCreateFormData] = useState({
+    nome: '',
+    ncm: '',
+    valorUnitario: '',
+    valorVenda: '',
+    fornecedorId: '',
+    fornecedorNome: '',
+    observacoes: ''
+  });
+  
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // ==================== EFFECTS ====================
   useEffect(() => {
     carregarCotacoes();
+    carregarFornecedores();
   }, []);
+  
+  const carregarFornecedores = async () => {
+    try {
+      const response = await fornecedoresService.listar();
+      if (response.success && response.data) {
+        setFornecedores(response.data);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar fornecedores:', error);
+    }
+  };
 
   // ==================== API CALLS ====================
   const carregarCotacoes = async () => {
@@ -225,7 +272,22 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
           });
           
           if (response.success && response.data) {
-            setCotacoesPreview(response.data.cotacoes || []);
+            const cotacoes = response.data.cotacoes || [];
+            const estatisticas = response.data.estatisticas || {
+              novos: 0,
+              atualizados: 0,
+              mantidos: 0,
+              total: cotacoes.length
+            };
+            
+            // Calcular valorVenda padrão (40%) para itens novos e atualizados
+            const cotacoesComValorVenda = cotacoes.map((cotacao: any) => ({
+              ...cotacao,
+              valorVenda: cotacao.valorVenda || cotacao.valorUnitario * 1.4
+            }));
+            
+            setCotacoesPreview(cotacoesComValorVenda);
+            setEstatisticasImportacao(estatisticas);
             setPreviewModalOpen(true);
           }
         } catch (error) {
@@ -254,15 +316,45 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       });
       
       if (response.success && response.data) {
-        const { criados, atualizados, erros } = response.data;
+        const { criados, atualizados, mantidos, erros, detalhes } = response.data;
         
-        toast.success(`Importação concluída: ${criados} criados, ${atualizados} atualizados${erros > 0 ? `, ${erros} erros` : ''}`);
-        
+        // Fechar modal de preview
         setPreviewModalOpen(false);
-        setImportModalOpen(false);
-        setSelectedFile(null);
-        setCotacoesPreview([]);
-        carregarCotacoes();
+        
+        // Atualizar estatísticas com os resultados reais
+        if (detalhes && detalhes.length > 0) {
+          const novos = detalhes.filter((d: any) => d.status === 'criado').length;
+          const atualizadosCount = detalhes.filter((d: any) => d.status === 'atualizado').length;
+          const mantidosCount = detalhes.filter((d: any) => d.status === 'mantido').length;
+          
+          setEstatisticasImportacao({
+            novos: novos || criados || 0,
+            atualizados: atualizadosCount || atualizados || 0,
+            mantidos: mantidosCount || mantidos || 0,
+            total: detalhes.length
+          });
+          
+          // Mapear detalhes para o formato do preview para exibir no resumo
+          const detalhesMapeados = detalhes.map((detalhe: any) => {
+            const cotacaoOriginal = cotacoesPreview.find((c: any) => c.nome === detalhe.nome);
+            return {
+              ...cotacaoOriginal,
+              status: detalhe.status === 'criado' ? 'novo' : detalhe.status,
+              valorAnterior: detalhe.valorAnterior,
+              valorNovo: detalhe.valorNovo
+            };
+          }).filter(Boolean);
+          
+          setCotacoesPreview(detalhesMapeados.length > 0 ? detalhesMapeados : cotacoesPreview);
+          setResumoModalOpen(true);
+        } else {
+          toast.success(`Importação concluída: ${criados || 0} criados, ${atualizados || 0} atualizados, ${mantidos || 0} mantidos${erros > 0 ? `, ${erros} erros` : ''}`);
+          setImportModalOpen(false);
+          setSelectedFile(null);
+          setCotacoesPreview([]);
+          setEstatisticasImportacao(null);
+          carregarCotacoes();
+        }
       }
     } catch (error) {
       console.error('Erro ao importar:', error);
@@ -270,6 +362,15 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFecharResumo = () => {
+    setResumoModalOpen(false);
+    setImportModalOpen(false);
+    setSelectedFile(null);
+    setCotacoesPreview([]);
+    setEstatisticasImportacao(null);
+    carregarCotacoes();
   };
 
   const handleAtualizarValorVenda = (index: number, valorVenda: number) => {
@@ -294,6 +395,55 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       observacoes: cotacao.observacoes || ''
     });
     setEditModalOpen(true);
+  };
+
+  const handleCreateCotacao = async () => {
+    try {
+      // Validações
+      if (!createFormData.nome || !createFormData.valorUnitario) {
+        toast.error('Nome e valor unitário são obrigatórios');
+        return;
+      }
+
+      setLoading(true);
+      
+      const payload: any = {
+        nome: createFormData.nome,
+        valorUnitario: parseFloat(createFormData.valorUnitario),
+      };
+
+      if (createFormData.ncm) payload.ncm = createFormData.ncm;
+      if (createFormData.valorVenda) {
+        payload.valorVenda = parseFloat(createFormData.valorVenda);
+      }
+      if (createFormData.fornecedorId) payload.fornecedorId = createFormData.fornecedorId;
+      if (createFormData.fornecedorNome) payload.fornecedorNome = createFormData.fornecedorNome;
+      if (createFormData.observacoes) payload.observacoes = createFormData.observacoes;
+
+      const response = await axiosApiService.post('/api/cotacoes', payload);
+
+      if (response.success) {
+        toast.success('Cotação criada com sucesso!');
+        setCreateModalOpen(false);
+        setCreateFormData({
+          nome: '',
+          ncm: '',
+          valorUnitario: '',
+          valorVenda: '',
+          fornecedorId: '',
+          fornecedorNome: '',
+          observacoes: ''
+        });
+        await carregarCotacoes();
+      } else {
+        toast.error(response.error || 'Erro ao criar cotação');
+      }
+    } catch (error: any) {
+      console.error('Erro ao criar cotação:', error);
+      toast.error(error.response?.data?.error || 'Erro ao criar cotação');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -348,10 +498,18 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
         setDeleteDialogOpen(false);
         setSelectedCotacao(null);
         carregarCotacoes();
+      } else {
+        toast.error(response.error || 'Não foi possível excluir a cotação');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao excluir:', error);
-      toast.error('Não foi possível excluir a cotação');
+      const errorMessage = error?.response?.data?.error || error?.message || 'Não foi possível excluir a cotação';
+      
+      if (error?.response?.status === 404) {
+        toast.error('Cotação não encontrada. Ela pode ter sido removida por outro usuário.');
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -400,8 +558,11 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       return;
     }
 
-    const confirmMessage = `Tem certeza que deseja excluir ${selectedIds.size} cotação(ões)?\n\nEsta ação não pode ser desfeita.`;
-    if (!window.confirm(confirmMessage)) {
+    setDeleteBulkDialogOpen(true);
+  };
+
+  const handleConfirmarExclusaoBulk = async () => {
+    if (selectedIds.size === 0) {
       return;
     }
 
@@ -412,15 +573,28 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       });
       
       if (response.success) {
-        toast.success(`${response.data.deletados || selectedIds.size} cotação(ões) excluída(s) com sucesso!`);
+        const { deletados, naoEncontrados } = response.data || {};
         
+        if (naoEncontrados && naoEncontrados > 0) {
+          toast.warning(
+            `${deletados || 0} cotação(ões) excluída(s), mas ${naoEncontrados} não foram encontradas`,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(`${deletados || selectedIds.size} cotação(ões) excluída(s) com sucesso!`);
+        }
+        
+        setDeleteBulkDialogOpen(false);
         setSelectedIds(new Set());
         setSelectAll(false);
         carregarCotacoes();
+      } else {
+        toast.error(response.error || 'Não foi possível excluir as cotações');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao excluir cotações:', error);
-      toast.error('Não foi possível excluir as cotações');
+      const errorMessage = error?.response?.data?.error || error?.message || 'Não foi possível excluir as cotações';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -452,6 +626,25 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
         </div>
         
         <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={() => {
+              setCreateFormData({
+                nome: '',
+                ncm: '',
+                valorUnitario: '',
+                valorVenda: '',
+                fornecedorId: '',
+                fornecedorNome: '',
+                observacoes: ''
+              });
+              setCreateModalOpen(true);
+            }}
+            className="px-4 py-2 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all flex items-center gap-2 shadow-md font-semibold"
+          >
+            <PlusIcon className="w-5 h-5" />
+            Nova Cotação
+          </button>
+          
           <button
             onClick={handleDownloadTemplate}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 shadow-md"
@@ -664,7 +857,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
             
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-semibold text-gray-700">Material:</label>
+                <label className="text-sm font-semibold text-gray-700">Nome do Material:</label>
                 <p className="text-lg text-gray-900 mt-1">{selectedCotacao.nome}</p>
               </div>
               
@@ -725,8 +918,8 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       {editModalOpen && selectedCotacao && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Editar Cotação</h2>
+            <div className=" flex justify-between items-start mb-6">
+              <h2 className=" text-2xl font-bold text-gray-900">Editar Cotação</h2>
               <button
                 onClick={() => setEditModalOpen(false)}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
@@ -738,7 +931,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Material *
+                  Nome do Material *
                 </label>
                 <input
                   type="text"
@@ -905,6 +1098,198 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
         </div>
       )}
 
+      {/* Modal Criar Nova Cotação */}
+      {createModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b p-6 flex justify-between items-start">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Nova Cotação</h2>
+                <p className="text-sm text-gray-600 mt-1">Preencha os dados para criar uma nova cotação</p>
+              </div>
+              <button
+                onClick={() => {
+                  setCreateModalOpen(false);
+                  setCreateFormData({
+                    nome: '',
+                    ncm: '',
+                    valorUnitario: '',
+                    valorVenda: '',
+                    fornecedorId: '',
+                    fornecedorNome: '',
+                    observacoes: ''
+                  });
+                }}
+                className="text-gray-400 hover:text-gray-600 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Nome do Material */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Nome do Material *
+                </label>
+                <input
+                  type="text"
+                  value={createFormData.nome}
+                  onChange={(e) => setCreateFormData({ ...createFormData, nome: e.target.value })}
+                  placeholder="Ex: Cabo elétrico 2.5mm"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* NCM */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  NCM (Nomenclatura Comum do Mercosul)
+                </label>
+                <input
+                  type="text"
+                  value={createFormData.ncm}
+                  onChange={(e) => setCreateFormData({ ...createFormData, ncm: e.target.value })}
+                  placeholder="Ex: 8544.42.90"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Valor Unitário */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Valor Unitário (R$) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={createFormData.valorUnitario}
+                  onChange={(e) => {
+                    const valor = e.target.value;
+                    setCreateFormData({ 
+                      ...createFormData, 
+                      valorUnitario: valor,
+                      // Calcular valor de venda automaticamente (40% de margem)
+                      valorVenda: valor ? (parseFloat(valor) * 1.4).toFixed(2) : ''
+                    });
+                  }}
+                  placeholder="0.00"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  required
+                />
+              </div>
+
+              {/* Valor de Venda */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Valor de Venda (R$)
+                  <span className="text-xs text-gray-500 ml-2">(40% de margem padrão)</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={createFormData.valorVenda}
+                  onChange={(e) => setCreateFormData({ ...createFormData, valorVenda: e.target.value })}
+                  placeholder="0.00"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Se não preenchido, será calculado automaticamente com 40% de margem sobre o valor unitário
+                </p>
+              </div>
+
+              {/* Fornecedor */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Fornecedor
+                </label>
+                <select
+                  value={createFormData.fornecedorId}
+                  onChange={(e) => {
+                    const fornecedorId = e.target.value;
+                    const fornecedor = fornecedores.find(f => f.id === fornecedorId);
+                    setCreateFormData({ 
+                      ...createFormData, 
+                      fornecedorId,
+                      fornecedorNome: fornecedor ? fornecedor.nome : ''
+                    });
+                  }}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="">Selecione um fornecedor (opcional)</option>
+                  {fornecedores.filter(f => f.ativo).map((fornecedor) => (
+                    <option key={fornecedor.id} value={fornecedor.id}>
+                      {fornecedor.nome}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Ou digite o nome do fornecedor manualmente abaixo
+                </p>
+                <input
+                  type="text"
+                  value={createFormData.fornecedorNome}
+                  onChange={(e) => {
+                    setCreateFormData({ 
+                      ...createFormData, 
+                      fornecedorNome: e.target.value,
+                      fornecedorId: '' // Limpar ID se digitar manualmente
+                    });
+                  }}
+                  placeholder="Nome do fornecedor (opcional)"
+                  className="w-full mt-2 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Observações */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Observações
+                </label>
+                <textarea
+                  value={createFormData.observacoes}
+                  onChange={(e) => setCreateFormData({ ...createFormData, observacoes: e.target.value })}
+                  placeholder="Observações adicionais sobre a cotação..."
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                />
+              </div>
+            </div>
+            
+            <div className="sticky bottom-0 bg-gray-50 border-t p-6 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setCreateModalOpen(false);
+                  setCreateFormData({
+                    nome: '',
+                    ncm: '',
+                    valorUnitario: '',
+                    valorVenda: '',
+                    fornecedorId: '',
+                    fornecedorNome: '',
+                    observacoes: ''
+                  });
+                }}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-all"
+                disabled={loading}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateCotacao}
+                className="px-6 py-2 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
+                disabled={loading || !createFormData.nome || !createFormData.valorUnitario}
+              >
+                {loading ? 'Criando...' : 'Criar Cotação'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Preview de Importação */}
       {previewModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -962,8 +1347,27 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Padrão: 40% acima
+                          Padrão: 40% acima (pode ser editado manualmente)
                         </p>
+                        {cotacao.status && (
+                          <div className="mt-1">
+                            {cotacao.status === 'novo' && (
+                              <span className="inline-block px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 rounded">
+                                ✨ Novo
+                              </span>
+                            )}
+                            {cotacao.status === 'atualizado' && (
+                              <span className="inline-block px-2 py-0.5 text-xs font-semibold bg-blue-100 text-blue-700 rounded">
+                                🔄 Atualizado
+                              </span>
+                            )}
+                            {cotacao.status === 'mantido' && (
+                              <span className="inline-block px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700 rounded">
+                                ✓ Mantido
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="col-span-1 text-right">
                         <p className="text-xs text-gray-500">
@@ -981,36 +1385,175 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
               </div>
             </div>
             
-            <div className="p-6 border-t bg-gray-50 flex justify-between items-center">
-              <div className="text-sm text-gray-600">
-                <strong>Total:</strong> {cotacoesPreview.length} cotação(ões)
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setPreviewModalOpen(false);
-                    setSelectedFile(null);
-                    setCotacoesPreview([]);
-                  }}
-                  className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
-                  disabled={loading}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleConfirmarImportacao}
-                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-                  disabled={loading}
-                >
-                  {loading ? 'Importando...' : 'Confirmar e Importar'}
-                </button>
+            <div className="p-6 border-t bg-gray-50">
+              {estatisticasImportacao && (
+                <div className="mb-4 grid grid-cols-4 gap-4">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-green-700">{estatisticasImportacao.novos}</p>
+                    <p className="text-xs text-green-600 font-semibold">Novos</p>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-blue-700">{estatisticasImportacao.atualizados}</p>
+                    <p className="text-xs text-blue-600 font-semibold">Atualizados</p>
+                  </div>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-gray-700">{estatisticasImportacao.mantidos}</p>
+                    <p className="text-xs text-gray-600 font-semibold">Mantidos</p>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-purple-700">{estatisticasImportacao.total}</p>
+                    <p className="text-xs text-purple-600 font-semibold">Total</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  <strong>Total:</strong> {cotacoesPreview.length} cotação(ões)
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setPreviewModalOpen(false);
+                      setSelectedFile(null);
+                      setCotacoesPreview([]);
+                    }}
+                    className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                    disabled={loading}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleConfirmarImportacao}
+                    className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                    disabled={loading}
+                  >
+                    {loading ? 'Importando...' : 'Confirmar e Importar'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* AlertDialog Excluir */}
+      {/* Modal de Resumo de Importação */}
+      {resumoModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-start p-6 border-b bg-gradient-to-r from-purple-600 to-purple-700">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Resumo da Importação</h2>
+                <p className="text-sm text-purple-100 mt-1">
+                  Detalhes das alterações realizadas
+                </p>
+              </div>
+              <button
+                onClick={handleFecharResumo}
+                className="text-white/80 hover:text-white text-2xl"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="mb-6 grid grid-cols-4 gap-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                  <p className="text-3xl font-bold text-green-700">
+                    {estatisticasImportacao?.novos || 0}
+                  </p>
+                  <p className="text-sm text-green-600 font-semibold mt-1">Novos</p>
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                  <p className="text-3xl font-bold text-blue-700">
+                    {estatisticasImportacao?.atualizados || 0}
+                  </p>
+                  <p className="text-sm text-blue-600 font-semibold mt-1">Atualizados</p>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                  <p className="text-3xl font-bold text-gray-700">
+                    {estatisticasImportacao?.mantidos || 0}
+                  </p>
+                  <p className="text-sm text-gray-600 font-semibold mt-1">Mantidos</p>
+                </div>
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-center">
+                  <p className="text-3xl font-bold text-purple-700">
+                    {estatisticasImportacao?.total || 0}
+                  </p>
+                  <p className="text-sm text-purple-600 font-semibold mt-1">Total</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-semibold text-gray-800 mb-3">Detalhes por Item:</h3>
+                {cotacoesPreview.map((cotacao, index) => (
+                  <div 
+                    key={index} 
+                    className={`border rounded-lg p-4 ${
+                      cotacao.status === 'atualizado' ? 'bg-blue-50 border-blue-200' :
+                      cotacao.status === 'novo' ? 'bg-green-50 border-green-200' :
+                      'bg-gray-50 border-gray-200'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="font-semibold text-gray-900">{cotacao.nome}</p>
+                          {cotacao.status === 'novo' && (
+                            <span className="px-2 py-0.5 text-xs font-semibold bg-green-100 text-green-700 rounded">
+                              ✨ Novo
+                            </span>
+                          )}
+                          {cotacao.status === 'atualizado' && (
+                            <span className="px-2 py-0.5 text-xs font-semibold bg-blue-100 text-blue-700 rounded">
+                              🔄 Atualizado
+                            </span>
+                          )}
+                          {cotacao.status === 'mantido' && (
+                            <span className="px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700 rounded">
+                              ✓ Mantido
+                            </span>
+                          )}
+                        </div>
+                        {cotacao.status === 'atualizado' && cotacao.valorAnterior !== null && (
+                          <div className="text-sm text-gray-600">
+                            <span className="line-through text-red-600 mr-2">
+                              R$ {cotacao.valorAnterior.toFixed(2)}
+                            </span>
+                            <span className="font-semibold text-blue-700">
+                              → R$ {cotacao.valorUnitario.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {cotacao.status === 'mantido' && (
+                          <div className="text-sm text-gray-600">
+                            Valor mantido: <span className="font-semibold">R$ {cotacao.valorUnitario.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {cotacao.status === 'novo' && (
+                          <div className="text-sm text-gray-600">
+                            Novo valor: <span className="font-semibold text-green-700">R$ {cotacao.valorUnitario.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div className="p-6 border-t bg-gray-50 flex justify-end">
+              <button
+                onClick={handleFecharResumo}
+                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AlertDialog Excluir Individual */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1037,6 +1580,38 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
               className="bg-red-600 hover:bg-red-700"
             >
               {loading ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog Excluir em Lote */}
+      <AlertDialog open={deleteBulkDialogOpen} onOpenChange={setDeleteBulkDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Confirmar Exclusão em Lote
+            </AlertDialogTitle>
+            <div className="space-y-3 text-gray-600">
+              <p>
+                Tem certeza que deseja excluir <strong>{selectedIds.size}</strong> cotação(ões) selecionada(s)?
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                <p className="font-semibold mb-1">⚠️ Atenção:</p>
+                <p>Esta ação não pode ser desfeita. Todas as cotações selecionadas serão permanentemente removidas.</p>
+              </div>
+            </div>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmarExclusaoBulk}
+              disabled={loading}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {loading ? 'Excluindo...' : `Excluir ${selectedIds.size} item(s)`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -15,6 +15,13 @@ import {
   updateTask,
   deleteTask
 } from '../controllers/tasksController';
+import {
+  criarDocumento,
+  listarDocumentos,
+  deletarDocumento,
+  visualizarDocumento,
+  uploadDocumento
+} from '../controllers/projetoDocumentosController';
 import { authenticate } from '../middlewares/auth';
 
 const router = Router();
@@ -96,5 +103,33 @@ router.put('/:projetoId/tasks/:taskId', updateTask);
  * @access Private
  */
 router.delete('/:projetoId/tasks/:taskId', deleteTask);
+
+/**
+ * @route POST /api/projetos/:projetoId/documentos
+ * @desc Upload de documento para um projeto
+ * @access Private
+ */
+router.post('/:projetoId/documentos', uploadDocumento, criarDocumento);
+
+/**
+ * @route GET /api/projetos/:projetoId/documentos
+ * @desc Listar documentos de um projeto
+ * @access Private
+ */
+router.get('/:projetoId/documentos', listarDocumentos);
+
+/**
+ * @route GET /api/projetos/:projetoId/documentos/:documentoId/visualizar
+ * @desc Visualizar documento de um projeto
+ * @access Private
+ */
+router.get('/:projetoId/documentos/:documentoId/visualizar', visualizarDocumento);
+
+/**
+ * @route DELETE /api/projetos/:projetoId/documentos/:documentoId
+ * @desc Deletar documento de um projeto
+ * @access Private
+ */
+router.delete('/:projetoId/documentos/:documentoId', deletarDocumento);
 
 export default router;

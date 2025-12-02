@@ -813,49 +813,49 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             {/* MODAL DE CRIAÇÃO/EDIÇÃO (Simplificado) */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
-                        <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-teal-50 to-blue-50">
+                        <div className="modal-header bg-gradient-to-r from-teal-50 to-blue-50 dark:from-slate-800 dark:to-slate-900">
                             <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100">
+                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100 dark:ring-teal-900/50">
                                     {itemToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
                                 </div>
                                 <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900">
+                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">
                                         {itemToEdit ? 'Editar Item' : 'Novo Item'}
                                     </h2>
-                                    <p className="text-sm text-gray-600 mt-1">
+                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
                                         {itemToEdit ? 'Atualize as informações do item' : 'Adicione um novo item ao catálogo'}
                                     </p>
                                 </div>
                             </div>
                             <button
                                 onClick={handleCloseModal}
-                                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                className="absolute top-4 right-4 p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
                             >
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                            <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                <p className="text-blue-800 font-medium">
+                        <form onSubmit={handleSubmit} className="modal-body space-y-6">
+                            <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                                <p className="text-blue-800 dark:text-blue-300 font-medium">
                                     🚧 Modal simplificado para demonstração. 
                                     A implementação completa incluirá formulários específicos para cada tipo de item.
                                 </p>
                             </div>
 
-                            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+                            <div className="modal-footer">
                                 <button
                                     type="button"
                                     onClick={handleCloseModal}
-                                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
+                                    className="btn-secondary"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-8 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-700 hover:to-teal-600 transition-all shadow-medium font-semibold"
+                                    className="btn-primary"
                                 >
                                     {itemToEdit ? 'Atualizar' : 'Adicionar'} Item
                                 </button>

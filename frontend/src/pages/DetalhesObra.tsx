@@ -156,6 +156,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
   // Modal de Edição de Tarefa
   const [modalEditarTarefa, setModalEditarTarefa] = useState(false);
   const [tarefaEditando, setTarefaEditando] = useState<TarefaObra | null>(null);
+  const [tipoAtribuicaoEdicao, setTipoAtribuicaoEdicao] = useState<'equipe' | 'individual'>('individual');
 
   // Modal de Visualização de Registro
   const [modalRegistro, setModalRegistro] = useState(false);
@@ -193,6 +194,14 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
       carregarEquipes();
     }
   }, [modalNovaTarefa]);
+
+  // Recarregar equipes quando o modal de edição de tarefa abrir
+  useEffect(() => {
+    if (modalEditarTarefa) {
+      console.log('🔄 Modal de edição de tarefa aberto, recarregando equipes...');
+      carregarEquipes();
+    }
+  }, [modalEditarTarefa]);
 
   const carregarDados = async () => {
     if (!obraId) return;
@@ -286,28 +295,25 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
     if (!obraId || !obra) return;
     try {
       setLoadingMateriais(true);
-      // Buscar movimentações que referenciam esta obra
-      const response = await axiosApiService.get('/api/movimentacoes');
+      // Usar o endpoint específico de materiais da obra
+      const response = await axiosApiService.get(`/api/obras/${obraId}/materiais`);
       if (response.success && response.data) {
-        const movimentacoesArray = Array.isArray(response.data) ? response.data : [];
-        // Filtrar movimentações que referenciam esta obra (campo referencia ou obraId)
-        const materiaisVinculados = movimentacoesArray
-          .filter((mov: any) => {
-            // Verificar se a referência corresponde ao ID da obra ou nome da obra
-            const referencia = mov.referencia || mov.obraId || mov.obraVinculada || '';
-            return referencia === obraId || referencia === obra?.nomeObra;
-          })
-          .map((mov: any) => ({
-            ...mov,
-            material: mov.material || { nome: 'Material não encontrado' }
-          }));
+        const materiaisArray = Array.isArray(response.data) ? response.data : [];
+        // Mapear para o formato esperado
+        const materiaisVinculados = materiaisArray.map((mov: any) => ({
+          ...mov,
+          material: mov.material || { nome: 'Material não encontrado', sku: '-', unidadeMedida: 'un' }
+        }));
         
         setMateriaisObra(materiaisVinculados);
         console.log(`✅ ${materiaisVinculados.length} materiais encontrados para a obra`);
+      } else {
+        setMateriaisObra([]);
       }
     } catch (error: any) {
       console.error('Erro ao carregar materiais da obra:', error);
       toast.error('Erro ao carregar materiais');
+      setMateriaisObra([]);
     } finally {
       setLoadingMateriais(false);
     }
@@ -431,17 +437,33 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
     if (!tarefaEditando) return;
 
     try {
-      await axiosApiService.put(`/api/obras/tarefas/${tarefaEditando.id}`, {
+      const payload: any = {
         descricao: tarefaEditando.descricao,
-        atribuidoA: tarefaEditando.atribuidoA || null,
         dataPrevista: tarefaEditando.dataPrevista || null,
+        dataPrevistaFim: tarefaEditando.dataPrevistaFim || null,
         observacoes: tarefaEditando.observacoes || null,
         progresso: tarefaEditando.progresso
-      });
+      };
+
+      // Se for equipe, enviar equipeId e limpar atribuidoA
+      if (tipoAtribuicaoEdicao === 'equipe' && tarefaEditando.equipeId) {
+        payload.equipeId = tarefaEditando.equipeId;
+        payload.atribuidoA = null;
+      } else if (tipoAtribuicaoEdicao === 'individual' && tarefaEditando.atribuidoA) {
+        payload.atribuidoA = tarefaEditando.atribuidoA;
+        payload.equipeId = null;
+      } else {
+        // Se não tiver nenhum, limpar ambos
+        payload.atribuidoA = null;
+        payload.equipeId = null;
+      }
+
+      await axiosApiService.put(`/api/obras/tarefas/${tarefaEditando.id}`, payload);
       toast.success('✅ Tarefa atualizada com sucesso!');
       setModalEditarTarefa(false);
       setTarefaEditando(null);
       carregarTarefas();
+      carregarAlocacoes();
     } catch (error: any) {
       console.error('Erro ao atualizar tarefa:', error);
       toast.error(error?.response?.data?.error || 'Erro ao atualizar tarefa');
@@ -465,6 +487,12 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
   const abrirModalEditarTarefa = (tarefa: TarefaObra) => {
     setTarefaEditando(tarefa);
+    // Detectar se a tarefa tem equipe ou eletricista individual
+    if (tarefa.equipeId) {
+      setTipoAtribuicaoEdicao('equipe');
+    } else {
+      setTipoAtribuicaoEdicao('individual');
+    }
     setModalEditarTarefa(true);
   };
 
@@ -848,45 +876,70 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {materiaisObra.map((mov: any) => (
-                    <div key={mov.id} className="card-secondary border-l-4 border-blue-500">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">
-                            {mov.material?.nome || 'Material não encontrado'}
-                          </h4>
-                          <div className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-dark-text-secondary">
-                            <span className={`px-3 py-1 rounded-lg font-semibold ${
-                              mov.tipo === 'SAIDA' 
-                                ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' 
-                                : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                            }`}>
-                              {mov.tipo === 'SAIDA' ? '📤 Saída' : '📥 Entrada'}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <strong>Quantidade:</strong> {mov.quantidade} {mov.material?.unidadeMedida || 'un'}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <ClockIcon className="w-4 h-4" />
-                              {new Date(mov.createdAt || mov.data).toLocaleDateString('pt-BR')}
-                            </span>
-                            {mov.motivo && (
-                              <span>
-                                <strong>Motivo:</strong> {mov.motivo}
+                  {materiaisObra.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 dark:bg-dark-card rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
+                      <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                      <p className="text-gray-500 dark:text-dark-text-secondary mb-2">Nenhum material alocado a esta obra</p>
+                      <p className="text-sm text-gray-400 dark:text-gray-500">
+                        Os materiais aparecerão aqui quando houver alocações do estoque para esta obra
+                      </p>
+                    </div>
+                  ) : (
+                    materiaisObra.map((mov: any, index: number) => (
+                      <div key={mov.id || `material-${index}`} className="bg-white dark:bg-dark-card border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4 shadow-md hover:shadow-lg transition-all">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-3">
+                              <h4 className="font-bold text-gray-900 dark:text-dark-text text-lg">
+                                {mov.material?.nome || 'Material não encontrado'}
+                              </h4>
+                              <span className="px-3 py-1 rounded-lg font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">
+                                ✓ Alocado
                               </span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
+                                <strong className="text-gray-900 dark:text-dark-text">SKU:</strong>
+                                <span>{mov.material?.sku || '-'}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
+                                <strong className="text-gray-900 dark:text-dark-text">Quantidade:</strong>
+                                <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                  {mov.quantidade} {mov.material?.unidadeMedida || 'un'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
+                                <ClockIcon className="w-4 h-4" />
+                                <strong className="text-gray-900 dark:text-dark-text">Data de Alocação:</strong>
+                                <span>{new Date(mov.createdAt || mov.data).toLocaleDateString('pt-BR', { 
+                                  day: '2-digit', 
+                                  month: '2-digit', 
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}</span>
+                              </div>
+                              {mov.material?.categoria && (
+                                <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
+                                  <strong className="text-gray-900 dark:text-dark-text">Categoria:</strong>
+                                  <span>{mov.material.categoria}</span>
+                                </div>
+                              )}
+                            </div>
+                            {mov.observacoes && (
+                              <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                                <p className="text-sm text-blue-900 dark:text-blue-300">
+                                  <strong>Observações:</strong> {mov.observacoes}
+                                </p>
+                              </div>
                             )}
                           </div>
-                          {mov.observacoes && (
-                            <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                              <p className="text-sm text-blue-900 dark:text-blue-300">
-                                <strong>Observações:</strong> {mov.observacoes}
-                              </p>
-                            </div>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               )}
             </div>
@@ -1140,35 +1193,145 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                 />
               </div>
 
+              {/* Seletor de Tipo de Atribuição */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                  Atribuir a Eletricista
+                  Tipo de Atribuição
                 </label>
-                <select
-                  value={tarefaEditando.atribuidoA || ''}
-                  onChange={(e) => setTarefaEditando({ ...tarefaEditando, atribuidoA: e.target.value })}
-                  className="select-field"
-                >
-                  <option value="">Não atribuído</option>
-                  {eletricistas.map((eletricista) => (
-                    <option key={eletricista.id} value={eletricista.id}>
-                      {eletricista.name} ({eletricista.email})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex gap-4 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="tipoAtribuicaoEdicao"
+                      value="equipe"
+                      checked={tipoAtribuicaoEdicao === 'equipe'}
+                      onChange={(e) => {
+                        setTipoAtribuicaoEdicao('equipe');
+                        setTarefaEditando({ ...tarefaEditando, atribuidoA: undefined });
+                      }}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-sm">Equipe</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="tipoAtribuicaoEdicao"
+                      value="individual"
+                      checked={tipoAtribuicaoEdicao === 'individual'}
+                      onChange={(e) => {
+                        setTipoAtribuicaoEdicao('individual');
+                        setTarefaEditando({ ...tarefaEditando, equipeId: undefined });
+                      }}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="text-sm">Eletricista Individual</span>
+                  </label>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                  Data Prevista
-                </label>
-                <input
-                  type="date"
-                  value={tarefaEditando.dataPrevista ? new Date(tarefaEditando.dataPrevista).toISOString().split('T')[0] : ''}
-                  onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevista: e.target.value })}
-                  className="input-field"
-                />
-              </div>
+              {/* Seletor de Equipe */}
+              {tipoAtribuicaoEdicao === 'equipe' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                    Atribuir a Equipe
+                  </label>
+                  <select
+                    value={tarefaEditando.equipeId || ''}
+                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, equipeId: e.target.value })}
+                    className="select-field"
+                  >
+                    <option value="">Selecione uma equipe</option>
+                    {equipes.map((equipe) => (
+                      <option key={equipe.id} value={equipe.id}>
+                        {equipe.nome} - {equipe.tipo} ({equipe.membros?.length || 0} {equipe.membros?.length === 1 ? 'membro' : 'membros'})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  {tarefaEditando.equipeId && (
+                    <div className="mt-3 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl">
+                      <p className="text-xs font-semibold text-purple-900 dark:text-purple-300 mb-2">
+                        👥 Membros da Equipe:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {equipes.find(e => e.id === tarefaEditando.equipeId)?.membros.map((membro) => (
+                          <span
+                            key={membro.id}
+                            className="px-2 py-1 bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-300 rounded-lg text-xs font-medium"
+                          >
+                            {membro.nome} • {membro.funcao}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Seletor Individual de Eletricista */}
+              {tipoAtribuicaoEdicao === 'individual' && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                    Atribuir a Eletricista
+                  </label>
+                  <select
+                    value={tarefaEditando.atribuidoA || ''}
+                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, atribuidoA: e.target.value })}
+                    className="select-field"
+                  >
+                    <option value="">Não atribuído</option>
+                    {eletricistas.map((eletricista) => (
+                      <option key={eletricista.id} value={eletricista.id}>
+                        {eletricista.name} ({eletricista.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Datas - Se for equipe, mostrar início e fim */}
+              {tipoAtribuicaoEdicao === 'equipe' ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                      Data de Início *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={tarefaEditando.dataPrevista ? new Date(tarefaEditando.dataPrevista).toISOString().slice(0, 16) : ''}
+                      onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevista: e.target.value })}
+                      className="input-field"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                      Data de Término *
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={tarefaEditando.dataPrevistaFim ? new Date(tarefaEditando.dataPrevistaFim).toISOString().slice(0, 16) : ''}
+                      onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevistaFim: e.target.value })}
+                      className="input-field"
+                      required
+                      min={tarefaEditando.dataPrevista || ''}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                    Data Prevista
+                  </label>
+                  <input
+                    type="date"
+                    value={tarefaEditando.dataPrevista ? new Date(tarefaEditando.dataPrevista).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevista: e.target.value })}
+                    className="input-field"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">

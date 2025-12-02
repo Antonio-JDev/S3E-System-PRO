@@ -8,7 +8,7 @@ import {
   TrendingUp, TrendingDown, Users, DollarSign, 
   Package, AlertTriangle, Building2, Zap, 
   ArrowUpRight, Calendar, Download, FileText,
-  Activity, Star
+  Activity, Star, Eye, Printer, X, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -41,8 +41,10 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const [obrasData, setObrasData] = useState<any[]>([]);
   const [quadrosData, setQuadrosData] = useState<any[]>([]);
   const [atividadesData, setAtividadesData] = useState<any[]>([]);
-  const [resumoFinanceiro, setResumoFinanceiro] = useState<any>(null);
+  const [materiaisCriticos, setMateriaisCriticos] = useState<any[]>([]);
   const [exportando, setExportando] = useState(false);
+  const [estoqueExpandido, setEstoqueExpandido] = useState(false);
+  const [filtroEstoque, setFiltroEstoque] = useState<'todos' | 'criticos' | 'abaixo-minimo'>('todos');
   
   // Detectar tema para ajustar cores dos gráficos
   const themeContext = useContext(ThemeContext);
@@ -115,15 +117,26 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     }
   };
 
-  // Carregar resumo financeiro
-  const loadResumoFinanceiro = async () => {
+  // Carregar materiais com estoque crítico
+  const loadMateriaisCriticos = async () => {
     try {
-      const result = await dashboardService.getResumoFinanceiro();
-      if (result.success && result.data) {
-        setResumoFinanceiro(result.data);
+      const alertasResult = await dashboardService.getAlertas();
+      if (alertasResult.success && alertasResult.data?.estoqueBaixo?.itens) {
+        setMateriaisCriticos(alertasResult.data.estoqueBaixo.itens);
+      } else {
+        // Fallback: buscar materiais e filtrar
+        const materiaisResult = await dashboardService.getMateriais();
+        if (materiaisResult.success && materiaisResult.data) {
+          const criticos = materiaisResult.data.filter((material: any) => {
+            const estoque = material.estoque || material.stock || 0;
+            const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+            return estoque <= estoqueMinimo;
+          });
+          setMateriaisCriticos(criticos);
+        }
       }
     } catch (err) {
-      console.error('Erro ao carregar resumo financeiro:', err);
+      console.error('Erro ao carregar materiais críticos:', err);
     }
   };
 
@@ -193,6 +206,290 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       alert('❌ Erro ao exportar dados. Tente novamente.');
     } finally {
       setExportando(false);
+    }
+  };
+
+  // Filtrar materiais críticos
+  const getMateriaisFiltrados = () => {
+    if (filtroEstoque === 'todos') {
+      return materiaisCriticos;
+    } else if (filtroEstoque === 'criticos') {
+      return materiaisCriticos.filter((material: any) => {
+        const estoque = material.estoque || material.stock || 0;
+        return estoque === 0;
+      });
+    } else {
+      // abaixo-minimo
+      return materiaisCriticos.filter((material: any) => {
+        const estoque = material.estoque || material.stock || 0;
+        const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+        return estoque > 0 && estoque <= estoqueMinimo;
+      });
+    }
+  };
+
+  // Gerar PDF para cotação com fornecedor
+  const handleGerarPDFCotacao = () => {
+    try {
+      const materiaisFiltrados = getMateriaisFiltrados();
+      
+      if (materiaisFiltrados.length === 0) {
+        alert('⚠️ Não há materiais para gerar a cotação.');
+        return;
+      }
+
+      const cotacaoWindow = window.open('', '_blank');
+      
+      if (!cotacaoWindow) {
+        alert('❌ Bloqueador de pop-ups ativado. Permita pop-ups para gerar o PDF.');
+        return;
+      }
+      
+      const dataAtual = new Date().toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+      
+      const html = `
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Solicitação de Cotação - S3E Engenharia</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Arial, sans-serif;
+              padding: 40px;
+              background: #fff;
+              color: #333;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 40px;
+              padding-bottom: 20px;
+              border-bottom: 3px solid #DC2626;
+            }
+            .header h1 {
+              color: #DC2626;
+              font-size: 28px;
+              margin-bottom: 10px;
+              font-weight: bold;
+            }
+            .header h2 {
+              color: #666;
+              font-size: 18px;
+              font-weight: normal;
+            }
+            .info-section {
+              margin-bottom: 30px;
+              padding: 20px;
+              background: #FEF2F2;
+              border-left: 4px solid #DC2626;
+              border-radius: 4px;
+            }
+            .info-section p {
+              margin-bottom: 8px;
+              line-height: 1.6;
+            }
+            .info-section strong {
+              color: #991B1B;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+              margin-bottom: 30px;
+            }
+            table th, table td {
+              padding: 12px;
+              text-align: left;
+              border: 1px solid #E5E7EB;
+            }
+            table th {
+              background: #DC2626;
+              color: white;
+              font-weight: 600;
+              text-align: center;
+            }
+            table td {
+              background: #fff;
+            }
+            table tr:nth-child(even) td {
+              background: #FEF2F2;
+            }
+            .col-nome {
+              width: 40%;
+            }
+            .col-sku {
+              width: 20%;
+            }
+            .col-estoque {
+              width: 15%;
+              text-align: center;
+            }
+            .col-minimo {
+              width: 15%;
+              text-align: center;
+            }
+            .col-unidade {
+              width: 10%;
+              text-align: center;
+            }
+            .status-badge {
+              display: inline-block;
+              padding: 4px 12px;
+              border-radius: 12px;
+              font-size: 12px;
+              font-weight: 600;
+            }
+            .status-critico {
+              background: #DC2626;
+              color: white;
+            }
+            .status-baixo {
+              background: #EA580C;
+              color: white;
+            }
+            .footer {
+              margin-top: 50px;
+              padding-top: 20px;
+              border-top: 2px solid #E5E7EB;
+              text-align: center;
+              color: #666;
+              font-size: 12px;
+            }
+            .obs-section {
+              margin-top: 30px;
+              padding: 15px;
+              background: #F3F4F6;
+              border-radius: 4px;
+              font-size: 13px;
+              line-height: 1.6;
+            }
+            .obs-section strong {
+              color: #374151;
+            }
+            @media print {
+              body { padding: 20px; }
+              .no-print { display: none; }
+              table { page-break-inside: avoid; }
+              table tr { page-break-inside: avoid; }
+            }
+            .button-container {
+              text-align: center;
+              margin-top: 30px;
+            }
+            button {
+              padding: 12px 24px;
+              margin: 0 10px;
+              border: none;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 14px;
+              font-weight: 600;
+              transition: all 0.3s;
+            }
+            .btn-print {
+              background: #DC2626;
+              color: white;
+            }
+            .btn-print:hover {
+              background: #991B1B;
+            }
+            .btn-close {
+              background: #6B7280;
+              color: white;
+            }
+            .btn-close:hover {
+              background: #4B5563;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>📋 SOLICITAÇÃO DE COTAÇÃO</h1>
+            <h2>S3E Engenharia - Materiais com Estoque Crítico</h2>
+            <p style="margin-top: 10px; color: #666; font-size: 14px;">Data: ${dataAtual}</p>
+          </div>
+
+          <div class="info-section">
+            <p><strong>Prezado(a) Fornecedor,</strong></p>
+            <p>Solicitamos cotação para os seguintes materiais que estão com estoque crítico em nossa empresa:</p>
+            <p style="margin-top: 10px;"><strong>Total de itens:</strong> ${materiaisFiltrados.length}</p>
+            ${filtroEstoque !== 'todos' ? `<p><strong>Filtro aplicado:</strong> ${filtroEstoque === 'criticos' ? 'Itens Críticos (estoque zerado)' : 'Itens Abaixo do Mínimo'}</p>` : ''}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th class="col-nome">Nome do Material</th>
+                <th class="col-sku">SKU</th>
+                <th class="col-estoque">Estoque Atual</th>
+                <th class="col-minimo">Estoque Mínimo</th>
+                <th class="col-unidade">Unidade</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${materiaisFiltrados.map((material: any) => {
+                const estoque = material.estoque || material.stock || 0;
+                const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+                const isCritico = estoque === 0;
+                
+                return `
+                  <tr>
+                    <td class="col-nome"><strong>${material.nome || material.name || 'Material sem nome'}</strong></td>
+                    <td class="col-sku">${material.sku || 'N/A'}</td>
+                    <td class="col-estoque">
+                      <span class="status-badge ${isCritico ? 'status-critico' : 'status-baixo'}">${estoque}</span>
+                    </td>
+                    <td class="col-minimo">${estoqueMinimo}</td>
+                    <td class="col-unidade">${material.unidadeMedida || 'un'}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <div class="obs-section">
+            <p><strong>Observações:</strong></p>
+            <ul style="margin-left: 20px; margin-top: 10px;">
+              <li>Por favor, informar prazo de entrega e condições de pagamento para cada item.</li>
+              <li>Solicitamos que a cotação tenha validade mínima de 30 dias.</li>
+              <li>Itens marcados como "Crítico" possuem estoque zerado e são prioritários.</li>
+              <li>Favor informar quantidade mínima de compra, se houver.</li>
+            </ul>
+            <p style="margin-top: 15px;"><strong>Contato:</strong></p>
+            <p>Para esclarecimentos, entre em contato conosco através dos canais oficiais.</p>
+          </div>
+
+          <div class="footer">
+            <p><strong>S3E Engenharia</strong> - Sistema de Gestão Profissional</p>
+            <p>Este documento foi gerado automaticamente pelo sistema</p>
+            <p style="margin-top: 10px; font-size: 11px; color: #999;">Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+            <p style="margin-top: 5px; font-size: 11px; color: #999;">Gerado por: ${user?.name || 'Usuário'}</p>
+          </div>
+
+          <div class="button-container no-print">
+            <button class="btn-print" onclick="window.print()">
+              🖨️ Imprimir / Salvar PDF
+            </button>
+            <button class="btn-close" onclick="window.close()">
+              ✖️ Fechar
+            </button>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      cotacaoWindow.document.write(html);
+      cotacaoWindow.document.close();
+      
+    } catch (err) {
+      console.error('Erro ao gerar PDF de cotação:', err);
+      alert('❌ Erro ao gerar PDF de cotação. Tente novamente.');
     }
   };
 
@@ -436,12 +733,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   useEffect(() => {
     loadDashboardData();
     loadAtividadesData();
-    loadResumoFinanceiro();
+    loadMateriaisCriticos();
     
     const interval = setInterval(() => {
       loadDashboardData();
       loadAtividadesData();
-      loadResumoFinanceiro();
+      loadMateriaisCriticos();
     }, 5 * 60 * 1000);
     
     return () => clearInterval(interval);
@@ -799,7 +1096,9 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             </ResponsiveContainer>
             <div className="mt-4 flex items-center justify-between text-sm">
               <span className="text-gray-600 dark:text-dark-text-secondary">
-                Hoje: <strong className="text-gray-900 dark:text-dark-text">135 quadros</strong>
+                {selectedQuadrosPeriod === 'daily' ? 'Hoje' : selectedQuadrosPeriod === 'weekly' ? 'Esta semana' : 'Este mês'}: <strong className="text-gray-900 dark:text-dark-text">
+                  {quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0)} quadros
+                </strong>
               </span>
               <Button variant="link" className="h-auto p-0">
                 Ver relatório →
@@ -821,7 +1120,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             <CardDescription className="mt-2">
               <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-semibold">
                 <Activity className="w-4 h-4" />
-                Live: 10k visitantes
+                Total: {atividadesData.reduce((sum, item) => sum + (item.sessoes || 0), 0)} atividades
               </span>
             </CardDescription>
           </CardHeader>
@@ -873,85 +1172,198 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
       {/* Seção inferior - Cards adicionais */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Resumo Financeiro */}
-        <Card>
+        {/* Alertas - Materiais com Estoque Crítico */}
+        <Card className={estoqueExpandido ? 'lg:col-span-2' : ''}>
           <CardHeader>
-            <CardTitle>Resumo Financeiro</CardTitle>
-            <CardDescription>Receita do período selecionado</CardDescription>
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <CardTitle className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  Estoque Crítico
+                </CardTitle>
+                <CardDescription>
+                  {materiaisCriticos.length > 0 
+                    ? `${materiaisCriticos.length} material(is) com estoque abaixo do mínimo`
+                    : 'Nenhum material com estoque crítico'}
+                </CardDescription>
+              </div>
+              {materiaisCriticos.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setEstoqueExpandido(!estoqueExpandido)}
+                  >
+                    {estoqueExpandido ? (
+                      <>
+                        <ChevronUp className="w-4 h-4" />
+                        Ocultar
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4" />
+                        Visualizar
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                <div>
-                  <p className="text-sm text-purple-700 dark:text-purple-300 font-medium">
-                    Receita Total
-                  </p>
-                  <p className="text-2xl font-bold text-purple-900 dark:text-purple-100 mt-1">
-                    R$ {(resumoFinanceiro?.receitaTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </p>
+            {materiaisCriticos.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Package className="w-8 h-8 text-green-600 dark:text-green-400" />
                 </div>
-                <DollarSign className="w-10 h-10 text-purple-600 dark:text-purple-400" />
+                <p className="text-sm text-gray-600 dark:text-dark-text-secondary font-medium">
+                  Todos os materiais estão com estoque adequado
+                </p>
               </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                  <p className="text-xs text-green-700 dark:text-green-300">Obras Concluídas</p>
-                  <p className="text-lg font-bold text-green-900 dark:text-green-100 mt-1">
-                    R$ {((resumoFinanceiro?.obrasConcluidas || 0) / 1000).toFixed(1)}K
-                  </p>
-                </div>
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-xs text-blue-700 dark:text-blue-300">Em Andamento</p>
-                  <p className="text-lg font-bold text-blue-900 dark:text-blue-100 mt-1">
-                    R$ {((resumoFinanceiro?.obrasAndamento || 0) / 1000).toFixed(1)}K
-                  </p>
-                </div>
+            ) : !estoqueExpandido ? (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {materiaisCriticos.slice(0, 5).map((material: any) => {
+                  const estoque = material.estoque || material.stock || 0;
+                  const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+                  const isCritico = estoque === 0;
+                  
+                  return (
+                    <div
+                      key={material.id || material.sku}
+                      className={`flex items-center justify-between p-3 rounded-lg border ${
+                        isCritico
+                          ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                          : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-dark-text truncate">
+                          {material.nome || material.name || 'Material sem nome'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                            SKU: {material.sku || 'N/A'}
+                          </span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">•</span>
+                          <span className={`text-xs font-medium ${
+                            isCritico ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'
+                          }`}>
+                            Estoque: {estoque} {material.unidadeMedida || 'un'}
+                          </span>
+                        </div>
+                      </div>
+                      <Badge 
+                        variant={isCritico ? "destructive" : "warning"}
+                        className="ml-2 flex-shrink-0"
+                      >
+                        {isCritico ? 'Crítico' : 'Baixo'}
+                      </Badge>
+                    </div>
+                  );
+                })}
+                {materiaisCriticos.length > 5 && (
+                  <Button
+                    variant="outline"
+                    className="w-full mt-2"
+                    onClick={() => setEstoqueExpandido(true)}
+                  >
+                    Ver todos ({materiaisCriticos.length})
+                  </Button>
+                )}
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            ) : (
+              <div className="space-y-4">
+                {/* Filtros e Botão PDF */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtrar:</span>
+                    <Select value={filtroEstoque} onValueChange={(v: any) => setFiltroEstoque(v)}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todos">Todos</SelectItem>
+                        <SelectItem value="criticos">Itens Críticos</SelectItem>
+                        <SelectItem value="abaixo-minimo">Abaixo do Mínimo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    variant="default"
+                    className="gap-2"
+                    onClick={handleGerarPDFCotacao}
+                  >
+                    <FileText className="w-4 h-4" />
+                    Gerar PDF para Cotação
+                  </Button>
+                </div>
 
-        {/* Alertas e Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-orange-500" />
-              Alertas
-            </CardTitle>
-            <CardDescription>Status do sistema</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-dark-text">
-                    Estoque
-                  </span>
+                {/* Tabela de Materiais */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full">
+                      <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Nome do Item</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Atual</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Mínimo</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unidade</th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {getMateriaisFiltrados().map((material: any) => {
+                          const estoque = material.estoque || material.stock || 0;
+                          const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+                          const isCritico = estoque === 0;
+                          
+                          return (
+                            <tr
+                              key={material.id || material.sku}
+                              className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
+                                isCritico
+                                  ? 'bg-red-50/50 dark:bg-red-900/10'
+                                  : 'bg-orange-50/50 dark:bg-orange-900/10'
+                              }`}
+                            >
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-dark-text">
+                                {material.nome || material.name || 'Material sem nome'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
+                                {material.sku || 'N/A'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-dark-text">
+                                {estoque}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-dark-text-secondary">
+                                {estoqueMinimo}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
+                                {material.unidadeMedida || 'un'}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <Badge 
+                                  variant={isCritico ? "destructive" : "warning"}
+                                >
+                                  {isCritico ? 'Crítico' : 'Baixo'}
+                                </Badge>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {getMateriaisFiltrados().length === 0 && (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      Nenhum material encontrado com o filtro selecionado.
+                    </div>
+                  )}
                 </div>
-                <Badge variant="success">Normal</Badge>
               </div>
-              
-              <div className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-dark-text">
-                    Materiais
-                  </span>
-                </div>
-                <Badge variant="warning">{dashboardData?.estatisticas?.estoque?.materiaisBaixo || 3} Baixo</Badge>
-              </div>
-              
-              <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm font-medium text-gray-900 dark:text-dark-text">
-                    Equipes
-                  </span>
-                </div>
-                <Badge variant="success">Todas Ativas</Badge>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -968,34 +1380,34 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             <div className="space-y-2">
               <Button 
                 variant="outline" 
-                className="w-full justify-between"
-                onClick={() => onNavigate('estoque')}
+                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
+                onClick={() => onNavigate('Estoque')}
               >
-                Gerenciar Estoque
+                <span>Gerenciar Estoque</span>
                 <ArrowUpRight className="w-4 h-4" />
               </Button>
               <Button 
                 variant="outline" 
-                className="w-full justify-between"
-                onClick={() => onNavigate('obras')}
+                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
+                onClick={() => onNavigate('Obras')}
               >
-                Nova Obra
+                <span>Nova Obra</span>
                 <ArrowUpRight className="w-4 h-4" />
               </Button>
               <Button 
                 variant="outline" 
-                className="w-full justify-between"
-                onClick={() => onNavigate('orcamentos')}
+                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
+                onClick={() => onNavigate('Orçamentos')}
               >
-                Criar Orçamento
+                <span>Criar Orçamento</span>
                 <ArrowUpRight className="w-4 h-4" />
               </Button>
               <Button 
                 variant="outline" 
-                className="w-full justify-between"
-                onClick={() => onNavigate('projetos')}
+                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
+                onClick={() => onNavigate('Projetos')}
               >
-                Ver Projetos
+                <span>Ver Projetos</span>
                 <ArrowUpRight className="w-4 h-4" />
               </Button>
             </div>
