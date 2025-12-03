@@ -7,26 +7,28 @@ export const API_CONFIG = {
 
 /**
  * Constrói a URL completa para um arquivo de upload (logo, imagem, etc.)
- * Se a URL já começar com http/https, retorna ela mesma.
- * Caso contrário, tenta usar o endpoint específico de logo primeiro,
+ * Se a URL já começar com http/https ou for base64, retorna ela mesma.
+ * Caso contrário, tenta usar o endpoint específico primeiro,
  * depois tenta a URL direta via express.static.
  */
 export const getUploadUrl = (url: string): string => {
   if (!url) return '';
+  
+  // Se for uma URL completa (http/https), retornar como está
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
   
-  // Se for uma logo (contém /uploads/logos/), usar endpoint específico primeiro
-  if (url.includes('/uploads/logos/')) {
-    const filename = url.split('/').pop() || url;
-    // Tentar endpoint específico primeiro (mais confiável)
-    if (API_CONFIG.BASE_URL) {
-      return `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
-    }
+  // ✅ IMPORTANTE: Se for dados base64 (data:image), retornar como está
+  // Isso evita tentar processar base64 como URL de arquivo
+  if (url.startsWith('data:image/') || url.startsWith('data:application/')) {
+    return url;
   }
   
-  // Fallback: URL direta via express.static
+  // ✅ SIMPLIFICADO: Usar express.static para TODAS as imagens de uploads
+  // O backend já serve /uploads via express.static(uploadsPath) com CORS configurado
+  // Isso funciona para: logos, materiais, tarefas-obra, pdf-customization, etc.
+  
   const cleanUrl = url.startsWith('/') ? url : `/${url}`;
   return API_CONFIG.BASE_URL ? `${API_CONFIG.BASE_URL}${cleanUrl}` : cleanUrl;
 };

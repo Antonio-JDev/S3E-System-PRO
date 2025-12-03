@@ -10,11 +10,18 @@ const prisma = new PrismaClient();
 // Configuração do multer para upload de imagem
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determinar pasta base (pode estar rodando da raiz ou da pasta backend)
+    // Em Docker, o CWD é /app e o volume está mapeado em /app/uploads
+    // Em desenvolvimento local, pode estar em backend/ ou na raiz
     const cwd = process.cwd();
-    const uploadDir = cwd.endsWith('backend')
-      ? path.join(cwd, 'uploads', 'logos')
-      : path.join(cwd, 'backend', 'uploads', 'logos');
+    let uploadDir: string;
+    
+    if (cwd.endsWith('backend')) {
+      // Desenvolvimento local rodando de dentro da pasta backend
+      uploadDir = path.join(cwd, 'uploads', 'logos');
+    } else {
+      // Docker ou raiz do projeto - usar /app/uploads diretamente
+      uploadDir = path.join(cwd, 'uploads', 'logos');
+    }
     
     console.log('📁 CWD:', cwd);
     console.log('📁 Upload directory:', uploadDir);
@@ -175,9 +182,14 @@ export class ConfiguracaoController {
 
       // Determinar caminho do arquivo
       const cwd = process.cwd();
-      const logosDir = cwd.endsWith('backend')
-        ? path.join(cwd, 'uploads', 'logos')
-        : path.join(cwd, 'backend', 'uploads', 'logos');
+      let logosDir: string;
+      
+      if (cwd.endsWith('backend')) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Docker: usar /app/uploads diretamente
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      }
       
       const logoPath = path.join(logosDir, filename);
 
@@ -196,12 +208,12 @@ export class ConfiguracaoController {
       
       // Se a logo estiver sendo usada como logoUrl ou logoLoginUrl, remover a referência
       if (configuracoes.logoUrl === logoUrl) {
-        await configuracaoService.salvarConfiguracoes({ logoUrl: null });
+        await configuracaoService.salvarConfiguracoes({ logoUrl: undefined });
         console.log('⚠️ Logo removida da configuração logoUrl');
       }
       
       if (configuracoes.logoLoginUrl === logoUrl) {
-        await configuracaoService.salvarConfiguracoes({ logoLoginUrl: null });
+        await configuracaoService.salvarConfiguracoes({ logoLoginUrl: undefined });
         console.log('⚠️ Logo removida da configuração logoLoginUrl');
       }
 
@@ -232,9 +244,14 @@ export class ConfiguracaoController {
     try {
       const cwd = process.cwd();
       const isBackendFolder = cwd.endsWith('backend');
-      const logosDir = isBackendFolder 
-        ? path.join(cwd, 'uploads', 'logos')
-        : path.join(cwd, 'backend', 'uploads', 'logos');
+      let logosDir: string;
+      
+      if (isBackendFolder) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Docker: usar /app/uploads diretamente
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      }
       
       // Criar diretório se não existir
       if (!fs.existsSync(logosDir)) {
@@ -292,9 +309,14 @@ export class ConfiguracaoController {
       // Validar se a logo existe
       const cwd = process.cwd();
       const isBackendFolder = cwd.endsWith('backend');
-      const logosDir = isBackendFolder 
-        ? path.join(cwd, 'uploads', 'logos')
-        : path.join(cwd, 'backend', 'uploads', 'logos');
+      let logosDir: string;
+      
+      if (isBackendFolder) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Docker: usar /app/uploads diretamente
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      }
       
       const filename = path.basename(logoUrl);
       const logoPath = path.join(logosDir, filename);
@@ -336,7 +358,7 @@ export class ConfiguracaoController {
 
       // Se logoUrl for vazio, remover a logo (usar fallback)
       if (logoUrl === '' || logoUrl === null || logoUrl === undefined) {
-        const configuracoes = await configuracaoService.salvarConfiguracoes({ logoLoginUrl: null });
+        const configuracoes = await configuracaoService.salvarConfiguracoes({ logoLoginUrl: undefined });
         res.status(200).json({
           success: true,
           data: configuracoes,
@@ -348,9 +370,14 @@ export class ConfiguracaoController {
       // Validar se a logo existe
       const cwd = process.cwd();
       const isBackendFolder = cwd.endsWith('backend');
-      const logosDir = isBackendFolder 
-        ? path.join(cwd, 'uploads', 'logos')
-        : path.join(cwd, 'backend', 'uploads', 'logos');
+      let logosDir: string;
+      
+      if (isBackendFolder) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Docker: usar /app/uploads diretamente
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      }
       
       const filename = path.basename(logoUrl);
       const logoPath = path.join(logosDir, filename);
@@ -401,9 +428,18 @@ export class ConfiguracaoController {
       // Determinar caminho do arquivo
       const cwd = process.cwd();
       const isBackendFolder = cwd.endsWith('backend');
-      const logosDir = isBackendFolder 
-        ? path.join(cwd, 'uploads', 'logos')
-        : path.join(cwd, 'backend', 'uploads', 'logos');
+      
+      // Em Docker, o CWD é /app e uploads está em /app/uploads
+      // Em desenvolvimento local, pode estar em backend/ ou na raiz
+      let logosDir: string;
+      if (cwd.endsWith('backend')) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Tentar /app/uploads/logos primeiro (Docker)
+        const dockerPath = path.join(cwd, 'uploads', 'logos');
+        const localPath = path.join(cwd, 'backend', 'uploads', 'logos');
+        logosDir = fs.existsSync(dockerPath) ? dockerPath : localPath;
+      }
       
       // Criar diretório se não existir
       if (!fs.existsSync(logosDir)) {

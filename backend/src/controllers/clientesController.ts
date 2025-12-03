@@ -1,7 +1,31 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
+import fs from 'fs';
 
 const prisma = new PrismaClient();
+
+// Configurar multer para upload de JSON
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/temp/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `clientes-${Date.now()}-${file.originalname}`);
+  }
+});
+
+export const uploadJSON = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/json') {
+      cb(null, true);
+    } else {
+      cb(new Error('Apenas arquivos JSON são permitidos'));
+    }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
 
 // Listar todos os clientes
 export const getClientes = async (req: Request, res: Response): Promise<void> => {
@@ -113,7 +137,7 @@ export const getClienteById = async (req: Request, res: Response): Promise<void>
 // Criar cliente
 export const createCliente = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep } = req.body;
+    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep, tipo } = req.body;
 
     // Verificar se CPF/CNPJ já existe
     const clienteExistente = await prisma.cliente.findUnique({
@@ -137,7 +161,8 @@ export const createCliente = async (req: Request, res: Response): Promise<void> 
         endereco,
         cidade,
         estado,
-        cep
+        cep,
+        tipo: tipo || 'PJ'
       }
     });
 
@@ -159,7 +184,7 @@ export const createCliente = async (req: Request, res: Response): Promise<void> 
 export const updateCliente = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep } = req.body;
+    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep, tipo } = req.body;
 
     // Verificar se cliente existe
     const clienteExistente = await prisma.cliente.findUnique({
@@ -199,7 +224,8 @@ export const updateCliente = async (req: Request, res: Response): Promise<void> 
         endereco,
         cidade,
         estado,
-        cep
+        cep,
+        tipo: tipo || clienteExistente.tipo || 'PJ'
       }
     });
 
@@ -351,6 +377,348 @@ export const reativarCliente = async (req: Request, res: Response): Promise<void
     res.status(500).json({ 
       success: false,
       error: 'Erro ao reativar cliente' 
+    });
+  }
+};
+
+// Preview de importação (validação antes de salvar)
+export const previewImportacao = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      res.status(400).json({
+        success: false,
+        error: 'Nenhum arquivo foi enviado'
+      });
+      return;
+    }
+
+    console.log('📥 Preview de importação do arquivo:', file.path);
+
+    // Ler arquivo JSON
+    const jsonContent = fs.readFileSync(file.path, 'utf-8');
+    let jsonData = JSON.parse(jsonContent);
+
+    // Remover wrapper se existir
+    if (jsonData.success && jsonData.data) {
+      jsonData = jsonData.data;
+    }
+
+    if (!jsonData.clientes || !Array.isArray(jsonData.clientes)) {
+      res.status(400).json({
+        success: false,
+        error: 'Formato JSON inválido. Deve conter array "clientes"'
+      });
+      return;
+    }
+
+    // Buscar todos os clientes existentes para comparação
+    const clientesExistentes = await prisma.cliente.findMany({
+      where: { ativo: true },
+      select: {
+        id: true,
+        nome: true,
+        cpfCnpj: true,
+        email: true
+      }
+    });
+
+    // Criar mapa para busca rápida (cpfCnpj como chave)
+    const mapaExistentes = new Map<string, typeof clientesExistentes[0]>();
+    clientesExistentes.forEach(c => {
+      mapaExistentes.set(c.cpfCnpj, c);
+    });
+
+    // Processar clientes para preview com informações de comparação
+    const clientesPreview = jsonData.clientes.map((cliente: any, index: number) => {
+      const clienteExistente = mapaExistentes.get(cliente.cpfCnpj);
+      const status = clienteExistente ? 'atualizar' : 'criar';
+      
+      return {
+        linha: index + 1,
+        nome: cliente.nome,
+        cpfCnpj: cliente.cpfCnpj,
+        email: cliente.email,
+        telefone: cliente.telefone,
+        endereco: cliente.endereco || '',
+        cidade: cliente.cidade || '',
+        estado: cliente.estado || '',
+        cep: cliente.cep || '',
+        tipo: cliente.tipo || 'PJ',
+        ativo: cliente.ativo !== false,
+        status,
+        clienteExistenteId: clienteExistente?.id,
+        clienteExistenteNome: clienteExistente?.nome,
+        avisos: []
+      };
+    });
+
+    // Limpar arquivo temporário
+    fs.unlinkSync(file.path);
+
+    res.json({
+      success: true,
+      data: {
+        totalClientes: clientesPreview.length,
+        criar: clientesPreview.filter((c: any) => c.status === 'criar').length,
+        atualizar: clientesPreview.filter((c: any) => c.status === 'atualizar').length,
+        clientes: clientesPreview
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao fazer preview de importação:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao fazer preview de importação'
+    });
+  }
+};
+
+// Importar clientes de JSON
+export const importarClientes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    const clientes = req.body?.clientes;
+
+    if (!file && !clientes) {
+      res.status(400).json({
+        success: false,
+        error: 'Nenhum arquivo ou dados foram enviados'
+      });
+      return;
+    }
+
+    let clientesParaImportar: any[] = [];
+
+    if (clientes && Array.isArray(clientes)) {
+      // Se vier do modal de preview, usar os dados já processados
+      clientesParaImportar = clientes;
+    } else if (file) {
+      // Se vier direto do arquivo, processar normalmente
+      console.log('📥 Importando clientes do arquivo:', file.filename);
+
+      const jsonContent = fs.readFileSync(file.path, 'utf-8');
+      let jsonData = JSON.parse(jsonContent);
+
+      if (jsonData.success && jsonData.data) {
+        jsonData = jsonData.data;
+      }
+
+      if (!jsonData.clientes || !Array.isArray(jsonData.clientes)) {
+        res.status(400).json({
+          success: false,
+          error: 'Formato JSON inválido. Deve conter array "clientes"'
+        });
+        return;
+      }
+
+      clientesParaImportar = jsonData.clientes;
+    }
+
+    // Processar clientes
+    const resultados = {
+      criados: 0,
+      atualizados: 0,
+      erros: 0,
+      detalhes: [] as Array<{
+        nome: string;
+        cpfCnpj: string;
+        status: 'criado' | 'atualizado' | 'erro';
+        erro?: string;
+      }>
+    };
+
+    for (const clienteData of clientesParaImportar) {
+      try {
+        // Validar campos obrigatórios
+        if (!clienteData.nome || !clienteData.cpfCnpj || !clienteData.email || !clienteData.telefone) {
+          resultados.erros++;
+          resultados.detalhes.push({
+            nome: clienteData.nome || 'Sem nome',
+            cpfCnpj: clienteData.cpfCnpj || 'Sem CPF/CNPJ',
+            status: 'erro',
+            erro: 'Campos obrigatórios faltando (nome, cpfCnpj, email, telefone)'
+          });
+          continue;
+        }
+
+        // Verificar se cliente já existe
+        const clienteExistente = await prisma.cliente.findUnique({
+          where: { cpfCnpj: clienteData.cpfCnpj }
+        });
+
+        if (clienteExistente) {
+          // Atualizar cliente existente
+          await prisma.cliente.update({
+            where: { id: clienteExistente.id },
+            data: {
+              nome: clienteData.nome,
+              email: clienteData.email,
+              telefone: clienteData.telefone,
+              endereco: clienteData.endereco || clienteExistente.endereco,
+              cidade: clienteData.cidade || clienteExistente.cidade,
+              estado: clienteData.estado || clienteExistente.estado,
+              cep: clienteData.cep || clienteExistente.cep,
+              tipo: clienteData.tipo || clienteExistente.tipo,
+              ativo: clienteData.ativo !== false
+            }
+          });
+
+          resultados.atualizados++;
+          resultados.detalhes.push({
+            nome: clienteData.nome,
+            cpfCnpj: clienteData.cpfCnpj,
+            status: 'atualizado'
+          });
+
+          console.log(`✅ Cliente atualizado: ${clienteData.nome}`);
+        } else {
+          // Criar novo cliente
+          await prisma.cliente.create({
+            data: {
+              nome: clienteData.nome,
+              cpfCnpj: clienteData.cpfCnpj,
+              email: clienteData.email,
+              telefone: clienteData.telefone,
+              endereco: clienteData.endereco || '',
+              cidade: clienteData.cidade || '',
+              estado: clienteData.estado || '',
+              cep: clienteData.cep || '',
+              tipo: clienteData.tipo || 'PJ',
+              ativo: clienteData.ativo !== false
+            }
+          });
+
+          resultados.criados++;
+          resultados.detalhes.push({
+            nome: clienteData.nome,
+            cpfCnpj: clienteData.cpfCnpj,
+            status: 'criado'
+          });
+
+          console.log(`✅ Cliente criado: ${clienteData.nome}`);
+        }
+      } catch (error: any) {
+        console.error(`❌ Erro ao processar cliente ${clienteData.nome}:`, error);
+        resultados.erros++;
+        resultados.detalhes.push({
+          nome: clienteData.nome || 'Sem nome',
+          cpfCnpj: clienteData.cpfCnpj || 'Sem CPF/CNPJ',
+          status: 'erro',
+          erro: error.message || 'Erro desconhecido'
+        });
+      }
+    }
+
+    // Limpar arquivo temporário se existir
+    if (file) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (err) {
+        console.warn('Aviso: não foi possível deletar arquivo temporário');
+      }
+    }
+
+    console.log('📊 Resultado da importação:', resultados);
+
+    res.json({
+      success: true,
+      data: resultados,
+      message: `Importação concluída: ${resultados.criados} criados, ${resultados.atualizados} atualizados, ${resultados.erros} erros`
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao importar clientes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao importar clientes'
+    });
+  }
+};
+
+// Exportar template de clientes
+export const exportarTemplate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const template = {
+      version: '1.0.0',
+      exportDate: new Date().toISOString(),
+      instrucoes: 'Preencha os campos abaixo com os dados dos clientes. Campos obrigatórios: nome, cpfCnpj, email, telefone. O tipo deve ser "PF" (Pessoa Física) ou "PJ" (Pessoa Jurídica).',
+      clientes: [
+        {
+          nome: 'EMPRESA EXEMPLO LTDA',
+          cpfCnpj: '12.345.678/0001-90',
+          email: 'contato@empresaexemplo.com.br',
+          telefone: '(47) 3333-4444',
+          endereco: 'Rua Exemplo, 123',
+          cidade: 'Itajaí',
+          estado: 'SC',
+          cep: '88300-000',
+          tipo: 'PJ',
+          ativo: true
+        },
+        {
+          nome: 'João da Silva',
+          cpfCnpj: '123.456.789-00',
+          email: 'joao.silva@email.com',
+          telefone: '(47) 99999-8888',
+          endereco: 'Avenida Principal, 456',
+          cidade: 'Florianópolis',
+          estado: 'SC',
+          cep: '88000-000',
+          tipo: 'PF',
+          ativo: true
+        }
+      ]
+    };
+
+    res.json({
+      success: true,
+      data: template
+    });
+  } catch (error) {
+    console.error('Erro ao exportar template:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao exportar template'
+    });
+  }
+};
+
+// Exportar clientes existentes
+export const exportarClientes = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const clientes = await prisma.cliente.findMany({
+      where: { ativo: true },
+      orderBy: { nome: 'asc' }
+    });
+
+    const exportData = {
+      version: '1.0.0',
+      exportDate: new Date().toISOString(),
+      totalClientes: clientes.length,
+      clientes: clientes.map(c => ({
+        nome: c.nome,
+        cpfCnpj: c.cpfCnpj,
+        email: c.email,
+        telefone: c.telefone,
+        endereco: c.endereco,
+        cidade: c.cidade,
+        estado: c.estado,
+        cep: c.cep,
+        tipo: c.tipo,
+        ativo: c.ativo
+      }))
+    };
+
+    res.json({
+      success: true,
+      data: exportData
+    });
+  } catch (error) {
+    console.error('Erro ao exportar clientes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao exportar clientes'
     });
   }
 };

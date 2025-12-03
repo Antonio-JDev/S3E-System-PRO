@@ -1,10 +1,25 @@
-import React, { useState, useMemo, useEffect, useContext } from 'react';
+import React, { useState, useMemo, useEffect, useContext, useRef } from 'react';
 import { toast } from 'sonner';
 import { clientesService, type Cliente, type CreateClienteData } from '../services/clientesService';
 import { AuthContext } from '../contexts/AuthContext';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
+import ActionsDropdown from './ui/ActionsDropdown';
+import ViewToggle from './ui/ViewToggle';
+import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { 
+    generateEmptyTemplate, 
+    generateExampleTemplate, 
+    exportToJSON, 
+    readJSONFile, 
+    validateImportData, 
+    downloadJSON,
+    type ClientesImportData,
+    type ImportResult
+} from '../utils/clientesImportExport';
+import { axiosApiService } from '../services/axiosApi';
+import { ENDPOINTS } from '../config/api';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -42,6 +57,21 @@ const ArrowPathIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
     </svg>
 );
+const ArrowDownTrayIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+    </svg>
+);
+const ArrowUpTrayIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+    </svg>
+);
+const DocumentTextIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+    </svg>
+);
 
 interface ClientesProps {
     toggleSidebar: () => void;
@@ -56,12 +86,19 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [tipoFilter, setTipoFilter] = useState<'Todos' | 'PF' | 'PJ'>('Todos');
     const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'Ativo' | 'Inativo'>('Todos');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => loadViewMode('clientes'));
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [clienteToEdit, setClienteToEdit] = useState<Cliente | null>(null);
     const [clienteToDelete, setClienteToDelete] = useState<Cliente | null>(null);
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [deletePermanent, setDeletePermanent] = useState(false); // true = permanente, false = soft delete
+
+    // Estados para importação/exportação
+    const [importing, setImporting] = useState(false);
+    const [modalPreviewImportOpen, setModalPreviewImportOpen] = useState(false);
+    const [dadosParaImportar, setDadosParaImportar] = useState<any>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [formState, setFormState] = useState<CreateClienteData>({
         nome: '',
@@ -102,6 +139,11 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleViewModeChange = (newView: 'grid' | 'list') => {
+        setViewMode(newView);
+        saveViewMode('clientes', newView);
     };
 
     const filteredClientes = useMemo(() => {
@@ -183,9 +225,133 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
     };
 
 
+    // Funções de Importação/Exportação
+    const handleExportTemplate = async () => {
+        try {
+            const template = generateExampleTemplate();
+            downloadJSON(template, `template-clientes-exemplo-${new Date().toISOString().split('T')[0]}.json`);
+            toast.success('✅ Template baixado com sucesso!');
+        } catch (error) {
+            console.error('Erro ao exportar template:', error);
+            toast.error('❌ Erro ao exportar template');
+        }
+    };
+
+    const handleExportData = async () => {
+        try {
+            const clientesExport = clientes.map(c => ({
+                nome: c.nome,
+                cpfCnpj: c.cpfCnpj,
+                email: c.email || '',
+                telefone: c.telefone || '',
+                endereco: c.endereco || '',
+                cidade: c.cidade || '',
+                estado: c.estado || '',
+                cep: c.cep || '',
+                tipo: c.tipo || 'PJ',
+                ativo: c.ativo !== false
+            }));
+            const exportData = exportToJSON(clientesExport);
+            downloadJSON(exportData, `clientes-export-${new Date().toISOString().split('T')[0]}.json`);
+            toast.success(`✅ ${clientes.length} cliente(s) exportado(s) com sucesso!`);
+        } catch (error) {
+            console.error('Erro ao exportar clientes:', error);
+            toast.error('❌ Erro ao exportar clientes');
+        }
+    };
+
+    const handleImportClick = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setImporting(true);
+            const data = await readJSONFile(file);
+            
+            // Validar estrutura
+            const validation = validateImportData(data);
+            if (!validation.valid) {
+                toast.error('❌ Erro na validação: ' + validation.errors.join(', '));
+                return;
+            }
+
+            if (!data.clientes || data.clientes.length === 0) {
+                toast.error('❌ O arquivo não contém clientes para importar');
+                return;
+            }
+
+            // Fazer preview da importação via API
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const previewResponse = await axiosApiService.post(`${ENDPOINTS.CLIENTES}/import/preview`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (previewResponse.success && previewResponse.data) {
+                setDadosParaImportar(previewResponse.data);
+                setModalPreviewImportOpen(true);
+            } else {
+                toast.error('❌ Erro ao processar arquivo: ' + (previewResponse.error || 'Erro desconhecido'));
+            }
+        } catch (error: any) {
+            console.error('Erro ao importar:', error);
+            toast.error('❌ Erro ao processar arquivo', {
+                description: error.message || 'Erro desconhecido'
+            });
+        } finally {
+            setImporting(false);
+            // Limpar input
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleConfirmarImportacao = async () => {
+        if (!dadosParaImportar) return;
+
+        try {
+            setImporting(true);
+            
+            const response = await axiosApiService.post(`${ENDPOINTS.CLIENTES}/import`, {
+                clientes: dadosParaImportar.clientes
+            });
+
+            if (response.success && response.data) {
+                const criados = (response.data as any).criados || 0;
+                const atualizados = (response.data as any).atualizados || 0;
+                const erros = (response.data as any).erros || 0;
+                
+                toast.success('✅ Importação concluída!', {
+                    description: `${criados} criados, ${atualizados} atualizados, ${erros} erros`
+                });
+
+                // Recarregar clientes
+                await loadClientes();
+                setModalPreviewImportOpen(false);
+                setDadosParaImportar(null);
+            } else {
+                toast.error('❌ Erro na importação: ' + (response.error || 'Erro desconhecido'));
+            }
+        } catch (error: any) {
+            console.error('Erro ao confirmar importação:', error);
+            toast.error('❌ Erro ao importar clientes', {
+                description: error.message || 'Erro desconhecido'
+            });
+        } finally {
+            setImporting(false);
+        }
+    };
+
     // Fechar modais com ESC
     useEscapeKey(isModalOpen, () => setIsModalOpen(false));
     useEscapeKey(!!clienteToDelete, () => setClienteToDelete(null));
+    useEscapeKey(modalPreviewImportOpen, () => setModalPreviewImportOpen(false));
 
     const handleDelete = async () => {
         if (!clienteToDelete) return;
@@ -274,18 +440,60 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie seus clientes e parceiros</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={loadClientes}
-                        disabled={loading}
-                        className="flex items-center gap-2 px-4 py-3 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-semibold disabled:opacity-50"
-                        title="Recarregar dados"
-                    >
-                        <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        {loading ? 'Carregando...' : 'Atualizar'}
-                    </button>
+                <div className="flex gap-3 flex-wrap">
+                    {/* Input oculto para importação */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportFile}
+                        className="hidden"
+                    />
+                    
+                    {/* Dropdown de Ações */}
+                    <ActionsDropdown
+                        actions={[
+                            {
+                                label: loading ? 'Carregando...' : 'Atualizar',
+                                onClick: loadClientes,
+                                icon: <ArrowPathIcon className="w-4 h-4" />,
+                                disabled: loading,
+                                variant: 'default'
+                            },
+                            {
+                                label: 'Template Vazio',
+                                onClick: () => {
+                                    const template = generateEmptyTemplate();
+                                    downloadJSON(template, 'clientes-template-vazio.json');
+                                    toast.success('Template vazio baixado!');
+                                },
+                                icon: <DocumentTextIcon className="w-4 h-4" />,
+                                variant: 'default'
+                            },
+                            {
+                                label: 'Template com Exemplos',
+                                onClick: handleExportTemplate,
+                                icon: <DocumentTextIcon className="w-4 h-4" />,
+                                variant: 'primary'
+                            },
+                            {
+                                label: 'Exportar JSON',
+                                onClick: handleExportData,
+                                icon: <ArrowDownTrayIcon className="w-4 h-4" />,
+                                disabled: clientes.length === 0,
+                                variant: 'success'
+                            },
+                            {
+                                label: importing ? 'Importando...' : 'Importar JSON',
+                                onClick: handleImportClick,
+                                icon: <ArrowUpTrayIcon className="w-4 h-4" />,
+                                disabled: importing,
+                                variant: 'primary'
+                            }
+                        ]}
+                        label="Ações"
+                    />
+                    
                     <button
                         onClick={() => handleOpenModal()}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
@@ -357,6 +565,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                         Exibindo <span className="font-bold text-gray-900">{filteredClientes.length}</span> de <span className="font-bold text-gray-900">{clientes.length}</span> clientes
                     </p>
                     <div className="flex items-center gap-4">
+                        <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                             <span className="text-xs text-gray-600">Ativo: {clientes.filter(c => c.ativo).length}</span>
@@ -375,7 +584,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            {/* Grid de Clientes */}
+            {/* Grid/Lista de Clientes */}
             {filteredClientes.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
                     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -397,7 +606,8 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                         </button>
                     )}
                 </div>
-            ) : (
+            ) : viewMode === 'grid' ? (
+                /* Visualização em Grid (Cards) */
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClientes.map((cliente) => (
                         <div key={cliente.id} className={`bg-white border-2 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 ${
@@ -512,6 +722,92 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                             </div>
                         </div>
                     ))}
+                </div>
+            ) : (
+                /* Visualização em Lista (Tabela) */
+                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
+                    <table className="w-full">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                            <tr>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">CPF/CNPJ</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Tipo</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Contato</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cidade</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                            {filteredClientes.map((cliente) => (
+                                <tr key={cliente.id} className={`hover:bg-gray-50 transition-colors ${!cliente.ativo ? 'opacity-60' : ''}`}>
+                                    <td className="px-6 py-4">
+                                        <p className="font-semibold text-gray-900">{cliente.nome}</p>
+                                        {cliente.email && <p className="text-xs text-gray-500">{cliente.email}</p>}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded font-mono">
+                                            {cliente.cpfCnpj}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${
+                                            cliente.tipo === 'PF' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                                        }`}>
+                                            {cliente.tipo === 'PF' ? '👤 PF' : '🏢 PJ'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <p className="text-sm text-gray-700">{cliente.telefone || '-'}</p>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <p className="text-sm text-gray-700">{cliente.cidade || '-'}</p>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${
+                                            cliente.ativo 
+                                                ? 'bg-green-100 text-green-700 ring-1 ring-green-200' 
+                                                : 'bg-red-100 text-red-700 ring-1 ring-red-200'
+                                        }`}>
+                                            {cliente.ativo ? '✅ Ativo' : '❌ Inativo'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <button
+                                                onClick={() => handleOpenModal(cliente)}
+                                                className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                                title="Editar"
+                                            >
+                                                <PencilIcon className="w-4 h-4" />
+                                            </button>
+                                            {cliente.ativo ? (
+                                            <button
+                                                onClick={() => {
+                                                    setClienteToDelete(cliente);
+                                                    setDeletePermanent(false);
+                                                    setShowDeleteDialog(true);
+                                                }}
+                                                className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                title="Desativar"
+                                            >
+                                                <TrashIcon className="w-4 h-4" />
+                                            </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleReativar(cliente)}
+                                                    className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                                                    title="Reativar"
+                                                >
+                                                    <ArrowPathIcon className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             )}
 
@@ -729,6 +1025,163 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                 cancelText="Cancelar"
                 variant={deletePermanent ? "danger" : "warning"}
             />
+
+            {/* Modal de Preview de Importação */}
+            {modalPreviewImportOpen && dadosParaImportar && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-hidden">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-orange-600 to-orange-500">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-white">Preview de Importação</h2>
+                                    <p className="text-sm text-white/80 mt-1">
+                                        Revise os dados antes de importar
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setModalPreviewImportOpen(false);
+                                        setDadosParaImportar(null);
+                                    }}
+                                    className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Resumo */}
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-orange-50 dark:bg-orange-900/20">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="text-center">
+                                    <div className="text-3xl font-bold text-green-600 dark:text-green-400">
+                                        {dadosParaImportar.criar}
+                                    </div>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">Novos Clientes</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                                        {dadosParaImportar.atualizar}
+                                    </div>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">Atualizações</div>
+                                </div>
+                                <div className="text-center">
+                                    <div className="text-3xl font-bold text-gray-600 dark:text-gray-400">
+                                        {dadosParaImportar.totalClientes}
+                                    </div>
+                                    <div className="text-sm text-gray-600 dark:text-gray-400">Total</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Lista de Clientes */}
+                        <div className="p-6 overflow-y-auto max-h-96">
+                            <div className="space-y-3">
+                                {dadosParaImportar.clientes.map((cliente: any, index: number) => (
+                                    <div
+                                        key={index}
+                                        className={`p-4 rounded-xl border-2 ${
+                                            cliente.status === 'criar'
+                                                ? 'border-green-200 bg-green-50 dark:bg-green-900/20'
+                                                : 'border-blue-200 bg-blue-50 dark:bg-blue-900/20'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                                        cliente.status === 'criar'
+                                                            ? 'bg-green-600 text-white'
+                                                            : 'bg-blue-600 text-white'
+                                                    }`}>
+                                                        {cliente.status === 'criar' ? '✨ NOVO' : '🔄 ATUALIZAR'}
+                                                    </span>
+                                                    <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                                        cliente.tipo === 'PF'
+                                                            ? 'bg-purple-100 text-purple-700'
+                                                            : 'bg-indigo-100 text-indigo-700'
+                                                    }`}>
+                                                        {cliente.tipo === 'PF' ? '👤 PF' : '🏢 PJ'}
+                                                    </span>
+                                                </div>
+                                                <h3 className="font-bold text-gray-900 dark:text-dark-text text-lg">
+                                                    {cliente.nome}
+                                                </h3>
+                                                <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
+                                                    <div>
+                                                        <span className="text-gray-600 dark:text-gray-400">CPF/CNPJ:</span>
+                                                        <span className="ml-2 font-medium text-gray-900 dark:text-dark-text">
+                                                            {cliente.cpfCnpj}
+                                                        </span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-gray-600 dark:text-gray-400">Email:</span>
+                                                        <span className="ml-2 font-medium text-gray-900 dark:text-dark-text">
+                                                            {cliente.email}
+                                                        </span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-gray-600 dark:text-gray-400">Telefone:</span>
+                                                        <span className="ml-2 font-medium text-gray-900 dark:text-dark-text">
+                                                            {cliente.telefone}
+                                                        </span>
+                                                    </div>
+                                                    {cliente.cidade && (
+                                                        <div>
+                                                            <span className="text-gray-600 dark:text-gray-400">Cidade:</span>
+                                                            <span className="ml-2 font-medium text-gray-900 dark:text-dark-text">
+                                                                {cliente.cidade}/{cliente.estado}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {cliente.status === 'atualizar' && cliente.clienteExistenteNome && (
+                                                    <div className="mt-2 text-xs text-blue-700 dark:text-blue-400">
+                                                        ℹ️ Atualizará: {cliente.clienteExistenteNome}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setModalPreviewImportOpen(false);
+                                    setDadosParaImportar(null);
+                                }}
+                                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors font-semibold"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmarImportacao}
+                                disabled={importing}
+                                className="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold disabled:opacity-50"
+                            >
+                                {importing ? (
+                                    <>
+                                        <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                        Importando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Confirmar Importação
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

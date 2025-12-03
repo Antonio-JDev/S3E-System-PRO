@@ -96,19 +96,28 @@ export interface KitProduct {
 export interface Service {
     id: string;
     nome: string;
+    codigo?: string; // Código interno do serviço
     descricao?: string;
     preco?: number;
     tipo?: ServiceType;
+    unidade?: string; // Unidade de medida: un, m², m³, m, diaria
     ativo?: boolean;
     createdAt?: string;
     updatedAt?: string;
+    // Aliases para compatibilidade com código legado
+    name?: string;
+    internalCode?: string;
+    description?: string;
+    price?: number;
+    type?: ServiceType;
 }
 
 export enum ServiceType {
-    INSTALACAO = 'INSTALACAO',
-    MANUTENCAO = 'MANUTENCAO',
-    CONSULTORIA = 'CONSULTORIA',
-    OUTRO = 'OUTRO'
+    Instalacao = 'Instalacao',
+    Manutencao = 'Manutencao',
+    Consultoria = 'Consultoria',
+    LaudoTecnico = 'LaudoTecnico',
+    Outro = 'Outro'
 }
 
 export interface ServiceCatalogItem {
@@ -150,8 +159,10 @@ export interface MaterialItem {
     descricao?: string;
     description?: string; // Alias para compatibilidade
     ncm?: string;
-    unidadeMedida?: string;
+    unidadeMedida?: string; // Unidade de estoque/compra
     unitOfMeasure?: string; // Alias para compatibilidade
+    unidadeVenda?: string; // Unidade de venda (pode ser diferente da unidade de estoque)
+    tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // Tipo especial para conversão de unidades
     preco?: number;
     price?: number; // Alias para compatibilidade
     valorVenda?: number;

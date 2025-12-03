@@ -170,8 +170,8 @@ export class PDFOrcamentoService {
             left: 0;
             right: 0;
             width: 100%;
-            height: 110px;
-            min-height: 110px;
+            height: 95px;
+            min-height: 95px;
             background: transparent;
             z-index: -2;
             pointer-events: none;
@@ -202,7 +202,7 @@ export class PDFOrcamentoService {
             .page-top-spacer {
                 position: fixed !important;
                 top: 0 !important;
-                height: 110px !important;
+                height: 95px !important;
                 display: block !important;
             }
 
@@ -214,16 +214,16 @@ export class PDFOrcamentoService {
                 display: block !important;
             }
 
-            /* Garantir margin-top de 110px e margin-bottom de 80px em TODAS as páginas */
+            /* Garantir margin-top de 95px e margin-bottom de 80px em TODAS as páginas */
             @page {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
             }
 
             @page :first {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
                 padding-top: 0 !important;
                 padding-bottom: 0 !important;
@@ -231,25 +231,25 @@ export class PDFOrcamentoService {
 
             /* Garantir que TODAS as páginas subsequentes também tenham as margens */
             @page :left {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
             @page :right {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
             /* Mantém o padding-top da div .page para a primeira página */
             body > .page {
-                padding-top: 110px;
+                padding-top: 95px;
                 padding-bottom: 80px;
-                min-height: calc(100vh - 110px - 80px);
+                min-height: calc(100vh - 95px - 80px);
             }
 
             /* Quando descrição técnica quebra para nova página, o spacer fixo cuida do espaçamento */
             .descricoes-wrapper {
-                padding-top: 110px;
+                padding-top: 95px;
                 padding-bottom: 80px;
             }
 
@@ -312,10 +312,10 @@ export class PDFOrcamentoService {
             max-width: 100%;
             margin: 0 15px;
 
-            padding: 110px 15px 80px 15px;
+            padding: 95px 15px 80px 15px;
             position: relative;
             background: transparent;
-            min-height: calc(100vh - 110px - 80px);
+            min-height: calc(100vh - 95px - 80px);
         }
 
         /* Adicionar padding-top em elementos que podem começar após quebra de página */
@@ -327,26 +327,26 @@ export class PDFOrcamentoService {
 
         /* Garantir padding-top e padding-bottom em todas as páginas após quebra de página */
         @media print {
-            /* Aplicar margin-top de 110px e margin-bottom de 80px em TODAS as páginas */
+            /* Aplicar margin-top de 95px e margin-bottom de 80px em TODAS as páginas */
             @page {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
             /* Primeira página também deve ter as margens */
             @page :first {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
             /* Garantir que TODAS as páginas subsequentes também tenham as margens */
             @page :left {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
             @page :right {
-                margin-top: 110px !important;
+                margin-top: 95px !important;
                 margin-bottom: 80px !important;
             }
 
@@ -414,10 +414,10 @@ export class PDFOrcamentoService {
         .descricoes-wrapper {
             page-break-before: always;
             break-before: page;
-            padding-top: 110px;
+            padding-top: 95px;
             padding-bottom: 80px;
             position: relative;
-            min-height: calc(100vh - 110px - 80px);
+            min-height: calc(100vh - 95px - 80px);
         }
 
         /* Descrições podem quebrar se muito longas */
@@ -435,9 +435,9 @@ export class PDFOrcamentoService {
         .descricao-section::before {
             content: "";
             display: block;
-            height: 110px;
+            height: 95px;
             position: absolute;
-            top: -110px;
+            top: -95px;
             left: 0;
             width: 100%;
             pointer-events: none;
@@ -472,8 +472,8 @@ export class PDFOrcamentoService {
             .observacoes-section:not(:first-child)::before {
                 content: "";
                 display: block;
-                height: 110px;
-                margin-top: -110px;
+                height: 95px;
+                margin-top: -95px;
                 visibility: hidden;
             }
 
@@ -536,10 +536,10 @@ export class PDFOrcamentoService {
             letter-spacing: 0.3px;
         }
 
-        .cliente-info {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
+        .cliente-info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px 12px;
             font-size: 12px;
             line-height: 1.4;
         }
@@ -547,18 +547,21 @@ export class PDFOrcamentoService {
         .cliente-info-item {
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: 3px;
         }
 
         .cliente-info-label {
-            font-size: 10px;
+            font-size: 9px;
             color: #64748b;
             font-weight: normal;
+            text-transform: uppercase;
+            letter-spacing: 0.2px;
         }
 
         .cliente-info-value {
             font-weight: bold;
             color: #1e293b;
+            font-size: 11px;
         }
 
         /* === ENDEREÇOS === */
@@ -581,6 +584,7 @@ export class PDFOrcamentoService {
             padding: 12px 0;
             margin-bottom: 16px;
             border: none;
+            page-break-inside: avoid;
         }
 
         .descricao-content {
@@ -592,6 +596,16 @@ export class PDFOrcamentoService {
 
         .descricao-section.projeto {
             border-left-color: #1e40af;
+        }
+
+        /* Garantir que elementos não quebrem mal entre páginas */
+        .cliente-section,
+        .addresses-row,
+        .itens-section,
+        .totais-section,
+        .pagamento-section,
+        .observacoes-section {
+            page-break-inside: avoid;
         }
 
         /* Suporte para HTML rico do Jodit */
@@ -680,6 +694,11 @@ export class PDFOrcamentoService {
 
         table.itens-table tbody tr {
             background: transparent;
+            page-break-inside: avoid;
+        }
+
+        table.itens-table thead {
+            display: table-header-group;
         }
 
         .item-tipo {
@@ -829,15 +848,10 @@ export class PDFOrcamentoService {
                     <label>Status:</label>
                     <strong>${orcamento.status}</strong>
                 </div>
-                ${orcamento.previsaoInicio && orcamento.previsaoTermino ? `
+                ${(orcamento.previsaoInicio && orcamento.previsaoTermino) || orcamento.previsaoTermino ? `
                 <div class="detail-item">
                     <label>Prazo de Entrega:</label>
-                    <strong>${new Date(orcamento.previsaoInicio).toLocaleDateString('pt-BR')} a ${new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}</strong>
-                </div>
-                ` : orcamento.previsaoTermino ? `
-                <div class="detail-item">
-                    <label>Prazo de Entrega:</label>
-                    <strong>${new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}</strong>
+                    <strong>${orcamento.previsaoInicio && orcamento.previsaoTermino ? `${new Date(orcamento.previsaoInicio).toLocaleDateString('pt-BR')} a ${new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}` : new Date(orcamento.previsaoTermino).toLocaleDateString('pt-BR')}</strong>
                 </div>
                 ` : ''}
             </div>
@@ -846,7 +860,7 @@ export class PDFOrcamentoService {
         <!-- Cliente -->
         <div class="cliente-section">
             <div class="section-title">Dados do Cliente</div>
-            <div class="cliente-info">
+            <div class="cliente-info-grid">
                 <div class="cliente-info-item">
                     <div class="cliente-info-label">Nome:</div>
                     <div class="cliente-info-value">${orcamento.cliente.nome}</div>
@@ -1068,7 +1082,7 @@ export class PDFOrcamentoService {
 </html>
         `;
 
-        console.log('✅ HTML do orçamento gerado com sucesso (versão atualizada - sem backgrounds, fonte 12px, padding 110px, margin 15px)');
+        console.log('✅ HTML do orçamento gerado com sucesso (versão atualizada - sem backgrounds, fonte 12px, padding 95px/80px, margin 15px)');
         return html;
     }
 

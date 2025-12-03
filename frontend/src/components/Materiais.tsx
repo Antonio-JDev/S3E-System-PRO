@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { type MaterialItem, MaterialCategory } from '../types';
 import { materiaisService, Material } from '../services/materiaisService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { axiosApiService } from '../services/axiosApi';
+import { getUploadUrl } from '../config/api';
 import SupplierCombobox from './ui/SupplierCombobox';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
@@ -149,6 +151,12 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
     const [loadingFornecedores, setLoadingFornecedores] = useState(false);
+    
+    // Estados para upload de imagem
+    const [imagemSelecionada, setImagemSelecionada] = useState<File | null>(null);
+    const [previewImagem, setPreviewImagem] = useState<string | null>(null);
+    const [uploadingImagem, setUploadingImagem] = useState(false);
+    
     const [formState, setFormState] = useState<MaterialFormState>({
         name: '',
         sku: '',
@@ -188,6 +196,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     category: MaterialCategory.ELETRICO, // Mapear conforme necessário
                     description: material.descricao,
                     ncm: material.ncm, // ✅ NCM do material (dado fiscal)
+                    imagemUrl: material.imagemUrl, // ✅ URL da imagem do material
                     stock: material.estoque,
                     minStock: material.estoqueMinimo,
                     unitOfMeasure: material.unidade,
@@ -339,8 +348,41 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const handleCloseModal = () => {
         setIsModalOpen(false);
         setItemToEdit(null);
+        setImagemSelecionada(null);
+        setPreviewImagem(null);
     };
 
+    // Funções para manipulação de imagem
+    const handleImagemChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setImagemSelecionada(file);
+            
+            // Criar preview
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setPreviewImagem(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleRemoverImagem = async () => {
+        if (itemToEdit?.id && itemToEdit.imagemUrl) {
+            try {
+                const response = await axiosApiService.delete(`/api/materiais/${itemToEdit.id}/imagem`);
+                if (response.success) {
+                    toast.success('Imagem removida com sucesso!');
+                    setFormState({...formState, imageUrl: undefined});
+                    await loadMaterials();
+                }
+            } catch (error) {
+                toast.error('Erro ao remover imagem');
+            }
+        }
+        setImagemSelecionada(null);
+        setPreviewImagem(null);
+    };
 
     // Função para fechar modal de histórico
     const handleFecharHistorico = () => {
@@ -398,23 +440,55 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 fornecedorId: fornecedorIdFinal || undefined
             };
 
+            let materialId: string;
+            
             if (itemToEdit) {
                 // Atualizar material existente
                 const response = await materiaisService.updateMaterial(itemToEdit.id, materialData);
                 if (response.success) {
-
+                    materialId = itemToEdit.id;
                     toast.success('✅ Material atualizado com sucesso!');
                 } else {
                     toast.error('❌ Erro ao atualizar material');
+                    return;
                 }
             } else {
                 // Criar novo material
                 const response = await materiaisService.createMaterial(materialData);
                 if (response.success) {
-
+                    materialId = response.data.id;
                     toast.success('✅ Material criado com sucesso!');
                 } else {
                     toast.error('❌ Erro ao criar material');
+                    return;
+                }
+            }
+
+            // Se houver imagem selecionada, fazer upload
+            if (imagemSelecionada && materialId) {
+                try {
+                    setUploadingImagem(true);
+                    const formData = new FormData();
+                    formData.append('imagem', imagemSelecionada);
+
+                    const uploadResponse = await axiosApiService.post(
+                        `/api/materiais/${materialId}/upload-imagem`,
+                        formData,
+                        {
+                            headers: {
+                                'Content-Type': 'multipart/form-data',
+                            },
+                        }
+                    );
+
+                    if (uploadResponse.success) {
+                        toast.success('📷 Imagem enviada com sucesso!');
+                    }
+                } catch (error) {
+                    console.error('Erro ao fazer upload da imagem:', error);
+                    toast.error('❌ Erro ao enviar imagem');
+                } finally {
+                    setUploadingImagem(false);
                 }
             }
             
@@ -1262,7 +1336,32 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredMaterials.map((material) => (
-                        <div key={material.id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200">
+                        <div key={material.id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-soft hover:shadow-medium hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200">
+                            {/* Imagem do Material - Sempre visível */}
+                            <div className="w-full h-48 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center overflow-hidden">
+                                {material.imagemUrl ? (
+                                    <img
+                                        src={getUploadUrl(material.imagemUrl)}
+                                        alt={material.name || 'Material'}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            const imgElement = e.target as HTMLImageElement;
+                                            imgElement.style.display = 'none';
+                                            const placeholder = document.createElement('div');
+                                            placeholder.className = 'w-full h-full flex items-center justify-center';
+                                            placeholder.innerHTML = '<svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>';
+                                            imgElement.parentElement?.appendChild(placeholder);
+                                        }}
+                                    />
+                                ) : (
+                                    <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                )}
+                            </div>
+                            
+                            {/* Conteúdo do Card */}
+                            <div className="p-6">
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
@@ -1396,6 +1495,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     {isAdminOrDev ? 'Excluir' : 'Desativar'}
                                 </button>
                             </div>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -1405,6 +1505,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600">
                             <tr>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Foto</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Material</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Categoria</th>
@@ -1419,6 +1520,24 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                             {filteredMaterials.map((material) => (
                                 <tr key={material.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                    <td className="px-6 py-4 text-center">
+                                        {material.imagemUrl ? (
+                                            <img
+                                                src={getUploadUrl(material.imagemUrl)}
+                                                alt={material.name || 'Material'}
+                                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 dark:border-gray-600 mx-auto"
+                                                onError={(e) => {
+                                                    (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center mx-auto">
+                                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="px-6 py-4">
                                         <p className="font-semibold text-gray-900 dark:text-white">
 
@@ -1628,6 +1747,56 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         className="textarea-field"
                                         placeholder="Descrição detalhada do material..."
                                     />
+                                </div>
+
+                                {/* Campo de Upload de Imagem */}
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        📷 Imagem do Material
+                                    </label>
+                                    
+                                    {/* Preview da imagem */}
+                                    {(previewImagem || (itemToEdit?.imagemUrl)) && (
+                                        <div className="mb-4 relative inline-block">
+                                            <img
+                                                src={previewImagem || getUploadUrl(itemToEdit?.imagemUrl || '')}
+                                                alt="Preview"
+                                                className="w-32 h-32 object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleRemoverImagem}
+                                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors shadow-md"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Input de upload */}
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            type="file"
+                                            accept="image/jpeg,image/jpg,image/png,image/webp"
+                                            onChange={handleImagemChange}
+                                            className="hidden"
+                                            id="imagem-material"
+                                        />
+                                        <label
+                                            htmlFor="imagem-material"
+                                            className="cursor-pointer flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                            </svg>
+                                            Escolher Imagem
+                                        </label>
+                                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                                            {imagemSelecionada ? imagemSelecionada.name : 'JPG, PNG ou WEBP (máx. 5MB)'}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2156,6 +2325,24 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         </div>
 
                         <div className="p-6 space-y-6">
+                            {/* Foto do Material */}
+                            {materialParaVisualizar.imagemUrl && (
+                                <div className="flex items-center gap-4 mb-4">
+                                    <img
+                                        src={getUploadUrl(materialParaVisualizar.imagemUrl)}
+                                        alt={materialParaVisualizar.name || 'Material'}
+                                        className="w-[100px] h-[100px] object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                                        onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                        }}
+                                    />
+                                    <div>
+                                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">📷 Imagem do Material</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">100x100 pixels</p>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Informações Principais */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">

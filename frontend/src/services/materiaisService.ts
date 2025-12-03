@@ -7,6 +7,7 @@ export interface Material {
   descricao: string;
   unidade: string;
   ncm?: string; // Nomenclatura Comum do Mercosul (dado fiscal)
+  imagemUrl?: string; // URL da imagem do material
 
   preco: number; // Preço de custo (última compra)
   valorVenda?: number; // Preço de venda (usado em orçamentos)

@@ -28,6 +28,7 @@ import { generateOrcamentoPDF, type OrcamentoPDFData as OrcamentoPDFDataOld } fr
 import NovoOrcamentoPage from '../pages/NovoOrcamentoPage';
 import PDFCustomizationModal from './PDFCustomization/PDFCustomizationModalWrapper';
 import { OrcamentoPDFData } from '../types/pdfCustomization';
+import { identificarTipoMaterial, TipoMaterial } from '../utils/unitConverter';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -113,7 +114,9 @@ interface OrcamentoItem {
     descricao?: string;
     dataAtualizacaoCotacao?: string; // Novo
     nome: string;
-    unidadeMedida: string;
+    unidadeMedida: string; // Unidade de estoque
+    unidadeVenda?: string; // Unidade de venda (pode ser diferente, ex: cm para barramentos)
+    tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // Tipo especial para conversão
     quantidade: number;
     custoUnit: number;
     precoBase?: number; // Base do preço de venda (valorVenda || preco) sem BDI - usado para recalcular quando BDI muda
@@ -989,7 +992,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     };
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
-    const handleAddCotacao = (cotacao: any, manterModalAberto = false) => {
+    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVenda?: string) => {
+        // Identificar tipo de material para conversão de unidades
+        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
+        const unidadeVendaFinal = unidadeVenda || 'UN';
+        
         // Usar valorVenda se disponível, senão calcular 40% acima do valorUnitario
         const valorVenda = cotacao.valorVenda || cotacao.valorUnitario * 1.4;
         const precoBase = valorVenda; // Base para recalcular quando BDI mudar
@@ -1000,7 +1007,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             nome: cotacao.nome,
             descricao: cotacao.nome, // ✅ Apenas o nome do material (não mostrar fornecedor)
             dataAtualizacaoCotacao: cotacao.dataAtualizacao,
-            unidadeMedida: 'UN',
+            unidadeMedida: 'UN', // Unidade de estoque
+            unidadeVenda: unidadeVendaFinal, // Unidade de venda
+            tipoMaterial: tipoMaterial,
             quantidade: 1,
             custoUnit: cotacao.valorUnitario, // Custo é sempre o valor da cotação
             precoBase: precoBase, // Base do preço de venda (sem BDI)
@@ -1057,7 +1066,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         });
     };
 
-    const handleAddItemComValidacao = (material?: Material, cotacao?: any, quantidade?: number) => {
+    const handleAddItemComValidacao = (material?: Material, cotacao?: any, quantidade?: number, unidadeVenda?: string) => {
         const qtd = quantidade || 1;
         
         // Validar estoque se for material
@@ -1069,6 +1078,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 return;
             }
             
+            // Identificar tipo de material para conversão de unidades
+            const tipoMaterial = identificarTipoMaterial(material.nome);
+            const unidadeVendaFinal = unidadeVenda || material.unidadeMedida;
+            
             // Usar handleAddItem existente
             const precoVenda = material.valorVenda || material.preco;
             const precoBase = precoVenda;
@@ -1078,7 +1091,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 materialId: material.id,
                 nome: material.nome,
                 descricao: material.nome,
-                unidadeMedida: material.unidadeMedida,
+                unidadeMedida: material.unidadeMedida, // Unidade de estoque
+                unidadeVenda: unidadeVendaFinal, // Unidade de venda (pode ser diferente)
+                tipoMaterial: tipoMaterial,
                 quantidade: qtd,
                 custoUnit: material.preco,
                 precoBase: precoBase,
@@ -1088,7 +1103,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             
             setItems(prev => [...prev, newItem]);
             toast.success('Material adicionado', {
-                description: `${material.nome} (${qtd} ${material.unidadeMedida}) - Estoque: ${material.estoque} ${material.unidadeMedida}`
+                description: `${material.nome} (${qtd} ${unidadeVendaFinal}) - Estoque: ${material.estoque} ${material.unidadeMedida}`
             });
         }
         

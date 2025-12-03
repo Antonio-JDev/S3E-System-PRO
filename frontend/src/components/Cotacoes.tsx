@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import { axiosApiService } from '../services/axiosApi';
 import {
   AlertDialog,
@@ -13,6 +13,13 @@ import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { useSKey } from '../hooks/useSKey';
+import ActionsDropdown from './ui/ActionsDropdown';
+import { 
+    generateEmptyTemplate, 
+    generateExampleTemplate, 
+    downloadJSON,
+    type CotacoesImportData
+} from '../utils/cotacoesImportExport';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -49,6 +56,30 @@ const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+  </svg>
+);
+
+const ArrowDownTrayIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+  </svg>
+);
+
+const ArrowUpTrayIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+  </svg>
+);
+
+const DocumentTextIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+  </svg>
+);
+
+const ArrowPathIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
   </svg>
 );
 
@@ -106,6 +137,34 @@ interface ImportacaoEstatisticas {
   atualizados: number;
   mantidos: number;
   total: number;
+}
+
+interface ImportacaoResponse {
+  criados: number;
+  atualizados: number;
+  mantidos: number;
+  erros: number;
+  detalhes: Array<{
+    nome: string;
+    status: 'criado' | 'atualizado' | 'mantido';
+    valorAnterior?: number | null;
+    valorNovo?: number;
+  }>;
+}
+
+interface ExportarResponse {
+  totalCotacoes: number;
+  [key: string]: any;
+}
+
+interface PreviewImportacaoResponse {
+  cotacoes: CotacaoPreview[];
+  estatisticas: ImportacaoEstatisticas;
+}
+
+interface ExclusaoBulkResponse {
+  deletados: number;
+  naoEncontrados: number;
 }
 
 interface CotacoesProps {
@@ -197,7 +256,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       const response = await axiosApiService.get('/api/cotacoes');
       
       if (response.success && response.data) {
-        setCotacoes(response.data);
+        setCotacoes(response.data as Cotacao[]);
       }
     } catch (error) {
       console.error('Erro ao carregar cotações:', error);
@@ -247,7 +306,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
         
-        toast.success(`${response.data.totalCotacoes || 0} cotações exportadas com sucesso!`);
+        toast.success(`${(response.data as ExportarResponse).totalCotacoes || 0} cotações exportadas com sucesso!`);
       }
     } catch (error) {
       console.error('Erro ao exportar:', error);
@@ -272,8 +331,9 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
           });
           
           if (response.success && response.data) {
-            const cotacoes = response.data.cotacoes || [];
-            const estatisticas = response.data.estatisticas || {
+            const previewData = response.data as PreviewImportacaoResponse;
+            const cotacoes = previewData.cotacoes || [];
+            const estatisticas = previewData.estatisticas || {
               novos: 0,
               atualizados: 0,
               mantidos: 0,
@@ -316,7 +376,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       });
       
       if (response.success && response.data) {
-        const { criados, atualizados, mantidos, erros, detalhes } = response.data;
+        const { criados, atualizados, mantidos, erros, detalhes } = response.data as ImportacaoResponse;
         
         // Fechar modal de preview
         setPreviewModalOpen(false);
@@ -337,13 +397,14 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
           // Mapear detalhes para o formato do preview para exibir no resumo
           const detalhesMapeados = detalhes.map((detalhe: any) => {
             const cotacaoOriginal = cotacoesPreview.find((c: any) => c.nome === detalhe.nome);
+            if (!cotacaoOriginal) return null;
             return {
               ...cotacaoOriginal,
               status: detalhe.status === 'criado' ? 'novo' : detalhe.status,
               valorAnterior: detalhe.valorAnterior,
               valorNovo: detalhe.valorNovo
-            };
-          }).filter(Boolean);
+            } as CotacaoPreview;
+          }).filter((item): item is CotacaoPreview => item !== null);
           
           setCotacoesPreview(detalhesMapeados.length > 0 ? detalhesMapeados : cotacoesPreview);
           setResumoModalOpen(true);
@@ -573,7 +634,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       });
       
       if (response.success) {
-        const { deletados, naoEncontrados } = response.data || {};
+        const { deletados, naoEncontrados } = (response.data as ExclusaoBulkResponse) || { deletados: 0, naoEncontrados: 0 };
         
         if (naoEncontrados && naoEncontrados > 0) {
           toast.warning(
@@ -645,29 +706,45 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
             Nova Cotação
           </button>
           
-          <button
-            onClick={handleDownloadTemplate}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 shadow-md"
-          >
-            <DocumentIcon className="w-5 h-5" />
-            Template
-          </button>
-          
-          <button
-            onClick={handleExportar}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-md"
-          >
-            <DownloadIcon className="w-5 h-5" />
-            Exportar
-          </button>
-          
-          <button
-            onClick={() => setImportModalOpen(true)}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-all flex items-center gap-2 shadow-md"
-          >
-            <UploadIcon className="w-5 h-5" />
-            Importar JSON
-          </button>
+          {/* Dropdown de Ações */}
+          <ActionsDropdown
+            actions={[
+              {
+                label: 'Template Vazio',
+                onClick: () => {
+                  const template = generateEmptyTemplate();
+                  downloadJSON(template, 'cotacoes-template-vazio.json');
+                  toast.success('Template vazio baixado!');
+                },
+                icon: <DocumentTextIcon className="w-4 h-4" />,
+                variant: 'default'
+              },
+              {
+                label: 'Template com Exemplos',
+                onClick: () => {
+                  const template = generateExampleTemplate();
+                  downloadJSON(template, 'cotacoes-template-exemplo.json');
+                  toast.success('Template com exemplos baixado!');
+                },
+                icon: <DocumentTextIcon className="w-4 h-4" />,
+                variant: 'primary'
+              },
+              {
+                label: 'Exportar JSON',
+                onClick: handleExportar,
+                icon: <ArrowDownTrayIcon className="w-4 h-4" />,
+                disabled: cotacoes.length === 0,
+                variant: 'success'
+              },
+              {
+                label: 'Importar JSON',
+                onClick: () => setImportModalOpen(true),
+                icon: <ArrowUpTrayIcon className="w-4 h-4" />,
+                variant: 'primary'
+              }
+            ]}
+            label="Ações"
+          />
         </div>
       </header>
 
@@ -1514,7 +1591,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                             </span>
                           )}
                         </div>
-                        {cotacao.status === 'atualizado' && cotacao.valorAnterior !== null && (
+                        {cotacao.status === 'atualizado' && cotacao.valorAnterior !== null && cotacao.valorAnterior !== undefined && (
                           <div className="text-sm text-gray-600">
                             <span className="line-through text-red-600 mr-2">
                               R$ {cotacao.valorAnterior.toFixed(2)}

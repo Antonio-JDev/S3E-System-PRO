@@ -191,20 +191,7 @@ const MainApp: React.FC = () => {
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-bg relative">
         {/* Botão Hambúrguer para Mobile - aparece apenas quando sidebar está fechada em mobile */}
         {!isSidebarOpen && <MobileMenuButton onClick={toggleSidebar} isOpen={isSidebarOpen} />}
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4" />
-                <p className="text-gray-600 dark:text-dark-text-secondary text-sm">
-                  Carregando módulo...
-                </p>
-              </div>
-            </div>
-          }
-        >
-          {renderActiveView()}
-        </Suspense>
+        {renderActiveView()}
       </main>
       {/* SettingsModal DESCONTINUADO - Substituído por página Configuracoes.tsx */}
       {/* <SettingsModal 

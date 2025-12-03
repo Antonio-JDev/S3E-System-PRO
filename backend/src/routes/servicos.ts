@@ -42,4 +42,18 @@ router.put('/:id', authorize('admin', 'gerente'), ServicosController.atualizarSe
  */
 router.delete('/:id', authorize('admin'), ServicosController.desativarServico);
 
+/**
+ * @route POST /api/servicos/import/json
+ * @desc Importa serviços em lote via JSON
+ * @access Admin/Gerente only
+ */
+router.post('/import/json', authorize('admin', 'gerente'), ServicosController.importarServicos);
+
+/**
+ * @route GET /api/servicos/export/json
+ * @desc Exporta serviços para JSON
+ * @access Authenticated
+ */
+router.get('/export/json', ServicosController.exportarServicos);
+
 export default router;

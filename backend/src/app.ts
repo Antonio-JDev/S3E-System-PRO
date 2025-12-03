@@ -124,6 +124,36 @@ app.get('/api/configuracoes/logo/:filename', async (req, res) => {
   }
 });
 
+// ROTA PÚBLICA: Servir imagens de materiais
+app.get('/api/materiais/imagem/:filename', async (req, res) => {
+  try {
+    const { servirImagemMaterial } = await import('./controllers/materiaisController');
+    await servirImagemMaterial(req, res);
+  } catch (error: any) {
+    console.error('Erro ao servir imagem de material:', error);
+    res.status(500).json({ success: false, message: 'Erro ao servir imagem', error: error.message });
+  }
+});
+
+// ROTA PÚBLICA: Buscar logo de login (sem autenticação)
+app.get('/api/configuracoes/public/logo-login', async (req, res) => {
+  try {
+    const configuracaoServiceModule = await import('./services/configuracao.service');
+    const configuracaoService = configuracaoServiceModule.default;
+    const configuracoes = await configuracaoService.getConfiguracoes();
+    res.status(200).json({ 
+      success: true, 
+      data: { 
+        logoLoginUrl: configuracoes.logoLoginUrl,
+        logoUrl: configuracoes.logoUrl // fallback
+      } 
+    });
+  } catch (error: any) {
+    console.error('Erro ao buscar logo de login:', error);
+    res.status(200).json({ success: true, data: { logoLoginUrl: null, logoUrl: null } });
+  }
+});
+
 // Servir arquivos estáticos (uploads) com CORS habilitado
 // Em produção (Docker), process.cwd() será /app e o volume está mapeado em /app/uploads
 // Em desenvolvimento local, usamos backend/uploads

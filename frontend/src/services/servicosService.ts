@@ -14,6 +14,9 @@ export interface Servico {
   updatedAt: string;
 }
 
+// Alias para compatibilidade
+export type Service = Servico;
+
 export interface CreateServicoData {
   nome: string;
   codigo: string;
@@ -52,6 +55,21 @@ class ServicosService {
 
   async desativar(id: string) {
     return axiosApiService.delete<{ message: string }>(`${ENDPOINTS.SERVICOS}/${id}`);
+  }
+
+  /**
+   * Importa serviços via JSON
+   */
+  async importarJSON(servicos: any[]) {
+    return axiosApiService.post(`${ENDPOINTS.SERVICOS}/import/json`, { servicos });
+  }
+
+  /**
+   * Exporta serviços para JSON
+   */
+  async exportarJSON(ativo?: boolean) {
+    const params = ativo !== undefined ? { ativo } : {};
+    return axiosApiService.get(`${ENDPOINTS.SERVICOS}/export/json`, params);
   }
 }
 

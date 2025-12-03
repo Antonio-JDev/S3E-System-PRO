@@ -215,7 +215,10 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         quantidade: item.quantidade,
         custoUnit,
         precoUnit,
-        subtotal: precoUnit * item.quantidade
+        subtotal: precoUnit * item.quantidade,
+        // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
+        unidadeVenda: item.unidadeVenda || null,
+        tipoMaterial: item.tipoMaterial || null
       });
     }
 
@@ -638,7 +641,10 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
           quantidade: item.quantidade,
           custoUnit,
           precoUnit,
-          subtotal: precoUnit * item.quantidade
+          subtotal: precoUnit * item.quantidade,
+          // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
+          unidadeVenda: item.unidadeVenda || null,
+          tipoMaterial: item.tipoMaterial || null
         });
       }
 

@@ -106,6 +106,7 @@ model Cliente {
   cidade    String?
   estado    String?
   cep       String?
+  tipo      String   @default("PJ") // PF (Pessoa Física) ou PJ (Pessoa Jurídica)
   ativo     Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -153,6 +154,7 @@ model Material {
   estoqueMinimo Float   @default(5)
   unidadeMedida String  @default("un")
   localizacao   String?
+  imagemUrl     String? // URL da imagem do material
 
   preco                  Float? // Preço de custo (última compra)
   valorVenda             Float? // Preço de venda (usado em orçamentos)
@@ -323,6 +325,10 @@ model OrcamentoItem {
   precoUnit   Float
   subtotal    Float
 
+  // ✅ NOVOS CAMPOS: Conversão de unidades (OPCIONAIS para compatibilidade)
+  unidadeVenda String? // Unidade de venda (ex: 'cm' para barramentos, pode ser diferente da unidade de estoque)
+  tipoMaterial String? // Tipo do material: BARRAMENTO_COBRE, TRILHO_DIN, CABO, PADRAO
+
   orcamento Orcamento @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
   material  Material? @relation(fields: [materialId], references: [id])
   kit       Kit?      @relation(fields: [kitId], references: [id])
@@ -375,9 +381,9 @@ model Projeto {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  orcamento    Orcamento      @relation(fields: [orcamentoId], references: [id])
-  cliente      Cliente        @relation(fields: [clienteId], references: [id])
-  responsavel  User?          @relation("ProjetoResponsavel", fields: [responsavelId], references: [id])
+  orcamento    Orcamento          @relation(fields: [orcamentoId], references: [id])
+  cliente      Cliente            @relation(fields: [clienteId], references: [id])
+  responsavel  User?              @relation("ProjetoResponsavel", fields: [responsavelId], references: [id])
   tasks        Task[]
   notasFiscais NotaFiscal[]
   vendas       Venda[]

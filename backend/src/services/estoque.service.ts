@@ -304,16 +304,16 @@ export class EstoqueService {
                     });
                 }
 
-                // Se não encontrou, buscar qualquer material com nome similar
+                // ✅ CORREÇÃO: Buscar material com nome EXATO (não apenas similar)
+                // Isso evita agrupar materiais diferentes com nomes parecidos
                 if (!materialEmEstoque) {
-                    const nomeNormalizado = cotacao.nome.toLowerCase().trim();
-                    const materiaisComEstoque = await prisma.material.findMany({
+                    const nomeNormalizado = cotacao.nome.trim();
+                    materialEmEstoque = await prisma.material.findFirst({
                         where: {
                             estoque: { gt: 0 },
-                            nome: { contains: nomeNormalizado.substring(0, 20), mode: 'insensitive' }
+                            nome: nomeNormalizado // Nome completo e exato
                         }
                     });
-                    materialEmEstoque = materiaisComEstoque[0] || null;
                 }
 
                 if (!materialEmEstoque) {

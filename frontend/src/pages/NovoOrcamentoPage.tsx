@@ -11,6 +11,10 @@ import { ENDPOINTS } from '../config/api';
 import JoditEditorComponent from '../components/JoditEditor';
 import PrecoValidadeFlag from '../components/PrecoValidadeFlag';
 import HistoricoPrecosModal from '../components/HistoricoPrecosModal';
+import UnitSelector from '../components/UnitSelector';
+import UnitDisplay from '../components/UnitDisplay';
+import { identificarTipoMaterial } from '../utils/unitConverter';
+import { getUploadUrl } from '../config/api';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
@@ -69,6 +73,7 @@ interface Material {
     nome: string;
     sku: string;
     unidadeMedida: string;
+    imagemUrl?: string; // Foto do material
 
     preco: number; // Preço de custo
     valorVenda?: number; // Preço de venda (usado em orçamentos)
@@ -110,8 +115,11 @@ interface OrcamentoItem {
     dataAtualizacaoCotacao?: string; // Novo: data da cotação para exibir flag
     nome: string;
     unidadeMedida: string;
+    unidadeVenda?: string; // ✅ NOVO: Unidade de venda (pode ser diferente da unidade de estoque)
+    tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // ✅ NOVO: Tipo para conversão
     quantidade: number;
     custoUnit: number;
+    precoBase?: number; // Preço base sem BDI
     precoUnit: number;
     subtotal: number;
     precoEditadoManual?: boolean; // Flag para indicar se o preço foi editado manualmente
@@ -711,7 +719,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     }, [items, formState.descontoValor, formState.impostoPercentual]);
 
     // Adicionar material do estoque ao orçamento
-    const handleAddItem = (material: Material, manterModalAberto = false) => {
+    const handleAddItem = (material: Material, manterModalAberto = false, unidadeVendaParam?: string) => {
+        // Identificar tipo de material para conversão de unidades
+        const tipoMaterial = identificarTipoMaterial(material.nome);
+        const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
+        
         // Usar valorVenda se disponível, senão usar preco (preço de compra)
         const precoVenda = material.valorVenda || material.preco;
         const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
@@ -722,6 +734,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             nome: material.nome,
             descricao: material.nome, // Usar o nome como descrição
             unidadeMedida: material.unidadeMedida,
+            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
+            tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
             quantidade: 1,
             custoUnit: material.preco,
             precoBase: precoBase, // Base do preço de venda (sem BDI)
@@ -736,7 +750,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         setItemSearchTerm('');
         setBuscaGlobal(''); // Limpar busca global ao adicionar
         toast.success('Material adicionado', {
-            description: `${material.nome} adicionado ao orçamento`
+            description: `${material.nome} adicionado ao orçamento (${unidadeVenda})`
         });
     };
 
@@ -797,18 +811,33 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
-    const handleAddCotacao = (cotacao: any, manterModalAberto = false) => {
+    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVendaParam?: string) => {
+        // Identificar tipo de material para conversão de unidades
+        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
+        const unidadeVenda = unidadeVendaParam || 'UN';
+        
+        // Calcular preço baseado na unidade de venda
+        let precoUnitario = cotacao.valorUnitario;
+        if (tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') {
+            if (unidadeVenda === 'cm') {
+                // Se vender em cm, dividir o preço por metro por 100
+                precoUnitario = cotacao.valorUnitario / 100;
+            }
+        }
+        
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
             cotacaoId: cotacao.id,
             nome: cotacao.nome,
             descricao: cotacao.nome, // ✅ Apenas o nome do material (não mostrar fornecedor)
             dataAtualizacaoCotacao: cotacao.dataAtualizacao,
-            unidadeMedida: 'UN',
+            unidadeMedida: unidadeVenda,
+            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
+            tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
             quantidade: 1,
-            custoUnit: cotacao.valorUnitario,
-            precoUnit: cotacao.valorUnitario * (1 + formState.bdi / 100),
-            subtotal: cotacao.valorUnitario * (1 + formState.bdi / 100)
+            custoUnit: precoUnitario,
+            precoUnit: precoUnitario * (1 + formState.bdi / 100),
+            subtotal: precoUnitario * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -818,7 +847,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         setItemSearchTerm('');
         setBuscaGlobal(''); // Limpar busca global ao adicionar
         toast.success('Cotação adicionada', {
-            description: `${cotacao.nome} do banco frio adicionado ao orçamento`
+            description: `${cotacao.nome} do banco frio adicionado ao orçamento (${unidadeVenda})`
         });
     };
 
@@ -1493,99 +1522,130 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            {items.map((item, index) => (
-                                <div key={index} className="bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border p-4 rounded-xl">
-                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{item.nome}</p>
-                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">{item.unidadeMedida}</p>
-                                            {/* Flag de Banco Frio */}
-                                            {(item.tipo === 'COTACAO' || (item as any).cotacao || (item as any).cotacaoId) && (
-                                                <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-lg text-xs font-medium">
-                                                    <span>📦 Banco Frio</span>
-                                                    {(() => {
-                                                        const dataStr = (item as any).cotacao?.dataAtualizacao || 
-                                                                      item.dataAtualizacaoCotacao || 
-                                                                      (item as any).cotacao?.createdAt ||
-                                                                      (item as any).dataAtualizacao;
-                                                        if (dataStr) {
-                                                            const data = new Date(dataStr);
-                                                            if (!isNaN(data.getTime())) {
-                                                                return <span className="text-blue-600 dark:text-blue-400">• {data.toLocaleDateString('pt-BR')}</span>;
-                                                            }
-                                                        }
-                                                        return <span className="text-blue-600 dark:text-blue-400">• Sem data</span>;
-                                                    })()}
-                                                </div>
-                                            )}
-                                        </div>
+                            {items.map((item, index) => {
+                                // Buscar foto do material se for do tipo MATERIAL
+                                const materialComFoto = item.tipo === 'MATERIAL' && item.materialId 
+                                    ? materiais.find(m => m.id === item.materialId)
+                                    : null;
+                                const fotoUrl = materialComFoto?.imagemUrl;
 
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Quantidade</label>
-                                            <input
-                                                type="number"
-                                                value={item.quantidade}
-                                                onChange={(e) => handleUpdateItemQuantity(index, Number(e.target.value))}
-                                                min="1"
-                                                step="0.01"
-                                                className="input-field text-sm"
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">
-                                                Valor Unit. (R$)
-                                                {item.precoEditadoManual && (
-                                                    <span className="ml-1 text-blue-600 dark:text-blue-400" title="Valor editado manualmente">
-                                                        ✏️
-                                                    </span>
+                                return (
+                                    <div key={index} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden hover:shadow-md transition-all">
+                                        <div className="flex items-center gap-4 p-4">
+                                            {/* Coluna de Foto - Compacta */}
+                                            <div className="flex-shrink-0">
+                                                {fotoUrl ? (
+                                                    <img
+                                                        src={getUploadUrl(fotoUrl)}
+                                                        alt={item.nome}
+                                                        className="w-14 h-14 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
+                                                        onError={(e) => {
+                                                            const imgElement = e.target as HTMLImageElement;
+                                                            imgElement.style.display = 'none';
+                                                            const placeholder = document.createElement('div');
+                                                            placeholder.className = 'w-14 h-14 bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-center';
+                                                            placeholder.innerHTML = '<svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>';
+                                                            imgElement.parentElement?.appendChild(placeholder);
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <div className="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                                                        <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                        </svg>
+                                                    </div>
                                                 )}
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={item.precoUnit.toFixed(2)}
-                                                onChange={(e) => {
-                                                    const novoValor = parseFloat(e.target.value) || 0;
-                                                    handleUpdateItemPrice(index, novoValor);
-                                                }}
-                                                onBlur={(e) => {
-                                                    // Garantir que o valor seja formatado corretamente ao sair do campo
-                                                    const valor = parseFloat(e.target.value) || 0;
-                                                    if (valor !== item.precoUnit) {
-                                                        handleUpdateItemPrice(index, valor);
-                                                    }
-                                                }}
-                                                min="0"
-                                                step="0.01"
-                                                className="input-field text-sm"
-                                                placeholder="0.00"
-                                            />
-                                            {!item.precoEditadoManual && (
-                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
-                                                    Clique para editar
+                                            </div>
+
+                                            {/* Nome e Badges - Expandido */}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-semibold text-gray-900 dark:text-dark-text truncate">{item.nome}</p>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.unidadeMedida}</span>
+                                                    {/* Badge de Banco Frio */}
+                                                    {(item.tipo === 'COTACAO' || (item as any).cotacao || (item as any).cotacaoId) && (
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium">
+                                                            <span>📦</span>
+                                                            {(() => {
+                                                                const dataStr = (item as any).cotacao?.dataAtualizacao || 
+                                                                              item.dataAtualizacaoCotacao || 
+                                                                              (item as any).cotacao?.createdAt ||
+                                                                              (item as any).dataAtualizacao;
+                                                                if (dataStr) {
+                                                                    const data = new Date(dataStr);
+                                                                    if (!isNaN(data.getTime())) {
+                                                                        return <span>{data.toLocaleDateString('pt-BR')}</span>;
+                                                                    }
+                                                                }
+                                                                return null;
+                                                            })()}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Quantidade - Compacto */}
+                                            <div className="flex-shrink-0 w-24">
+                                                <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Qtd.</label>
+                                                <input
+                                                    type="number"
+                                                    value={item.quantidade}
+                                                    onChange={(e) => handleUpdateItemQuantity(index, Number(e.target.value))}
+                                                    min="1"
+                                                    step="0.01"
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                                                />
+                                            </div>
+
+                                            {/* Valor Unitário - Compacto */}
+                                            <div className="flex-shrink-0 w-32">
+                                                <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">
+                                                    Valor Unit.
+                                                    {item.precoEditadoManual && <span className="ml-1 text-blue-600 dark:text-blue-400" title="Editado">✏️</span>}
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={item.precoUnit.toFixed(2)}
+                                                    onChange={(e) => {
+                                                        const novoValor = parseFloat(e.target.value) || 0;
+                                                        handleUpdateItemPrice(index, novoValor);
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        const valor = parseFloat(e.target.value) || 0;
+                                                        if (valor !== item.precoUnit) {
+                                                            handleUpdateItemPrice(index, valor);
+                                                        }
+                                                    }}
+                                                    min="0"
+                                                    step="0.01"
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
+                                                    placeholder="0.00"
+                                                />
+                                            </div>
+
+                                            {/* Subtotal - Compacto */}
+                                            <div className="flex-shrink-0 w-32">
+                                                <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Subtotal</label>
+                                                <p className="text-base font-bold text-purple-700 dark:text-purple-300">
+                                                    R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </p>
-                                            )}
-                                        </div>
+                                            </div>
 
-                                        <div>
-                                            <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Subtotal</label>
-                                            <p className="text-sm font-bold text-purple-700 dark:text-purple-300">
-                                                R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                        </div>
-
-                                        <div className="flex justify-end">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveItem(index)}
-                                                className="btn-action-delete"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
+                                            {/* Botão Deletar - Compacto */}
+                                            <div className="flex-shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveItem(index)}
+                                                    className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                                                    title="Remover item"
+                                                >
+                                                    <TrashIcon className="w-5 h-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -2046,24 +2106,66 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                         <span>🏷️</span> Cotações - Banco Frio ({resultadosBuscaGlobal.cotacoes.length})
                                                     </h4>
                                                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.cotacoes.map(cotacao => (
-                                                            <button
-                                                                key={cotacao.id}
-                                                                type="button"
-                                                                onClick={() => handleAddCotacao(cotacao, true)}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                            >
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                        📦 Banco Frio
-                                                                    </span>
+                                                        {resultadosBuscaGlobal.cotacoes.map(cotacao => {
+                                                            const tipoMat = identificarTipoMaterial(cotacao.nome);
+                                                            const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                            
+                                                            return (
+                                                                <div
+                                                                    key={cotacao.id}
+                                                                    className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+                                                                >
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
+                                                                            📦 Banco Frio
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-start gap-3">
+                                                                        <div className="flex-1">
+                                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
+                                                                            <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'} • R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}/m
+                                                                            </p>
+                                                                            {temSelecaoUnidade && (
+                                                                                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                                    💡 Metros ou cm
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            {temSelecaoUnidade ? (
+                                                                                <>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'm')}
+                                                                                        className="px-2 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                                        title="Adicionar em metros"
+                                                                                    >
+                                                                                        + m
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'cm')}
+                                                                                        className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
+                                                                                        title="Adicionar em centímetros"
+                                                                                    >
+                                                                                        + cm
+                                                                                    </button>
+                                                                                </>
+                                                                            ) : (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleAddCotacao(cotacao, true)}
+                                                                                    className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                                >
+                                                                                    + Add
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'} • Valor: R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                                </p>
-                                                            </button>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             )}
@@ -2534,27 +2636,68 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </div>
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredMaterials.map(material => (
-                                                <button
-                                                    key={material.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem(material)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
-                                                >
-                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-
-                                                        SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
-                                                        <br />
-                                                        Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                        {material.valorVenda && (
-                                                            <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)} 
-                                                            {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
-                                                            </>
-                                                        )}
-                                                    </p>
-                                                </button>
-                                            ))}
+                                            {filteredMaterials.map(material => {
+                                                const tipoMat = identificarTipoMaterial(material.nome);
+                                                const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                
+                                                return (
+                                                    <div
+                                                        key={material.id}
+                                                        className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+                                                    >
+                                                        <div className="flex justify-between items-start gap-4">
+                                                            <div className="flex-1">
+                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
+                                                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                    SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
+                                                                    <br />
+                                                                    Custo: R$ {(material.preco ?? 0).toFixed(2)}
+                                                                    {material.valorVenda && (
+                                                                        <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)} 
+                                                                        {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
+                                                                        </>
+                                                                    )}
+                                                                </p>
+                                                                {temSelecaoUnidade && (
+                                                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                        💡 Este material pode ser vendido em metros ou centímetros
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {temSelecaoUnidade ? (
+                                                                    <>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAddItem(material, false, 'm')}
+                                                                            className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                            title="Adicionar em metros"
+                                                                        >
+                                                                            + Metro
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAddItem(material, false, 'cm')}
+                                                                            className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                                                                            title="Adicionar em centímetros"
+                                                                        >
+                                                                            + cm
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddItem(material)}
+                                                                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                    >
+                                                                        + Adicionar
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>
@@ -2728,34 +2871,74 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </div>
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredCotacoes.map(cotacao => (
-                                                <button
-                                                    key={cotacao.id}
-                                                    type="button"
-                                                    onClick={() => handleAddCotacao(cotacao)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                >
-                                                    <div className="flex justify-between items-start">
-                                                        <div className="flex-1">
-                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                            </p>
-                                                            {cotacao.observacoes && (
-                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
-                                                            )}
-                                                        </div>
-                                                        <div className="text-right ml-4">
-                                                            <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                                                                R$ {cotacao.valorUnitario.toFixed(2)}
-                                                            </p>
-                                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
-                                                                Atualizado em {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
-                                                            </p>
+                                            {filteredCotacoes.map(cotacao => {
+                                                const tipoMat = identificarTipoMaterial(cotacao.nome);
+                                                const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                
+                                                return (
+                                                    <div
+                                                        key={cotacao.id}
+                                                        className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+                                                    >
+                                                        <div className="flex justify-between items-start gap-4">
+                                                            <div className="flex-1">
+                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
+                                                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                    NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
+                                                                </p>
+                                                                {cotacao.observacoes && (
+                                                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
+                                                                )}
+                                                                {temSelecaoUnidade && (
+                                                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                        💡 Este material pode ser vendido em metros ou centímetros
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-col items-end gap-2">
+                                                                <div className="text-right">
+                                                                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                                                                        R$ {cotacao.valorUnitario.toFixed(2)}/m
+                                                                    </p>
+                                                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                                                                        Atualizado em {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    {temSelecaoUnidade ? (
+                                                                        <>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddCotacao(cotacao, false, 'm')}
+                                                                                className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                                title="Adicionar em metros"
+                                                                            >
+                                                                                + Metro
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddCotacao(cotacao, false, 'cm')}
+                                                                                className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                                                                                title="Adicionar em centímetros"
+                                                                            >
+                                                                                + cm
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAddCotacao(cotacao)}
+                                                                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                        >
+                                                                            + Adicionar
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </button>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>

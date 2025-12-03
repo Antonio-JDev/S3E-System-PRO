@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { dashboardService, type DashboardCompleto } from '../services/dashboardService';
+import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
 
@@ -45,6 +46,8 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const [exportando, setExportando] = useState(false);
   const [estoqueExpandido, setEstoqueExpandido] = useState(false);
   const [filtroEstoque, setFiltroEstoque] = useState<'todos' | 'criticos' | 'abaixo-minimo'>('todos');
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [filtroFornecedor, setFiltroFornecedor] = useState<string>('todos');
   
   // Detectar tema para ajustar cores dos gráficos
   const themeContext = useContext(ThemeContext);
@@ -122,7 +125,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     try {
       const alertasResult = await dashboardService.getAlertas();
       if (alertasResult.success && alertasResult.data?.estoqueBaixo?.itens) {
-        setMateriaisCriticos(alertasResult.data.estoqueBaixo.itens);
+        const materiais = alertasResult.data.estoqueBaixo.itens;
+        console.log('📦 Materiais críticos carregados:', materiais.length);
+        if (materiais.length > 0) {
+          console.log('📊 Exemplo de estrutura do material:', materiais[0]);
+        }
+        setMateriaisCriticos(materiais);
       } else {
         // Fallback: buscar materiais e filtrar
         const materiaisResult = await dashboardService.getMateriais();
@@ -132,11 +140,29 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
             return estoque <= estoqueMinimo;
           });
+          console.log('📦 Materiais críticos (fallback):', criticos.length);
+          if (criticos.length > 0) {
+            console.log('📊 Exemplo de estrutura do material:', criticos[0]);
+          }
           setMateriaisCriticos(criticos);
         }
       }
     } catch (err) {
       console.error('Erro ao carregar materiais críticos:', err);
+    }
+  };
+
+  // Carregar fornecedores
+  const loadFornecedores = async () => {
+    try {
+      const result = await fornecedoresService.listar();
+      if (result.success && result.data) {
+        // Filtrar apenas fornecedores ativos
+        const fornecedoresAtivos = result.data.filter((f: Fornecedor) => f.ativo);
+        setFornecedores(fornecedoresAtivos);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar fornecedores:', err);
     }
   };
 
@@ -211,21 +237,34 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
   // Filtrar materiais críticos
   const getMateriaisFiltrados = () => {
-    if (filtroEstoque === 'todos') {
-      return materiaisCriticos;
-    } else if (filtroEstoque === 'criticos') {
-      return materiaisCriticos.filter((material: any) => {
+    let materiaisFiltrados = materiaisCriticos;
+    
+    // Filtrar por nível de estoque
+    if (filtroEstoque === 'criticos') {
+      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
         const estoque = material.estoque || material.stock || 0;
         return estoque === 0;
       });
-    } else {
-      // abaixo-minimo
-      return materiaisCriticos.filter((material: any) => {
+    } else if (filtroEstoque === 'abaixo-minimo') {
+      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
         const estoque = material.estoque || material.stock || 0;
         const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
         return estoque > 0 && estoque <= estoqueMinimo;
       });
     }
+    
+    // Filtrar por fornecedor
+    if (filtroFornecedor !== 'todos') {
+      const antesDoFiltro = materiaisFiltrados.length;
+      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
+        // Suportar tanto fornecedorId direto quanto fornecedor.id (objetos aninhados)
+        const fornecedorIdMaterial = material.fornecedorId || material.fornecedor?.id;
+        return fornecedorIdMaterial === filtroFornecedor;
+      });
+      console.log(`🔍 Filtro de fornecedor: ${antesDoFiltro} materiais → ${materiaisFiltrados.length} após filtrar por fornecedor ${filtroFornecedor}`);
+    }
+    
+    return materiaisFiltrados;
   };
 
   // Gerar PDF para cotação com fornecedor
@@ -250,6 +289,11 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         month: '2-digit',
         year: 'numeric'
       });
+      
+      // Buscar nome do fornecedor se filtrado
+      const fornecedorSelecionado = filtroFornecedor !== 'todos' 
+        ? fornecedores.find(f => f.id === filtroFornecedor) 
+        : null;
       
       const html = `
         <!DOCTYPE html>
@@ -321,37 +365,14 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
               background: #FEF2F2;
             }
             .col-nome {
-              width: 40%;
+              width: 60%;
             }
             .col-sku {
-              width: 20%;
-            }
-            .col-estoque {
-              width: 15%;
-              text-align: center;
-            }
-            .col-minimo {
-              width: 15%;
-              text-align: center;
+              width: 25%;
             }
             .col-unidade {
-              width: 10%;
+              width: 15%;
               text-align: center;
-            }
-            .status-badge {
-              display: inline-block;
-              padding: 4px 12px;
-              border-radius: 12px;
-              font-size: 12px;
-              font-weight: 600;
-            }
-            .status-critico {
-              background: #DC2626;
-              color: white;
-            }
-            .status-baixo {
-              background: #EA580C;
-              color: white;
             }
             .footer {
               margin-top: 50px;
@@ -411,15 +432,16 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         <body>
           <div class="header">
             <h1>📋 SOLICITAÇÃO DE COTAÇÃO</h1>
-            <h2>S3E Engenharia - Materiais com Estoque Crítico</h2>
+            <h2>S3E Engenharia - Lista de Materiais</h2>
             <p style="margin-top: 10px; color: #666; font-size: 14px;">Data: ${dataAtual}</p>
           </div>
 
           <div class="info-section">
-            <p><strong>Prezado(a) Fornecedor,</strong></p>
-            <p>Solicitamos cotação para os seguintes materiais que estão com estoque crítico em nossa empresa:</p>
+            <p><strong>${fornecedorSelecionado ? `Prezado(a) ${fornecedorSelecionado.nome},` : 'Prezado(a) Fornecedor,'}</strong></p>
+            <p>Solicitamos cotação para os seguintes materiais de nosso interesse:</p>
             <p style="margin-top: 10px;"><strong>Total de itens:</strong> ${materiaisFiltrados.length}</p>
-            ${filtroEstoque !== 'todos' ? `<p><strong>Filtro aplicado:</strong> ${filtroEstoque === 'criticos' ? 'Itens Críticos (estoque zerado)' : 'Itens Abaixo do Mínimo'}</p>` : ''}
+            ${fornecedorSelecionado ? `<p><strong>Destinatário:</strong> ${fornecedorSelecionado.nome}</p>` : ''}
+            ${fornecedorSelecionado && fornecedorSelecionado.email ? `<p><strong>Email:</strong> ${fornecedorSelecionado.email}</p>` : ''}
           </div>
 
           <table>
@@ -427,25 +449,15 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
               <tr>
                 <th class="col-nome">Nome do Material</th>
                 <th class="col-sku">SKU</th>
-                <th class="col-estoque">Estoque Atual</th>
-                <th class="col-minimo">Estoque Mínimo</th>
                 <th class="col-unidade">Unidade</th>
               </tr>
             </thead>
             <tbody>
               ${materiaisFiltrados.map((material: any) => {
-                const estoque = material.estoque || material.stock || 0;
-                const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
-                const isCritico = estoque === 0;
-                
                 return `
                   <tr>
                     <td class="col-nome"><strong>${material.nome || material.name || 'Material sem nome'}</strong></td>
                     <td class="col-sku">${material.sku || 'N/A'}</td>
-                    <td class="col-estoque">
-                      <span class="status-badge ${isCritico ? 'status-critico' : 'status-baixo'}">${estoque}</span>
-                    </td>
-                    <td class="col-minimo">${estoqueMinimo}</td>
                     <td class="col-unidade">${material.unidadeMedida || 'un'}</td>
                   </tr>
                 `;
@@ -458,8 +470,8 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
             <ul style="margin-left: 20px; margin-top: 10px;">
               <li>Por favor, informar prazo de entrega e condições de pagamento para cada item.</li>
               <li>Solicitamos que a cotação tenha validade mínima de 30 dias.</li>
-              <li>Itens marcados como "Crítico" possuem estoque zerado e são prioritários.</li>
               <li>Favor informar quantidade mínima de compra, se houver.</li>
+              <li>Por favor, enviar catálogo ou informações técnicas dos produtos, se disponível.</li>
             </ul>
             <p style="margin-top: 15px;"><strong>Contato:</strong></p>
             <p>Para esclarecimentos, entre em contato conosco através dos canais oficiais.</p>
@@ -734,6 +746,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     loadDashboardData();
     loadAtividadesData();
     loadMateriaisCriticos();
+    loadFornecedores();
     
     const interval = setInterval(() => {
       loadDashboardData();
@@ -1276,28 +1289,84 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
               <div className="space-y-4">
                 {/* Filtros e Botão PDF */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Filtrar:</span>
-                    <Select value={filtroEstoque} onValueChange={(v: any) => setFiltroEstoque(v)}>
-                      <SelectTrigger className="w-[180px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="todos">Todos</SelectItem>
-                        <SelectItem value="criticos">Itens Críticos</SelectItem>
-                        <SelectItem value="abaixo-minimo">Abaixo do Mínimo</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Estoque:</span>
+                      <Select value={filtroEstoque} onValueChange={(v: any) => setFiltroEstoque(v)}>
+                        <SelectTrigger className="w-[180px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">Todos</SelectItem>
+                          <SelectItem value="criticos">Itens Críticos</SelectItem>
+                          <SelectItem value="abaixo-minimo">Abaixo do Mínimo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Fornecedor:</span>
+                      <Select 
+                        value={filtroFornecedor} 
+                        onValueChange={(v: string) => setFiltroFornecedor(v)}
+                        disabled={fornecedores.length === 0}
+                      >
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder={fornecedores.length === 0 ? "Sem fornecedores" : "Todos os fornecedores"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">Todos os fornecedores</SelectItem>
+                          {fornecedores.map((fornecedor) => (
+                            <SelectItem key={fornecedor.id} value={fornecedor.id}>
+                              {fornecedor.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {(filtroEstoque !== 'todos' || filtroFornecedor !== 'todos') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setFiltroEstoque('todos');
+                          setFiltroFornecedor('todos');
+                        }}
+                        className="text-xs"
+                      >
+                        <X className="w-3 h-3 mr-1" />
+                        Limpar Filtros
+                      </Button>
+                    )}
                   </div>
-                  <Button
-                    variant="default"
-                    className="gap-2"
-                    onClick={handleGerarPDFCotacao}
-                  >
-                    <FileText className="w-4 h-4" />
-                    Gerar PDF para Cotação
-                  </Button>
+                  
+                  <div className="flex items-center gap-3">
+                    <Badge variant="outline" className="text-sm">
+                      {getMateriaisFiltrados().length} {getMateriaisFiltrados().length === 1 ? 'item' : 'itens'}
+                    </Badge>
+                    <Button
+                      variant="default"
+                      className="gap-2"
+                      onClick={handleGerarPDFCotacao}
+                    >
+                      <FileText className="w-4 h-4" />
+                      Gerar PDF para Cotação
+                    </Button>
+                  </div>
                 </div>
+
+                {/* Alerta de Filtro Ativo */}
+                {filtroFornecedor !== 'todos' && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>
+                        Exibindo apenas materiais do fornecedor: <strong>{fornecedores.find(f => f.id === filtroFornecedor)?.nome}</strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Tabela de Materiais */}
                 <div className="border rounded-lg overflow-hidden">

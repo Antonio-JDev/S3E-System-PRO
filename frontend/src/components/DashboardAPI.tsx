@@ -5,8 +5,6 @@ import ErrorMessage from './ErrorMessage';
 import StatCard from './StatCard';
 import CriticalAlerts from './CriticalAlerts';
 import QuickActions from './QuickActions';
-import ConnectionTest from './ConnectionTest';
-import AuthDebug from './AuthDebug';
 import { 
     CubeIcon, 
     BlueprintIcon, 
@@ -226,15 +224,7 @@ const DashboardAPI: React.FC<DashboardAPIProps> = ({ toggleSidebar, onNavigate }
                     <QuickActions onNavigate={onNavigate} />
                 </div>
 
-                {/* Teste de Conectividade */}
-                <div className="mb-8">
-                    <ConnectionTest />
-                </div>
-
-                {/* Debug de Autenticação */}
-                <div className="mb-8">
-                    <AuthDebug />
-                </div>
+                {/* Componentes de teste removidos para produção */}
 
                 {/* Gráficos */}
                 {graficos && (

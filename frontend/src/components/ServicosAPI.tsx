@@ -1,7 +1,20 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { servicosService, type Servico, type CreateServicoData, type UpdateServicoData } from '../services/servicosService';
+import { servicosService, type Servico as ServicoBase, type CreateServicoData as CreateServicoDataBase, type UpdateServicoData } from '../services/servicosService';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
+
+// Extend types para incluir campos opcionais do componente
+interface Servico extends ServicoBase {
+    categoria?: string;
+    tempoEstimado?: number;
+    observacoes?: string;
+}
+
+interface CreateServicoData extends CreateServicoDataBase {
+    categoria?: string;
+    tempoEstimado?: number;
+    observacoes?: string;
+}
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -50,6 +63,16 @@ const ArrowPathIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
     </svg>
 );
+const Squares2X2Icon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+    </svg>
+);
+const ListBulletIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+    </svg>
+);
 
 interface ServicosProps {
     toggleSidebar: () => void;
@@ -62,6 +85,7 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [tipoFilter, setTipoFilter] = useState<string>('Todos');
     const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'true' | 'false'>('Todos');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [servicoToEdit, setServicoToEdit] = useState<Servico | null>(null);
@@ -70,24 +94,22 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     const [formState, setFormState] = useState<CreateServicoData>({
         nome: '',
+        codigo: '',
         descricao: '',
         tipo: '',
         preco: 0,
-        unidadeMedida: 'hora',
-        tempoEstimado: 1,
-        categoria: '',
-        observacoes: ''
+        unidade: 'hora'
     });
 
-    // Mock data para demonstração
-    const mockServicos: Servico[] = [
+    // Mock data para demonstração (comentado - usando API real)
+    const mockServicos: any[] = [
         {
             id: '1',
             nome: 'Instalação Elétrica Residencial',
             descricao: 'Instalação completa de sistema elétrico para residências até 100m²',
             tipo: 'Instalação',
             preco: 1200.00,
-            unidadeMedida: 'projeto',
+            unidade: 'projeto',
             tempoEstimado: 8,
             categoria: 'Elétrica',
             observacoes: 'Inclui projeto, materiais e mão de obra',
@@ -101,7 +123,7 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             descricao: 'Manutenção preventiva completa em quadros elétricos',
             tipo: 'Manutenção',
             preco: 150.00,
-            unidadeMedida: 'hora',
+            unidade: 'hora',
             tempoEstimado: 2,
             categoria: 'Elétrica',
             observacoes: 'Verificação de conexões, limpeza e testes',
@@ -115,7 +137,7 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             descricao: 'Desenvolvimento de projeto completo de automação para indústria',
             tipo: 'Projeto',
             preco: 5000.00,
-            unidadeMedida: 'projeto',
+            unidade: 'projeto',
             tempoEstimado: 40,
             categoria: 'Automação',
             observacoes: 'Inclui levantamento, projeto e especificação técnica',
@@ -163,8 +185,8 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         if (searchTerm) {
             filtered = filtered.filter(servico =>
                 servico.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                servico.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                servico.categoria.toLowerCase().includes(searchTerm.toLowerCase())
+                servico.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                servico.categoria?.toLowerCase().includes(searchTerm.toLowerCase())
             );
         }
 
@@ -193,10 +215,11 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             setServicoToEdit(servico);
             setFormState({
                 nome: servico.nome,
+                codigo: servico.codigo,
                 descricao: servico.descricao,
                 tipo: servico.tipo,
                 preco: servico.preco,
-                unidadeMedida: servico.unidadeMedida,
+                unidade: servico.unidade,
                 tempoEstimado: servico.tempoEstimado,
                 categoria: servico.categoria,
                 observacoes: servico.observacoes || ''
@@ -205,10 +228,11 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             setServicoToEdit(null);
             setFormState({
                 nome: '',
+                codigo: '',
                 descricao: '',
                 tipo: '',
                 preco: 0,
-                unidadeMedida: 'hora',
+                unidade: 'hora',
                 tempoEstimado: 1,
                 categoria: '',
                 observacoes: ''
@@ -389,8 +413,36 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            {/* Filtros */}
+            {/* Filtros e Toggle de Visualização */}
             <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+                    <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-lg">
+                        <button
+                            onClick={() => setViewMode('grid')}
+                            className={`p-2 rounded-lg transition-all ${
+                                viewMode === 'grid'
+                                    ? 'bg-white text-cyan-600 shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                            title="Visualização em Cards"
+                        >
+                            <Squares2X2Icon className="w-5 h-5" />
+                        </button>
+                        <button
+                            onClick={() => setViewMode('list')}
+                            className={`p-2 rounded-lg transition-all ${
+                                viewMode === 'list'
+                                    ? 'bg-white text-cyan-600 shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                            title="Visualização em Lista"
+                        >
+                            <ListBulletIcon className="w-5 h-5" />
+                        </button>
+                    </div>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
@@ -439,7 +491,7 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            {/* Grid de Serviços */}
+            {/* Lista/Grid de Serviços */}
             {filteredServicos.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
                     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -460,6 +512,100 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             Cadastrar Primeiro Serviço
                         </button>
                     )}
+                </div>
+            ) : viewMode === 'list' ? (
+                <div className="space-y-4">
+                    {filteredServicos.map((servico) => (
+                        <div key={servico.id} className={`bg-white border-2 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 ${
+                            servico.ativo ? 'border-gray-200 hover:border-cyan-300' : 'border-red-200 hover:border-red-300 opacity-75'
+                        }`}>
+                            <div className="flex flex-col md:flex-row gap-6">
+                                {/* Informações Principais */}
+                                <div className="flex-1">
+                                    <div className="flex items-start justify-between mb-3">
+                                        <div>
+                                            <h3 className="font-bold text-xl text-gray-900 mb-2">{servico.nome}</h3>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeColor(servico.tipo)}`}>
+                                                    {getTypeIcon(servico.tipo)} {servico.tipo}
+                                                </span>
+                                                <span className="px-3 py-1 text-xs font-bold rounded-lg bg-gray-100 text-gray-700">
+                                                    📂 {servico.categoria}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${
+                                            servico.ativo 
+                                                ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
+                                                : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                                        }`}>
+                                            {servico.ativo ? '✅ Ativo' : '❌ Inativo'}
+                                        </span>
+                                    </div>
+                                    
+                                    <p className="text-gray-600 mb-3">{servico.descricao}</p>
+                                    
+                                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                                        <span className="flex items-center gap-1">
+                                            <span>⏱️</span>
+                                            <span>{servico.tempoEstimado}h estimadas</span>
+                                        </span>
+                                        <span className="flex items-center gap-1">
+                                            <span>📏</span>
+                                            <span>Unidade: {servico.unidade}</span>
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Preço e Ações */}
+                                <div className="flex flex-col justify-between min-w-[200px]">
+                                    <div className="bg-cyan-50 border border-cyan-200 p-4 rounded-xl mb-4">
+                                        <p className="text-xs font-medium text-cyan-600 mb-1">Preço do Serviço</p>
+                                        <p className="text-2xl font-bold text-cyan-700">
+                                            R$ {servico.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                        <p className="text-xs text-cyan-600 mt-1">por {servico.unidade}</p>
+                                    </div>
+
+                                    <div className="flex flex-col gap-2">
+                                        {servico.ativo ? (
+                                            <>
+                                                <button
+                                                    onClick={() => setServicoToView(servico)}
+                                                    className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                >
+                                                    <EyeIcon className="w-4 h-4" />
+                                                    Visualizar
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenModal(servico)}
+                                                    className="flex items-center justify-center gap-2 px-4 py-2 bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200 transition-colors text-sm font-semibold"
+                                                >
+                                                    <PencilIcon className="w-4 h-4" />
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    onClick={() => setServicoToDelete(servico)}
+                                                    className="flex items-center justify-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                    Desativar
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={() => handleReativar(servico)}
+                                                className="flex items-center justify-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                            >
+                                                <ArrowPathIcon className="w-4 h-4" />
+                                                Reativar
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -509,7 +655,7 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         <span className="text-xl font-bold text-cyan-700">
                                             R$ {servico.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
-                                        <p className="text-xs text-cyan-600">/{servico.unidadeMedida}</p>
+                                        <p className="text-xs text-cyan-600">/{servico.unidade}</p>
                                     </div>
                                 </div>
                             </div>
@@ -669,8 +815,8 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         Unidade de Medida *
                                     </label>
                                     <select
-                                        value={formState.unidadeMedida}
-                                        onChange={(e) => setFormState({...formState, unidadeMedida: e.target.value})}
+                                        value={formState.unidade}
+                                        onChange={(e) => setFormState({...formState, unidade: e.target.value})}
                                         required
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-cyan-500"
                                     >
@@ -786,18 +932,22 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     <p className="text-2xl font-bold text-green-700">
                                         R$ {servicoToView.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
-                                    <p className="text-sm text-green-600">/{servicoToView.unidadeMedida}</p>
+                                    <p className="text-sm text-green-600">/{servicoToView.unidade}</p>
                                 </div>
-                                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Tempo Estimado</h3>
-                                    <p className="text-2xl font-bold text-blue-700">{servicoToView.tempoEstimado}h</p>
-                                </div>
-                                <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Valor/Hora</h3>
-                                    <p className="text-2xl font-bold text-purple-700">
-                                        R$ {(servicoToView.preco / servicoToView.tempoEstimado).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
-                                    </p>
-                                </div>
+                                {servicoToView.tempoEstimado && (
+                                    <>
+                                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+                                            <h3 className="font-semibold text-gray-800 mb-2">Tempo Estimado</h3>
+                                            <p className="text-2xl font-bold text-blue-700">{servicoToView.tempoEstimado}h</p>
+                                        </div>
+                                        <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
+                                            <h3 className="font-semibold text-gray-800 mb-2">Valor/Hora</h3>
+                                            <p className="text-2xl font-bold text-purple-700">
+                                                R$ {(servicoToView.preco / servicoToView.tempoEstimado).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             {servicoToView.observacoes && (

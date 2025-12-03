@@ -19,9 +19,13 @@ const Login: React.FC = () => {
   useEffect(() => {
     const loadLoginLogo = async () => {
       try {
-        const response = await configuracoesService.getConfiguracoes();
-        if (response.success && response.data?.logoLoginUrl) {
-          setLoginLogoUrl(response.data.logoLoginUrl);
+        // Usar rota pública que não requer autenticação
+        const baseUrl = import.meta.env.VITE_API_URL || '';
+        const response = await fetch(`${baseUrl}/api/configuracoes/public/logo-login`);
+        const data = await response.json();
+        
+        if (data.success && (data.data?.logoLoginUrl || data.data?.logoUrl)) {
+          setLoginLogoUrl(data.data.logoLoginUrl || data.data.logoUrl);
         } else {
           // Se não houver logo, mostrar fallback
           setShowFallback(true);

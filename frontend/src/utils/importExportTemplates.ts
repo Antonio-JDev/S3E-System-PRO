@@ -98,18 +98,32 @@ export interface MaterialTemplate {
   ativo?: boolean;
 }
 
+export interface ClienteTemplate {
+  nome: string;
+  cpfCnpj: string;
+  email: string;
+  telefone: string;
+  endereco?: string;
+  cidade?: string;
+  estado?: string;
+  cep?: string;
+  tipo: 'PF' | 'PJ';
+  ativo?: boolean;
+}
+
 export interface ImportExportData {
   version: string;
   exportDate: string;
   orcamentos?: OrcamentoTemplate[];
   vendas?: VendaTemplate[];
   materiais?: MaterialTemplate[];
+  clientes?: ClienteTemplate[];
 }
 
 /**
  * Gerar template vazio para exportação
  */
-export function generateEmptyTemplate(type: 'orcamentos' | 'vendas' | 'materiais'): ImportExportData {
+export function generateEmptyTemplate(type: 'orcamentos' | 'vendas' | 'materiais' | 'clientes'): ImportExportData {
   const base = {
     version: '1.0.0',
     exportDate: new Date().toISOString(),
@@ -131,6 +145,11 @@ export function generateEmptyTemplate(type: 'orcamentos' | 'vendas' | 'materiais
         ...base,
         materiais: [],
       };
+    case 'clientes':
+      return {
+        ...base,
+        clientes: [],
+      };
     default:
       return base;
   }
@@ -139,7 +158,7 @@ export function generateEmptyTemplate(type: 'orcamentos' | 'vendas' | 'materiais
 /**
  * Gerar template com exemplo para referência
  */
-export function generateExampleTemplate(type: 'orcamentos' | 'vendas' | 'materiais'): ImportExportData {
+export function generateExampleTemplate(type: 'orcamentos' | 'vendas' | 'materiais' | 'clientes'): ImportExportData {
   const exampleDate = new Date().toISOString();
   const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -233,6 +252,37 @@ export function generateExampleTemplate(type: 'orcamentos' | 'vendas' | 'materia
             estoqueMinimo: 10,
             categoria: 'Categoria Exemplo',
             fornecedorNome: 'Fornecedor Exemplo',
+            ativo: true,
+          },
+        ],
+      };
+    case 'clientes':
+      return {
+        version: '1.0.0',
+        exportDate: exampleDate,
+        clientes: [
+          {
+            nome: 'EMPRESA EXEMPLO LTDA',
+            cpfCnpj: '12.345.678/0001-90',
+            email: 'contato@empresaexemplo.com.br',
+            telefone: '(47) 3333-4444',
+            endereco: 'Rua Exemplo, 123',
+            cidade: 'Itajaí',
+            estado: 'SC',
+            cep: '88300-000',
+            tipo: 'PJ',
+            ativo: true,
+          },
+          {
+            nome: 'João da Silva',
+            cpfCnpj: '123.456.789-00',
+            email: 'joao.silva@email.com',
+            telefone: '(47) 99999-8888',
+            endereco: 'Avenida Principal, 456',
+            cidade: 'Florianópolis',
+            estado: 'SC',
+            cep: '88000-000',
+            tipo: 'PF',
             ativo: true,
           },
         ],
@@ -331,6 +381,18 @@ export function validateImportData(data: ImportExportData): { valid: boolean; er
       }
       if (mat.estoque === undefined || mat.estoque === null) {
         errors.push(`Material ${index + 1}: campo 'estoque' é obrigatório`);
+      }
+    });
+  }
+
+  if (data.clientes) {
+    data.clientes.forEach((cliente, index) => {
+      if (!cliente.nome) errors.push(`Cliente ${index + 1}: campo 'nome' é obrigatório`);
+      if (!cliente.cpfCnpj) errors.push(`Cliente ${index + 1}: campo 'cpfCnpj' é obrigatório`);
+      if (!cliente.email) errors.push(`Cliente ${index + 1}: campo 'email' é obrigatório`);
+      if (!cliente.telefone) errors.push(`Cliente ${index + 1}: campo 'telefone' é obrigatório`);
+      if (!cliente.tipo || !['PF', 'PJ'].includes(cliente.tipo)) {
+        errors.push(`Cliente ${index + 1}: campo 'tipo' deve ser 'PF' ou 'PJ'`);
       }
     });
   }

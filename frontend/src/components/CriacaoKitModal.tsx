@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
+import { identificarTipoMaterial } from '../utils/unitConverter';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -53,6 +54,8 @@ interface ItemKit {
     precoUnit: number;
     subtotal: number;
     unidadeMedida: string;
+    unidadeVenda?: string; // ✅ NOVO: Unidade de venda
+    tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // ✅ NOVO: Tipo para conversão
     isCotacao: boolean;
     dataUltimaCotacao?: string;
 }
@@ -271,7 +274,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         return itensKit.reduce((total, item) => total + item.subtotal, 0);
     }, [itensKit]);
 
-    const handleAdicionarItem = (material: Material) => {
+    const handleAdicionarItem = (material: Material, unidadeVendaParam?: string) => {
         // Verificar se já existe
         const jaExiste = itensKit.some(item => item.materialId === material.id);
         if (jaExiste) {
@@ -280,6 +283,10 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
             });
             return;
         }
+
+        // Identificar tipo de material para conversão de unidades
+        const tipoMaterial = identificarTipoMaterial(material.nome);
+        const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
 
         // Usar valorVenda se disponível, senão usar preco (preço de compra)
         const precoVenda = (material as any).valorVenda || material.preco || 0;
@@ -291,13 +298,15 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
             precoUnit: precoVenda,
             subtotal: precoVenda,
             unidadeMedida: material.unidadeMedida,
+            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
+            tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
             isCotacao: material._isCotacao || false,
             dataUltimaCotacao: material._dataUltimaCotacao
         };
 
         setItensKit(prev => [...prev, novoItem]);
         toast.success('Item adicionado ao kit', {
-            description: material.nome,
+            description: `${material.nome} (${unidadeVenda})`,
             icon: '✅'
         });
     };
@@ -620,13 +629,37 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                         )}
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={() => handleAdicionarItem(material)}
-                                                    className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors flex-shrink-0"
-                                                    title="Adicionar ao kit"
-                                                >
-                                                    <PlusIcon className="w-5 h-5" />
-                                                </button>
+                                                {(() => {
+                                                    const tipoMat = identificarTipoMaterial(material.nome);
+                                                    const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                    
+                                                    return temSelecaoUnidade ? (
+                                                        <div className="flex gap-1 flex-shrink-0">
+                                                            <button
+                                                                onClick={() => handleAdicionarItem(material, 'm')}
+                                                                className="px-2 py-1.5 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium"
+                                                                title="Adicionar em metros"
+                                                            >
+                                                                + m
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleAdicionarItem(material, 'cm')}
+                                                                className="px-2 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                                                                title="Adicionar em centímetros"
+                                                            >
+                                                                + cm
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleAdicionarItem(material)}
+                                                            className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors flex-shrink-0"
+                                                            title="Adicionar ao kit"
+                                                        >
+                                                            <PlusIcon className="w-5 h-5" />
+                                                        </button>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     ))

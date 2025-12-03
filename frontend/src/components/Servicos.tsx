@@ -3,6 +3,17 @@ import { toast } from 'sonner';
 import { type Service, ServiceType } from '../types';
 import { servicosService, type Servico } from '../services/servicosService';
 import { useSKey } from '../hooks/useSKey';
+import ActionsDropdown from './ui/ActionsDropdown';
+import { 
+    generateEmptyTemplate, 
+    generateExampleTemplate, 
+    exportToJSON, 
+    readJSONFile, 
+    validateImportData, 
+    downloadJSON,
+    type ServicosImportData,
+    type ImportResult
+} from '../utils/servicosImportExport';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>;
@@ -16,6 +27,11 @@ const WrenchScrewdriverIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {..
 const ArrowPathIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>;
 const ClockIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const FolderIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" /></svg>;
+const ArrowDownTrayIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>;
+const ArrowUpTrayIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>;
+const DocumentTextIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>;
+const Squares2X2Icon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>;
+const ListBulletIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>;
 
 const getTypeClass = (type: ServiceType) => {
     switch (type) {
@@ -43,21 +59,49 @@ interface ServicosProps {
 
 // FIX: Correctly define ServiceFormState to avoid 'price' property becoming 'never'
 // by omitting 'price' from the base type before intersecting with the new 'price' type.
-type ServiceFormState = Omit<Service, 'id' | 'price'> & { price: string };
+type ServiceFormState = {
+    nome: string;
+    codigo: string;
+    descricao: string;
+    tipo: ServiceType;
+    price: string; 
+    unidade: string;
+    name: string;
+    internalCode: string;
+    description: string;
+    type: ServiceType;
+};
 
 const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const [services, setServices] = useState<Service[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<ServiceType | 'Todos'>('Todos');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [serviceToEdit, setServiceToEdit] = useState<Service | null>(null);
+    const [serviceToView, setServiceToView] = useState<Service | null>(null);
     const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
     const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
     const dropdownRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
+    // ✅ NOVOS ESTADOS: Importação/Exportação
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importResult, setImportResult] = useState<ImportResult | null>(null);
+    const [isImporting, setIsImporting] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const [formState, setFormState] = useState<ServiceFormState>({
-        name: '', internalCode: '', description: '', type: ServiceType.Instalacao, price: ''
+        nome: '',
+        codigo: '',
+        descricao: '',
+        tipo: ServiceType.Instalacao,
+        price: '',
+        unidade: 'un',
+        name: '',
+        internalCode: '',
+        description: '',
+        type: ServiceType.Instalacao
     });
 
     // Carregar serviços do backend
@@ -71,17 +115,17 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             const response = await servicosService.listar();
             
             if (response.success && response.data) {
-                // Converter serviços da API para o formato do componente
+                // Mapear serviços da API adicionando aliases para compatibilidade
                 const servicosArray = Array.isArray(response.data) ? response.data : [];
-                const servicesFormatados: Service[] = servicosArray.map((serv: Servico) => ({
-                    id: serv.id,
+                const servicesFormatados = servicosArray.map((serv: any) => ({
+                    ...serv,
+                    // Aliases para compatibilidade com o código existente
                     name: serv.nome,
                     internalCode: serv.codigo,
                     description: serv.descricao || '',
-                    type: serv.tipo as ServiceType,
+                    type: serv.tipo,
                     price: serv.preco
                 }));
-                
                 setServices(servicesFormatados);
             } else {
                 console.warn('Nenhum serviço encontrado ou erro na resposta:', response);
@@ -107,32 +151,61 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     const filteredServices = useMemo(() => {
         return services
-            .filter(s => typeFilter === 'Todos' || s.type === typeFilter)
+            .filter(s => typeFilter === 'Todos' || s.type === typeFilter || s.tipo === typeFilter)
             .filter(s =>
-                s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                s.internalCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                s.description.toLowerCase().includes(searchTerm.toLowerCase())
+                (s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (s.internalCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (s.description || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
     }, [services, searchTerm, typeFilter]);
 
     // Estatísticas calculadas
     const stats = useMemo(() => {
         const total = services.length;
-        const ativos = services.filter(s => s.price > 0).length; // Considera ativo se tem preço
+        const ativos = services.filter(s => (s.price || 0) > 0).length; // Considera ativo se tem preço
         const inativos = total - ativos;
-        const precoMedio = total > 0 ? services.reduce((sum, s) => sum + s.price, 0) / total : 0;
+        const precoMedio = total > 0 ? services.reduce((sum, s) => sum + (s.price || s.preco || 0), 0) / total : 0;
         
         return { total, ativos, inativos, precoMedio };
     }, [services]);
 
     const resetForm = () => {
-        setFormState({ name: '', internalCode: '', description: '', type: ServiceType.Instalacao, price: '' });
+        setFormState({ 
+            nome: '',
+            codigo: '',
+            descricao: '',
+            tipo: ServiceType.Instalacao,
+            name: '', 
+            internalCode: '', 
+            description: '', 
+            type: ServiceType.Instalacao, 
+            price: '', 
+            unidade: 'un' 
+        });
     };
 
     const handleOpenModal = (service: Service | null = null) => {
         if (service) {
             setServiceToEdit(service);
-            setFormState({ ...service, price: String(service.price) });
+            const name = (service as any).name || service.nome || '';
+            const internalCode = (service as any).internalCode || service.codigo || '';
+            const description = (service as any).description || service.descricao || '';
+            const type = (service as any).type || service.tipo || ServiceType.Instalacao;
+            const price = String((service as any).price || service.preco || 0);
+            const unidade = service.unidade || 'un';
+            
+            setFormState({ 
+                nome: service.nome || '',
+                codigo: service.codigo || '',
+                descricao: service.descricao || '',
+                tipo: service.tipo || ServiceType.Instalacao,
+                name,
+                internalCode,
+                description,
+                type,
+                price, 
+                unidade
+            });
         } else {
             setServiceToEdit(null);
             resetForm();
@@ -157,9 +230,26 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Validações detalhadas
+        if (!formState.name || formState.name.trim() === '') {
+            toast.error('Nome do serviço é obrigatório');
+            return;
+        }
+        
+        if (!formState.internalCode || formState.internalCode.trim() === '') {
+            toast.error('Código interno é obrigatório');
+            return;
+        }
+        
+        if (!formState.type) {
+            toast.error('Tipo do serviço é obrigatório');
+            return;
+        }
+        
         const priceValue = parseFloat(formState.price);
         if (isNaN(priceValue) || priceValue < 0) {
-            toast.error("O preço deve ser um número válido.");
+            toast.error('O preço deve ser um número válido e positivo');
             return;
         }
 
@@ -167,47 +257,129 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             if (serviceToEdit) {
                 // Atualizar serviço existente
                 const servicoData = {
-                    nome: formState.name,
-                    codigo: formState.internalCode,
-                    descricao: formState.description,
+                    nome: formState.name.trim(),
+                    codigo: formState.internalCode.trim(),
+                    descricao: formState.description?.trim() || '',
                     tipo: formState.type,
                     preco: priceValue,
-                    unidade: 'un'
+                    unidade: formState.unidade || 'un'
                 };
+                
+                console.log('📤 Atualizando serviço:', servicoData);
                 
                 const response = await servicosService.atualizar(serviceToEdit.id, servicoData);
                 
                 if (response.success) {
-                    toast.error('✅ Serviço atualizado com sucesso!');
+                    toast.success('Serviço atualizado com sucesso!');
                     handleCloseModal();
                     await loadServices();
                 } else {
-                    toast.error(`❌ Erro ao atualizar serviço: ${response.error || 'Erro desconhecido'}`);
+                    const errorMsg = response.error || (response as any).message || 'Erro desconhecido';
+                    toast.error(`Erro ao atualizar: ${errorMsg}`);
                 }
             } else {
                 // Criar novo serviço
                 const servicoData = {
-                    nome: formState.name,
-                    codigo: formState.internalCode,
-                    descricao: formState.description,
+                    nome: formState.name.trim(),
+                    codigo: formState.internalCode.trim(),
+                    descricao: formState.description?.trim() || '',
                     tipo: formState.type,
                     preco: priceValue,
-                    unidade: 'un'
+                    unidade: formState.unidade || 'un'
                 };
+                
+                console.log('📤 Criando novo serviço:', servicoData);
                 
                 const response = await servicosService.criar(servicoData);
                 
                 if (response.success) {
-                    toast.error('✅ Serviço criado com sucesso!');
+                    toast.success('Serviço criado com sucesso!');
                     handleCloseModal();
                     await loadServices();
                 } else {
-                    toast.error(`❌ Erro ao criar serviço: ${response.error || 'Erro desconhecido'}`);
+                    const errorMsg = response.error || (response as any).message || 'Erro desconhecido';
+                    toast.error(`Erro ao criar: ${errorMsg}`);
+                    console.error('❌ Resposta do servidor:', response);
                 }
             }
+        } catch (error: any) {
+            console.error('❌ Erro ao salvar serviço:', error);
+            const errorMsg = error?.response?.data?.message || error?.message || 'Erro desconhecido';
+            toast.error(`Erro: ${errorMsg}`);
+        }
+    };
+
+    // ✅ FUNÇÕES DE IMPORTAÇÃO/EXPORTAÇÃO
+    const handleDownloadEmptyTemplate = () => {
+        const template = generateEmptyTemplate();
+        downloadJSON(template, 'servicos-template-vazio.json');
+        toast.success('Template vazio baixado!', {
+            description: 'Preencha o arquivo JSON e importe de volta'
+        });
+    };
+
+    const handleDownloadExampleTemplate = () => {
+        const template = generateExampleTemplate();
+        downloadJSON(template, 'servicos-template-exemplo.json');
+        toast.success('Template com exemplos baixado!', {
+            description: '12 serviços de exemplo incluídos'
+        });
+    };
+
+    const handleExportServicos = async () => {
+        try {
+            const response = await servicosService.exportarJSON();
+            if (response.success && response.data) {
+                const exportData = response.data as ServicosImportData;
+                downloadJSON(exportData, `servicos-export-${new Date().toISOString().split('T')[0]}.json`);
+                toast.success('Serviços exportados!', {
+                    description: `${exportData.servicos.length} serviços exportados com sucesso`
+                });
+            }
         } catch (error) {
-            console.error('Erro ao salvar serviço:', error);
-            toast.error('❌ Erro ao salvar serviço. Verifique o console para mais detalhes.');
+            console.error('Erro ao exportar:', error);
+            toast.error('Erro ao exportar serviços');
+        }
+    };
+
+    const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const data = await readJSONFile(file);
+            const validation = validateImportData(data);
+
+            if (!validation.valid) {
+                toast.error('Arquivo JSON inválido', {
+                    description: validation.errors.join(', ')
+                });
+                return;
+            }
+
+            setIsImporting(true);
+            const response = await servicosService.importarJSON(data.servicos);
+
+            if (response.success && response.data) {
+                const importData = response.data as ImportResult;
+                setImportResult(importData);
+                setShowImportModal(true);
+                loadServices(); // Recarregar lista
+                
+                toast.success('Importação concluída!', {
+                    description: `${importData.sucesso} serviços importados, ${importData.erros} erros`
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao importar:', error);
+            toast.error('Erro ao importar serviços', {
+                description: error.message || 'Verifique o formato do arquivo'
+            });
+        } finally {
+            setIsImporting(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
         }
     };
 
@@ -256,13 +428,57 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie serviços e especialidades técnicas</p>
                     </div>
                 </div>
-                <button
-                    onClick={() => handleOpenModal()}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-xl hover:from-cyan-700 hover:to-cyan-600 transition-all shadow-lg font-semibold"
-                >
-                    <PlusIcon className="w-5 h-5" />
-                    Novo Serviço
-                </button>
+                <div className="flex items-center gap-3 flex-wrap">
+                    {/* Input oculto para importação */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                        disabled={isImporting}
+                    />
+                    
+                    {/* Dropdown de Ações */}
+                    <ActionsDropdown
+                        actions={[
+                            {
+                                label: 'Template Vazio',
+                                onClick: handleDownloadEmptyTemplate,
+                                icon: <DocumentTextIcon className="w-4 h-4" />,
+                                variant: 'default'
+                            },
+                            {
+                                label: 'Template com Exemplos',
+                                onClick: handleDownloadExampleTemplate,
+                                icon: <DocumentTextIcon className="w-4 h-4" />,
+                                variant: 'primary'
+                            },
+                            {
+                                label: 'Exportar JSON',
+                                onClick: handleExportServicos,
+                                icon: <ArrowDownTrayIcon className="w-4 h-4" />,
+                                variant: 'success'
+                            },
+                            {
+                                label: isImporting ? 'Importando...' : 'Importar JSON',
+                                onClick: () => fileInputRef.current?.click(),
+                                icon: <ArrowUpTrayIcon className="w-4 h-4" />,
+                                disabled: isImporting,
+                                variant: 'primary'
+                            }
+                        ]}
+                        label="Ações"
+                    />
+                    
+                    <button
+                        onClick={() => handleOpenModal()}
+                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-cyan-600 to-cyan-500 text-white rounded-xl hover:from-cyan-700 hover:to-cyan-600 transition-all shadow-lg font-semibold"
+                    >
+                        <PlusIcon className="w-5 h-5" />
+                        Novo Serviço
+                    </button>
+                </div>
             </header>
 
             {/* Cards de Estatísticas */}
@@ -318,8 +534,36 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            {/* Filtros */}
+            {/* Filtros e Toggle de Visualização */}
             <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setViewMode('grid')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
+                                viewMode === 'grid'
+                                    ? 'bg-purple-600 text-white shadow-md'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                        >
+                            <Squares2X2Icon className="w-5 h-5" />
+                            Grade
+                        </button>
+                        <button
+                            onClick={() => setViewMode('list')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
+                                viewMode === 'list'
+                                    ? 'bg-purple-600 text-white shadow-md'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                        >
+                            <ListBulletIcon className="w-5 h-5" />
+                            Lista
+                        </button>
+                    </div>
+                </div>
+                
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
@@ -363,7 +607,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
-            {/* Grid de Serviços */}
+            {/* Lista/Grid de Serviços */}
             {filteredServices.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-16 text-center">
                     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -385,6 +629,92 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                         </button>
                     )}
                 </div>
+            ) : viewMode === 'list' ? (
+                <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">SERVIÇO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">CÓDIGO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">TIPO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">DESCRIÇÃO</th>
+                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">PREÇO</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">UNIDADE</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">STATUS</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">AÇÕES</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {filteredServices.map((service) => (
+                                    <tr key={service.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-100 to-cyan-200 flex items-center justify-center flex-shrink-0">
+                                                    <WrenchScrewdriverIcon className="w-5 h-5 text-cyan-600" />
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold text-gray-900">{service.name}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="text-sm text-gray-600 font-mono">{service.internalCode}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
+                                                {getTypeIcon(service.type || service.tipo || ServiceType.Instalacao)} {service.type || service.tipo}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <p className="text-sm text-gray-600 line-clamp-2 max-w-xs">{service.description || service.descricao || 'Sem descrição'}</p>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <p className="text-lg font-bold text-green-600">
+                                                R$ {(service.price || service.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className="text-sm text-gray-600">{service.unidade || 'un'}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex justify-center">
+                                                <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                                    ✅ Ativo
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <button
+                                                    onClick={() => setServiceToView(service)}
+                                                    className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                                    title="Visualizar"
+                                                >
+                                                    <EyeIcon className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenModal(service)}
+                                                    className="p-2 bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200 transition-colors"
+                                                    title="Editar"
+                                                >
+                                                    <PencilIcon className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenDeleteModal(service)}
+                                                    className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                    title="Desativar"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredServices.map((service) => (
@@ -392,10 +722,10 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
-                                    <h3 className="font-bold text-lg text-gray-900 mb-2 line-clamp-2">{service.name}</h3>
+                                    <h3 className="font-bold text-lg text-gray-900 mb-2 line-clamp-2">{service.name || service.nome}</h3>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type)}`}>
-                                            {getTypeIcon(service.type)} {service.type}
+                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
+                                            {getTypeIcon(service.type || service.tipo || ServiceType.Instalacao)} {service.type || service.tipo}
                                         </span>
                                     </div>
                                 </div>
@@ -407,15 +737,15 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             {/* Informações */}
                             <div className="space-y-2 mb-4">
                                 <div className="text-sm text-gray-600">
-                                    <p className="line-clamp-2">{service.description || 'Sem descrição'}</p>
+                                    <p className="line-clamp-2">{service.description || service.descricao || 'Sem descrição'}</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <FolderIcon className="w-4 h-4" />
-                                    <span className="truncate">{service.type}</span>
+                                    <span className="truncate">{service.type || service.tipo}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <ClockIcon className="w-4 h-4" />
-                                    <span>Código: {service.internalCode}</span>
+                                    <span>Código: {service.internalCode || service.codigo}</span>
                                 </div>
                             </div>
 
@@ -425,9 +755,9 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     <span className="text-sm font-medium text-cyan-800">Preço:</span>
                                     <div className="text-right">
                                         <span className="text-xl font-bold text-cyan-700">
-                                            R$ {service.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {(service.price || service.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
-                                        <p className="text-xs text-cyan-600">/projeto</p>
+                                        <p className="text-xs text-cyan-600">/{service.unidade || 'un'}</p>
                                     </div>
                                 </div>
                             </div>
@@ -435,6 +765,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             {/* Botões de Ação */}
                             <div className="flex gap-2 pt-4 border-t border-gray-100">
                                 <button
+                                    onClick={() => setServiceToView(service)}
                                     className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
                                 >
                                     <EyeIcon className="w-4 h-4" />
@@ -523,16 +854,41 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                        Tipo de Serviço
+                                        Tipo de Serviço *
                                     </label>
                                     <select
                                         name="type"
                                         value={formState.type}
                                         onChange={handleInputChange}
                                         className="select-field"
+                                        required
                                     >
                                         {Object.values(ServiceType).map(t => <option key={t} value={t}>{t}</option>)}
                                     </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        Unidade de Medida *
+                                    </label>
+                                    <select
+                                        name="unidade"
+                                        value={formState.unidade}
+                                        onChange={(e) => setFormState({...formState, unidade: e.target.value})}
+                                        className="select-field"
+                                        required
+                                    >
+                                        <option value="un">Unidade (un)</option>
+                                        <option value="m²">Metro Quadrado (m²)</option>
+                                        <option value="m³">Metro Cúbico (m³)</option>
+                                        <option value="m">Metro Linear (m)</option>
+                                        <option value="diaria">Diária</option>
+                                        <option value="hora">Hora</option>
+                                        <option value="kg">Quilograma (kg)</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Escolha como este serviço será cobrado (ex: m² para instalação elétrica)
+                                    </p>
                                 </div>
 
                                 <div className="md:col-span-2">
@@ -587,6 +943,67 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             )}
             
+            {/* MODAL DE VISUALIZAÇÃO */}
+            {serviceToView && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-cyan-50">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900">Detalhes do Serviço</h2>
+                                <p className="text-sm text-gray-600 mt-1">Informações completas do serviço</p>
+                            </div>
+                            <button onClick={() => setServiceToView(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl">
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-gray-50 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Nome</h3>
+                                    <p className="text-gray-900 font-medium">{serviceToView.name || serviceToView.nome}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Tipo</h3>
+                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getTypeClass(serviceToView.type || serviceToView.tipo || ServiceType.Instalacao)}`}>
+                                        {getTypeIcon(serviceToView.type || serviceToView.tipo || ServiceType.Instalacao)} {serviceToView.type || serviceToView.tipo}
+                                    </span>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Código</h3>
+                                    <p className="text-gray-900 font-medium">{serviceToView.internalCode || serviceToView.codigo}</p>
+                                </div>
+                                <div className="bg-gray-50 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Status</h3>
+                                    <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                        ✅ Ativo
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="bg-cyan-50 border border-cyan-200 p-4 rounded-xl">
+                                <h3 className="font-semibold text-gray-800 mb-2">Descrição</h3>
+                                <p className="text-gray-700">{serviceToView.description || serviceToView.descricao || 'Sem descrição'}</p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="bg-green-50 border border-green-200 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Preço</h3>
+                                    <p className="text-2xl font-bold text-green-700">
+                                        R$ {(serviceToView.price || serviceToView.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </p>
+                                    <p className="text-sm text-green-600">/{serviceToView.unidade || 'un'}</p>
+                                </div>
+                                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 mb-2">Unidade de Medida</h3>
+                                    <p className="text-2xl font-bold text-blue-700">{serviceToView.unidade || 'un'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
             {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
             {serviceToDelete && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -608,6 +1025,123 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                 className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold"
                             >
                                 Desativar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ✅ MODAL DE RESULTADO DA IMPORTAÇÃO */}
+            {showImportModal && importResult && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-600 to-purple-700 flex items-center justify-center shadow-lg">
+                                        <DocumentTextIcon className="w-7 h-7 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-gray-900">Resultado da Importação</h2>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            {importResult.sucesso} sucesso • {importResult.erros} erros • {importResult.total} total
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowImportModal(false)}
+                                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Estatísticas */}
+                        <div className="p-6 bg-gray-50 border-b border-gray-200">
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="bg-white rounded-xl p-4 border-2 border-green-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                                            <span className="text-xl">✅</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-600">Sucesso</p>
+                                            <p className="text-2xl font-bold text-green-600">{importResult.sucesso}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white rounded-xl p-4 border-2 border-red-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+                                            <span className="text-xl">❌</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-600">Erros</p>
+                                            <p className="text-2xl font-bold text-red-600">{importResult.erros}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white rounded-xl p-4 border-2 border-blue-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                                            <span className="text-xl">📊</span>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-600">Total</p>
+                                            <p className="text-2xl font-bold text-blue-600">{importResult.total}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Detalhes */}
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <h3 className="font-bold text-gray-900 mb-4">Detalhes da Importação</h3>
+                            <div className="space-y-2">
+                                {importResult.detalhes.map((detalhe, index) => (
+                                    <div
+                                        key={index}
+                                        className={`p-4 rounded-lg border-2 ${
+                                            detalhe.status === 'sucesso'
+                                                ? 'bg-green-50 border-green-200'
+                                                : 'bg-red-50 border-red-200'
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-3">
+                                            <span className="text-xl">
+                                                {detalhe.status === 'sucesso' ? '✅' : '❌'}
+                                            </span>
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-gray-900">
+                                                    Linha {detalhe.linha}: {detalhe.nome}
+                                                </p>
+                                                <p className="text-sm text-gray-600">
+                                                    Código: {detalhe.codigo}
+                                                </p>
+                                                {detalhe.mensagem && (
+                                                    <p className={`text-sm mt-1 ${
+                                                        detalhe.status === 'sucesso' ? 'text-green-700' : 'text-red-700'
+                                                    }`}>
+                                                        {detalhe.mensagem}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-gray-200 bg-gray-50">
+                            <button
+                                onClick={() => setShowImportModal(false)}
+                                className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 font-semibold transition-all"
+                            >
+                                Fechar
                             </button>
                         </div>
                     </div>

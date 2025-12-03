@@ -202,9 +202,9 @@ class AxiosApiService {
   }
 
   // DELETE request
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
+  async delete<T>(endpoint: string, config?: any): Promise<ApiResponse<T>> {
     try {
-      const response = await this.axiosInstance.delete(endpoint);
+      const response = await this.axiosInstance.delete(endpoint, config);
       
       // Se o backend já retorna { success, data }, retornar direto
       if (response.data && typeof response.data === 'object' && 'success' in response.data) {

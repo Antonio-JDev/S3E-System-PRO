@@ -37,6 +37,41 @@ export const uploadImportFile = multer({
   }
 }).single('arquivo');
 
+// Configuração de upload para imagens de materiais
+const imageStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const cwd = process.cwd();
+    const uploadDir = cwd.endsWith('backend')
+      ? path.join(cwd, 'uploads', 'materiais')
+      : path.join(cwd, 'uploads', 'materiais');
+    
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, `material-${uniqueSuffix}${path.extname(file.originalname)}`);
+  }
+});
+
+export const uploadImagemMaterial = multer({
+  storage: imageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error('Apenas imagens (JPEG, PNG, WEBP) são permitidas'));
+    }
+  }
+}).single('imagem');
+
 // Listar todos os materiais
 export const getMateriais = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -540,9 +575,9 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
     const sheet = workbook.addWorksheet('Materiais para Cotação');
 
     // Mesclar células do cabeçalho
-    sheet.mergeCells('A1:I1');
-    sheet.mergeCells('A2:I2');
-    sheet.mergeCells('A4:I4');
+    sheet.mergeCells('A1:F1');
+    sheet.mergeCells('A2:F2');
+    sheet.mergeCells('A4:F4');
 
     // Cabeçalho
     sheet.getCell('A1').value = 'S3E ENGENHARIA ELÉTRICA - SOLICITAÇÃO DE COTAÇÃO';
@@ -556,7 +591,7 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
     sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
     sheet.getRow(2).height = 20;
 
-    sheet.getCell('A4').value = 'INSTRUÇÕES: Preencha a coluna "Preço Fornecedor" com os valores atualizados. Não altere as outras colunas!';
+    sheet.getCell('A4').value = 'INSTRUÇÕES: Preencha os campos de preço, prazo de entrega e observações. Não altere as outras colunas!';
     sheet.getCell('A4').font = { bold: true, color: { argb: 'FFF57C00' } };
     sheet.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E0' } };
     sheet.getCell('A4').alignment = { horizontal: 'center', vertical: 'middle' };
@@ -568,11 +603,8 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
       'Código (SKU)',
       'Nome do Material',
       'Unidade',
-      'Estoque Atual',
-      'Estoque Mínimo',
-      'Preço Atual',
-      'Preço Fornecedor',
-      'Fornecedor Atual',
+      'Preço Cotado',
+      'Prazo de Entrega',
       'Observações'
     ];
 
@@ -599,16 +631,13 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
         material.sku,
         material.nome || material.descricao,
         material.unidadeMedida,
-        material.estoque,
-        material.estoqueMinimo,
-        material.preco || 0,
-        null, // Preço Fornecedor vazio
-        material.fornecedor?.nome || 'N/A',
+        null, // Preço Cotado (para fornecedor preencher)
+        null, // Prazo de Entrega (para fornecedor preencher)
         null // Observações
       ];
 
-      // Colorir linhas de estoque zerado
-      const fillColor = material.estoque === 0 ? 'FFFFEBEE' : 'FFFFFDE7';
+      // Colorir linhas alternadas
+      const fillColor = rowIndex % 2 === 0 ? 'FFFFFFFF' : 'FFF5F5F5';
       row.eachCell((cell, colNumber) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
         cell.border = {
@@ -624,33 +653,26 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
 
     // Formatação de colunas
     sheet.getColumn(1).width = 15; // SKU
-    sheet.getColumn(2).width = 40; // Nome
-    sheet.getColumn(3).width = 10; // Unidade
-    sheet.getColumn(4).width = 12; // Estoque Atual
-    sheet.getColumn(5).width = 15; // Estoque Mínimo
-    sheet.getColumn(6).width = 15; // Preço Atual
-    sheet.getColumn(7).width = 15; // Preço Fornecedor
-    sheet.getColumn(8).width = 25; // Fornecedor
-    sheet.getColumn(9).width = 30; // Observações
+    sheet.getColumn(2).width = 50; // Nome
+    sheet.getColumn(3).width = 12; // Unidade
+    sheet.getColumn(4).width = 18; // Preço Cotado
+    sheet.getColumn(5).width = 18; // Prazo de Entrega
+    sheet.getColumn(6).width = 35; // Observações
 
-    // Formato numérico
-    sheet.getColumn(4).numFmt = '0';
-    sheet.getColumn(5).numFmt = '0';
-    sheet.getColumn(6).numFmt = '"R$ "#,##0.00';
-    sheet.getColumn(7).numFmt = '"R$ "#,##0.00';
+    // Formato numérico para preço
+    sheet.getColumn(4).numFmt = '"R$ "#,##0.00';
 
     // Alinhar células de dados
     for (let i = 7; i < rowIndex; i++) {
       const row = sheet.getRow(i);
-      row.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+      row.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+      row.getCell(4).alignment = { horizontal: 'right', vertical: 'middle' };
       row.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
-      row.getCell(6).alignment = { horizontal: 'right', vertical: 'middle' };
-      row.getCell(7).alignment = { horizontal: 'right', vertical: 'middle' };
     }
 
     // Configurar headers antes de escrever
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-criticos-${new Date().toISOString().split('T')[0]}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-${new Date().toISOString().split('T')[0]}.xlsx`);
     
     // Escrever diretamente no response
     await workbook.xlsx.write(res);
@@ -665,22 +687,19 @@ async function gerarExcelCotacao(res: Response, materiais: any[]) {
  * Gerar arquivo CSV para cotação
  */
 async function gerarCSVCotacao(res: Response, materiais: any[]) {
-  let csv = 'Código (SKU);Nome do Material;Unidade;Estoque Atual;Estoque Mínimo;Preço Atual;Preço Fornecedor;Fornecedor Atual;Observações\n';
+  let csv = 'Código (SKU);Nome do Material;Unidade;Preço Cotado;Prazo de Entrega;Observações\n';
 
   materiais.forEach((material) => {
     csv += `${material.sku};`;
     csv += `${material.nome || material.descricao};`;
     csv += `${material.unidadeMedida};`;
-    csv += `${material.estoque};`;
-    csv += `${material.estoqueMinimo};`;
-    csv += `${(material.preco || 0).toFixed(2)};`;
-    csv += `;`; // Preço Fornecedor vazio para preenchimento
-    csv += `${material.fornecedor?.nome || 'N/A'};`;
+    csv += `;`; // Preço Cotado (para fornecedor preencher)
+    csv += `;`; // Prazo de Entrega (para fornecedor preencher)
     csv += `\n`;
   });
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-criticos-${new Date().toISOString().split('T')[0]}.csv`);
+  res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-${new Date().toISOString().split('T')[0]}.csv`);
   
   // Adicionar BOM UTF-8 para Excel reconhecer corretamente
   res.write('\uFEFF');
@@ -695,13 +714,13 @@ async function gerarPDFCotacao(res: Response, materiais: any[]) {
   const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape' });
 
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-criticos-${new Date().toISOString().split('T')[0]}.pdf`);
+  res.setHeader('Content-Disposition', `attachment; filename=cotacao-materiais-${new Date().toISOString().split('T')[0]}.pdf`);
 
   doc.pipe(res);
 
   // Cabeçalho
   doc.fontSize(16).fillColor('#000000').text('S3E ENGENHARIA ELÉTRICA', 30, 30, { align: 'center', width: 782 });
-  doc.fontSize(12).fillColor('#333333').text('Solicitação de Cotação - Materiais Críticos', 30, 50, { align: 'center', width: 782 });
+  doc.fontSize(12).fillColor('#333333').text('Solicitação de Cotação - Lista de Materiais', 30, 50, { align: 'center', width: 782 });
   doc.fontSize(9).fillColor('#666666').text(
     `Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`,
     30, 70, { align: 'center', width: 782 }
@@ -709,7 +728,7 @@ async function gerarPDFCotacao(res: Response, materiais: any[]) {
 
   // Instruções
   doc.fontSize(8).fillColor('#FF6600').text(
-    'INSTRUÇÕES: Preencha a coluna "Novo Preço" e retorne este documento',
+    'INSTRUÇÕES: Informe preço, prazo de entrega e condições de pagamento',
     30, 90, { align: 'center', width: 782 }
   );
 
@@ -719,8 +738,8 @@ async function gerarPDFCotacao(res: Response, materiais: any[]) {
   doc.fontSize(8).fillColor('#FFFFFF');
   doc.rect(30, yPos, 782, 20).fill('#4CAF50');
 
-  const headers = ['SKU', 'Material', 'Un', 'Estq', 'Mín', 'Preço Atual', 'Novo Preço', 'Fornecedor'];
-  const colX = [35, 100, 330, 370, 410, 450, 530, 610];
+  const headers = ['SKU', 'Material', 'Un', 'Preço Cotado', 'Prazo Entrega', 'Observações'];
+  const colX = [35, 100, 400, 480, 570, 660];
   
   headers.forEach((header, i) => {
     doc.fontSize(8).fillColor('#FFFFFF').text(header, colX[i], yPos + 6);
@@ -743,26 +762,24 @@ async function gerarPDFCotacao(res: Response, materiais: any[]) {
     }
 
     // Background alternado
-    const bgColor = material.estoque === 0 ? '#FFEBEE' : (index % 2 === 0 ? '#FFFFFF' : '#F5F5F5');
+    const bgColor = index % 2 === 0 ? '#FFFFFF' : '#F5F5F5';
     doc.rect(30, yPos, 782, 18).fill(bgColor);
 
     // Dados
     doc.fontSize(7).fillColor('#000000');
     doc.text(material.sku || '', 35, yPos + 5);
-    doc.text((material.nome || material.descricao || '').substring(0, 30), 100, yPos + 5);
-    doc.text(material.unidadeMedida || '', 330, yPos + 5);
-    doc.text(material.estoque?.toString() || '0', 370, yPos + 5);
-    doc.text(material.estoqueMinimo?.toString() || '0', 410, yPos + 5);
-    doc.text(`R$ ${(material.preco || 0).toFixed(2)}`, 450, yPos + 5);
-    doc.text('_____________', 530, yPos + 5);
-    doc.text((material.fornecedor?.nome || 'N/A').substring(0, 22), 610, yPos + 5);
+    doc.text((material.nome || material.descricao || '').substring(0, 40), 100, yPos + 5);
+    doc.text(material.unidadeMedida || '', 400, yPos + 5);
+    doc.text('_____________', 480, yPos + 5); // Preço Cotado (para o fornecedor preencher)
+    doc.text('_____________', 570, yPos + 5); // Prazo Entrega (para o fornecedor preencher)
+    doc.text('', 660, yPos + 5); // Observações
 
     yPos += 18;
   });
 
   // Rodapé
   doc.fontSize(7).fillColor('#999999').text(
-    `S3E Engenharia - Total de ${materiais.length} materiais críticos`,
+    `S3E Engenharia - Total de ${materiais.length} materiais`,
     30, 560, { align: 'center', width: 782 }
   );
 
@@ -1383,6 +1400,135 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
       success: false,
       error: 'Erro ao processar preview',
       message: error instanceof Error ? error.message : 'Erro desconhecido'
+    });
+  }
+};
+
+/**
+ * POST /api/materiais/:id/upload-imagem
+ * Upload de imagem para um material
+ */
+export const uploadImagemMaterialHandler = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'Nenhuma imagem foi enviada' });
+      return;
+    }
+
+    const material = await prisma.material.findUnique({ where: { id } });
+    if (!material) {
+      res.status(404).json({ success: false, message: 'Material não encontrado' });
+      return;
+    }
+
+    // Deletar imagem antiga se existir
+    if (material.imagemUrl) {
+      const oldImagePath = material.imagemUrl.replace('/uploads/', '');
+      const cwd = process.cwd();
+      const oldFilePath = path.join(cwd, 'uploads', 'materiais', oldImagePath.split('/').pop()!);
+      
+      if (fs.existsSync(oldFilePath)) {
+        fs.unlinkSync(oldFilePath);
+      }
+    }
+
+    // Salvar nova URL no banco
+    const imagemUrl = `/uploads/materiais/${req.file.filename}`;
+    const materialAtualizado = await prisma.material.update({
+      where: { id },
+      data: { imagemUrl }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Imagem enviada com sucesso',
+      data: {
+        id: materialAtualizado.id,
+        imagemUrl: materialAtualizado.imagemUrl
+      }
+    });
+  } catch (error: any) {
+    console.error('Erro ao fazer upload de imagem:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao fazer upload de imagem',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * DELETE /api/materiais/:id/imagem
+ * Remove a imagem de um material
+ */
+export const deletarImagemMaterial = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const material = await prisma.material.findUnique({ where: { id } });
+    if (!material) {
+      res.status(404).json({ success: false, message: 'Material não encontrado' });
+      return;
+    }
+
+    if (!material.imagemUrl) {
+      res.status(400).json({ success: false, message: 'Material não possui imagem' });
+      return;
+    }
+
+    // Deletar arquivo físico
+    const imagePath = material.imagemUrl.replace('/uploads/', '');
+    const cwd = process.cwd();
+    const filePath = path.join(cwd, 'uploads', 'materiais', imagePath.split('/').pop()!);
+    
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    // Remover URL do banco
+    await prisma.material.update({
+      where: { id },
+      data: { imagemUrl: null }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Imagem removida com sucesso'
+    });
+  } catch (error: any) {
+    console.error('Erro ao deletar imagem:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao deletar imagem',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * GET /api/materiais/imagem/:filename
+ * Serve imagem de material (rota pública)
+ */
+export const servirImagemMaterial = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { filename } = req.params;
+    const cwd = process.cwd();
+    const filePath = path.join(cwd, 'uploads', 'materiais', filename);
+
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ success: false, message: 'Imagem não encontrada' });
+      return;
+    }
+
+    res.sendFile(filePath);
+  } catch (error: any) {
+    console.error('Erro ao servir imagem:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao servir imagem',
+      error: error.message
     });
   }
 };

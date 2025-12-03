@@ -158,4 +158,170 @@ export class ServicosController {
       res.status(500).json({ success: false, message: 'Erro ao desativar serviço', error: error.message });
     }
   }
+
+  /**
+   * Importa serviços em lote via JSON
+   */
+  static async importarServicos(req: Request, res: Response): Promise<void> {
+    try {
+      const { servicos } = req.body;
+
+      if (!servicos || !Array.isArray(servicos)) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Campo "servicos" deve ser um array' 
+        });
+        return;
+      }
+
+      const resultados = {
+        sucesso: 0,
+        erros: 0,
+        total: servicos.length,
+        detalhes: [] as Array<{
+          linha: number;
+          codigo: string;
+          nome: string;
+          status: 'sucesso' | 'erro';
+          mensagem?: string;
+        }>
+      };
+
+      // Processar cada serviço
+      for (let i = 0; i < servicos.length; i++) {
+        const servico = servicos[i];
+        const linha = i + 1;
+
+        try {
+          // Validação
+          if (!servico.codigo || !servico.nome || !servico.tipo || servico.preco === undefined) {
+            resultados.erros++;
+            resultados.detalhes.push({
+              linha,
+              codigo: servico.codigo || 'N/A',
+              nome: servico.nome || 'N/A',
+              status: 'erro',
+              mensagem: 'Campos obrigatórios faltando (codigo, nome, tipo, preco)'
+            });
+            continue;
+          }
+
+          // Verificar se já existe
+          const servicoExistente = await prisma.servico.findUnique({
+            where: { codigo: servico.codigo }
+          });
+
+          if (servicoExistente) {
+            // Atualizar serviço existente
+            await prisma.servico.update({
+              where: { codigo: servico.codigo },
+              data: {
+                nome: servico.nome,
+                descricao: servico.descricao || null,
+                tipo: servico.tipo,
+                preco: servico.preco,
+                unidade: servico.unidade || 'un',
+                ativo: servico.ativo !== false
+              }
+            });
+
+            resultados.sucesso++;
+            resultados.detalhes.push({
+              linha,
+              codigo: servico.codigo,
+              nome: servico.nome,
+              status: 'sucesso',
+              mensagem: 'Serviço atualizado'
+            });
+          } else {
+            // Criar novo serviço
+            await prisma.servico.create({
+              data: {
+                nome: servico.nome,
+                codigo: servico.codigo,
+                descricao: servico.descricao || null,
+                tipo: servico.tipo,
+                preco: servico.preco,
+                unidade: servico.unidade || 'un',
+                ativo: servico.ativo !== false
+              }
+            });
+
+            resultados.sucesso++;
+            resultados.detalhes.push({
+              linha,
+              codigo: servico.codigo,
+              nome: servico.nome,
+              status: 'sucesso',
+              mensagem: 'Serviço criado'
+            });
+          }
+        } catch (error: any) {
+          resultados.erros++;
+          resultados.detalhes.push({
+            linha,
+            codigo: servico.codigo || 'N/A',
+            nome: servico.nome || 'N/A',
+            status: 'erro',
+            mensagem: error.message || 'Erro desconhecido'
+          });
+        }
+      }
+
+      res.status(200).json({ 
+        success: true, 
+        data: resultados,
+        message: `Importação concluída: ${resultados.sucesso} sucesso, ${resultados.erros} erros`
+      });
+    } catch (error: any) {
+      console.error('Erro ao importar serviços:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Erro ao importar serviços', 
+        error: error.message 
+      });
+    }
+  }
+
+  /**
+   * Exporta todos os serviços para JSON
+   */
+  static async exportarServicos(req: Request, res: Response): Promise<void> {
+    try {
+      const { ativo } = req.query;
+      const where: any = {};
+      
+      if (ativo !== undefined) {
+        where.ativo = ativo === 'true';
+      }
+
+      const servicos = await prisma.servico.findMany({
+        where,
+        orderBy: { codigo: 'asc' }
+      });
+
+      const exportData = {
+        versao: '1.0.0',
+        dataExportacao: new Date().toISOString(),
+        servicos: servicos.map(s => ({
+          codigo: s.codigo,
+          nome: s.nome,
+          descricao: s.descricao || '',
+          tipo: s.tipo,
+          preco: s.preco,
+          unidade: s.unidade,
+          ativo: s.ativo
+        }))
+      };
+
+      res.status(200).json({ success: true, data: exportData });
+    } catch (error: any) {
+      console.error('Erro ao exportar serviços:', error);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Erro ao exportar serviços', 
+        error: error.message 
+      });
+    }
+  }
 }

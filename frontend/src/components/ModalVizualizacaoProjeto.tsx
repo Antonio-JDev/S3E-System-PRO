@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
-import { ENDPOINTS } from '../config/api';
+import { ENDPOINTS, getUploadUrl } from '../config/api';
 import { alocacaoMateriaisService } from '../services/alocacaoMateriaisService';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -25,6 +25,7 @@ interface MaterialRef {
   sku?: string;
   estoque?: number;
   unidadeMedida?: string | null;
+  imagemUrl?: string | null;
   updatedAt?: string;
 }
 
@@ -1417,6 +1418,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   <table className="min-w-full">
                     <thead className="bg-gray-50 dark:bg-dark-bg border-b-2 border-gray-200 dark:border-dark-border">
                       <tr>
+                        <th className="text-center px-4 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Foto</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Item</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">SKU / NCM</th>
                         <th className="text-left px-6 py-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Quantidade</th>
@@ -1428,7 +1430,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     <tbody>
                       {loadingOrcamento ? (
                         <tr>
-                          <td colSpan={6} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
+                          <td colSpan={7} className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
                             <div className="flex flex-col items-center gap-2">
                               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                               <p className="font-medium">Carregando materiais...</p>
@@ -1451,8 +1453,32 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                           possuiEstoque ? 'hover:bg-gray-50 dark:hover:bg-dark-hover' : 'bg-red-50/60 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20'
                         }`;
 
+                        const fotoUrl = item.material?.imagemUrl;
+
                         return (
                           <tr key={item.id || idx} className={rowClasses}>
+                            {/* Coluna de Foto */}
+                            <td className="px-4 py-4 text-center align-top">
+                              {fotoUrl ? (
+                                <img
+                                  src={getUploadUrl(fotoUrl)}
+                                  alt={nomeMaterial}
+                                  className="w-12 h-12 object-cover rounded-lg border border-gray-300 dark:border-gray-600 mx-auto"
+                                  onError={(e) => {
+                                    const imgElement = e.target as HTMLImageElement;
+                                    imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center mx-auto">
+                                  <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                </div>
+                              )}
+                            </td>
+                            
+                            {/* Coluna de Nome */}
                             <td className="px-6 py-4 text-sm text-gray-900 dark:text-white font-semibold align-top">
                               <div>{nomeMaterial}</div>
                               <div className="mt-1 space-y-1 text-xs font-normal text-gray-500 dark:text-gray-400">

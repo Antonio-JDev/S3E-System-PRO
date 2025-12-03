@@ -124,21 +124,26 @@ export class ComprasService {
                 if (!materialId) {
                     console.log(`🆕 Item sem materialId: "${item.nomeProduto}". Criando Material...`);
                     
-                    // Tentar encontrar material existente pelo NCM ou nome
+                    // Tentar encontrar material existente pelo nome EXATO
+                    // ✅ CORREÇÃO: Usar nome completo e exato para evitar agrupar materiais diferentes
+                    // que tenham nomes similares mas especificações diferentes (ex: diâmetros, tamanhos)
                     let material: { id: string; preco: number | null } | null = null;
-                    if (item.ncm) {
-                        material = await tx.material.findFirst({
-                            where: { sku: String(item.ncm) }
-                        });
-                    }
                     
-                    if (!material) {
+                    // Buscar por nome exato (case-insensitive mas completo)
+                    material = await tx.material.findFirst({
+                        where: { 
+                            descricao: item.nomeProduto.trim() // Nome completo e exato
+                        }
+                    });
+                    
+                    // Se não encontrou por nome exato e tem NCM, tentar por NCM + nome
+                    if (!material && item.ncm) {
                         material = await tx.material.findFirst({
                             where: { 
-                                descricao: { 
-                                    contains: item.nomeProduto.substring(0, 20), 
-                                    mode: 'insensitive' 
-                                } 
+                                AND: [
+                                    { ncm: String(item.ncm) },
+                                    { descricao: item.nomeProduto.trim() }
+                                ]
                             }
                         });
                     }
@@ -516,13 +521,11 @@ export class ComprasService {
                             });
                         }
                         
+                        // ✅ CORREÇÃO: Buscar por nome exato
                         if (!material) {
                             material = await tx.material.findFirst({
                                 where: { 
-                                    descricao: { 
-                                        contains: item.nomeProduto.substring(0, 20), 
-                                        mode: 'insensitive' 
-                                    } 
+                                    descricao: item.nomeProduto.trim() // Nome completo e exato
                                 }
                             });
                         }
@@ -674,13 +677,11 @@ export class ComprasService {
                             });
                         }
                         
+                        // ✅ CORREÇÃO: Buscar por nome exato
                         if (!material) {
                             material = await tx.material.findFirst({
                                 where: { 
-                                    descricao: { 
-                                        contains: item.nomeProduto.substring(0, 20), 
-                                        mode: 'insensitive' 
-                                    } 
+                                    descricao: item.nomeProduto.trim() // Nome completo e exato
                                 }
                             });
                         }

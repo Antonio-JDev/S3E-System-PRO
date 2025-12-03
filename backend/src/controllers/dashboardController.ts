@@ -188,7 +188,16 @@ export class DashboardController {
             nome: true,
             sku: true,
             estoque: true,
-            estoqueMinimo: true
+            estoqueMinimo: true,
+            unidadeMedida: true,
+            fornecedorId: true,
+            fornecedor: {
+              select: {
+                id: true,
+                nome: true,
+                email: true
+              }
+            }
           },
           take: 10
         }),

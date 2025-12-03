@@ -5,7 +5,12 @@ import {
   createCliente,
   updateCliente,
   deleteCliente,
-  reativarCliente
+  reativarCliente,
+  previewImportacao,
+  importarClientes,
+  exportarTemplate,
+  exportarClientes,
+  uploadJSON
 } from '../controllers/clientesController';
 import { authenticate } from '../middlewares/auth';
 
@@ -56,5 +61,33 @@ router.put('/:id/reativar', reativarCliente);
  * @access Private
  */
 router.delete('/:id', deleteCliente);
+
+/**
+ * @route GET /api/clientes/template/download
+ * @desc Baixar template JSON para importação
+ * @access Private
+ */
+router.get('/template/download', exportarTemplate);
+
+/**
+ * @route GET /api/clientes/export/all
+ * @desc Exportar todos os clientes ativos
+ * @access Private
+ */
+router.get('/export/all', exportarClientes);
+
+/**
+ * @route POST /api/clientes/import/preview
+ * @desc Preview de importação (validação)
+ * @access Private
+ */
+router.post('/import/preview', uploadJSON.single('file'), previewImportacao);
+
+/**
+ * @route POST /api/clientes/import
+ * @desc Importar clientes de JSON
+ * @access Private
+ */
+router.post('/import', uploadJSON.single('file'), importarClientes);
 
 export default router;

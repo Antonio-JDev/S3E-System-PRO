@@ -13,6 +13,10 @@ import {
   exportarMateriaisCriticos,
   importarPrecos,
   uploadImportFile,
+  uploadImagemMaterial,
+  uploadImagemMaterialHandler,
+  deletarImagemMaterial,
+  servirImagemMaterial,
   gerarTemplateImportacao,
   previewImportacao,
   getHistoricoPrecos
@@ -36,6 +40,11 @@ router.post('/importar-precos', uploadImportFile, importarPrecos);
 
 router.get('/:id/historico-compras', getHistoricoCompras); // Rota específica antes da genérica
 router.get('/:id/historico-precos', getHistoricoPrecos); // Histórico de preços
+
+// Rotas de imagens (antes da rota genérica /:id)
+router.post('/:id/upload-imagem', uploadImagemMaterial, uploadImagemMaterialHandler);
+router.delete('/:id/imagem', deletarImagemMaterial);
+
 router.get('/:id', getMaterialById);
 router.post('/', createMaterial);
 router.put('/:id', updateMaterial);
