@@ -8,6 +8,32 @@ interface ExportarRelatorioFinanceiroProps {
   toggleSidebar: () => void;
 }
 
+// Interfaces para os dados do relatório
+interface Conta {
+  descricao?: string;
+  dataVencimento?: string;
+  status: string;
+  valor: number;
+}
+
+interface GraficoData {
+  labels?: string[];
+  datasets?: any[];
+  [key: string]: any;
+}
+
+interface DadosRelatorio {
+  totalReceber?: number;
+  totalPagar?: number;
+  saldoPrevisto?: number;
+  totalFaturado?: number;
+  totalPago?: number;
+  lucroLiquido?: number;
+  contasReceber?: Conta[];
+  contasPagar?: Conta[];
+  graficos?: GraficoData;
+}
+
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -74,7 +100,7 @@ const ExportarRelatorioFinanceiro: React.FC<ExportarRelatorioFinanceiroProps> = 
         return;
       }
 
-      const dados = response.data;
+      const dados: DadosRelatorio = response.data;
 
       // Criar objeto JSON com todos os dados
       const jsonData = {
@@ -137,7 +163,7 @@ const ExportarRelatorioFinanceiro: React.FC<ExportarRelatorioFinanceiroProps> = 
         return;
       }
 
-      const dados = response.data;
+      const dados: DadosRelatorio = response.data;
 
       // Obter URL completa do logo
       const logoUrl = getUploadUrl('/uploads/logos/logo-nome-azul.png');

@@ -18,3 +18,7 @@ coverage/
 .env.producao
 .env.prod
 !.env.example
+
+# Uploads (não commitar arquivos enviados)
+uploads/
+backend/uploads/

@@ -432,14 +432,8 @@ export class ConfiguracaoController {
       // Em Docker, o CWD é /app e uploads está em /app/uploads
       // Em desenvolvimento local, pode estar em backend/ ou na raiz
       let logosDir: string;
-      if (cwd.endsWith('backend')) {
-        logosDir = path.join(cwd, 'uploads', 'logos');
-      } else {
-        // Tentar /app/uploads/logos primeiro (Docker)
-        const dockerPath = path.join(cwd, 'uploads', 'logos');
-        const localPath = path.join(cwd, 'backend', 'uploads', 'logos');
-        logosDir = fs.existsSync(dockerPath) ? dockerPath : localPath;
-      }
+      // Usar apenas uploads (não backend/uploads)
+      logosDir = path.join(cwd, 'uploads', 'logos');
       
       // Criar diretório se não existir
       if (!fs.existsSync(logosDir)) {

@@ -180,6 +180,60 @@ export const createCliente = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+// Criar cliente rápido (apenas nome e tipo)
+export const createClienteRapido = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { nome, tipo } = req.body;
+
+    // Validação
+    if (!nome || nome.trim().length < 3) {
+      res.status(400).json({
+        success: false,
+        error: 'Nome do cliente deve ter pelo menos 3 caracteres'
+      });
+      return;
+    }
+
+    if (!tipo || !['PF', 'PJ'].includes(tipo)) {
+      res.status(400).json({
+        success: false,
+        error: 'Tipo deve ser PF ou PJ'
+      });
+      return;
+    }
+
+    // Criar cliente com CPF/CNPJ placeholder
+    const cliente = await prisma.cliente.create({
+      data: {
+        nome: nome.trim(),
+        tipo,
+        cpfCnpj: `TEMP-${Date.now()}`, // Temporário, será atualizado após criar
+        ativo: true
+      }
+    });
+
+    // Atualizar CPF/CNPJ com ID do cliente
+    const clienteAtualizado = await prisma.cliente.update({
+      where: { id: cliente.id },
+      data: {
+        cpfCnpj: `N/A-${cliente.id}`
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      data: clienteAtualizado,
+      message: 'Cliente criado com sucesso'
+    });
+  } catch (error) {
+    console.error('Erro ao criar cliente rápido:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Erro ao criar cliente rápido' 
+    });
+  }
+};
+
 // Atualizar cliente
 export const updateCliente = async (req: Request, res: Response): Promise<void> => {
   try {

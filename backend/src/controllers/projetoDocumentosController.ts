@@ -11,10 +11,8 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const cwd = process.cwd();
     // Em produção (Docker), cwd será /app e o volume está mapeado em /app/uploads
-    // Em desenvolvimento, usamos sempre backend/uploads para manter um único padrão
-    const uploadDir = cwd.endsWith('backend')
-      ? path.join(cwd, 'uploads', 'projetos-documentos')
-      : path.join(cwd, 'backend', 'uploads', 'projetos-documentos');
+    // Em desenvolvimento, usamos apenas uploads (não backend/uploads)
+    const uploadDir = path.join(cwd, 'uploads', 'projetos-documentos');
     
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
@@ -162,9 +160,7 @@ export const visualizarDocumento = async (req: Request, res: Response): Promise<
 
     // Construir caminho do arquivo
     const cwd = process.cwd();
-    const filePath = cwd.endsWith('backend')
-      ? path.join(cwd, 'uploads', 'projetos-documentos', documento.nomeArquivo)
-      : path.join(cwd, 'backend', 'uploads', 'projetos-documentos', documento.nomeArquivo);
+    const filePath = path.join(cwd, 'uploads', 'projetos-documentos', documento.nomeArquivo);
 
     // Verificar se arquivo existe
     if (!fs.existsSync(filePath)) {
@@ -213,9 +209,7 @@ export const deletarDocumento = async (req: Request, res: Response): Promise<voi
 
     // Deletar arquivo físico
     const cwd = process.cwd();
-    const filePath = cwd.endsWith('backend')
-      ? path.join(cwd, 'uploads', 'projetos-documentos', documento.nomeArquivo)
-      : path.join(cwd, 'backend', 'uploads', 'projetos-documentos', documento.nomeArquivo);
+    const filePath = path.join(cwd, 'uploads', 'projetos-documentos', documento.nomeArquivo);
 
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);

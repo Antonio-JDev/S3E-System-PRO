@@ -1,6 +1,14 @@
+/* Import de fonte para assinatura */
+@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Classe para assinatura */
+.font-signature {
+    font-family: 'Dancing Script', cursive;
+}
 
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {

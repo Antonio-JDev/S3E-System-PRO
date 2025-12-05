@@ -101,7 +101,7 @@ export const ConstructionIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
-// Ícone de Gestão de Obras (Calendário com Pessoas)
+// Ícone de Métricas de Equipe (Calendário com Pessoas)
 export const TeamCalendarIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
@@ -111,6 +111,13 @@ export const TeamCalendarIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <circle cx="9" cy="16" r="2"/>
         <circle cx="15" cy="16" r="2"/>
         <path d="M12 12v4"/>
+    </svg>
+);
+
+// Ícone de Ferramentas (Chave Inglesa)
+export const ToolsIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
     </svg>
 );
 
@@ -333,7 +340,8 @@ export const navLinks: NavLink[] = [
     { name: 'Projetos', icon: BlueprintIcon, requiredPermission: 'view_projetos' },
     { name: 'Obras', icon: ConstructionIcon, requiredPermission: 'view_obras' },
     { name: 'Tarefas da Obra', icon: TaskListIcon, requiredPermission: 'view_tarefas_obra' },
-    { name: 'Gestão de Obras', icon: TeamCalendarIcon, requiredPermission: 'view_gestao_obras' },
+    { name: 'Ferramentas', icon: ToolsIcon, requiredPermission: 'view_gestao_obras' },
+    { name: 'Métricas de Equipe', icon: TeamCalendarIcon, requiredPermission: 'view_gestao_obras' },
     { name: 'Serviços', icon: ElectricalServiceIcon, requiredPermission: 'view_servicos' },
     
     // ========== FINANCEIRO / CONTÁBIL ==========

@@ -18,6 +18,7 @@ export interface CreateTarefaData {
 }
 
 export interface CreateRegistroAtividadeData {
+  usuarioId: string;
   descricaoAtividade: string;
   horasTrabalhadas: number;
   observacoes?: string;
@@ -416,6 +417,7 @@ export class ObraService {
       const registro = await prisma.registroAtividade.create({
         data: {
           tarefaId,
+          usuarioId: data.usuarioId,
           descricaoAtividade: data.descricaoAtividade,
           horasTrabalhadas: data.horasTrabalhadas,
           observacoes: data.observacoes

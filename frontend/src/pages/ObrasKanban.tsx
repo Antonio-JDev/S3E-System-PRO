@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import ObraKanban from '../components/ObraKanban';
+import ObrasGanttChart from '../components/ObrasGanttChart';
 import { obrasService } from '../services/obrasService';
 import { projetosService, type Projeto } from '../services/projetosService';
 import { axiosApiService } from '../services/axiosApi';
@@ -64,6 +65,7 @@ interface ObrasKanbanProps {
 const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate }) => {
     const [isModalNovaObraOpen, setIsModalNovaObraOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [viewMode, setViewMode] = useState<'kanban' | 'timeline'>('kanban');
     
     // Estados para o formulário
     const [projetosValidados, setProjetosValidados] = useState<Projeto[]>([]);
@@ -301,13 +303,57 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
             </div>
 
             {/* Quadro Kanban */}
-            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border p-6">
-                <div className="mb-6">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-dark-text">Kanban de Obras</h2>
-                    <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">Clique nos cards para gerenciar tarefas ou arraste para mover entre as etapas</p>
+            {/* Toggle de Visualização */}
+            <div className="mb-6 flex items-center justify-between">
+                <div className="inline-flex items-center bg-white dark:bg-gray-800 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 p-1">
+                    <button
+                        onClick={() => setViewMode('kanban')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
+                            viewMode === 'kanban'
+                                ? 'bg-blue-600 text-white shadow-md'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                        </svg>
+                        Kanban
+                    </button>
+                    <button
+                        onClick={() => setViewMode('timeline')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
+                            viewMode === 'timeline'
+                                ? 'bg-blue-600 text-white shadow-md'
+                                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        Timeline
+                    </button>
                 </div>
-                <ObraKanban key={refreshKey} onRefresh={handleRefresh} onNavigate={onNavigate} />
             </div>
+
+            {/* Renderização Condicional */}
+            {viewMode === 'kanban' ? (
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-lg border border-gray-200 dark:border-dark-border p-6">
+                    <div className="mb-6">
+                        <h2 className="text-xl font-bold text-gray-900 dark:text-dark-text">Kanban de Obras</h2>
+                        <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">Clique nos cards para gerenciar tarefas ou arraste para mover entre as etapas</p>
+                    </div>
+                    <ObraKanban key={refreshKey} onRefresh={handleRefresh} onNavigate={onNavigate} />
+                </div>
+            ) : (
+                <ObrasGanttChart
+                    obras={[...kanbanData.BACKLOG, ...kanbanData.A_FAZER, ...kanbanData.ANDAMENTO, ...kanbanData.CONCLUIDO]}
+                    onSelectObra={(obraId) => {
+                        toast.info('Obra selecionada', {
+                            description: `ID: ${obraId}`
+                        });
+                    }}
+                />
+            )}
 
             {/* MODAL DE CRIAÇÃO DE OBRA - COMPLETO */}
             {isModalNovaObraOpen && (

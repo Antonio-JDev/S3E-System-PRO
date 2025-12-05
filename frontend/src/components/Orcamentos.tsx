@@ -2322,6 +2322,74 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         variant: 'default'
                                                     },
                                                     {
+                                                        label: 'Copiar',
+                                                        icon: (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                            </svg>
+                                                        ),
+                                                            onClick: async () => {
+                                                            // Buscar orçamento completo
+                                                            const response = await orcamentosService.buscar(orcamento.id);
+                                                            if (response.success && response.data) {
+                                                                const orcData = response.data;
+                                                                // Mapear items corretamente garantindo que o nome seja preservado
+                                                                const itemsMapeados = (orcData.items || []).map((item: any) => ({
+                                                                    tipo: item.tipo,
+                                                                    materialId: item.materialId,
+                                                                    kitId: item.kitId,
+                                                                    cotacaoId: item.cotacaoId,
+                                                                    servicoNome: item.servicoNome,
+                                                                    descricao: item.descricao,
+                                                                    // Buscar data da cotação de múltiplas fontes possíveis
+                                                                    dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || 
+                                                                                          item.cotacao?.dataAtualizacao || 
+                                                                                          item.cotacao?.updatedAt || 
+                                                                                          item.cotacao?.createdAt,
+                                                                    nome: item.nome || item.material?.nome || item.kit?.nome || item.cotacao?.nome || item.servicoNome || 'Item sem nome',
+                                                                    unidadeMedida: item.unidadeMedida,
+                                                                    unidadeVenda: item.unidadeVenda,
+                                                                    tipoMaterial: item.tipoMaterial,
+                                                                    quantidade: item.quantidade,
+                                                                    custoUnit: item.custoUnit,
+                                                                    precoBase: item.precoBase,
+                                                                    precoUnit: item.precoUnit,
+                                                                    subtotal: item.subtotal,
+                                                                    precoEditadoManual: item.precoEditadoManual
+                                                                }));
+                                                                
+                                                                // Salvar no localStorage (sem cliente)
+                                                                const orcamentoCopia = {
+                                                                    empresaCNPJ: orcData.empresaCNPJ,
+                                                                    titulo: orcData.titulo,
+                                                                    descricao: orcData.descricao,
+                                                                    descricaoProjeto: orcData.descricaoProjeto,
+                                                                    validade: orcData.validade,
+                                                                    endereco: orcData.enderecoObra,
+                                                                    bairro: orcData.bairro,
+                                                                    cidade: orcData.cidade,
+                                                                    cep: orcData.cep,
+                                                                    responsavelObra: orcData.responsavelObra,
+                                                                    bdi: orcData.bdi,
+                                                                    previsaoInicio: orcData.previsaoInicio,
+                                                                    previsaoTermino: orcData.previsaoTermino,
+                                                                    condicaoPagamento: orcData.condicaoPagamento,
+                                                                    items: itemsMapeados
+                                                                };
+                                                                localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
+                                                                toast.success('Orçamento copiado', {
+                                                                    description: 'Abrindo novo orçamento...'
+                                                                });
+                                                                setAbaAtiva('novo');
+                                                            } else {
+                                                                toast.error('Erro ao copiar orçamento', {
+                                                                    description: response.error || 'Não foi possível buscar os dados'
+                                                                });
+                                                            }
+                                                        },
+                                                        variant: 'default'
+                                                    },
+                                                    {
                                                         label: 'PDF Rápido',
                                                         icon: (
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4340,6 +4408,66 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             </button>
                                         </>
                                     )}
+                                    <button
+                                        onClick={async () => {
+                                            // Copiar orçamento
+                                            const orcData = orcamentoToView;
+                                            // Mapear items corretamente garantindo que o nome seja preservado
+                                            const itemsMapeados = (orcData.items || []).map((item: any) => ({
+                                                tipo: item.tipo,
+                                                materialId: item.materialId,
+                                                kitId: item.kitId,
+                                                cotacaoId: item.cotacaoId,
+                                                servicoNome: item.servicoNome,
+                                                descricao: item.descricao,
+                                                // Buscar data da cotação de múltiplas fontes possíveis
+                                                dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || 
+                                                                      item.cotacao?.dataAtualizacao || 
+                                                                      item.cotacao?.updatedAt || 
+                                                                      item.cotacao?.createdAt,
+                                                nome: item.nome || item.material?.nome || item.kit?.nome || item.cotacao?.nome || item.servicoNome || 'Item sem nome',
+                                                unidadeMedida: item.unidadeMedida,
+                                                unidadeVenda: item.unidadeVenda,
+                                                tipoMaterial: item.tipoMaterial,
+                                                quantidade: item.quantidade,
+                                                custoUnit: item.custoUnit,
+                                                precoBase: item.precoBase,
+                                                precoUnit: item.precoUnit,
+                                                subtotal: item.subtotal,
+                                                precoEditadoManual: item.precoEditadoManual
+                                            }));
+                                            
+                                            const orcamentoCopia = {
+                                                empresaCNPJ: orcData.empresaCNPJ,
+                                                titulo: orcData.titulo,
+                                                descricao: orcData.descricao,
+                                                descricaoProjeto: orcData.descricaoProjeto,
+                                                validade: orcData.validade,
+                                                endereco: orcData.enderecoObra,
+                                                bairro: orcData.bairro,
+                                                cidade: orcData.cidade,
+                                                cep: orcData.cep,
+                                                responsavelObra: orcData.responsavelObra,
+                                                bdi: orcData.bdi,
+                                                previsaoInicio: orcData.previsaoInicio,
+                                                previsaoTermino: orcData.previsaoTermino,
+                                                condicaoPagamento: orcData.condicaoPagamento,
+                                                items: itemsMapeados
+                                            };
+                                            localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
+                                            toast.success('Orçamento copiado', {
+                                                description: 'Abrindo novo orçamento...'
+                                            });
+                                            setOrcamentoToView(null);
+                                            setAbaAtiva('novo');
+                                        }}
+                                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                        Copiar Orçamento
+                                    </button>
                                     <button
                                         onClick={() => setOrcamentoToView(null)}
                                         className="px-6 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-300 dark:hover:bg-gray-600 transition-all font-semibold"

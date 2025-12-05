@@ -49,7 +49,7 @@ export const uploadTarefaImages = multer({
  */
 async function verificarSeUsuarioEstaNaEquipe(userId: string, equipeId: string): Promise<boolean> {
   try {
-    console.log(`🔍 [verificarSeUsuarioEstaNaEquipe] Verificando se usuário ${userId} está na equipe ${equipeId}`);
+    console.log(`\n🔍 [verificarSeUsuarioEstaNaEquipe] Verificando se usuário ${userId} está na equipe ${equipeId}`);
     
     const equipe = await prisma.equipe.findUnique({
       where: { id: equipeId },
@@ -66,9 +66,20 @@ async function verificarSeUsuarioEstaNaEquipe(userId: string, equipeId: string):
       return false;
     }
     
-    const isMember = equipe.membros.includes(userId);
-    console.log(`🔍 [verificarSeUsuarioEstaNaEquipe] Equipe "${equipe.nome}" tem ${equipe.membros.length} membros:`, equipe.membros);
-    console.log(`${isMember ? '✅' : '❌'} [verificarSeUsuarioEstaNaEquipe] Usuário ${userId} ${isMember ? 'É' : 'NÃO É'} membro da equipe ${equipeId}`);
+    // Log detalhado para debug
+    console.log(`📋 [verificarSeUsuarioEstaNaEquipe] Equipe: "${equipe.nome}"`);
+    console.log(`👥 [verificarSeUsuarioEstaNaEquipe] Membros da equipe (${equipe.membros.length}):`, equipe.membros);
+    console.log(`🔍 [verificarSeUsuarioEstaNaEquipe] Comparando com userId: "${userId}" (tipo: ${typeof userId})`);
+    
+    // Verificar cada membro (comparação segura como string)
+    equipe.membros.forEach((membroId, index) => {
+      const match = String(membroId) === String(userId);
+      console.log(`  ${index + 1}. Membro: "${membroId}" (tipo: ${typeof membroId}) ${match ? '✅ MATCH!' : '❌ diferente'}`);
+    });
+
+    // Comparação resiliente (String)
+    const isMember = equipe.membros.some(m => String(m) === String(userId));
+    console.log(`\n${isMember ? '✅' : '❌'} [verificarSeUsuarioEstaNaEquipe] RESULTADO: Usuário ${userId} ${isMember ? 'É' : 'NÃO É'} membro da equipe ${equipeId}\n`);
     
     return isMember;
   } catch (error) {
@@ -108,46 +119,37 @@ export const getTarefasEletricista = async (req: Request, res: Response): Promis
           },
           registrosAtividade: {
             orderBy: { dataRegistro: 'desc' },
-            take: 1
+            take: 1,
+            include: {
+              usuario: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  role: true
+                }
+              }
+            }
           }
         },
         orderBy: { dataPrevista: 'asc' }
       });
     } else {
-      // Eletricista: tarefas atribuídas diretamente a ele OU tarefas de equipes onde ele é membro
-      // Primeiro, buscar todas as equipes onde o usuário é membro
-      const equipesDoUsuario = await prisma.equipe.findMany({
-        where: {
-          membros: {
-            has: userId // Verifica se userId está no array membros
-          },
-          ativa: true
-        },
-        select: {
-          id: true,
-          nome: true
-        }
-      });
+      // ELETRICISTA: Mostrar TODAS as tarefas de obras EM ANDAMENTO
+      // Isso permite que ele veja o trabalho disponível e possa reportar progresso
       
-      const equipeIds = equipesDoUsuario.map(e => e.id);
+      console.log(`\n========== 🔍 DEBUG TAREFAS ELETRICISTA ==========`);
+      console.log(`Usuário ID: ${userId}`);
+      console.log(`Role: ${userRole}`);
       
-      console.log(`🔍 Eletricista ${userId} está em ${equipeIds.length} equipe(s):`, equipesDoUsuario.map(e => e.nome));
-      
-      // Construir condições OR
-      const condicoesOR: any[] = [
-        // Tarefas atribuídas diretamente ao eletricista
-        { atribuidoA: userId }
-      ];
-      
-      // Adicionar condição de equipes se o usuário estiver em alguma equipe
-      if (equipeIds.length > 0) {
-        condicoesOR.push({ equipeId: { in: equipeIds } });
-      }
-      
-      // Buscar tarefas: atribuídas diretamente OU atribuídas a equipes do usuário
+      // Buscar todas as tarefas de obras que estão em andamento ou a fazer
       tarefas = await prisma.tarefaObra.findMany({
         where: {
-          OR: condicoesOR
+          obra: {
+            status: {
+              in: ['ANDAMENTO', 'A_FAZER'] // Obras em andamento ou a fazer
+            }
+          }
         },
         include: {
           obra: {
@@ -162,13 +164,46 @@ export const getTarefasEletricista = async (req: Request, res: Response): Promis
           },
           registrosAtividade: {
             orderBy: { dataRegistro: 'desc' },
-            take: 1
+            take: 1,
+            include: {
+              usuario: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  role: true
+                }
+              }
+            }
           }
         },
         orderBy: { dataPrevista: 'asc' }
       });
       
-      console.log(`✅ Encontradas ${tarefas.length} tarefa(s) para o eletricista (${tarefas.filter(t => t.atribuidoA === userId).length} diretas, ${tarefas.filter(t => t.equipeId && equipeIds.includes(t.equipeId)).length} de equipes)`);
+      // Categorizar tarefas
+      const tarefasMinhas = tarefas.filter(t => t.atribuidoA === userId);
+      const tarefasDisponiveis = tarefas.filter(t => !t.atribuidoA && !t.equipeId);
+      const tarefasOutros = tarefas.filter(t => t.atribuidoA && t.atribuidoA !== userId);
+      
+      console.log(`\n📊 RESULTADO DA BUSCA:`);
+      console.log(`Total de tarefas em obras ativas: ${tarefas.length}`);
+      console.log(`  - Minhas tarefas: ${tarefasMinhas.length}`);
+      console.log(`  - Tarefas disponíveis: ${tarefasDisponiveis.length}`);
+      console.log(`  - Tarefas de outros: ${tarefasOutros.length}`);
+      
+      if (tarefas.length > 0) {
+        console.log(`\n📋 LISTA DE TAREFAS (primeiras 10):`);
+        tarefas.slice(0, 10).forEach((t, index) => {
+          console.log(`  ${index + 1}. "${t.descricao}" (ID: ${t.id})`);
+          console.log(`     - Obra: ${t.obra.nomeObra} (${t.obra.status})`);
+          console.log(`     - AtribuidoA: ${t.atribuidoA || 'Nenhum'}`);
+          console.log(`     - EquipeId: ${t.equipeId || 'Nenhuma'}`);
+          console.log(`     - Progresso: ${t.progresso}%`);
+        });
+      } else {
+        console.log(`⚠️ Nenhuma tarefa encontrada em obras com status ANDAMENTO ou A_FAZER`);
+      }
+      console.log(`========== FIM DEBUG ==========\n`);
     }
     
     // Formatar resposta para o frontend
@@ -233,7 +268,8 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
         obra: {
           select: {
             id: true,
-            nomeObra: true
+            nomeObra: true,
+            status: true // ✅ Incluir status da obra para verificação de permissão
           }
         }
       }
@@ -256,8 +292,8 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
     console.log(`🔍 [salvarResumoTarefa] Tarefa ID: ${tarefaId}`);
     console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída a: ${tarefa.atribuidoA || 'Nenhum'}, Equipe: ${tarefa.equipeId || 'Nenhuma'}`);
     
-    // Apenas eletricista atribuído, membro da equipe ou desenvolvedor podem registrar
-    if (userRole !== 'desenvolvedor') {
+    // Verificar permissões para eletricistas
+    if (!['desenvolvedor','gerente','engenheiro'].includes(userRole)) {
       // Verificar se é tarefa atribuída diretamente ao usuário
       const tarefaAtribuidaDiretamente = tarefa.atribuidoA === userId;
       console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída diretamente ao usuário: ${tarefaAtribuidaDiretamente}`);
@@ -272,20 +308,43 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
         console.log(`🔍 [salvarResumoTarefa] Tarefa não tem equipeId`);
       }
       
-      if (!tarefaAtribuidaDiretamente && !tarefaDeEquipeDoUsuario) {
+      // Verificar se a tarefa está disponível (sem atribuição específica)
+      const tarefaDisponivel = !tarefa.atribuidoA && !tarefa.equipeId;
+      console.log(`🔍 [salvarResumoTarefa] Tarefa disponível (sem atribuição): ${tarefaDisponivel}`);
+      
+      // Verificar se a obra está em andamento (permite que qualquer eletricista registre atividades)
+      const obraEmAndamento = tarefa.obra && ['ANDAMENTO', 'A_FAZER'].includes(tarefa.obra.status);
+      console.log(`🔍 [salvarResumoTarefa] Obra em andamento: ${obraEmAndamento}`);
+      
+      // Permitir registro se:
+      // 1. Tarefa atribuída diretamente ao usuário, OU
+      // 2. Tarefa atribuída a uma equipe onde o usuário é membro, OU
+      // 3. Tarefa disponível (sem atribuição) e obra em andamento, OU
+      // 4. Tarefa atribuída apenas a equipe (sem pessoa específica) e obra em andamento (permite colaboração)
+      //    IMPORTANTE: Permite que qualquer eletricista registre atividades em tarefas de obras em andamento,
+      //    desde que a tarefa não esteja atribuída a outra pessoa específica (atribuidoA = null)
+      const temPermissao = 
+        tarefaAtribuidaDiretamente || 
+        tarefaDeEquipeDoUsuario || 
+        (tarefaDisponivel && obraEmAndamento) ||
+        (obraEmAndamento && !tarefa.atribuidoA); // Permite se obra está em andamento e não está atribuída a pessoa específica (mesmo que tenha equipe)
+      
+      if (!temPermissao) {
         console.error(`❌ [salvarResumoTarefa] Acesso negado: Usuário ${userId} não tem permissão para registrar atividades na tarefa ${tarefaId}`);
         console.error(`   - Tarefa atribuída diretamente: ${tarefaAtribuidaDiretamente}`);
         console.error(`   - Tarefa de equipe do usuário: ${tarefaDeEquipeDoUsuario}`);
+        console.error(`   - Tarefa disponível: ${tarefaDisponivel}`);
+        console.error(`   - Obra em andamento: ${obraEmAndamento}`);
         res.status(403).json({ 
           success: false, 
-          error: '🚫 Você não tem permissão para registrar atividades nesta tarefa. A tarefa deve estar atribuída a você ou a uma equipe da qual você faz parte.' 
+          error: '🚫 Você não tem permissão para registrar atividades nesta tarefa. A tarefa deve estar atribuída a você, a uma equipe da qual você faz parte, ou estar disponível em uma obra em andamento.' 
         });
         return;
       }
       
       console.log(`✅ [salvarResumoTarefa] Permissão concedida para usuário ${userId}`);
     } else {
-      console.log(`✅ [salvarResumoTarefa] Desenvolvedor - Acesso universal concedido`);
+      console.log(`✅ [salvarResumoTarefa] Desenvolvedor/Gerente/Engenheiro - Acesso universal concedido`);
     }
     
     // Processar URLs das imagens
@@ -305,11 +364,22 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
     const registro = await prisma.registroAtividade.create({
       data: {
         tarefaId: tarefaId,
+        usuarioId: userId, // ✅ Salvar quem fez o registro
         descricaoAtividade: descricaoAtividade,
         horasTrabalhadas: horas,
         observacoes: observacoes || null,
         imagens: imagensUrls,
         dataRegistro: new Date()
+      },
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true
+          }
+        }
       }
     });
     
@@ -380,7 +450,17 @@ export const getTarefaById = async (req: Request, res: Response): Promise<void> 
           }
         },
         registrosAtividade: {
-          orderBy: { dataRegistro: 'desc' }
+          orderBy: { dataRegistro: 'desc' },
+          include: {
+            usuario: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+              }
+            }
+          }
         }
       }
     });
@@ -443,36 +523,60 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
     }
     
     // Verificar se o usuário atribuído é eletricista (se fornecido)
-    let eletricista = null;
+    let eletricista: { id: string; name: string; role: string } | null = null;
     if (atribuidoA) {
-      eletricista = await prisma.user.findUnique({
+      const usuarioEncontrado = await prisma.user.findUnique({
         where: { id: atribuidoA }
       });
       
-      if (!eletricista || eletricista.role.toLowerCase() !== 'eletricista') {
+      if (!usuarioEncontrado || usuarioEncontrado.role.toLowerCase() !== 'eletricista') {
         res.status(400).json({ 
           success: false, 
           error: 'Tarefas só podem ser atribuídas a eletricistas' 
         });
         return;
       }
+      
+      eletricista = {
+        id: usuarioEncontrado.id,
+        name: usuarioEncontrado.name,
+        role: usuarioEncontrado.role
+      };
     }
 
     // Verificar se equipe existe (se fornecida)
-    let equipe = null;
+    let equipe: { id: string; nome: string; membros: string[]; ativa: boolean } | null = null;
     if (equipeId) {
-      equipe = await prisma.equipe.findUnique({
-        where: { id: equipeId }
+      const equipeEncontrada = await prisma.equipe.findUnique({
+        where: { id: equipeId },
+        include: { alocacoes: false } // Apenas dados básicos
       });
       
-      if (!equipe) {
+      if (!equipeEncontrada) {
         res.status(404).json({ 
           success: false, 
           error: 'Equipe não encontrada' 
         });
         return;
       }
+      
+      equipe = {
+        id: equipeEncontrada.id,
+        nome: equipeEncontrada.nome,
+        membros: equipeEncontrada.membros,
+        ativa: equipeEncontrada.ativa
+      };
+      
+      console.log(`\n👥 [criarTarefa] Equipe selecionada: "${equipe.nome}" (${equipe.id})`);
+      console.log(`   Membros da equipe (${equipe.membros.length}):`, equipe.membros);
+      console.log(`   Ativa: ${equipe.ativa}`);
     }
+    
+    console.log(`\n📝 [criarTarefa] Criando tarefa com:`);
+    console.log(`   - Descrição: "${descricao}"`);
+    console.log(`   - Obra ID: ${obraId}`);
+    console.log(`   - Atribuído a (individual): ${atribuidoA || 'Nenhum'}`);
+    console.log(`   - Equipe ID: ${equipeId || 'Nenhuma'}`);
     
     // Criar tarefa
     const tarefa = await prisma.tarefaObra.create({
@@ -491,6 +595,10 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
         registrosAtividade: true
       }
     });
+    
+    console.log(`✅ [criarTarefa] Tarefa criada com ID: ${tarefa.id}`);
+    console.log(`   - AtribuidoA salvo: ${tarefa.atribuidoA || 'Nenhum'}`);
+    console.log(`   - EquipeId salvo: ${tarefa.equipeId || 'Nenhuma'}\n`);
     
     // Audit log
     let descricaoLog = 'Nova tarefa criada';
@@ -580,7 +688,17 @@ export const atualizarTarefa = async (req: Request, res: Response): Promise<void
       include: {
         obra: true,
         registrosAtividade: {
-          orderBy: { dataRegistro: 'desc' }
+          orderBy: { dataRegistro: 'desc' },
+          include: {
+            usuario: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+              }
+            }
+          }
         }
       }
     });
@@ -677,7 +795,17 @@ export const getTarefasPorObra = async (req: Request, res: Response): Promise<vo
       where: { obraId },
       include: {
         registrosAtividade: {
-          orderBy: { dataRegistro: 'desc' }
+          orderBy: { dataRegistro: 'desc' },
+          include: {
+            usuario: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true
+              }
+            }
+          }
         }
       },
       orderBy: { dataPrevista: 'asc' }
@@ -686,8 +814,8 @@ export const getTarefasPorObra = async (req: Request, res: Response): Promise<vo
     // Buscar informações dos eletricistas e equipes para cada tarefa
     const tarefasComNomes = await Promise.all(
       tarefas.map(async (tarefa) => {
-        let atribuidoNome = null;
-        let equipeNome = null;
+        let atribuidoNome: string | null = null;
+        let equipeNome: string | null = null;
         
         if (tarefa.atribuidoA) {
           const usuario = await prisma.user.findUnique({
@@ -739,7 +867,17 @@ export const getRegistrosAtividade = async (req: Request, res: Response): Promis
     
     const registros = await prisma.registroAtividade.findMany({
       where: { tarefaId },
-      orderBy: { dataRegistro: 'desc' }
+      orderBy: { dataRegistro: 'desc' },
+      include: {
+        usuario: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true
+          }
+        }
+      }
     });
     
     res.json({ 

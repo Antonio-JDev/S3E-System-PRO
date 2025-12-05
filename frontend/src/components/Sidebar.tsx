@@ -369,13 +369,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                 )}
 
                 {/* OPERACIONAL / PROJETOS */}
-                {filteredNavLinks.filter(link => ['Projetos', 'Obras', 'Tarefas da Obra', 'Gestão de Obras'].includes(link.name)).length > 0 && (
+                {filteredNavLinks.filter(link => ['Projetos', 'Obras', 'Tarefas da Obra', 'Ferramentas', 'Métricas de Equipe'].includes(link.name)).length > 0 && (
                     <div className="mb-6">
                         {!isCollapsed && (
                             <span className="block px-3 py-1.5 mb-2 text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 rounded-lg">Operacional</span>
                         )}
                         <ul className="space-y-1">
-                            {filteredNavLinks.filter(link => ['Projetos', 'Obras', 'Tarefas da Obra', 'Gestão de Obras'].includes(link.name)).map((link) => (
+                            {filteredNavLinks.filter(link => ['Projetos', 'Obras', 'Tarefas da Obra', 'Ferramentas', 'Métricas de Equipe'].includes(link.name)).map((link) => (
                             <li key={link.name}>
                                 <a
                                     href="#"

@@ -26,9 +26,11 @@ model User {
 
   // Relacionamentos
   pdfTemplates        PDFTemplate[]
-  projetosResponsavel Projeto[]      @relation("ProjetoResponsavel")
+  projetosResponsavel Projeto[]           @relation("ProjetoResponsavel")
   auditLogs           AuditLog[]
-  alocacoes           AlocacaoObra[] @relation("AlocacaoEletricista")
+  alocacoes           AlocacaoObra[]      @relation("AlocacaoEletricista")
+  registrosAtividade  RegistroAtividade[] @relation("RegistrosAtividade")
+  kitsFerramentas     KitFerramenta[]     @relation("KitEletricista")
 
   @@map("users")
 }
@@ -840,6 +842,7 @@ model TarefaObra {
 model RegistroAtividade {
   id                 String   @id @default(uuid())
   tarefaId           String
+  usuarioId          String // ID do usuário que fez o registro
   dataRegistro       DateTime @default(now())
   descricaoAtividade String // O que foi feito (resumo do dia)
   horasTrabalhadas   Float    @default(0)
@@ -847,8 +850,10 @@ model RegistroAtividade {
   imagens            String[] @default([]) // URLs das imagens enviadas
   createdAt          DateTime @default(now())
 
-  tarefa TarefaObra @relation(fields: [tarefaId], references: [id], onDelete: Cascade)
+  tarefa  TarefaObra @relation(fields: [tarefaId], references: [id], onDelete: Cascade)
+  usuario User       @relation("RegistrosAtividade", fields: [usuarioId], references: [id], onDelete: Cascade)
 
+  @@index([usuarioId])
   @@map("registros_atividade")
 }
 
@@ -999,4 +1004,71 @@ model HistoryLog {
   @@index([module, timestamp])
   @@index([userId, timestamp])
   @@map("history_logs")
+}
+
+// ============================================
+// GESTÃO DE FERRAMENTAS E KITS
+// ============================================
+
+// Ferramentas individuais
+model Ferramenta {
+  id          String   @id @default(uuid())
+  nome        String
+  codigo      String   @unique // Código de identificação
+  categoria   String // Alicate, Chave, Multímetro, Furadeira, etc
+  marca       String?
+  modelo      String?
+  descricao   String?
+  valorCompra Float?
+  imagemUrl   String? // URL da foto da ferramenta
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  itensKit KitFerramentaItem[]
+
+  @@map("ferramentas")
+}
+
+// Kits de Ferramentas para Eletricistas
+model KitFerramenta {
+  id              String   @id @default(uuid())
+  nome            String // Ex: "Kit Eletricista Júnior", "Kit Completo"
+  descricao       String?
+  eletricistaId   String // ID do usuário eletricista (User)
+  eletricistaNome String // Nome do eletricista (desnormalizado)
+  dataEntrega     DateTime // Data de entrega do kit
+  imagemUrl       String? // Foto do kit completo/termo de responsabilidade
+  assinatura      String? // Assinatura digital do eletricista
+  observacoes     String?
+  ativo           Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  itens KitFerramentaItem[]
+
+  // Relação com usuário eletricista
+  eletricista User @relation("KitEletricista", fields: [eletricistaId], references: [id])
+
+  @@index([eletricistaId])
+  @@map("kits_ferramenta")
+}
+
+// Itens dentro de cada Kit
+model KitFerramentaItem {
+  id            String   @id @default(uuid())
+  kitId         String
+  ferramentaId  String
+  quantidade    Int      @default(1)
+  estadoEntrega String   @default("Novo") // Novo, Bom, Regular, Desgastado
+  observacoes   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  kit        KitFerramenta @relation(fields: [kitId], references: [id], onDelete: Cascade)
+  ferramenta Ferramenta    @relation(fields: [ferramentaId], references: [id])
+
+  @@index([kitId])
+  @@index([ferramentaId])
+  @@map("kit_ferramenta_itens")
 }

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
 import { hasPermission } from '../utils/permissions';
 import { obrasService } from '../services/obrasService';
+import { getUploadUrl } from '../config/api';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -80,12 +81,19 @@ interface TarefaObra {
 interface RegistroAtividade {
     id: string;
     tarefaId: string;
+    usuarioId?: string;
     dataRegistro: string;
     descricaoAtividade: string;
     horasTrabalhadas: number;
     observacoes: string | null;
     imagens: string[];
     createdAt: string;
+    usuario?: {
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+    };
 }
 
 interface TarefasObraProps {
@@ -107,6 +115,9 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
     const [salvando, setSalvando] = useState(false);
     const [iniciandoExecucao, setIniciandoExecucao] = useState<string | null>(null); // ID da obra sendo iniciada
     const [tarefaHistorico, setTarefaHistorico] = useState<TarefaObra | null>(null); // Tarefa para visualizar histórico
+    const [modalDiagnostico, setModalDiagnostico] = useState(false);
+    const [diagnostico, setDiagnostico] = useState<any>(null);
+    const [loadingDiagnostico, setLoadingDiagnostico] = useState(false);
 
     // Verificar permissão - Desenvolvedor tem acesso universal a todas as páginas
     const userRole = user?.role?.toLowerCase();
@@ -133,6 +144,26 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
             setTarefas([]);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const executarDiagnostico = async () => {
+        try {
+            setLoadingDiagnostico(true);
+            const response = await axiosApiService.get('/api/diagnostico/tarefas-usuario');
+            
+            if (response.success && response.data) {
+                setDiagnostico(response.data.diagnostico);
+                setModalDiagnostico(true);
+                toast.success('✅ Diagnóstico concluído!');
+            } else {
+                toast.error('Erro ao executar diagnóstico');
+            }
+        } catch (error) {
+            console.error('Erro ao executar diagnóstico:', error);
+            toast.error('Erro ao executar diagnóstico');
+        } finally {
+            setLoadingDiagnostico(false);
         }
     };
 
@@ -309,6 +340,29 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
                         </p>
                     </div>
                 </div>
+                
+                {/* Botão de Diagnóstico (apenas para desenvolvedor) */}
+                {userRole === 'desenvolvedor' && (
+                    <button
+                        onClick={executarDiagnostico}
+                        disabled={loadingDiagnostico}
+                        className="px-4 py-2 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl hover:from-red-700 hover:to-red-600 transition-all shadow-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                        {loadingDiagnostico ? (
+                            <>
+                                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Diagnosticando...
+                            </>
+                        ) : (
+                            <>
+                                🔍 Diagnosticar Tarefas
+                            </>
+                        )}
+                    </button>
+                )}
             </header>
 
             {/* Lista de Tarefas */}
@@ -720,13 +774,13 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
                                             <div key={registro.id} className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-xl p-5 shadow-soft">
                                                 {/* Header do Registro */}
                                                 <div className="flex items-start justify-between mb-3 pb-3 border-b border-gray-200 dark:border-dark-border">
-                                                    <div>
+                                                    <div className="flex-1">
                                                         <div className="flex items-center gap-2 mb-1">
                                                             <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs font-bold rounded">
                                                                 Registro #{tarefaHistorico.registrosAtividade!.length - index}
                                                             </span>
                                                             <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                                {new Date(registro.dataRegistro).toLocaleDateString('pt-BR', {
+                                                                📅 {new Date(registro.dataRegistro).toLocaleDateString('pt-BR', {
                                                                     day: '2-digit',
                                                                     month: '2-digit',
                                                                     year: 'numeric',
@@ -735,6 +789,12 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
                                                                 })}
                                                             </span>
                                                         </div>
+                                                        {registro.usuario && (
+                                                            <div className="text-xs text-gray-600 dark:text-gray-400 mt-1 flex items-center gap-1">
+                                                                <span>👤</span>
+                                                                <span className="font-semibold">{registro.usuario.name}</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <div className="flex items-center gap-2">
                                                         <ClockIcon className="w-4 h-4 text-gray-400" />
@@ -769,16 +829,24 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
                                                             📷 Fotos ({registro.imagens.length})
                                                         </h4>
                                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                                            {registro.imagens.map((imagem, imgIndex) => (
-                                                                <div key={imgIndex} className="relative group">
-                                                                    <img
-                                                                        src={imagem}
-                                                                        alt={`Foto ${imgIndex + 1} do registro`}
-                                                                        className="w-full h-32 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80 transition-opacity"
-                                                                        onClick={() => window.open(imagem, '_blank')}
-                                                                    />
-                                                                </div>
-                                                            ))}
+                                                            {registro.imagens.map((imagem, imgIndex) => {
+                                                                const imagemUrl = getUploadUrl(imagem);
+                                                                return (
+                                                                    <div key={imgIndex} className="relative group">
+                                                                        <img
+                                                                            src={imagemUrl}
+                                                                            alt={`Foto ${imgIndex + 1} do registro`}
+                                                                            className="w-full h-32 object-cover rounded-lg border border-gray-200 dark:border-gray-700 cursor-pointer hover:opacity-80 transition-opacity"
+                                                                            onClick={() => window.open(imagemUrl, '_blank')}
+                                                                            onError={(e) => {
+                                                                                console.error('Erro ao carregar imagem:', imagemUrl);
+                                                                                const target = e.target as HTMLImageElement;
+                                                                                target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZW0gbsOjbyBlbmNvbnRyYWRhPC90ZXh0Pjwvc3ZnPg==';
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                );
+                                                            })}
                                                         </div>
                                                     </div>
                                                 )}
@@ -803,6 +871,172 @@ const TarefasObra: React.FC<TarefasObraProps> = ({ toggleSidebar }) => {
                             <button
                                 onClick={() => setTarefaHistorico(null)}
                                 className="btn-secondary"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Diagnóstico */}
+            {modalDiagnostico && diagnostico && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setModalDiagnostico(false)}>
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-red-600 to-red-500">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">🔍 Diagnóstico de Tarefas</h2>
+                                <p className="text-red-100 text-sm mt-1">Informações detalhadas sobre visibilidade de tarefas</p>
+                            </div>
+                            <button
+                                onClick={() => setModalDiagnostico(false)}
+                                className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            {/* Status Geral */}
+                            <div className={`p-4 rounded-xl border-2 ${
+                                diagnostico.problema.startsWith('✅') ? 'bg-green-50 border-green-200' :
+                                'bg-yellow-50 border-yellow-200'
+                            }`}>
+                                <h3 className="font-bold text-lg mb-2">Status:</h3>
+                                <p className="text-sm">{diagnostico.problema}</p>
+                            </div>
+
+                            {/* Dados do Usuário */}
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                <h3 className="font-bold text-lg mb-3 text-blue-900 dark:text-blue-300">👤 Usuário Logado</h3>
+                                <div className="grid grid-cols-2 gap-3 text-sm">
+                                    <div>
+                                        <p className="text-gray-600 dark:text-gray-400">Nome:</p>
+                                        <p className="font-semibold">{diagnostico.usuario.name}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 dark:text-gray-400">Email:</p>
+                                        <p className="font-semibold">{diagnostico.usuario.email}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 dark:text-gray-400">ID:</p>
+                                        <p className="font-mono text-xs">{diagnostico.usuario.id}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-gray-600 dark:text-gray-400">Role:</p>
+                                        <p className="font-semibold">{diagnostico.usuario.role}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Equipes do Usuário */}
+                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
+                                <h3 className="font-bold text-lg mb-3 text-green-900 dark:text-green-300">👥 Equipes do Usuário ({diagnostico.equipesDoUsuario.length})</h3>
+                                {diagnostico.equipesDoUsuario.length === 0 ? (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">❌ Usuário não está em nenhuma equipe ativa!</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {diagnostico.equipesDoUsuario.map((equipe: any) => (
+                                            <div key={equipe.id} className="bg-white dark:bg-dark-bg p-3 rounded-lg border border-green-200 dark:border-green-800">
+                                                <p className="font-semibold">{equipe.nome}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">ID: {equipe.id}</p>
+                                                <p className="text-xs mt-1">Membros ({equipe.membros.length}): {equipe.membros.join(', ')}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Todas as Equipes */}
+                            <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+                                <h3 className="font-bold text-lg mb-3 text-purple-900 dark:text-purple-300">🏢 Todas as Equipes ({diagnostico.todasEquipes.length})</h3>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {diagnostico.todasEquipes.map((equipe: any) => (
+                                        <div key={equipe.id} className={`p-3 rounded-lg border ${
+                                            equipe.usuarioNaEquipe 
+                                                ? 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700' 
+                                                : 'bg-white dark:bg-dark-bg border-purple-200 dark:border-purple-800'
+                                        }`}>
+                                            <div className="flex justify-between items-start">
+                                                <div className="flex-1">
+                                                    <p className="font-semibold">{equipe.nome} {equipe.usuarioNaEquipe && '✅'}</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                        Tipo: {equipe.tipo} | Ativa: {equipe.ativa ? '✅' : '❌'}
+                                                    </p>
+                                                    <p className="text-xs mt-1">Membros ({equipe.membros.length}): {equipe.membros.join(', ')}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Tarefas */}
+                            <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
+                                <h3 className="font-bold text-lg mb-3 text-orange-900 dark:text-orange-300">📋 Tarefas ({diagnostico.todasTarefas.length})</h3>
+                                <div className="space-y-2 max-h-80 overflow-y-auto">
+                                    {diagnostico.todasTarefas.map((tarefa: any) => (
+                                        <div key={tarefa.id} className={`p-3 rounded-lg border ${
+                                            tarefa.deveriaVer 
+                                                ? 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700' 
+                                                : 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
+                                        }`}>
+                                            <div className="flex justify-between items-start mb-2">
+                                                <p className="font-semibold flex-1">{tarefa.descricao}</p>
+                                                {tarefa.deveriaVer && <span className="text-xl">✅</span>}
+                                            </div>
+                                            <p className="text-xs text-gray-600 dark:text-gray-400">Obra: {tarefa.obra}</p>
+                                            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                                                <div>
+                                                    <span className="text-gray-500 dark:text-gray-400">Atribuído a:</span>
+                                                    <p className="font-mono">{tarefa.atribuidoA || 'Nenhum'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500 dark:text-gray-400">Equipe:</span>
+                                                    <p className="font-mono">{tarefa.equipeId || 'Nenhuma'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="mt-2 flex gap-2 text-xs">
+                                                <span className={`px-2 py-1 rounded ${tarefa.tarefaDireta ? 'bg-blue-200 text-blue-900' : 'bg-gray-200 text-gray-600'}`}>
+                                                    {tarefa.tarefaDireta ? '✅' : '❌'} Direta
+                                                </span>
+                                                <span className={`px-2 py-1 rounded ${tarefa.tarefaDeEquipe ? 'bg-purple-200 text-purple-900' : 'bg-gray-200 text-gray-600'}`}>
+                                                    {tarefa.tarefaDeEquipe ? '✅' : '❌'} Equipe
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Resumo */}
+                            <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-4">
+                                <h3 className="font-bold text-lg mb-3">📊 Resumo</h3>
+                                <div className="grid grid-cols-3 gap-4 text-center">
+                                    <div className="bg-white dark:bg-dark-bg p-3 rounded-lg">
+                                        <p className="text-2xl font-bold text-blue-600">{diagnostico.todasTarefas.length}</p>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400">Total de Tarefas</p>
+                                    </div>
+                                    <div className="bg-white dark:bg-dark-bg p-3 rounded-lg">
+                                        <p className="text-2xl font-bold text-green-600">{diagnostico.tarefasQueDeveriaVer}</p>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400">Deveria Ver</p>
+                                    </div>
+                                    <div className="bg-white dark:bg-dark-bg p-3 rounded-lg">
+                                        <p className="text-2xl font-bold text-purple-600">{diagnostico.tarefasRetornadasPelaQuery}</p>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400">Query Retorna</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="modal-footer">
+                            <button
+                                onClick={() => setModalDiagnostico(false)}
+                                className="btn-primary"
                             >
                                 Fechar
                             </button>

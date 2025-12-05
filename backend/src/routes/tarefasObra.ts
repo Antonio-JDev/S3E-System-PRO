@@ -33,10 +33,10 @@ router.get(
 );
 
 // POST /api/obras/tarefas/resumo - Salvar resumo do dia com fotos (eletricista ou desenvolvedor)
+// ✅ Qualquer usuário autenticado pode registrar atividades (especialmente eletricistas)
 router.post(
   '/tarefas/resumo',
-  authenticate,
-  checkPermission('view_tarefas_obra'),
+  authenticate, // Apenas precisa estar autenticado
   (req, res, next) => {
     uploadTarefaImages(req, res, (err) => {
       if (err) {
@@ -53,10 +53,10 @@ router.post(
 );
 
 // GET /api/obras/tarefas/:id - Buscar tarefa específica
+// ✅ Qualquer usuário autenticado pode visualizar detalhes da tarefa
 router.get(
   '/tarefas/:id',
   authenticate,
-  checkPermission('view_tarefas_obra', 'view_obras'),
   getTarefaById
 );
 
@@ -93,10 +93,10 @@ router.get(
 );
 
 // GET /api/obras/tarefas/registros/:tarefaId - Listar registros de atividade
+// ✅ Qualquer usuário autenticado pode visualizar registros
 router.get(
   '/tarefas/registros/:tarefaId',
   authenticate,
-  checkPermission('view_tarefas_obra', 'view_obras'),
   getRegistrosAtividade
 );
 

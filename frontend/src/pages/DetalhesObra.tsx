@@ -1042,7 +1042,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                   
                   {equipes.length === 0 && (
                     <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Nenhuma equipe disponível. Crie equipes na página de Gestão de Obras.
+                      Nenhuma equipe disponível. Crie equipes na página de Métricas de Equipe.
                     </p>
                   )}
                   

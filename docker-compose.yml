@@ -19,7 +19,7 @@ services:
     container_name: s3e-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-s3e_user}
+      POSTGRES_USER: ${DB_USER:-s3e_prod}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-s3e_password}
       POSTGRES_DB: ${DB_NAME:-s3e_db}
       POSTGRES_HOST_AUTH_METHOD: trust

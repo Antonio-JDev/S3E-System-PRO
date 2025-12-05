@@ -3,6 +3,7 @@ import {
   getClientes,
   getClienteById,
   createCliente,
+  createClienteRapido,
   updateCliente,
   deleteCliente,
   reativarCliente,
@@ -19,48 +20,7 @@ const router = Router();
 // Middleware de autenticação para todas as rotas
 router.use(authenticate);
 
-/**
- * @route GET /api/clientes
- * @desc Listar todos os clientes com filtros opcionais
- * @query ?ativo=true&busca=nome
- * @access Private
- */
-router.get('/', getClientes);
-
-/**
- * @route GET /api/clientes/:id
- * @desc Buscar cliente específico com relacionamentos
- * @access Private
- */
-router.get('/:id', getClienteById);
-
-/**
- * @route POST /api/clientes
- * @desc Criar novo cliente
- * @access Private
- */
-router.post('/', createCliente);
-
-/**
- * @route PUT /api/clientes/:id
- * @desc Atualizar dados do cliente
- * @access Private
- */
-router.put('/:id', updateCliente);
-
-/**
- * @route PUT /api/clientes/:id/reativar
- * @desc Reativar cliente inativo
- * @access Private
- */
-router.put('/:id/reativar', reativarCliente);
-
-/**
- * @route DELETE /api/clientes/:id
- * @desc Desativar cliente (soft delete)
- * @access Private
- */
-router.delete('/:id', deleteCliente);
+// ==================== ROTAS ESPECÍFICAS (DEVEM VIR PRIMEIRO) ====================
 
 /**
  * @route GET /api/clientes/template/download
@@ -77,6 +37,13 @@ router.get('/template/download', exportarTemplate);
 router.get('/export/all', exportarClientes);
 
 /**
+ * @route POST /api/clientes/rapido
+ * @desc Criar cliente rápido (apenas nome e tipo)
+ * @access Private
+ */
+router.post('/rapido', createClienteRapido);
+
+/**
  * @route POST /api/clientes/import/preview
  * @desc Preview de importação (validação)
  * @access Private
@@ -89,5 +56,52 @@ router.post('/import/preview', uploadJSON.single('file'), previewImportacao);
  * @access Private
  */
 router.post('/import', uploadJSON.single('file'), importarClientes);
+
+// ==================== ROTAS GENÉRICAS ====================
+
+/**
+ * @route GET /api/clientes
+ * @desc Listar todos os clientes com filtros opcionais
+ * @query ?ativo=true&busca=nome
+ * @access Private
+ */
+router.get('/', getClientes);
+
+/**
+ * @route POST /api/clientes
+ * @desc Criar novo cliente
+ * @access Private
+ */
+router.post('/', createCliente);
+
+// ==================== ROTAS COM PARÂMETROS (DEVEM VIR POR ÚLTIMO) ====================
+
+/**
+ * @route PUT /api/clientes/:id/reativar
+ * @desc Reativar cliente inativo
+ * @access Private
+ */
+router.put('/:id/reativar', reativarCliente);
+
+/**
+ * @route GET /api/clientes/:id
+ * @desc Buscar cliente específico com relacionamentos
+ * @access Private
+ */
+router.get('/:id', getClienteById);
+
+/**
+ * @route PUT /api/clientes/:id
+ * @desc Atualizar dados do cliente
+ * @access Private
+ */
+router.put('/:id', updateCliente);
+
+/**
+ * @route DELETE /api/clientes/:id
+ * @desc Desativar cliente (soft delete)
+ * @access Private
+ */
+router.delete('/:id', deleteCliente);
 
 export default router;

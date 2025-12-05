@@ -11,6 +11,22 @@ async function main() {
   const devPassword = await bcrypt.hash('134679@Aj', 10);
   const eletricistaPassword = await bcrypt.hash('eletricista123', 10);
 
+  // Deletar kits de ferramentas primeiro (para evitar violação de foreign key)
+  await prisma.kitFerramenta.deleteMany({
+    where: {
+      eletricista: {
+        email: {
+          in: [
+            'financeiro@s3eengenharia.com.br',
+            'antoniojrtech@gmail.com',
+            'eletricista1@s3e.com',
+            'eletricista2@s3e.com'
+          ]
+        }
+      }
+    }
+  });
+
   // Deletar usuários existentes se houver
   await prisma.user.deleteMany({
     where: { 

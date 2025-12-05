@@ -353,7 +353,7 @@ const GerenciamentoObras: React.FC<GerenciamentoObrasProps> = ({ toggleSidebar }
               </button>
               
               <div>
-                <h1 className="text-2xl font-bold text-brand-gray-900">Gestão de Obras</h1>
+                <h1 className="text-2xl font-bold text-brand-gray-900">Métricas de Equipe</h1>
                 <p className="text-sm text-brand-gray-600">
                   {visualizacao === 'calendario' ? 'Calendário de Alocação de Equipes' : 
                    visualizacao === 'gantt' ? 'Gantt Chart - Cronograma de Projetos' : 

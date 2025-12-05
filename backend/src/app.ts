@@ -46,6 +46,9 @@ import planosRoutes from './routes/planos.routes';
 import despesasFixasRoutes from './routes/despesasFixas.routes';
 import logsRoutes from './routes/logs';
 import tarefasObraRoutes from './routes/tarefasObra';
+import diagnosticoRoutes from './routes/diagnostico';
+import ferramentasRoutes from './routes/ferramentas.routes';
+import kitsFerramentaRoutes from './routes/kits-ferramenta.routes';
 import { healthCheck } from './controllers/logsController';
 
 const app = express();
@@ -156,7 +159,7 @@ app.get('/api/configuracoes/public/logo-login', async (req, res) => {
 
 // Servir arquivos estáticos (uploads) com CORS habilitado
 // Em produção (Docker), process.cwd() será /app e o volume está mapeado em /app/uploads
-// Em desenvolvimento local, usamos backend/uploads
+// Em desenvolvimento local, usamos apenas uploads (não backend/uploads)
 const cwd = process.cwd();
 let uploadsPath: string;
 
@@ -164,18 +167,12 @@ if (cwd.endsWith('backend')) {
   // Ambiente de desenvolvimento: backend/ é o CWD
   uploadsPath = path.join(cwd, 'uploads');
 } else {
-  // Ambiente Docker/raiz do monorepo: garantir o uso de /app/uploads (volume) ou backend/uploads
-  const dockerUploads = path.join(cwd, 'uploads');
-  const localBackendUploads = path.join(cwd, 'backend', 'uploads');
+  // Ambiente Docker: usar /app/uploads (volume mapeado)
+  uploadsPath = path.join(cwd, 'uploads');
+}
 
-  if (fs.existsSync(dockerUploads)) {
-    uploadsPath = dockerUploads;
-  } else if (fs.existsSync(localBackendUploads)) {
-    uploadsPath = localBackendUploads;
-  } else {
-    uploadsPath = dockerUploads;
-    fs.mkdirSync(uploadsPath, { recursive: true });
-  }
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true });
 }
 
 console.log('📁 Servindo uploads de:', uploadsPath);
@@ -310,6 +307,9 @@ app.use('/api/gastos-veiculo', gastosVeiculoRoutes);
 app.use('/api/planos', planosRoutes);
 app.use('/api/despesas-fixas', despesasFixasRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/diagnostico', diagnosticoRoutes);
+app.use('/api/ferramentas', ferramentasRoutes);
+app.use('/api/kits-ferramenta', kitsFerramentaRoutes);
 
 // Error handling middleware
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

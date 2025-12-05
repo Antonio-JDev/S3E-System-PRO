@@ -178,9 +178,62 @@ export interface OrcamentoPDFData {
     };
 }
 
+// Dados do kit de ferramentas para geração de PDF
+export interface KitFerramentasPDFData {
+    // Informações básicas
+    numero: string;
+    data: string;
+    
+    // Kit
+    kit: {
+        nome: string;
+        descricao?: string;
+        observacoes?: string;
+    };
+    
+    // Eletricista
+    eletricista: {
+        nome: string;
+        email?: string;
+    };
+    
+    // Ferramentas
+    ferramentas: {
+        codigo: string;
+        nome: string;
+        categoria: string;
+        marca?: string;
+        modelo?: string;
+        quantidade: number;
+        estadoEntrega: string;
+        observacoes?: string;
+    }[];
+    
+    // Data de entrega
+    dataEntrega: string;
+    
+    // Empresa
+    empresa?: {
+        nome: string;
+        cnpj: string;
+        endereco: string;
+        telefone: string;
+        email: string;
+        logo?: string;
+    };
+}
+
 // Request para geração de PDF
 export interface GeneratePDFRequest {
     orcamentoData: OrcamentoPDFData;
+    customization: PDFCustomization;
+    saveAsTemplate?: boolean;
+    templateName?: string;
+}
+
+// Request para geração de PDF de Kit
+export interface GenerateKitPDFRequest {
+    kitData: KitFerramentasPDFData;
     customization: PDFCustomization;
     saveAsTemplate?: boolean;
     templateName?: string;

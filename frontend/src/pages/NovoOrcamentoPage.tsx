@@ -15,6 +15,8 @@ import UnitSelector from '../components/UnitSelector';
 import UnitDisplay from '../components/UnitDisplay';
 import { identificarTipoMaterial } from '../utils/unitConverter';
 import { getUploadUrl } from '../config/api';
+import ClienteCombobox from '../components/ui/ClienteCombobox';
+import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
@@ -243,6 +245,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         tipo: 'MATERIAL' as const
     });
 
+    // Estados para cliente rápido
+    const [showClienteRapidoModal, setShowClienteRapidoModal] = useState(false);
+    const [criandoClienteRapido, setCriandoClienteRapido] = useState(false);
+
 
     // Funções para gerenciar rascunho
     const getRascunhoKey = () => {
@@ -343,6 +349,50 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             }
         }
     }, [userId]);
+
+    // Carregar dados de orçamento copiado (se houver)
+    useEffect(() => {
+        try {
+            const orcamentoCopiaStr = localStorage.getItem('orcamentoCopia');
+            if (orcamentoCopiaStr) {
+                const orcamentoCopia = JSON.parse(orcamentoCopiaStr);
+                
+                // Preencher formState (exceto clienteId)
+                setFormState(prev => ({
+                    ...prev,
+                    empresaCNPJ: orcamentoCopia.empresaCNPJ || prev.empresaCNPJ,
+                    titulo: orcamentoCopia.titulo || '',
+                    descricao: orcamentoCopia.descricao || '',
+                    descricaoProjeto: orcamentoCopia.descricaoProjeto || '',
+                    validade: orcamentoCopia.validade || prev.validade,
+                    endereco: orcamentoCopia.endereco || '',
+                    bairro: orcamentoCopia.bairro || '',
+                    cidade: orcamentoCopia.cidade || '',
+                    cep: orcamentoCopia.cep || '',
+                    responsavelObra: orcamentoCopia.responsavelObra || '',
+                    bdi: orcamentoCopia.bdi || prev.bdi,
+                    previsaoInicio: orcamentoCopia.previsaoInicio || '',
+                    previsaoTermino: orcamentoCopia.previsaoTermino || '',
+                    condicaoPagamento: orcamentoCopia.condicaoPagamento || prev.condicaoPagamento
+                }));
+
+                // Preencher itens
+                if (orcamentoCopia.items && Array.isArray(orcamentoCopia.items)) {
+                    setItems(orcamentoCopia.items);
+                }
+
+                // Limpar localStorage
+                localStorage.removeItem('orcamentoCopia');
+
+                // Toast informativo
+                toast.info('Orçamento copiado', {
+                    description: 'Selecione um cliente para continuar'
+                });
+            }
+        } catch (error) {
+            console.error('Erro ao carregar orçamento copiado:', error);
+        }
+    }, []);
 
     // Salvar rascunho automaticamente ao sair da página
     useEffect(() => {
@@ -1047,6 +1097,44 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         });
     };
 
+    // Criar cliente rápido
+    const handleCreateClienteRapido = async (nome: string, tipo: 'PF' | 'PJ') => {
+        try {
+            setCriandoClienteRapido(true);
+            
+            const response = await clientesService.criarClienteRapido(nome, tipo);
+            
+            if (response.success && response.data) {
+                // Atualizar lista de clientes
+                const clientesRes = await clientesService.listar();
+                if (clientesRes.success && clientesRes.data) {
+                    setClientes(clientesRes.data);
+                }
+
+                // Selecionar novo cliente automaticamente
+                setFormState(prev => ({ ...prev, clienteId: response.data!.id }));
+                
+                // Fechar modal
+                setShowClienteRapidoModal(false);
+                
+                toast.success('Cliente criado com sucesso', {
+                    description: `${nome} foi adicionado e selecionado`
+                });
+            } else {
+                toast.error('Erro ao criar cliente', {
+                    description: response.error || 'Não foi possível criar o cliente'
+                });
+            }
+        } catch (error) {
+            console.error('Erro ao criar cliente rápido:', error);
+            toast.error('Erro ao criar cliente', {
+                description: 'Ocorreu um erro ao tentar criar o cliente'
+            });
+        } finally {
+            setCriandoClienteRapido(false);
+        }
+    };
+
     // Salvar orçamento
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1284,26 +1372,21 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                Cliente
+                                Cliente *
                             </label>
-                            <select
+                            <ClienteCombobox
+                                clientes={clientes}
                                 value={formState.clienteId}
-                                onChange={(e) => {
-                                    setFormState(prev => ({ ...prev, clienteId: e.target.value }));
+                                onChange={(clienteId) => {
+                                    setFormState(prev => ({ ...prev, clienteId }));
                                     // Limpar estado de endereço quando mudar cliente
                                     if (usandoEnderecoCliente) {
                                         setUsandoEnderecoCliente(false);
                                     }
                                 }}
-                                className="select-field"
-                            >
-                                <option value="">Selecione um cliente</option>
-                                {clientes.map(cliente => (
-                                    <option key={cliente.id} value={cliente.id}>
-                                        {cliente.nome} - {cliente.cpfCnpj}
-                                    </option>
-                                ))}
-                            </select>
+                                onCreateNew={() => setShowClienteRapidoModal(true)}
+                                required
+                            />
                         </div>
 
                         <div>
@@ -1564,8 +1647,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     <span className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.unidadeMedida}</span>
                                                     {/* Badge de Banco Frio */}
                                                     {(item.tipo === 'COTACAO' || (item as any).cotacao || (item as any).cotacaoId) && (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium">
-                                                            <span>📦</span>
+                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium">
+                                                            <span>Banco Frio</span>
                                                             {(() => {
                                                                 const dataStr = (item as any).cotacao?.dataAtualizacao || 
                                                                               item.dataAtualizacaoCotacao || 
@@ -1574,7 +1657,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                 if (dataStr) {
                                                                     const data = new Date(dataStr);
                                                                     if (!isNaN(data.getTime())) {
-                                                                        return <span>{data.toLocaleDateString('pt-BR')}</span>;
+                                                                        return <span>• {data.toLocaleDateString('pt-BR')}</span>;
                                                                     }
                                                                 }
                                                                 return null;
@@ -2117,7 +2200,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                 >
                                                                     <div className="flex items-center gap-2 mb-1">
                                                                         <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                            📦 Banco Frio
+                                                                            Banco Frio
                                                                         </span>
                                                                     </div>
                                                                     <div className="flex justify-between items-start gap-3">
@@ -2434,7 +2517,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                 >
                                                                     <div className="flex items-center gap-2 mb-1">
                                                                         <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                            📦 Banco Frio
+                                                                            Banco Frio
                                                                         </span>
                                                                     </div>
                                                                     <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
@@ -3143,6 +3226,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             )}
 
         </div>
+
+        {/* Modal de Criar Cliente Rápido */}
+        <CriarClienteRapidoModal
+            isOpen={showClienteRapidoModal}
+            onClose={() => setShowClienteRapidoModal(false)}
+            onSubmit={handleCreateClienteRapido}
+            loading={criandoClienteRapido}
+        />
 
         </>
     );

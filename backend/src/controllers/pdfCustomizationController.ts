@@ -12,9 +12,7 @@ const prisma = new PrismaClient();
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const cwd = process.cwd();
-        const uploadDir = cwd.endsWith('backend')
-            ? path.join(cwd, 'uploads', 'pdf-customization')
-            : path.join(cwd, 'backend', 'uploads', 'pdf-customization');
+        const uploadDir = path.join(cwd, 'uploads', 'pdf-customization');
         
         if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });

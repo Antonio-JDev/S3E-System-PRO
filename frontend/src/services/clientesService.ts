@@ -51,7 +51,7 @@ class ClientesService {
       
       if (response.success && response.data) {
         // Verificar se os dados estão em response.data.data ou diretamente em response.data
-        const clientesData = Array.isArray(response.data) ? response.data : response.data.data || [];
+        const clientesData = Array.isArray(response.data) ? response.data : (response.data as any).data || [];
         console.log(`✅ ${clientesData.length} clientes carregados`);
         
         return {
@@ -144,6 +144,56 @@ class ClientesService {
       return {
         success: false,
         error: 'Erro de conexão ao criar cliente'
+      };
+    }
+  }
+
+  /**
+   * Cria um cliente rápido (apenas com nome e tipo)
+   */
+  async criarClienteRapido(nome: string, tipo: 'PF' | 'PJ') {
+    try {
+      console.log('⚡ Criando cliente rápido...', { nome, tipo });
+      
+      // Validações básicas antes de enviar
+      if (!nome || nome.trim().length < 3) {
+        return {
+          success: false,
+          error: 'Nome deve ter pelo menos 3 caracteres'
+        };
+      }
+
+      if (!['PF', 'PJ'].includes(tipo)) {
+        return {
+          success: false,
+          error: 'Tipo deve ser PF ou PJ'
+        };
+      }
+
+      const response = await axiosApiService.post<Cliente>(`${ENDPOINTS.CLIENTES}/rapido`, {
+        nome: nome.trim(),
+        tipo
+      });
+      
+      if (response.success && response.data) {
+        console.log('✅ Cliente rápido criado com sucesso:', response.data);
+        return {
+          success: true,
+          data: response.data,
+          message: 'Cliente criado com sucesso'
+        };
+      } else {
+        console.warn('⚠️ Erro ao criar cliente rápido:', response);
+        return {
+          success: false,
+          error: response.error || 'Erro ao criar cliente rápido'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao criar cliente rápido:', error);
+      return {
+        success: false,
+        error: 'Erro de conexão ao criar cliente rápido'
       };
     }
   }
@@ -265,7 +315,7 @@ class ClientesService {
       
       return {
         success: response.success,
-        available: response.data?.available || false,
+        available: (response.data as any)?.available || false,
         message: response.message || response.error
       };
     } catch (error) {

@@ -347,6 +347,15 @@ export class ObraController {
     try {
       const { id } = req.params;
       const { descricaoAtividade, horasTrabalhadas, observacoes } = req.body;
+      const userId = (req as any).user?.userId;
+
+      if (!userId) {
+        res.status(401).json({ 
+          success: false, 
+          message: 'Usuário não autenticado' 
+        });
+        return;
+      }
 
       if (!descricaoAtividade || horasTrabalhadas === undefined) {
         res.status(400).json({ 
@@ -357,6 +366,7 @@ export class ObraController {
       }
 
       const registro = await obraService.addRegistroAtividade(id, {
+        usuarioId: userId,
         descricaoAtividade,
         horasTrabalhadas: parseFloat(horasTrabalhadas),
         observacoes

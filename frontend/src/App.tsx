@@ -14,8 +14,9 @@ import NovaCompraPage from './pages/NovaCompraPage';
 import DetalhesObra from './pages/DetalhesObra';
 import EditarOrcamentoPage from './pages/EditarOrcamentoPage';
 // import SettingsModal from './components/SettingsModal'; // DESCONTINUADO - Substituído por página Configuracoes.tsx
-import GanttChartPage from './components/GestaoObras';
+import MetricasEquipe from './components/MetricasEquipe';
 import TarefasObra from './components/TarefasObra';
+import Ferramentas from './components/Ferramentas';
 import GerenciamentoEmpresarial from './components/GerenciamentoEmpresarial';
 import { type Project } from './types';
 import { Toaster } from './components/ui/sonner';
@@ -49,6 +50,7 @@ const Configuracoes = lazy(() => import('./components/Configuracoes'));
 const AtualizacaoPrecos = lazy(() => import('./components/AtualizacaoPrecos'));
 const Vendas = lazy(() => import('./components/Vendas'));
 const Cotacoes = lazy(() => import('./components/Cotacoes'));
+const GerenciamentoFerramentas = lazy(() => import('./components/GerenciamentoFerramentas'));
 
 const MainApp: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -105,7 +107,7 @@ const MainApp: React.FC = () => {
   const renderActiveView = () => {
     switch (activeView) {
       case 'Dashboard':
-        return <Dashboard toggleSidebar={toggleSidebar} onNavigate={handleNavigate} projects={projects} />;
+        return <Dashboard toggleSidebar={toggleSidebar} onNavigate={handleNavigate} />;
       case 'Orçamentos':
         return <Orcamentos toggleSidebar={toggleSidebar} />;
       case 'Catálogo':
@@ -136,7 +138,7 @@ const MainApp: React.FC = () => {
                  onViewObra={handleViewObra}
                />;
       case 'Obras':
-        return <ObrasKanban toggleSidebar={toggleSidebar} onNavigate={(view, ...args) => {
+        return <ObrasKanban toggleSidebar={toggleSidebar} onNavigate={(view: string, ...args: any[]) => {
           if (view === 'DetalhesObra' && args[0]) {
             handleViewObra(args[0]);
           } else {
@@ -151,8 +153,8 @@ const MainApp: React.FC = () => {
         );
       case 'Tarefas da Obra':
         return <TarefasObra toggleSidebar={toggleSidebar} />;
-      case 'Gestão de Obras':
-        return <GanttChartPage toggleSidebar={toggleSidebar} />;
+      case 'Métricas de Equipe':
+        return <MetricasEquipe toggleSidebar={toggleSidebar} />;
       case 'Financeiro':
         return <Financeiro toggleSidebar={toggleSidebar} />;
       case 'Vendas':
@@ -163,6 +165,8 @@ const MainApp: React.FC = () => {
         return <EmissaoNFe toggleSidebar={toggleSidebar} />;
       case 'Serviços':
         return <Servicos toggleSidebar={toggleSidebar} />;
+      case 'Ferramentas':
+        return <GerenciamentoFerramentas toggleSidebar={toggleSidebar} />;
       case 'Configurações':
         return <Configuracoes toggleSidebar={toggleSidebar} />;
       case 'Gerenciamento Empresarial':
@@ -227,7 +231,8 @@ const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: 
       'Projetos': '/',
       'Obras': '/',
       'Tarefas da Obra': '/',
-      'Gestão de Obras': '/',
+      'Ferramentas': '/',
+      'Métricas de Equipe': '/',
       'Financeiro': '/',
       'Vendas': '/',
       'Emissão NF-e': '/',

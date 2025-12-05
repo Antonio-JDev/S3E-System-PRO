@@ -16,6 +16,8 @@ import UnitSelector from '../components/UnitSelector';
 import UnitDisplay from '../components/UnitDisplay';
 import { identificarTipoMaterial } from '../utils/unitConverter';
 import { getUploadUrl } from '../config/api';
+import ClienteCombobox from '../components/ui/ClienteCombobox';
+import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
@@ -274,6 +276,10 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
         custoUnit: 0,
         tipo: 'MATERIAL' as const
     });
+
+    // Estados para cliente rápido
+    const [showClienteRapidoModal, setShowClienteRapidoModal] = useState(false);
+    const [criandoClienteRapido, setCriandoClienteRapido] = useState(false);
 
 
     // Funções para gerenciar rascunho
@@ -1318,6 +1324,82 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     };
 
     // Cancelar e voltar
+    // Criar cliente rápido
+    const handleCreateClienteRapido = async (nome: string, tipo: 'PF' | 'PJ') => {
+        try {
+            setCriandoClienteRapido(true);
+            
+            const response = await clientesService.criarClienteRapido(nome, tipo);
+            
+            if (response.success && response.data) {
+                // Atualizar lista de clientes
+                const clientesRes = await clientesService.listar();
+                if (clientesRes.success && clientesRes.data) {
+                    setClientes(clientesRes.data);
+                }
+
+                // Selecionar novo cliente automaticamente
+                setFormState(prev => ({ ...prev, clienteId: response.data!.id }));
+                
+                // Fechar modal
+                setShowClienteRapidoModal(false);
+                
+                toast.success('Cliente criado com sucesso', {
+                    description: `${nome} foi adicionado e selecionado`
+                });
+            } else {
+                toast.error('Erro ao criar cliente', {
+                    description: response.error || 'Não foi possível criar o cliente'
+                });
+            }
+        } catch (error) {
+            console.error('Erro ao criar cliente rápido:', error);
+            toast.error('Erro ao criar cliente', {
+                description: 'Ocorreu um erro ao tentar criar o cliente'
+            });
+        } finally {
+            setCriandoClienteRapido(false);
+        }
+    };
+
+    // Copiar orçamento
+    const handleCopiarOrcamento = () => {
+        if (!orcamentoCarregado) {
+            toast.error('Nenhum orçamento carregado');
+            return;
+        }
+
+        // Salvar dados do orçamento no localStorage (exceto cliente)
+        const orcamentoCopia = {
+            empresaCNPJ: formState.empresaCNPJ,
+            titulo: formState.titulo,
+            descricao: formState.descricao,
+            descricaoProjeto: formState.descricaoProjeto,
+            validade: formState.validade,
+            endereco: formState.enderecoObra,
+            bairro: formState.bairro,
+            cidade: formState.cidade,
+            cep: formState.cep,
+            responsavelObra: formState.responsavelObra,
+            bdi: formState.bdi,
+            previsaoInicio: formState.previsaoInicio,
+            previsaoTermino: formState.previsaoTermino,
+            condicaoPagamento: formState.condicaoPagamento,
+            items: items
+        };
+
+        localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
+        
+        toast.success('Orçamento copiado', {
+            description: 'Você será redirecionado para criar um novo orçamento'
+        });
+
+        // Redirecionar para novo orçamento
+        setTimeout(() => {
+            navigate('/orcamentos?aba=novo');
+        }, 500);
+    };
+
     const handleCancelar = () => {
         if (items.length > 0 || formState.titulo) {
             toast('Descartar alterações?', {
@@ -1493,6 +1575,17 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                         <ArrowLeftIcon className="w-5 h-5" />
                         Voltar
                     </button>
+                    <button
+                        onClick={handleCopiarOrcamento}
+                        type="button"
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 shadow-md"
+                        title="Copiar orçamento"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        Copiar Orçamento
+                    </button>
                     <div className="flex-1">
                         <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">
                             Editar Orçamento
@@ -1540,26 +1633,21 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
 
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                Cliente
+                                Cliente *
                             </label>
-                            <select
+                            <ClienteCombobox
+                                clientes={clientes}
                                 value={formState.clienteId}
-                                onChange={(e) => {
-                                    setFormState(prev => ({ ...prev, clienteId: e.target.value }));
+                                onChange={(clienteId) => {
+                                    setFormState(prev => ({ ...prev, clienteId }));
                                     // Limpar estado de endereço quando mudar cliente
                                     if (usandoEnderecoCliente) {
                                         setUsandoEnderecoCliente(false);
                                     }
                                 }}
-                                className="select-field"
-                            >
-                                <option value="">Selecione um cliente</option>
-                                {clientes.map(cliente => (
-                                    <option key={cliente.id} value={cliente.id}>
-                                        {cliente.nome} - {cliente.cpfCnpj}
-                                    </option>
-                                ))}
-                            </select>
+                                onCreateNew={() => setShowClienteRapidoModal(true)}
+                                required
+                            />
                         </div>
 
                         <div>
@@ -3396,6 +3484,15 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             )}
 
         </div>
+
+        {/* Modal de Criar Cliente Rápido */}
+        <CriarClienteRapidoModal
+            isOpen={showClienteRapidoModal}
+            onClose={() => setShowClienteRapidoModal(false)}
+            onSubmit={handleCreateClienteRapido}
+            loading={criandoClienteRapido}
+        />
+
     </>
     );
 }
