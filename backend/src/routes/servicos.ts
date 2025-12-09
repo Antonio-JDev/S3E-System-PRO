@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ServicosController } from '../controllers/servicosController';
-import { authenticate, authorize } from '../middlewares/auth';
+import { authenticate } from '../middlewares/auth';
+import { checkPermission, checkDeletePermission } from '../middlewares/rbac';
 
 const router = Router();
 
@@ -24,30 +25,30 @@ router.get('/:id', ServicosController.buscarServico);
 /**
  * @route POST /api/servicos
  * @desc Cria um novo serviço
- * @access Admin/Gerente only
+ * @access RBAC: create_servico (admin, gerente, engenheiro, comprador)
  */
-router.post('/', authorize('admin', 'gerente'), ServicosController.criarServico);
+router.post('/', checkPermission('create_servico'), ServicosController.criarServico);
 
 /**
  * @route PUT /api/servicos/:id
  * @desc Atualiza um serviço
- * @access Admin/Gerente only
+ * @access RBAC: update_servico (admin, gerente, engenheiro, comprador)
  */
-router.put('/:id', authorize('admin', 'gerente'), ServicosController.atualizarServico);
+router.put('/:id', checkPermission('update_servico'), ServicosController.atualizarServico);
 
 /**
  * @route DELETE /api/servicos/:id
  * @desc Desativa um serviço (soft delete)
- * @access Admin only
+ * @access RBAC: checkDeletePermission (admin, gerente podem deletar permanentemente; engenheiro, comprador podem desativar)
  */
-router.delete('/:id', authorize('admin'), ServicosController.desativarServico);
+router.delete('/:id', checkDeletePermission('servico'), ServicosController.desativarServico);
 
 /**
  * @route POST /api/servicos/import/json
  * @desc Importa serviços em lote via JSON
- * @access Admin/Gerente only
+ * @access RBAC: create_servico (admin, gerente, engenheiro, comprador)
  */
-router.post('/import/json', authorize('admin', 'gerente'), ServicosController.importarServicos);
+router.post('/import/json', checkPermission('create_servico'), ServicosController.importarServicos);
 
 /**
  * @route GET /api/servicos/export/json

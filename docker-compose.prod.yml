@@ -37,7 +37,7 @@ services:
 
   # Backend API - PRODUÇÃO
   backend:
-    image: odev10antonio/s3e-backend:1.0.5
+    image: odev10antonio/s3e-backend:1.0.6
     container_name: s3e-backend-prod
     restart: unless-stopped
     environment:
@@ -77,7 +77,7 @@ services:
 
   # Frontend React App - PRODUÇÃO
   frontend:
-    image: odev10antonio/s3e-frontend:1.0.5
+    image: odev10antonio/s3e-frontend:1.0.6
     container_name: s3e-frontend-prod
     restart: unless-stopped
     ports:

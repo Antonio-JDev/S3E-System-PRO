@@ -12,6 +12,7 @@ import {
 } from '../controllers/orcamentosController';
 import { PDFOrcamentoController } from '../controllers/pdfOrcamentoController';
 import { authenticate } from '../middlewares/auth';
+import { checkPermission, checkDeletePermission } from '../middlewares/rbac';
 
 const router = Router();
 
@@ -27,12 +28,27 @@ router.get('/:id/pdf/preview', PDFOrcamentoController.gerarPreview);
 router.get('/proximo-numero', getProximoNumeroOrcamento);
 router.get('/', getOrcamentos);
 router.get('/:id', getOrcamentoById);
-router.post('/', createOrcamento);
-router.put('/:id', updateOrcamento);
-router.patch('/:id/status', updateOrcamentoStatus);
-router.post('/:id/aprovar', aprovarOrcamento);
-router.post('/:id/recusar', recusarOrcamento);
-router.delete('/:id', deleteOrcamento);
+/**
+ * @route POST /api/orcamentos
+ * @desc Cria um novo orçamento
+ * @access RBAC: create_orcamento (admin, gerente, engenheiro, comprador)
+ */
+router.post('/', checkPermission('create_orcamento'), createOrcamento);
+/**
+ * @route PUT /api/orcamentos/:id
+ * @desc Atualiza um orçamento
+ * @access RBAC: update_orcamento (admin, gerente, engenheiro, comprador)
+ */
+router.put('/:id', checkPermission('update_orcamento'), updateOrcamento);
+router.patch('/:id/status', checkPermission('update_orcamento'), updateOrcamentoStatus);
+router.post('/:id/aprovar', checkPermission('update_orcamento'), aprovarOrcamento);
+router.post('/:id/recusar', checkPermission('update_orcamento'), recusarOrcamento);
+/**
+ * @route DELETE /api/orcamentos/:id
+ * @desc Deleta um orçamento
+ * @access RBAC: checkDeletePermission (admin, gerente podem deletar permanentemente; engenheiro, comprador podem desativar)
+ */
+router.delete('/:id', checkDeletePermission('orcamento'), deleteOrcamento);
 
 export default router;
 

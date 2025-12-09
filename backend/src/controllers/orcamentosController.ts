@@ -124,84 +124,110 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
     const itemsData = [];
 
     for (const item of items) {
-      let custoUnit = item.custoUnit;
-      let precoVendaUnit = item.custoUnit; // Preço de venda unitário (valorVenda || preco)
+      let custoUnit = item.custoUnit || 0;
+      let precoUnit = 0;
       
-      // Se for material, buscar valorVenda se disponível
-      if (item.tipo === 'MATERIAL' && item.materialId) {
-        const material = await prisma.material.findUnique({
-          where: { id: item.materialId },
-          select: { preco: true, valorVenda: true }
-        });
+      // ✅ PRIORIDADE 1: Se o usuário editou o preço manualmente, usar o valor editado
+      if (item.precoUnitario !== undefined && item.precoUnitario !== null) {
+        // Usuário editou o valor - usar diretamente (já pode incluir BDI ou não, conforme editado)
+        precoUnit = item.precoUnitario;
+        console.log(`✅ Usando preço editado pelo usuário: R$ ${precoUnit.toFixed(2)} para item ${item.descricao || item.nome}`);
+      } else {
+        // ✅ PRIORIDADE 2: Se não foi editado, calcular baseado no estoque/cotações
+        let precoVendaUnit = item.custoUnit || 0; // Preço de venda unitário (valorVenda || preco)
         
-        if (material) {
-          // Usar valorVenda se disponível, senão usar preco (preço de compra)
-          precoVendaUnit = material.valorVenda || material.preco || 0;
-          custoUnit = material.preco || 0; // Custo sempre é o preço de compra
+        // Se for cotação (banco frio), buscar valor da cotação
+        if (item.tipo === 'COTACAO' && item.cotacaoId) {
+          const cotacao = await prisma.cotacao.findUnique({
+            where: { id: item.cotacaoId },
+            select: { valorUnitario: true, valorVenda: true }
+          });
+          
+          if (cotacao) {
+            // Usar valorVenda se disponível, senão usar valorUnitario
+            precoVendaUnit = cotacao.valorVenda || cotacao.valorUnitario || 0;
+            custoUnit = cotacao.valorUnitario || 0; // Custo é o valor unitário da cotação
+          }
         }
-      }
-      
-      // Se for kit, calcular custo baseado nos materiais
-      if (item.tipo === 'KIT' && item.kitId) {
-        const kit = await prisma.kit.findUnique({
-          where: { id: item.kitId },
-          include: {
-            items: {
-              include: { 
-                material: {
-                  select: { preco: true, valorVenda: true }
+        // Se for material, buscar valorVenda se disponível
+        else if (item.tipo === 'MATERIAL' && item.materialId) {
+          const material = await prisma.material.findUnique({
+            where: { id: item.materialId },
+            select: { preco: true, valorVenda: true }
+          });
+          
+          if (material) {
+            // Usar valorVenda se disponível, senão usar preco (preço de compra)
+            precoVendaUnit = material.valorVenda || material.preco || 0;
+            custoUnit = material.preco || 0; // Custo sempre é o preço de compra
+          }
+        }
+        
+        // Se for kit, calcular custo baseado nos materiais
+        if (item.tipo === 'KIT' && item.kitId) {
+          const kit = await prisma.kit.findUnique({
+            where: { id: item.kitId },
+            include: {
+              items: {
+                include: { 
+                  material: {
+                    select: { preco: true, valorVenda: true }
+                  }
                 }
               }
             }
-          }
-        });
-        
-        if (kit) {
-          // Calcular custo total (soma dos preços de compra dos materiais do estoque real)
-          const custoTotalKit = kit.items.reduce((sum, kitItem) => 
-            sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
-          );
+          });
           
-          // Calcular preço de venda total (soma dos valorVenda || preco dos materiais do estoque real)
-          let precoVendaTotalKit = kit.items.reduce((sum, kitItem) => {
-            const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
-            return sum + precoVendaItem * kitItem.quantidade;
-          }, 0);
-          
-          // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
-          if (kit.itensFaltantes) {
-            let itensFaltantesArray: any[] = [];
-            // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
-            if (typeof kit.itensFaltantes === 'string') {
-              try {
-                const parsed = JSON.parse(kit.itensFaltantes);
-                itensFaltantesArray = Array.isArray(parsed) ? parsed : [parsed];
-              } catch (e) {
-                console.error('Erro ao fazer parse de itensFaltantes:', e);
-                itensFaltantesArray = [];
+          if (kit) {
+            // Calcular custo total (soma dos preços de compra dos materiais do estoque real)
+            const custoTotalKit = kit.items.reduce((sum, kitItem) => 
+              sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
+            );
+            
+            // Calcular preço de venda total (soma dos valorVenda || preco dos materiais do estoque real)
+            let precoVendaTotalKit = kit.items.reduce((sum, kitItem) => {
+              const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
+              return sum + precoVendaItem * kitItem.quantidade;
+            }, 0);
+            
+            // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
+            if (kit.itensFaltantes) {
+              let itensFaltantesArray: any[] = [];
+              // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
+              if (typeof kit.itensFaltantes === 'string') {
+                try {
+                  const parsed = JSON.parse(kit.itensFaltantes);
+                  itensFaltantesArray = Array.isArray(parsed) ? parsed : [parsed];
+                } catch (e) {
+                  console.error('Erro ao fazer parse de itensFaltantes:', e);
+                  itensFaltantesArray = [];
+                }
+              } else if (Array.isArray(kit.itensFaltantes)) {
+                itensFaltantesArray = kit.itensFaltantes;
+              } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
+                itensFaltantesArray = [kit.itensFaltantes];
               }
-            } else if (Array.isArray(kit.itensFaltantes)) {
-              itensFaltantesArray = kit.itensFaltantes;
-            } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
-              itensFaltantesArray = [kit.itensFaltantes];
+              
+              // Somar preços dos itens do banco frio
+              const precoVendaBancoFrio = itensFaltantesArray.reduce((sum: number, itemBancoFrio: any) => {
+                const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
+                const quantidade = itemBancoFrio.quantidade || 0;
+                return sum + (precoUnit * quantidade);
+              }, 0);
+              precoVendaTotalKit += precoVendaBancoFrio;
             }
             
-            // Somar preços dos itens do banco frio
-            const precoVendaBancoFrio = itensFaltantesArray.reduce((sum: number, itemBancoFrio: any) => {
-              const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
-              const quantidade = itemBancoFrio.quantidade || 0;
-              return sum + (precoUnit * quantidade);
-            }, 0);
-            precoVendaTotalKit += precoVendaBancoFrio;
+            custoUnit = custoTotalKit;
+            precoVendaUnit = precoVendaTotalKit;
           }
-          
-          custoUnit = custoTotalKit;
-          precoVendaUnit = precoVendaTotalKit;
         }
+        
+        // Aplicar BDI apenas se o preço não foi editado manualmente
+        precoUnit = precoVendaUnit * (1 + (bdi || 0) / 100);
       }
 
       const subtotal = custoUnit * item.quantidade;
-      const precoUnit = precoVendaUnit * (1 + (bdi || 0) / 100);
+      const subtotalPreco = precoUnit * item.quantidade;
       
       custoTotal += subtotal;
 
@@ -215,7 +241,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         quantidade: item.quantidade,
         custoUnit,
         precoUnit,
-        subtotal: precoUnit * item.quantidade,
+        subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
         // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
         unidadeVenda: item.unidadeVenda || null,
         tipoMaterial: item.tipoMaterial || null
@@ -607,27 +633,72 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
 
       for (const item of items) {
         let custoUnit = item.custoUnit || 0;
+        let precoUnit = 0;
         
-        // Se for kit, calcular custo baseado nos materiais
-        if (item.tipo === 'KIT' && item.kitId) {
-          const kit = await prisma.kit.findUnique({
-            where: { id: item.kitId },
-            include: {
-              items: {
-                include: { material: true }
-              }
-            }
-          });
+        // ✅ PRIORIDADE 1: Se o usuário editou o preço manualmente, usar o valor editado
+        if (item.precoUnitario !== undefined && item.precoUnitario !== null) {
+          // Usuário editou o valor - usar diretamente (já pode incluir BDI ou não, conforme editado)
+          precoUnit = item.precoUnitario;
+          console.log(`✅ Usando preço editado pelo usuário: R$ ${precoUnit.toFixed(2)} para item ${item.descricao || item.nome}`);
+        } else {
+          // ✅ PRIORIDADE 2: Se não foi editado, calcular baseado no estoque/cotações
+          let precoVendaUnit = item.custoUnit || 0;
           
-          if (kit) {
-            custoUnit = kit.items.reduce((sum, kitItem) => 
-              sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
-            );
+          // Se for cotação (banco frio), buscar valor da cotação
+          if (item.tipo === 'COTACAO' && item.cotacaoId) {
+            const cotacao = await prisma.cotacao.findUnique({
+              where: { id: item.cotacaoId },
+              select: { valorUnitario: true, valorVenda: true }
+            });
+            
+            if (cotacao) {
+              precoVendaUnit = cotacao.valorVenda || cotacao.valorUnitario || 0;
+              custoUnit = cotacao.valorUnitario || 0;
+            }
           }
+          // Se for material, buscar valorVenda se disponível
+          else if (item.tipo === 'MATERIAL' && item.materialId) {
+            const material = await prisma.material.findUnique({
+              where: { id: item.materialId },
+              select: { preco: true, valorVenda: true }
+            });
+            
+            if (material) {
+              precoVendaUnit = material.valorVenda || material.preco || 0;
+              custoUnit = material.preco || 0;
+            }
+          }
+          
+          // Se for kit, calcular custo baseado nos materiais
+          if (item.tipo === 'KIT' && item.kitId) {
+            const kit = await prisma.kit.findUnique({
+              where: { id: item.kitId },
+              include: {
+                items: {
+                  include: { material: true }
+                }
+              }
+            });
+            
+            if (kit) {
+              custoUnit = kit.items.reduce((sum, kitItem) => 
+                sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
+              );
+              
+              // Calcular preço de venda do kit
+              precoVendaUnit = kit.items.reduce((sum, kitItem) => {
+                const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
+                return sum + precoVendaItem * kitItem.quantidade;
+              }, 0);
+            }
+          }
+          
+          // Aplicar BDI apenas se o preço não foi editado manualmente
+          precoUnit = precoVendaUnit * (1 + (bdi || orcamentoExistente.bdi || 0) / 100);
         }
 
         const subtotal = custoUnit * item.quantidade;
-        const precoUnit = custoUnit * (1 + (bdi || orcamentoExistente.bdi || 0) / 100);
+        const subtotalPreco = precoUnit * item.quantidade;
         
         custoTotal += subtotal;
 
@@ -641,7 +712,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
           quantidade: item.quantidade,
           custoUnit,
           precoUnit,
-          subtotal: precoUnit * item.quantidade,
+          subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
           // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
           unidadeVenda: item.unidadeVenda || null,
           tipoMaterial: item.tipoMaterial || null
