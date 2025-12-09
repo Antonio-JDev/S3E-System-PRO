@@ -1,7 +1,36 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
+import fs from 'fs';
 
 const prisma = new PrismaClient();
+
+// Configurar multer para upload de JSON
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = 'uploads/temp/';
+    // Criar diretório se não existir
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `orcamentos-${Date.now()}-${file.originalname}`);
+  }
+});
+
+export const uploadJSON = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/json') {
+      cb(null, true);
+    } else {
+      cb(new Error('Apenas arquivos JSON são permitidos'));
+    }
+  },
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB para permitir arquivos grandes com muitos orçamentos
+});
 
 // Listar orçamentos
 export const getOrcamentos = async (req: Request, res: Response): Promise<void> => {
@@ -881,6 +910,459 @@ export const deleteOrcamento = async (req: Request, res: Response): Promise<void
     res.status(500).json({
       success: false,
       error: 'Erro ao excluir orçamento'
+    });
+  }
+};
+
+// ============================================
+// IMPORTAÇÃO DE ORÇAMENTOS HISTÓRICOS
+// ============================================
+
+// Função auxiliar para parsear data (suporta múltiplos formatos)
+function parseData(dataStr: string | null | undefined): Date | null {
+  if (!dataStr) return null;
+  
+  // Se for um número (serial do Excel), converter
+  if (typeof dataStr === 'number') {
+    // Excel armazena datas como número de dias desde 1900-01-01
+    const excelEpoch = new Date(1899, 11, 30);
+    const date = new Date(excelEpoch.getTime() + dataStr * 86400000);
+    return date;
+  }
+  
+  // Tentar parsear formato DD/MM/YYYY
+  const matchDDMMYYYY = String(dataStr).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (matchDDMMYYYY) {
+    const [, dia, mes, ano] = matchDDMMYYYY;
+    return new Date(parseInt(ano), parseInt(mes) - 1, parseInt(dia));
+  }
+  
+  // Tentar parsear como ISO
+  const date = new Date(dataStr);
+  if (!isNaN(date.getTime())) {
+    return date;
+  }
+  
+  return null;
+}
+
+// Função auxiliar para mapear status do sistema antigo para o novo
+function mapearStatus(status: string): string {
+  const statusLower = String(status).toLowerCase().trim();
+  
+  if (statusLower.includes('concluído') || statusLower.includes('concluido') || statusLower.includes('aprovado')) {
+    return 'Aprovado';
+  }
+  
+  if (statusLower.includes('recusado') || statusLower.includes('cancelado')) {
+    return 'Recusado';
+  }
+  
+  return 'Pendente'; // Padrão para "Aberto" ou qualquer outro
+}
+
+// Função auxiliar para normalizar nome do cliente
+function normalizarNome(nome: string): string {
+  return nome.trim().replace(/\s+/g, ' ');
+}
+
+// Função auxiliar para criar ou encontrar cliente
+async function criarOuEncontrarCliente(nome: string): Promise<{ id: string; criado: boolean }> {
+  const nomeNormalizado = normalizarNome(nome);
+  
+  // Tentar encontrar cliente existente pelo nome (case-insensitive)
+  const clienteExistente = await prisma.cliente.findFirst({
+    where: {
+      nome: {
+        equals: nomeNormalizado,
+        mode: 'insensitive'
+      }
+    }
+  });
+  
+  if (clienteExistente) {
+    return { id: clienteExistente.id, criado: false };
+  }
+  
+  // Criar novo cliente
+  // Gerar CPF/CNPJ temporário baseado no nome (para permitir criação)
+  const cpfCnpjTemp = `TEMP-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  const novoCliente = await prisma.cliente.create({
+    data: {
+      nome: nomeNormalizado,
+      cpfCnpj: cpfCnpjTemp,
+      tipo: 'PJ', // Assumir PJ por padrão
+      email: null,
+      telefone: null,
+      ativo: true
+    }
+  });
+  
+  return { id: novoCliente.id, criado: true };
+}
+
+/**
+ * Exportar template JSON para importação de orçamentos
+ * GET /api/orcamentos/import/template
+ */
+export const exportarTemplateOrcamentos = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const template = {
+      orcamentos: [
+        {
+          numero: "ORC-001",
+          status: "Aprovado",
+          cliente: "Nome do Cliente",
+          dataEmissao: "2024-01-15",
+          dataValidade: "2024-02-15",
+          valorTotal: 15000.00
+        },
+        {
+          numero: "ORC-002",
+          status: "Pendente",
+          cliente: "Outro Cliente",
+          dataEmissao: "2024-01-20",
+          dataValidade: "2024-02-20",
+          valorTotal: 25000.00
+        }
+      ]
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="template-orcamentos-${Date.now()}.json"`);
+    res.json(template);
+  } catch (error: any) {
+    console.error('❌ Erro ao exportar template de orçamentos:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao exportar template de orçamentos'
+    });
+  }
+};
+
+/**
+ * Preview de importação de orçamentos (validação antes de salvar)
+ * POST /api/orcamentos/import/preview
+ */
+export const previewImportacaoOrcamentos = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      res.status(400).json({
+        success: false,
+        error: 'Nenhum arquivo foi enviado'
+      });
+      return;
+    }
+
+    console.log('📥 Preview de importação de orçamentos do arquivo:', file.path);
+
+    // Ler arquivo JSON
+    const jsonContent = fs.readFileSync(file.path, 'utf-8');
+    let jsonData = JSON.parse(jsonContent);
+
+    // Remover wrapper se existir
+    if (jsonData.success && jsonData.data) {
+      jsonData = jsonData.data;
+    }
+
+    if (!jsonData.orcamentos || !Array.isArray(jsonData.orcamentos)) {
+      res.status(400).json({
+        success: false,
+        error: 'Formato JSON inválido. Deve conter array "orcamentos"'
+      });
+      return;
+    }
+
+    // Buscar todos os clientes existentes para comparação
+    const clientesExistentes = await prisma.cliente.findMany({
+      where: { ativo: true },
+      select: {
+        id: true,
+        nome: true,
+        cpfCnpj: true
+      }
+    });
+
+    // Criar mapa para busca rápida (nome como chave, case-insensitive)
+    const mapaExistentes = new Map<string, typeof clientesExistentes[0]>();
+    clientesExistentes.forEach(c => {
+      mapaExistentes.set(c.nome.toLowerCase().trim(), c);
+    });
+
+    // Processar orçamentos para preview
+    const orcamentosPreview = [];
+    let clientesNovos = 0;
+    let clientesExistentesCount = 0;
+
+    for (let i = 0; i < jsonData.orcamentos.length; i++) {
+      const orcamento = jsonData.orcamentos[i];
+      const linha = i + 1;
+
+      // Validar campos obrigatórios
+      const erros: string[] = [];
+      if (!orcamento.numero) erros.push('Campo "numero" é obrigatório');
+      if (!orcamento.cliente) erros.push('Campo "cliente" é obrigatório');
+      if (!orcamento.dataEmissao) erros.push('Campo "dataEmissao" é obrigatório');
+      if (!orcamento.dataValidade) erros.push('Campo "dataValidade" é obrigatório');
+      if (orcamento.valorTotal === undefined || orcamento.valorTotal === null) {
+        erros.push('Campo "valorTotal" é obrigatório');
+      }
+
+      // Verificar se cliente existe
+      const nomeClienteNormalizado = normalizarNome(orcamento.cliente || '').toLowerCase();
+      const clienteExistente = mapaExistentes.get(nomeClienteNormalizado);
+      const statusCliente = clienteExistente ? 'existente' : 'novo';
+      
+      if (statusCliente === 'novo') {
+        clientesNovos++;
+      } else {
+        clientesExistentesCount++;
+      }
+
+      orcamentosPreview.push({
+        linha,
+        numero: orcamento.numero || '',
+        status: mapearStatus(orcamento.status || 'Aberto'),
+        cliente: orcamento.cliente || '',
+        dataEmissao: orcamento.dataEmissao || '',
+        dataValidade: orcamento.dataValidade || '',
+        valorTotal: parseFloat(orcamento.valorTotal) || 0,
+        statusCliente,
+        clienteExistenteId: clienteExistente?.id,
+        clienteExistenteNome: clienteExistente?.nome,
+        erros: erros.length > 0 ? erros : undefined,
+        avisos: []
+      });
+    }
+
+    // Limpar arquivo temporário
+    try {
+      fs.unlinkSync(file.path);
+    } catch (error) {
+      console.warn('⚠️  Não foi possível deletar arquivo temporário:', file.path);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalOrcamentos: orcamentosPreview.length,
+        criar: orcamentosPreview.length,
+        clientesNovos,
+        clientesExistentes: clientesExistentesCount,
+        orcamentos: orcamentosPreview
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao fazer preview de importação de orçamentos:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao fazer preview de importação de orçamentos',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * Importar orçamentos de JSON
+ * POST /api/orcamentos/import
+ */
+export const importarOrcamentos = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    const orcamentos = req.body?.orcamentos;
+
+    if (!file && !orcamentos) {
+      res.status(400).json({
+        success: false,
+        error: 'Nenhum arquivo ou dados foram enviados'
+      });
+      return;
+    }
+
+    let orcamentosParaImportar: any[] = [];
+
+    if (orcamentos && Array.isArray(orcamentos)) {
+      // Se vier do modal de preview, usar os dados já processados
+      orcamentosParaImportar = orcamentos;
+    } else if (file) {
+      // Se vier direto do arquivo, processar normalmente
+      console.log('📥 Importando orçamentos do arquivo:', file.filename);
+
+      const jsonContent = fs.readFileSync(file.path, 'utf-8');
+      let jsonData = JSON.parse(jsonContent);
+
+      if (jsonData.success && jsonData.data) {
+        jsonData = jsonData.data;
+      }
+
+      if (!jsonData.orcamentos || !Array.isArray(jsonData.orcamentos)) {
+        res.status(400).json({
+          success: false,
+          error: 'Formato JSON inválido. Deve conter array "orcamentos"'
+        });
+        return;
+      }
+
+      orcamentosParaImportar = jsonData.orcamentos;
+    }
+
+    // Processar orçamentos
+    const resultados = {
+      criados: 0,
+      erros: 0,
+      clientesCriados: 0,
+      clientesEncontrados: 0,
+      detalhes: [] as Array<{
+        linha: number;
+        numero: string;
+        cliente: string;
+        status: 'sucesso' | 'erro';
+        mensagem?: string;
+      }>
+    };
+
+    for (let i = 0; i < orcamentosParaImportar.length; i++) {
+      const orcamentoData = orcamentosParaImportar[i];
+      const linha = i + 1;
+
+      try {
+        // Validar campos obrigatórios
+        if (!orcamentoData.numero || !orcamentoData.cliente || !orcamentoData.dataEmissao || 
+            !orcamentoData.dataValidade || orcamentoData.valorTotal === undefined) {
+          resultados.erros++;
+          resultados.detalhes.push({
+            linha,
+            numero: orcamentoData.numero || 'N/A',
+            cliente: orcamentoData.cliente || 'N/A',
+            status: 'erro',
+            mensagem: 'Campos obrigatórios faltando (numero, cliente, dataEmissao, dataValidade, valorTotal)'
+          });
+          continue;
+        }
+
+        // Criar ou encontrar cliente
+        const { id: clienteId, criado } = await criarOuEncontrarCliente(orcamentoData.cliente);
+        
+        if (criado) {
+          resultados.clientesCriados++;
+        } else {
+          resultados.clientesEncontrados++;
+        }
+
+        // Parsear datas
+        const dataEmissao = parseData(orcamentoData.dataEmissao);
+        const dataValidade = parseData(orcamentoData.dataValidade);
+
+        if (!dataEmissao || !dataValidade) {
+          resultados.erros++;
+          resultados.detalhes.push({
+            linha,
+            numero: orcamentoData.numero,
+            cliente: orcamentoData.cliente,
+            status: 'erro',
+            mensagem: 'Erro ao parsear datas (dataEmissao ou dataValidade inválidas)'
+          });
+          continue;
+        }
+
+        // Mapear status
+        const status = mapearStatus(orcamentoData.status || 'Aberto');
+
+        // Valor do orçamento
+        const valorTotal = parseFloat(orcamentoData.valorTotal) || 0;
+
+        // Criar itens do orçamento
+        const itemsData = [];
+        if (valorTotal > 0) {
+          // Criar item genérico "Serviço" com o valor total
+          itemsData.push({
+            tipo: 'SERVICO',
+            servicoNome: 'Serviço de Engenharia Elétrica',
+            descricao: `Orçamento migrado do sistema antigo (Número: ${orcamentoData.numero})`,
+            quantidade: 1,
+            custoUnit: valorTotal,
+            precoUnit: valorTotal,
+            subtotal: valorTotal
+          });
+        }
+
+        // Criar orçamento
+        const orcamento = await prisma.orcamento.create({
+          data: {
+            clienteId,
+            titulo: `Orçamento - ${orcamentoData.cliente}`,
+            descricao: `Orçamento migrado do sistema antigo${orcamentoData.numero ? ` (Número Original: ${orcamentoData.numero})` : ''}`,
+            validade: dataValidade,
+            status,
+            bdi: 0,
+            custoTotal: valorTotal,
+            precoVenda: valorTotal,
+            observacoes: `Orçamento histórico importado. Número original: ${orcamentoData.numero}`,
+            items: {
+              create: itemsData
+            },
+            createdAt: dataEmissao // Preservar data original
+          }
+        });
+
+        resultados.criados++;
+        resultados.detalhes.push({
+          linha,
+          numero: orcamentoData.numero,
+          cliente: orcamentoData.cliente,
+          status: 'sucesso'
+        });
+
+        console.log(`✅ Orçamento criado: #${orcamento.numeroSequencial} - ${orcamentoData.cliente} - R$ ${valorTotal.toFixed(2)}`);
+
+      } catch (error: any) {
+        resultados.erros++;
+        resultados.detalhes.push({
+          linha,
+          numero: orcamentoData.numero || 'N/A',
+          cliente: orcamentoData.cliente || 'N/A',
+          status: 'erro',
+          mensagem: error.message || 'Erro desconhecido'
+        });
+
+        console.error(`❌ Erro ao processar linha ${linha}:`, error.message);
+      }
+    }
+
+    // Limpar arquivo temporário se existir
+    if (file) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (error) {
+        console.warn('⚠️  Não foi possível deletar arquivo temporário:', file.path);
+      }
+    }
+
+    console.log('\n📊 Resumo da importação:');
+    console.log(`   ✅ Orçamentos criados: ${resultados.criados}`);
+    console.log(`   ❌ Erros: ${resultados.erros}`);
+    console.log(`   👥 Clientes criados: ${resultados.clientesCriados}`);
+    console.log(`   🔍 Clientes encontrados: ${resultados.clientesEncontrados}`);
+
+    res.json({
+      success: true,
+      data: {
+        criados: resultados.criados,
+        erros: resultados.erros,
+        clientesCriados: resultados.clientesCriados,
+        clientesEncontrados: resultados.clientesEncontrados,
+        detalhes: resultados.detalhes
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao importar orçamentos:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao importar orçamentos',
+      details: error.message
     });
   }
 };

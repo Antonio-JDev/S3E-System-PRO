@@ -1,0 +1,68 @@
+feat: implementa importação de orçamentos históricos via JSON
+
+## 🎯 Funcionalidade Implementada
+
+### ✨ Importação de Orçamentos Históricos
+- Endpoint para baixar template JSON de exemplo
+- Preview de importação com validação antes de salvar
+- Importação em lote de orçamentos do sistema antigo
+- Criação automática de clientes quando não existem
+- Preservação de dados históricos (número original, datas, valores)
+
+## 🔧 Detalhes Técnicos
+
+### Backend
+- Novo controller: `exportarTemplateOrcamentos` - Gera template JSON
+- Novo controller: `previewImportacaoOrcamentos` - Valida dados antes de importar
+- Novo controller: `importarOrcamentos` - Processa e cria orçamentos no banco
+- Configuração Multer para upload de arquivos JSON (até 50MB)
+- Funções auxiliares:
+  - `parseData()` - Suporta múltiplos formatos de data (ISO, DD/MM/YYYY, Excel serial)
+  - `mapearStatus()` - Mapeia status do sistema antigo (Concluído → Aprovado, Aberto → Pendente)
+  - `normalizarNome()` - Normaliza nomes de clientes
+  - `criarOuEncontrarCliente()` - Cria ou encontra cliente pelo nome
+
+### Rotas Adicionadas
+- `GET /api/orcamentos/import/template` - Baixar template JSON
+- `POST /api/orcamentos/import/preview` - Preview antes de importar
+- `POST /api/orcamentos/import` - Importar orçamentos (com RBAC)
+
+### Características
+- ✅ Não modifica funcionalidades existentes (`createOrcamento` permanece intacto)
+- ✅ Segue padrão dos outros endpoints de importação (clientes, materiais, cotações)
+- ✅ RBAC implementado (`checkPermission('create_orcamento')`)
+- ✅ Tratamento de erros individual (não para importação inteira se um falhar)
+- ✅ Limpeza automática de arquivos temporários
+- ✅ Logs detalhados para debug
+- ✅ Cria orçamentos com item genérico "Serviço" se valorTotal > 0
+- ✅ Preserva número original nas observações
+- ✅ Usa dataEmissao para createdAt (preserva data original)
+
+## 📋 Formato JSON Esperado
+
+```json
+{
+  "orcamentos": [
+    {
+      "numero": "ORC-001",
+      "status": "Aprovado",
+      "cliente": "Nome do Cliente",
+      "dataEmissao": "2024-01-15",
+      "dataValidade": "2024-02-15",
+      "valorTotal": 15000.00
+    }
+  ]
+}
+```
+
+## 📝 Arquivos Modificados
+
+- `backend/src/controllers/orcamentosController.ts` - Adicionadas 3 novas funções + multer config
+- `backend/src/routes/orcamentos.ts` - Adicionadas 3 novas rotas de importação
+
+## 🚀 Próximos Passos
+
+- Testar importação com arquivo JSON real do sistema antigo
+- Validar criação automática de clientes
+- Verificar preservação de dados históricos
+

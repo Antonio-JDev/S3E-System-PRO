@@ -8,7 +8,11 @@ import {
   aprovarOrcamento,
   recusarOrcamento,
   deleteOrcamento,
-  getProximoNumeroOrcamento
+  getProximoNumeroOrcamento,
+  exportarTemplateOrcamentos,
+  previewImportacaoOrcamentos,
+  importarOrcamentos,
+  uploadJSON
 } from '../controllers/orcamentosController';
 import { PDFOrcamentoController } from '../controllers/pdfOrcamentoController';
 import { authenticate } from '../middlewares/auth';
@@ -26,6 +30,32 @@ router.get('/:id/pdf/html', PDFOrcamentoController.gerarHTML);
 router.get('/:id/pdf/preview', PDFOrcamentoController.gerarPreview);
 
 router.get('/proximo-numero', getProximoNumeroOrcamento);
+
+// ==================== ROTAS DE IMPORTAÇÃO (DEVEM VIR ANTES DAS ROTAS GENÉRICAS) ====================
+
+/**
+ * @route GET /api/orcamentos/import/template
+ * @desc Baixar template JSON para importação de orçamentos históricos
+ * @access Private
+ */
+router.get('/import/template', exportarTemplateOrcamentos);
+
+/**
+ * @route POST /api/orcamentos/import/preview
+ * @desc Preview de importação (validação antes de importar)
+ * @access Private
+ */
+router.post('/import/preview', uploadJSON.single('file'), previewImportacaoOrcamentos);
+
+/**
+ * @route POST /api/orcamentos/import
+ * @desc Importar orçamentos históricos de JSON
+ * @access RBAC: create_orcamento (admin, gerente, engenheiro, comprador)
+ */
+router.post('/import', uploadJSON.single('file'), checkPermission('create_orcamento'), importarOrcamentos);
+
+// ==================== ROTAS GENÉRICAS ====================
+
 router.get('/', getOrcamentos);
 router.get('/:id', getOrcamentoById);
 /**
