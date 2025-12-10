@@ -67,6 +67,22 @@ router.put(
     ContasPagarController.atualizarVencimento
 );
 
+// Agendar pagamento
+router.put(
+    '/:id/agendar',
+    authenticate,
+    authorize('admin', 'financeiro'),
+    ContasPagarController.agendarPagamento
+);
+
+// Remover agendamento
+router.put(
+    '/:id/remover-agendamento',
+    authenticate,
+    authorize('admin', 'financeiro'),
+    ContasPagarController.removerAgendamento
+);
+
 // Buscar contas em atraso
 router.get(
     '/alertas/atrasadas',

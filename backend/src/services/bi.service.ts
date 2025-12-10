@@ -42,6 +42,18 @@ export interface MarkupItem {
   quantidade: number;
 }
 
+export interface EvolucaoOrcamentosPorServico {
+  data: string;
+  [key: string]: string | number; // Tipo de serviço como chave, valor como número
+}
+
+export interface GastosFixos {
+  totalMensal: number;
+  totalAnual: number;
+  porCategoria: Record<string, number>;
+  evolucaoMensal: Array<{ mes: string; valor: number }>;
+}
+
 export interface ResumoGeral {
   investimentos: InvestimentosProdutos;
   gastosFornecedor: GastoFornecedor[];
@@ -49,6 +61,20 @@ export interface ResumoGeral {
   lucrosQuadros: LucrosQuadros;
   vendas: VendasStats;
   markupItens: { porTipo: MarkupItem[] };
+  evolucaoOrcamentosPorServico: EvolucaoOrcamentosPorServico[];
+  gastosFixos: GastosFixos;
+}
+
+export interface DashboardMetrics {
+  // Métricas principais
+  vendasTotal: number; // Receita Bruta
+  cpv: number; // Custo dos Produtos Vendidos
+  margemBruta: number; // Lucro Bruto (Vendas Total - CPV)
+  custosFixosTotal: number; // Total de custos fixos no período
+  
+  // Dados para gráficos
+  investimentosPorMes: Array<{ mes: string; cpv: number }>; // CPV por mês
+  gastosPorFornecedorTop10: Array<{ nomeFornecedor: string; valorGasto: number }>; // Top 10 fornecedores
 }
 
 export class BIService {
@@ -374,6 +400,367 @@ export class BIService {
   }
 
   /**
+   * Calcula evolução de orçamentos por tipo de serviço
+   */
+  static async getEvolucaoOrcamentosPorServico(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<EvolucaoOrcamentosPorServico[]> {
+    const orcamentos = await prisma.orcamento.findMany({
+      where: {
+        createdAt: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+      },
+      include: {
+        items: {
+          where: {
+            tipo: 'SERVICO',
+          },
+        },
+      },
+    });
+
+    // Agrupar por data e tipo de serviço
+    const dadosPorData = new Map<string, Map<string, number>>();
+
+    orcamentos.forEach((orcamento) => {
+      const data = orcamento.createdAt.toISOString().split('T')[0]; // YYYY-MM-DD
+
+      if (!dadosPorData.has(data)) {
+        dadosPorData.set(data, new Map());
+      }
+
+      const dadosDia = dadosPorData.get(data)!;
+
+      orcamento.items.forEach((item) => {
+        if (item.tipo === 'SERVICO') {
+          const servicoNome = item.servicoNome || 'Serviço não especificado';
+          const valor = item.subtotal || 0;
+
+          dadosDia.set(servicoNome, (dadosDia.get(servicoNome) || 0) + valor);
+        }
+      });
+    });
+
+    // Converter para array
+    const resultado: EvolucaoOrcamentosPorServico[] = [];
+
+    // Obter todos os tipos de serviço únicos
+    const tiposServico = new Set<string>();
+    dadosPorData.forEach((dadosDia) => {
+      dadosDia.forEach((_, servicoNome) => {
+        tiposServico.add(servicoNome);
+      });
+    });
+
+    // Criar array ordenado por data
+    const datasOrdenadas = Array.from(dadosPorData.keys()).sort();
+
+    datasOrdenadas.forEach((data) => {
+      const dadosDia = dadosPorData.get(data)!;
+      const item: EvolucaoOrcamentosPorServico = { data };
+
+      tiposServico.forEach((servicoNome) => {
+        item[servicoNome] = dadosDia.get(servicoNome) || 0;
+      });
+
+      resultado.push(item);
+    });
+
+    return resultado;
+  }
+
+  /**
+   * Calcula gastos fixos no período
+   */
+  static async getGastosFixos(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<GastosFixos> {
+    // Buscar despesas fixas ativas
+    const despesas = await prisma.despesaFixa.findMany({
+      where: { ativa: true },
+      include: {
+        pagamentos: {
+          where: {
+            dataPagamento: {
+              gte: dataInicio,
+              lte: dataFim,
+            },
+          },
+        },
+      },
+    });
+
+    // Calcular total mensal (soma de todas as despesas fixas)
+    const totalMensal = despesas.reduce((sum, d) => sum + Number(d.valor), 0);
+    const totalAnual = totalMensal * 12;
+
+    // Agrupar por categoria
+    const porCategoria: Record<string, number> = {};
+    despesas.forEach((d) => {
+      const cat = d.categoria || 'Outros';
+      porCategoria[cat] = (porCategoria[cat] || 0) + Number(d.valor);
+    });
+
+    // Calcular evolução mensal baseada nos pagamentos
+    const evolucaoMensalMap = new Map<string, number>();
+
+    despesas.forEach((despesa) => {
+      despesa.pagamentos.forEach((pagamento) => {
+        const mes = pagamento.dataPagamento.toISOString().substring(0, 7); // YYYY-MM
+        evolucaoMensalMap.set(
+          mes,
+          (evolucaoMensalMap.get(mes) || 0) + Number(pagamento.valorPago)
+        );
+      });
+    });
+
+    // Se não houver pagamentos, usar valor mensal estimado
+    if (evolucaoMensalMap.size === 0) {
+      const mesAtual = new Date(dataInicio);
+      while (mesAtual <= dataFim) {
+        const mes = mesAtual.toISOString().substring(0, 7);
+        evolucaoMensalMap.set(mes, totalMensal);
+        mesAtual.setMonth(mesAtual.getMonth() + 1);
+      }
+    }
+
+    const evolucaoMensal = Array.from(evolucaoMensalMap.entries())
+      .map(([mes, valor]) => ({ mes, valor }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+
+    return {
+      totalMensal,
+      totalAnual,
+      porCategoria,
+      evolucaoMensal,
+    };
+  }
+
+  /**
+   * Calcula métricas do dashboard de BI conforme especificação
+   * Retorna: Vendas Total, CPV, Margem Bruta, Custos Fixos e dados para gráficos
+   */
+  static async getDashboardMetrics(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<DashboardMetrics> {
+    // 1. Vendas Total (Receita Bruta)
+    const vendas = await prisma.venda.findMany({
+      where: {
+        dataVenda: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelada',
+        },
+      },
+      select: {
+        valorTotal: true,
+        orcamentoId: true,
+      },
+    });
+
+    const vendasTotal = vendas.reduce((sum, v) => sum + (v.valorTotal || 0), 0);
+
+    // 2. CPV (Custo dos Produtos Vendidos)
+    // Buscar itens de orçamento das vendas realizadas
+    const orcamentoIds = vendas.map((v) => v.orcamentoId).filter(Boolean);
+    
+    let cpv = 0;
+    if (orcamentoIds.length > 0) {
+      const itensVendidos = await prisma.orcamentoItem.findMany({
+        where: {
+          orcamentoId: {
+            in: orcamentoIds,
+          },
+          // Excluir serviços e custos extras do CPV
+          tipo: {
+            notIn: ['SERVICO', 'CUSTO_EXTRA'],
+          },
+        },
+        select: {
+          quantidade: true,
+          custoUnit: true,
+        },
+      });
+
+      cpv = itensVendidos.reduce(
+        (sum, item) => sum + (item.quantidade || 0) * (item.custoUnit || 0),
+        0
+      );
+    }
+
+    // 3. Margem Bruta (Lucro Bruto)
+    const margemBruta = vendasTotal - cpv;
+
+    // 4. Custos Fixos Total
+    const despesasFixas = await prisma.despesaFixa.findMany({
+      where: {
+        ativa: true,
+      },
+      include: {
+        pagamentos: {
+          where: {
+            dataPagamento: {
+              gte: dataInicio,
+              lte: dataFim,
+            },
+          },
+        },
+      },
+    });
+
+    // Calcular custos fixos baseado nos pagamentos realizados no período
+    let custosFixosTotal = 0;
+    despesasFixas.forEach((despesa) => {
+      if (despesa.pagamentos.length > 0) {
+        // Se houver pagamentos no período, somar os valores pagos
+        despesa.pagamentos.forEach((pagamento) => {
+          custosFixosTotal += Number(pagamento.valorPago);
+        });
+      } else {
+        // Se não houver pagamentos no período, usar o valor mensal da despesa
+        // Calcular proporcionalmente aos meses no período
+        const mesesNoPeriodo = this.calcularMesesNoPeriodo(dataInicio, dataFim);
+        custosFixosTotal += Number(despesa.valor) * mesesNoPeriodo;
+      }
+    });
+
+    // 5. Investimentos em Produtos por Mês (CPV por mês)
+    // Buscar vendas novamente com dataVenda para agrupar por mês
+    const vendasComData = await prisma.venda.findMany({
+      where: {
+        dataVenda: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelada',
+        },
+      },
+      select: {
+        dataVenda: true,
+        orcamentoId: true,
+      },
+    });
+
+    // Agrupar vendas por mês
+    const vendasPorMesMap = new Map<string, string[]>(); // mes -> orcamentoIds
+    
+    vendasComData.forEach((venda) => {
+      const mes = venda.dataVenda.toISOString().substring(0, 7); // YYYY-MM
+      if (!vendasPorMesMap.has(mes)) {
+        vendasPorMesMap.set(mes, []);
+      }
+      if (venda.orcamentoId) {
+        vendasPorMesMap.get(mes)!.push(venda.orcamentoId);
+      }
+    });
+
+    // Calcular CPV por mês de forma otimizada
+    const cpvPorMesMap = new Map<string, number>();
+    
+    for (const [mes, orcamentoIdsMes] of vendasPorMesMap.entries()) {
+      if (orcamentoIdsMes.length === 0) {
+        cpvPorMesMap.set(mes, 0);
+        continue;
+      }
+
+      // Buscar todos os itens dos orçamentos deste mês de uma vez
+      const itens = await prisma.orcamentoItem.findMany({
+        where: {
+          orcamentoId: {
+            in: orcamentoIdsMes,
+          },
+          tipo: {
+            notIn: ['SERVICO', 'CUSTO_EXTRA'],
+          },
+        },
+        select: {
+          quantidade: true,
+          custoUnit: true,
+        },
+      });
+
+      const cpvMes = itens.reduce(
+        (sum, item) => sum + (item.quantidade || 0) * (item.custoUnit || 0),
+        0
+      );
+
+      cpvPorMesMap.set(mes, cpvMes);
+    }
+
+    const investimentosPorMes = Array.from(cpvPorMesMap.entries())
+      .map(([mes, cpv]) => ({ mes, cpv }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+
+    // 6. Gastos por Fornecedor Top 10
+    const compras = await prisma.compra.findMany({
+      where: {
+        dataCompra: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelado',
+        },
+      },
+      select: {
+        fornecedorNome: true,
+        valorTotal: true,
+      },
+    });
+
+    // Agrupar por fornecedor
+    const gastosPorFornecedorMap = new Map<string, number>();
+    compras.forEach((compra) => {
+      const nome = compra.fornecedorNome || 'Fornecedor não identificado';
+      gastosPorFornecedorMap.set(
+        nome,
+        (gastosPorFornecedorMap.get(nome) || 0) + (compra.valorTotal || 0)
+      );
+    });
+
+    // Ordenar e pegar top 10
+    const gastosPorFornecedorTop10 = Array.from(gastosPorFornecedorMap.entries())
+      .map(([nomeFornecedor, valorGasto]) => ({ nomeFornecedor, valorGasto }))
+      .sort((a, b) => b.valorGasto - a.valorGasto)
+      .slice(0, 10);
+
+    return {
+      vendasTotal,
+      cpv,
+      margemBruta,
+      custosFixosTotal,
+      investimentosPorMes,
+      gastosPorFornecedorTop10,
+    };
+  }
+
+  /**
+   * Calcula o número de meses no período (para cálculo proporcional de custos fixos)
+   */
+  private static calcularMesesNoPeriodo(dataInicio: Date, dataFim: Date): number {
+    const inicio = new Date(dataInicio);
+    const fim = new Date(dataFim);
+    
+    let meses = 0;
+    const dataAtual = new Date(inicio);
+    
+    while (dataAtual <= fim) {
+      meses++;
+      dataAtual.setMonth(dataAtual.getMonth() + 1);
+    }
+    
+    return meses;
+  }
+
+  /**
    * Resumo consolidado de todas as métricas
    */
   static async getResumoGeral(
@@ -387,6 +774,8 @@ export class BIService {
       lucrosQuadros,
       vendas,
       markupItens,
+      evolucaoOrcamentosPorServico,
+      gastosFixos,
     ] = await Promise.all([
       this.getInvestimentosProdutos(dataInicio, dataFim),
       this.getGastosPorFornecedor(dataInicio, dataFim),
@@ -394,6 +783,8 @@ export class BIService {
       this.getLucrosQuadros(dataInicio, dataFim),
       this.getVendas(dataInicio, dataFim),
       this.getMarkupItens(dataInicio, dataFim),
+      this.getEvolucaoOrcamentosPorServico(dataInicio, dataFim),
+      this.getGastosFixos(dataInicio, dataFim),
     ]);
 
     return {
@@ -403,6 +794,8 @@ export class BIService {
       lucrosQuadros,
       vendas,
       markupItens,
+      evolucaoOrcamentosPorServico,
+      gastosFixos,
     };
   }
 }

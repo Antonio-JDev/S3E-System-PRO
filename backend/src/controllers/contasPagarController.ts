@@ -95,6 +95,73 @@ export class ContasPagarController {
     }
 
     /**
+     * Agenda uma data de pagamento para uma conta a pagar
+     */
+    static async agendarPagamento(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const { dataAgendamento } = req.body;
+
+            if (!id) {
+                return res.status(400).json({
+                    error: 'ID da conta a pagar é obrigatório'
+                });
+            }
+
+            if (!dataAgendamento) {
+                return res.status(400).json({
+                    error: 'Data de agendamento é obrigatória'
+                });
+            }
+
+            const conta = await ContasPagarService.agendarPagamento(id, new Date(dataAgendamento));
+
+            res.json({
+                success: true,
+                message: 'Pagamento agendado com sucesso',
+                data: conta
+            });
+
+        } catch (error) {
+            console.error('Erro ao agendar pagamento:', error);
+            res.status(500).json({
+                error: 'Erro interno do servidor',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
+     * Remove o agendamento de pagamento de uma conta
+     */
+    static async removerAgendamento(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+
+            if (!id) {
+                return res.status(400).json({
+                    error: 'ID da conta a pagar é obrigatório'
+                });
+            }
+
+            const conta = await ContasPagarService.removerAgendamento(id);
+
+            res.json({
+                success: true,
+                message: 'Agendamento removido com sucesso',
+                data: conta
+            });
+
+        } catch (error) {
+            console.error('Erro ao remover agendamento:', error);
+            res.status(500).json({
+                error: 'Erro interno do servidor',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
      * Lista contas a pagar com filtros
      */
     static async listarContas(req: Request, res: Response) {

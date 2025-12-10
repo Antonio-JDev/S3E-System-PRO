@@ -76,6 +76,7 @@ interface Material {
     sku: string;
     unidadeMedida: string;
     imagemUrl?: string; // Foto do material
+    ncm?: string; // Nomenclatura Comum do Mercosul
 
     preco: number; // Preço de custo
     valorVenda?: number; // Preço de venda (usado em orçamentos)
@@ -119,6 +120,7 @@ interface OrcamentoItem {
     unidadeMedida: string;
     unidadeVenda?: string; // ✅ NOVO: Unidade de venda (pode ser diferente da unidade de estoque)
     tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // ✅ NOVO: Tipo para conversão
+    ncm?: string; // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
     quantidade: number;
     custoUnit: number;
     precoBase?: number; // Preço base sem BDI
@@ -658,6 +660,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 nome: material.nome,
                 descricao: material.nome,
                 unidadeMedida: material.unidadeMedida,
+                ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
                 quantidade: qtd,
                 custoUnit: material.preco,
                 precoBase: precoBase, // Base do preço de venda (sem BDI)
@@ -683,6 +686,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 nome: cotacao.nome,
                 descricao: cotacao.observacoes || cotacao.nome,
                 unidadeMedida: cotacao.unidadeMedida || 'UN',
+                ncm: cotacao.ncm || undefined, // ✅ NCM da cotação para faturamento
                 quantidade: qtd,
                 custoUnit: cotacao.valorUnitario || 0,
                 precoBase: precoBase, // Base do preço de venda (sem BDI)
@@ -786,6 +790,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             unidadeMedida: material.unidadeMedida,
             unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
             tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
+            ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
             quantidade: 1,
             custoUnit: material.preco,
             precoBase: precoBase, // Base do preço de venda (sem BDI)
@@ -1181,12 +1186,16 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                     tipo: item.tipo,
                     materialId: item.materialId,
                     kitId: item.kitId,
+                    cotacaoId: item.cotacaoId,
                     servicoNome: item.servicoNome,
                     descricao: item.descricao || item.nome,
+                    ncm: item.ncm, // ✅ NCM para faturamento NF-e/NFS-e
                     quantidade: item.quantidade,
                     custoUnit: item.custoUnit,
                     precoUnitario: item.precoUnit,
-                    subtotal: item.subtotal
+                    subtotal: item.subtotal,
+                    unidadeVenda: item.unidadeVenda,
+                    tipoMaterial: item.tipoMaterial
                 }))
             };
 
@@ -1643,8 +1652,24 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                             {/* Nome e Badges - Expandido */}
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-semibold text-gray-900 dark:text-dark-text truncate">{item.nome}</p>
-                                                <div className="flex items-center gap-2 mt-1">
+                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                     <span className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.unidadeMedida}</span>
+                                                    {/* Campo NCM */}
+                                                    <div className="flex items-center gap-1">
+                                                        <label className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">NCM:</label>
+                                                        <input
+                                                            type="text"
+                                                            value={item.ncm || ''}
+                                                            onChange={(e) => {
+                                                                setItems(prev => prev.map((it, i) => 
+                                                                    i === index ? { ...it, ncm: e.target.value || undefined } : it
+                                                                ));
+                                                            }}
+                                                            placeholder="00000000"
+                                                            maxLength={8}
+                                                            className="w-20 px-2 py-0.5 border border-gray-300 dark:border-gray-600 rounded text-xs bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500"
+                                                        />
+                                                    </div>
                                                     {/* Badge de Banco Frio */}
                                                     {(item.tipo === 'COTACAO' || (item as any).cotacao || (item as any).cotacaoId) && (
                                                         <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium">

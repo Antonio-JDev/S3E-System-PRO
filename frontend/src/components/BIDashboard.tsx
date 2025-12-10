@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import {
   BarChart,
   Bar,
   PieChart,
   Pie,
   Cell,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -23,8 +25,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { biService, type ResumoGeral } from '../services/biService';
+import { biService, type ResumoGeral, type DashboardMetrics } from '../services/biService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
@@ -43,6 +44,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
   );
   const [loading, setLoading] = useState<boolean>(true);
   const [resumoGeral, setResumoGeral] = useState<ResumoGeral | null>(null);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [exportando, setExportando] = useState<boolean>(false);
 
   const themeContext = useContext(ThemeContext);
@@ -51,28 +53,39 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     (themeContext?.theme === 'system' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  // Cores para gráficos
+  // Cores para gráficos - seguindo padrão do sistema (indigo/roxo como primário)
   const COLORS = [
-    '#3B82F6', // blue
-    '#10B981', // green
-    '#F59E0B', // amber
-    '#EF4444', // red
-    '#8B5CF6', // purple
-    '#EC4899', // pink
-    '#06B6D4', // cyan
-    '#84CC16', // lime
+    '#6366F1', // indigo-500 (primário do sistema)
+    '#8B5CF6', // purple-500
+    '#3B82F6', // blue-500
+    '#10B981', // green-500
+    '#F59E0B', // amber-500
+    '#EF4444', // red-500
+    '#EC4899', // pink-500
+    '#06B6D4', // cyan-500
   ];
 
   // Carregar dados
   const carregarDados = async () => {
     try {
       setLoading(true);
-      const resultado = await biService.getResumoGeral(dataInicio, dataFim);
+      
+      // Carregar ambos: resumo geral (para gráficos existentes) e dashboard metrics (para métricas principais)
+      const [resumoResultado, dashboardResultado] = await Promise.all([
+        biService.getResumoGeral(dataInicio, dataFim),
+        biService.getDashboardMetrics(dataInicio, dataFim),
+      ]);
 
-      if (resultado.success && resultado.data) {
-        setResumoGeral(resultado.data);
+      if (resumoResultado.success && resumoResultado.data) {
+        setResumoGeral(resumoResultado.data);
       } else {
-        toast.error(resultado.error || 'Erro ao carregar dados');
+        console.warn('Erro ao carregar resumo geral:', resumoResultado.error);
+      }
+
+      if (dashboardResultado.success && dashboardResultado.data) {
+        setDashboardMetrics(dashboardResultado.data);
+      } else {
+        toast.error(dashboardResultado.error || 'Erro ao carregar métricas do dashboard');
       }
     } catch (error: any) {
       console.error('Erro ao carregar dados de BI:', error);
@@ -142,8 +155,14 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     }
   };
 
-  // Preparar dados para gráfico de investimentos por mês
-  const dadosInvestimentosPorMes = resumoGeral?.investimentos.porMes.map((item) => ({
+  // Preparar dados para gráfico de investimentos por mês (CPV por mês)
+  const dadosInvestimentosPorMes = dashboardMetrics?.investimentosPorMes.map((item) => ({
+    mes: new Date(item.mes + '-01').toLocaleDateString('pt-BR', {
+      month: 'short',
+      year: 'numeric',
+    }),
+    valor: item.cpv,
+  })) || resumoGeral?.investimentos.porMes.map((item) => ({
     mes: new Date(item.mes + '-01').toLocaleDateString('pt-BR', {
       month: 'short',
       year: 'numeric',
@@ -152,7 +171,11 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
   })) || [];
 
   // Preparar dados para gráfico de gastos por fornecedor (top 10)
-  const dadosGastosFornecedor = resumoGeral?.gastosFornecedor
+  const dadosGastosFornecedor = dashboardMetrics?.gastosPorFornecedorTop10.map((item) => ({
+    nome: item.nomeFornecedor,
+    total: item.valorGasto,
+    quantidade: 0, // Não disponível no dashboard metrics
+  })) || resumoGeral?.gastosFornecedor
     .sort((a, b) => b.total - a.total)
     .slice(0, 10)
     .map((item) => ({
@@ -179,158 +202,256 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     quantidade: item.quantidade,
   })) || [];
 
+  // Preparar dados para gráfico de linha interativo - Evolução de orçamentos por tipo de serviço
+  const dadosEvolucaoOrcamentos = resumoGeral?.evolucaoOrcamentosPorServico || [];
+  
+  // Obter todos os tipos de serviço únicos para o gráfico interativo
+  const tiposServico = useMemo(() => {
+    if (!dadosEvolucaoOrcamentos.length) return [];
+    const servicos = new Set<string>();
+    dadosEvolucaoOrcamentos.forEach((item) => {
+      Object.keys(item).forEach((key) => {
+        if (key !== 'data') {
+          servicos.add(key);
+        }
+      });
+    });
+    return Array.from(servicos);
+  }, [dadosEvolucaoOrcamentos]);
+
+  const [servicoAtivo, setServicoAtivo] = useState<string>('');
+
+  // Atualizar serviço ativo quando tiposServico mudar
+  useEffect(() => {
+    if (tiposServico.length > 0 && !servicoAtivo) {
+      setServicoAtivo(tiposServico[0]);
+    }
+  }, [tiposServico, servicoAtivo]);
+
+  // Calcular totais por serviço
+  const totaisPorServico = useMemo(() => {
+    const totais: Record<string, number> = {};
+    dadosEvolucaoOrcamentos.forEach((item) => {
+      tiposServico.forEach((servico) => {
+        totais[servico] = (totais[servico] || 0) + (Number(item[servico]) || 0);
+      });
+    });
+    return totais;
+  }, [dadosEvolucaoOrcamentos, tiposServico]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 dark:border-indigo-400"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6" id="bi-dashboard-content">
+    <div className="space-y-6 p-4 sm:p-6 bg-gray-50 dark:bg-dark-bg min-h-screen" id="bi-dashboard-content">
       {/* Header com seletor de período e botão de exportar */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-dark-text">
             Business Intelligence
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
             Análise de investimentos, gastos, custos e lucros
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <div className="flex gap-2">
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-500 mb-1">Data Início</label>
+            <div className="flex flex-col flex-1 sm:flex-none">
+              <label className="text-xs font-medium text-gray-700 dark:text-dark-text mb-1">
+                Data Início
+              </label>
               <input
                 type="date"
                 value={dataInicio}
                 onChange={(e) => setDataInicio(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700 dark:text-white"
+                className="input-field text-sm"
               />
             </div>
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-500 mb-1">Data Fim</label>
+            <div className="flex flex-col flex-1 sm:flex-none">
+              <label className="text-xs font-medium text-gray-700 dark:text-dark-text mb-1">
+                Data Fim
+              </label>
               <input
                 type="date"
                 value={dataFim}
                 onChange={(e) => setDataFim(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm dark:bg-gray-800 dark:border-gray-700 dark:text-white"
+                className="input-field text-sm"
               />
             </div>
           </div>
-          <Button
+          <button
             onClick={exportarParaPDF}
             disabled={exportando}
-            className="mt-6 sm:mt-0"
+            className="btn-primary mt-6 sm:mt-0 flex items-center justify-center"
           >
             <Download className="w-4 h-4 mr-2" />
             {exportando ? 'Exportando...' : 'Exportar PDF'}
-          </Button>
+          </button>
         </div>
       </div>
 
-      {/* Cards de Métricas Principais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Investimentos em Produtos</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatarMoeda(resumoGeral?.investimentos.total || 0)}
+      {/* Cards de Métricas Principais - Dashboard Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 1. Vendas Total (Receita Bruta) */}
+        <div className="card-primary card-hover">
+          <div className="flex flex-row items-center justify-between pb-2">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text">
+              Vendas Total
+            </h3>
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/30 dark:to-green-800/30 flex items-center justify-center">
+              <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              Total no período selecionado
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+              {formatarMoeda(dashboardMetrics?.vendasTotal || 0)}
+            </div>
+            <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1">
+              Receita Bruta no período
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Custos de Quadros</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatarMoeda(resumoGeral?.custosQuadros.total || 0)}
+        {/* 2. CPV (Custo dos Produtos Vendidos) */}
+        <div className="card-primary card-hover">
+          <div className="flex flex-row items-center justify-between pb-2">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text">
+              CPV
+            </h3>
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-red-800/30 flex items-center justify-center">
+              <Package className="h-5 w-5 text-red-600 dark:text-red-400" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              {resumoGeral?.custosQuadros.quantidade || 0} quadros • Média:{' '}
-              {formatarMoeda(resumoGeral?.custosQuadros.media || 0)}
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+              {formatarMoeda(dashboardMetrics?.cpv || 0)}
+            </div>
+            <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1">
+              Custo dos Produtos Vendidos
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Lucros de Quadros</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {formatarMoeda(resumoGeral?.lucrosQuadros.total || 0)}
+        {/* 3. Margem Bruta (Lucro Bruto) */}
+        <div className="card-primary card-hover">
+          <div className="flex flex-row items-center justify-between pb-2">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text">
+              Margem Bruta
+            </h3>
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/30 dark:to-blue-800/30 flex items-center justify-center">
+              <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              Margem média: {formatarPercentual(resumoGeral?.lucrosQuadros.margemMedia || 0)}
+          </div>
+          <div className="mt-2">
+            <div className={`text-2xl font-bold ${
+              (dashboardMetrics?.margemBruta || 0) >= 0 
+                ? 'text-green-600 dark:text-green-400' 
+                : 'text-red-600 dark:text-red-400'
+            }`}>
+              {formatarMoeda(dashboardMetrics?.margemBruta || 0)}
+            </div>
+            <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1">
+              Lucro Bruto • {dashboardMetrics?.vendasTotal 
+                ? formatarPercentual(((dashboardMetrics.margemBruta || 0) / dashboardMetrics.vendasTotal) * 100)
+                : '0,00%'
+              } de margem
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Vendas</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {resumoGeral?.vendas.quantidade || 0}
+        {/* 4. Custos Fixos Total */}
+        <div className="card-primary card-hover">
+          <div className="flex flex-row items-center justify-between pb-2">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-dark-text">
+              Custos Fixos
+            </h3>
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200 dark:from-amber-900/30 dark:to-amber-800/30 flex items-center justify-center">
+              <Calendar className="h-5 w-5 text-amber-600 dark:text-amber-400" />
             </div>
-            <p className="text-xs text-muted-foreground">
-              Total: {formatarMoeda(resumoGeral?.vendas.valorTotal || 0)} • Média:{' '}
-              {formatarMoeda(resumoGeral?.vendas.media || 0)}
+          </div>
+          <div className="mt-2">
+            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+              {formatarMoeda(dashboardMetrics?.custosFixosTotal || 0)}
+            </div>
+            <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1">
+              Total de custos fixos no período
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
       {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Gráfico de Barras - Investimentos por Mês */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Investimentos em Produtos por Mês</CardTitle>
-            <CardDescription>Evolução dos investimentos ao longo do período</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="card-primary">
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Investimentos em Produtos por Mês (CPV)
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+              Evolução do Custo dos Produtos Vendidos (CPV) ao longo do período
+            </p>
+          </div>
+          <div className="p-6">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={dadosInvestimentosPorMes}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="mes" />
-                <YAxis />
+                <CartesianGrid 
+                  strokeDasharray="3 3" 
+                  stroke={isDark ? '#334155' : '#e5e7eb'} 
+                />
+                <XAxis 
+                  dataKey="mes" 
+                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                />
+                <YAxis 
+                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tickFormatter={(value) => {
+                    if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
+                    return `R$ ${value}`;
+                  }}
+                />
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
-                    backgroundColor: isDark ? '#1f2937' : '#fff',
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    color: isDark ? '#F8FAFC' : '#111827',
                   }}
+                  labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
                 />
-                <Legend />
-                <Bar dataKey="valor" fill="#3B82F6" name="Investimento" />
+                <Legend 
+                  wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                />
+                <Bar 
+                  dataKey="valor" 
+                  fill="#6366F1" 
+                  name="Investimento"
+                  radius={[8, 8, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Gráfico de Pizza - Gastos por Fornecedor */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Distribuição de Gastos por Fornecedor</CardTitle>
-            <CardDescription>Top 8 fornecedores por volume de compras</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="card-primary">
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Distribuição de Gastos por Fornecedor
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+              Top 8 fornecedores por volume de compras
+            </p>
+          </div>
+          <div className="p-6">
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
@@ -339,7 +460,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   cy="50%"
                   labelLine={false}
                   label={({ name, percent }) =>
-                    `${name}: ${(percent * 100).toFixed(0)}%`
+                    `${name.length > 15 ? name.substring(0, 15) + '...' : name}: ${(percent * 100).toFixed(0)}%`
                   }
                   outerRadius={80}
                   fill="#8884d8"
@@ -355,53 +476,86 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
-                    backgroundColor: isDark ? '#1f2937' : '#fff',
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    color: isDark ? '#F8FAFC' : '#111827',
                   }}
+                  labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
                 />
               </PieChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Gráfico de Barras - Gastos por Fornecedor */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Gastos por Fornecedor (Top 10)</CardTitle>
-            <CardDescription>Fornecedores com maior volume de compras</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="card-primary">
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Gastos por Fornecedor (Top 10)
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+              Fornecedores com maior volume de compras
+            </p>
+          </div>
+          <div className="p-6">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={dadosGastosFornecedor} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" />
+                <CartesianGrid 
+                  strokeDasharray="3 3" 
+                  stroke={isDark ? '#334155' : '#e5e7eb'} 
+                />
+                <XAxis 
+                  type="number" 
+                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tickFormatter={(value) => {
+                    if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
+                    return `R$ ${value}`;
+                  }}
+                />
                 <YAxis
                   dataKey="nome"
                   type="category"
                   width={150}
-                  tick={{ fontSize: 12 }}
+                  tick={{ fontSize: 12, fill: isDark ? '#CBD5E1' : '#6b7280' }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
                 />
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
-                    backgroundColor: isDark ? '#1f2937' : '#fff',
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    color: isDark ? '#F8FAFC' : '#111827',
                   }}
+                  labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
                 />
-                <Legend />
-                <Bar dataKey="total" fill="#10B981" name="Total Gasto" />
+                <Legend 
+                  wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                />
+                <Bar 
+                  dataKey="total" 
+                  fill="#10B981" 
+                  name="Total Gasto"
+                  radius={[0, 8, 8, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Gráfico de Pizza - Markup por Tipo */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Markup Médio por Tipo de Item</CardTitle>
-            <CardDescription>Percentual de lucro por categoria</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div className="card-primary">
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Markup Médio por Tipo de Item
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+              Percentual de lucro por categoria
+            </p>
+          </div>
+          <div className="p-6">
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
@@ -424,47 +578,305 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 <Tooltip
                   formatter={(value: number) => `${value.toFixed(2)}%`}
                   contentStyle={{
-                    backgroundColor: isDark ? '#1f2937' : '#fff',
-                    border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    color: isDark ? '#F8FAFC' : '#111827',
                   }}
+                  labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
                 />
               </PieChart>
             </ResponsiveContainer>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Gráfico de Linha Interativo - Evolução de Orçamentos por Tipo de Serviço */}
+      <div className="card-primary">
+        <div className="flex flex-col lg:flex-row border-b border-gray-200 dark:border-dark-border">
+          <div className="flex flex-1 flex-col justify-center gap-1 p-6">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Evolução de Orçamentos por Tipo de Serviço
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+              Mostrando valores de orçamentos por tipo de serviço no período selecionado
+            </p>
+          </div>
+          {tiposServico.length > 0 ? (
+            <div className="flex flex-wrap border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-dark-border">
+              {tiposServico.map((servico) => {
+                const total = totaisPorServico[servico] || 0;
+                const isActive = servicoAtivo === servico;
+                return (
+                  <button
+                    key={servico}
+                    onClick={() => setServicoAtivo(servico)}
+                    className={`
+                      flex flex-1 flex-col justify-center gap-1 px-4 py-4 text-left 
+                      min-w-[150px] sm:min-w-[180px] 
+                      transition-all duration-200
+                      ${isActive 
+                        ? 'bg-indigo-50 dark:bg-indigo-900/20 border-l-2 border-indigo-600 dark:border-indigo-400' 
+                        : 'hover:bg-gray-50 dark:hover:bg-slate-700/50'
+                      }
+                      border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-dark-border
+                      even:border-l lg:even:border-l
+                    `}
+                  >
+                    <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
+                      {servico.length > 20 ? servico.substring(0, 20) + '...' : servico}
+                    </span>
+                    <span className={`text-lg leading-none font-bold sm:text-2xl ${
+                      isActive 
+                        ? 'text-indigo-600 dark:text-indigo-400' 
+                        : 'text-gray-900 dark:text-dark-text'
+                    }`}>
+                      {formatarMoeda(total)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center px-6 py-4 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-dark-border">
+              <p className="text-sm text-gray-500 dark:text-dark-text-secondary">
+                Nenhum serviço encontrado no período
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="p-6">
+          {tiposServico.length > 0 && dadosEvolucaoOrcamentos.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart
+                data={dadosEvolucaoOrcamentos}
+                margin={{
+                  left: 12,
+                  right: 12,
+                  top: 12,
+                  bottom: 12,
+                }}
+              >
+                <CartesianGrid 
+                  strokeDasharray="3 3" 
+                  vertical={false}
+                  stroke={isDark ? '#334155' : '#e5e7eb'} 
+                />
+                <XAxis
+                  dataKey="data"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  minTickGap={32}
+                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tickFormatter={(value) => {
+                    const date = new Date(value);
+                    return date.toLocaleDateString('pt-BR', {
+                      month: 'short',
+                      day: 'numeric',
+                    });
+                  }}
+                />
+                <YAxis
+                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tickFormatter={(value) => {
+                    if (value >= 1000) {
+                      return `R$ ${(value / 1000).toFixed(1)}k`;
+                    }
+                    return `R$ ${value}`;
+                  }}
+                />
+                <Tooltip
+                  formatter={(value: number) => formatarMoeda(value)}
+                  labelFormatter={(value) => {
+                    return new Date(value).toLocaleDateString('pt-BR', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    });
+                  }}
+                  contentStyle={{
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    borderRadius: '8px',
+                    color: isDark ? '#F8FAFC' : '#111827',
+                  }}
+                  labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                />
+                <Legend 
+                  wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                />
+                {tiposServico.map((servico, index) => {
+                  const isActive = servicoAtivo === servico;
+                  return (
+                    <Line
+                      key={servico}
+                      type="monotone"
+                      dataKey={servico}
+                      stroke={COLORS[index % COLORS.length]}
+                      strokeWidth={isActive ? 3 : 2}
+                      dot={isActive}
+                      dotRadius={isActive ? 4 : 0}
+                      strokeDasharray={isActive ? '0' : '5 5'}
+                      opacity={isActive ? 1 : 0.5}
+                      name={servico.length > 20 ? servico.substring(0, 20) + '...' : servico}
+                    />
+                  );
+                })}
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-[300px] bg-gray-50 dark:bg-slate-800/30 rounded-lg">
+              <div className="text-center">
+                <BarChart3 className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-3" />
+                <p className="text-sm text-gray-500 dark:text-dark-text-secondary">
+                  Nenhum dado de serviço disponível para o período selecionado
+                </p>
+                <p className="text-xs text-gray-400 dark:text-dark-text-secondary mt-1">
+                  Os dados aparecerão aqui quando houver orçamentos com serviços no período
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tabela de Markup por Tipo */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Detalhamento de Markup por Tipo</CardTitle>
-          <CardDescription>Análise detalhada de margem de lucro</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div className="card-primary">
+        <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+          <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+            Detalhamento de Markup por Tipo
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+            Análise detalhada de margem de lucro
+          </p>
+        </div>
+        <div className="p-6">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-b">
-                  <th className="text-left p-3 font-semibold">Tipo</th>
-                  <th className="text-right p-3 font-semibold">Markup Médio</th>
-                  <th className="text-right p-3 font-semibold">Quantidade</th>
+                <tr className="border-b border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-slate-800/50">
+                  <th className="text-left p-3 font-semibold text-gray-700 dark:text-dark-text">
+                    Tipo
+                  </th>
+                  <th className="text-right p-3 font-semibold text-gray-700 dark:text-dark-text">
+                    Markup Médio
+                  </th>
+                  <th className="text-right p-3 font-semibold text-gray-700 dark:text-dark-text">
+                    Quantidade
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {resumoGeral?.markupItens.porTipo.map((item, index) => (
-                  <tr key={index} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
-                    <td className="p-3">{item.tipo.replace('_', ' ')}</td>
-                    <td className="p-3 text-right font-semibold text-green-600">
+                  <tr 
+                    key={index} 
+                    className="border-b border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-slate-800/30 transition-colors"
+                  >
+                    <td className="p-3 text-gray-900 dark:text-dark-text">
+                      {item.tipo.replace('_', ' ')}
+                    </td>
+                    <td className="p-3 text-right font-semibold text-green-600 dark:text-green-400">
                       {formatarPercentual(item.markupMedio)}
                     </td>
-                    <td className="p-3 text-right">{item.quantidade}</td>
+                    <td className="p-3 text-right text-gray-700 dark:text-dark-text-secondary">
+                      {item.quantidade}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
+      {/* Card de Gastos Fixos por Categoria */}
+      {resumoGeral?.gastosFixos && (
+        <div className="card-primary">
+          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
+              Gastos Fixos por Categoria
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+              Distribuição mensal de gastos fixos por categoria
+            </p>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              {Object.entries(resumoGeral.gastosFixos.porCategoria).map(([categoria, valor]) => (
+                <div
+                  key={categoria}
+                  className="p-4 border border-gray-200 dark:border-dark-border rounded-lg bg-white dark:bg-slate-800/30 hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors card-hover"
+                >
+                  <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary mb-1">
+                    {categoria}
+                  </p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-dark-text">
+                    {formatarMoeda(valor)}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
+                    Mensal
+                  </p>
+                </div>
+              ))}
+            </div>
+            {resumoGeral.gastosFixos.evolucaoMensal.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold mb-3 text-gray-700 dark:text-dark-text">
+                  Evolução Mensal
+                </h4>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={resumoGeral.gastosFixos.evolucaoMensal}>
+                    <CartesianGrid 
+                      strokeDasharray="3 3" 
+                      stroke={isDark ? '#334155' : '#e5e7eb'} 
+                    />
+                    <XAxis
+                      dataKey="mes"
+                      tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                      stroke={isDark ? '#334155' : '#e5e7eb'}
+                      tickFormatter={(value) => {
+                        const date = new Date(value + '-01');
+                        return date.toLocaleDateString('pt-BR', {
+                          month: 'short',
+                        });
+                      }}
+                    />
+                    <YAxis
+                      tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
+                      stroke={isDark ? '#334155' : '#e5e7eb'}
+                      tickFormatter={(value) => {
+                        if (value >= 1000) {
+                          return `R$ ${(value / 1000).toFixed(1)}k`;
+                        }
+                        return `R$ ${value}`;
+                      }}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => formatarMoeda(value)}
+                      contentStyle={{
+                        backgroundColor: isDark ? '#1E293B' : '#fff',
+                        border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                        borderRadius: '8px',
+                        color: isDark ? '#F8FAFC' : '#111827',
+                      }}
+                      labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    />
+                    <Bar 
+                      dataKey="valor" 
+                      fill="#F59E0B" 
+                      name="Gastos Fixos"
+                      radius={[8, 8, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

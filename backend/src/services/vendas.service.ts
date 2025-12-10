@@ -263,7 +263,30 @@ export class VendasService {
                 include: {
                     cliente: true,
                     projeto: true,
-                    contasReceber: true
+                    contasReceber: true,
+                    orcamento: {
+                        include: {
+                            items: {
+                                include: {
+                                    material: {
+                                        select: {
+                                            id: true,
+                                            nome: true,
+                                            sku: true,
+                                            ncm: true
+                                        }
+                                    },
+                                    cotacao: {
+                                        select: {
+                                            id: true,
+                                            nome: true,
+                                            ncm: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }),
             prisma.venda.count()
@@ -289,7 +312,30 @@ export class VendasService {
             include: {
                 cliente: true,
                 projeto: true,
-                contasReceber: true
+                contasReceber: true,
+                orcamento: {
+                    include: {
+                        items: {
+                            include: {
+                                material: {
+                                    select: {
+                                        id: true,
+                                        nome: true,
+                                        sku: true,
+                                        ncm: true
+                                    }
+                                },
+                                cotacao: {
+                                    select: {
+                                        id: true,
+                                        nome: true,
+                                        ncm: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         });
     }

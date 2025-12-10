@@ -326,6 +326,7 @@ model OrcamentoItem {
   custoUnit   Float
   precoUnit   Float
   subtotal    Float
+  ncm         String? // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
 
   // ✅ NOVOS CAMPOS: Conversão de unidades (OPCIONAIS para compatibilidade)
   unidadeVenda String? // Unidade de venda (ex: 'cm' para barramentos, pode ser diferente da unidade de estoque)
@@ -632,6 +633,7 @@ model ContaPagar {
   descricao      String
   valorParcela   Float // Valor da parcela/despesa
   dataVencimento DateTime
+  dataAgendamento DateTime? // Data agendada para pagamento
   dataPagamento  DateTime?
   status         String    @default("Pendente") // Pendente, Pago, Atrasado, Cancelado
   numeroParcela  Int?

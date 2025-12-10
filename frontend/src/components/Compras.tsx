@@ -1826,6 +1826,85 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </div>
                             )}
 
+                            {/* Contas a Pagar Vinculadas */}
+                            {(purchaseToView as any).contasPagar && (purchaseToView as any).contasPagar.length > 0 && (
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">💳</span>
+                                        Contas a Pagar Vinculadas ({(purchaseToView as any).contasPagar.length})
+                                    </h3>
+                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead className="bg-purple-50 border-b border-gray-200">
+                                                    <tr>
+                                                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Parcela</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Vencimento</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Agendamento</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Pagamento</th>
+                                                        <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">Valor</th>
+                                                        <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-white divide-y divide-gray-200">
+                                                    {(purchaseToView as any).contasPagar.map((conta: any, idx: number) => (
+                                                        <tr key={conta.id || idx} className="hover:bg-gray-50 transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <span className="font-semibold text-gray-900">
+                                                                    {conta.numeroParcela || idx + 1}/{conta.totalParcelas || (purchaseToView as any).contasPagar.length}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-sm text-gray-700">
+                                                                    {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                {conta.dataAgendamento ? (
+                                                                    <span className="text-sm text-blue-600 font-medium">
+                                                                        📅 {new Date(conta.dataAgendamento).toLocaleDateString('pt-BR')}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-xs text-gray-400">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                {conta.dataPagamento ? (
+                                                                    <span className="text-sm text-green-600 font-medium">
+                                                                        ✅ {new Date(conta.dataPagamento).toLocaleDateString('pt-BR')}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-xs text-gray-400">-</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-4 text-right">
+                                                                <span className="font-bold text-gray-900">
+                                                                    R$ {parseFloat(conta.valorParcela || conta.valor || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center">
+                                                                <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${
+                                                                    conta.status === 'Pago' ? 'bg-green-100 text-green-800' :
+                                                                    conta.status === 'Atrasado' ? 'bg-red-100 text-red-800' :
+                                                                    conta.dataAgendamento ? 'bg-blue-100 text-blue-800' :
+                                                                    'bg-yellow-100 text-yellow-800'
+                                                                }`}>
+                                                                    {conta.status === 'Pago' && '✅ '}
+                                                                    {conta.status === 'Atrasado' && '⚠️ '}
+                                                                    {conta.status === 'Pendente' && conta.dataAgendamento && '📅 '}
+                                                                    {conta.status === 'Pendente' && !conta.dataAgendamento && '⏳ '}
+                                                                    {conta.status || 'Pendente'}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Observações */}
                             {purchaseToView.notes && (
                                 <div>

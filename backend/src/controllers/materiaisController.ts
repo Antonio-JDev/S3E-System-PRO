@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { classificarMaterialPorNome, normalizarCategoria, isCategoriaValida } from '../utils/materialClassifier';
+import { gerarSKUUnico } from '../utils/skuGenerator';
 
 const prisma = new PrismaClient();
 
@@ -136,7 +137,7 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
 // Criar material
 export const createMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
-    let { categoria, nome, ...rest } = req.body;
+    let { categoria, nome, sku, ncm, ...rest } = req.body;
     
     // Normalizar categoria se fornecida
     if (categoria) {
@@ -149,11 +150,21 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
       console.log(`🔍 Categoria auto-classificada: "${categoria}" para "${nome}"`);
     }
     
+    // Gerar SKU único e aleatório se não fornecido
+    let skuFinal = sku;
+    if (!skuFinal || skuFinal.trim() === '') {
+      console.log('🔧 SKU não fornecido. Gerando SKU único e aleatório...');
+      skuFinal = await gerarSKUUnico(prisma, ncm || null);
+      console.log(`✅ SKU gerado: ${skuFinal}`);
+    }
+    
     const material = await prisma.material.create({
       data: {
         ...rest,
         nome,
-        categoria
+        categoria,
+        sku: skuFinal,
+        ncm: ncm || null
       }
     });
 

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { EstoqueService } from './estoque.service';
 import { ContasPagarService } from './contasPagar.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
+import { gerarSKUUnico } from '../utils/skuGenerator';
 
 const prisma = new PrismaClient();
 
@@ -151,10 +152,8 @@ export class ComprasService {
                     // Se não encontrou, CRIAR novo Material
                     if (!material) {
                         console.log(`✨ Criando novo Material: "${item.nomeProduto}"`);
-                        // Gerar SKU único (timestamp + random para garantir unicidade)
-                        const timestamp = Date.now();
-                        const random = Math.random().toString(36).substr(2, 9);
-                        const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
+                        // Gerar SKU único e aleatório
+                        const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
                         
                         // Classificar categoria automaticamente baseado no nome do produto
                         const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
@@ -162,11 +161,11 @@ export class ComprasService {
                         material = await tx.material.create({
                             data: {
                                 nome: item.nomeProduto, // ✅ Nome real do produto do XML
-                                sku: skuGerado, // ✅ SKU único gerado
+                                sku: skuGerado, // ✅ SKU único e aleatório gerado (NCM usado apenas como referência no SKU)
                                 tipo: 'Material Elétrico', // ✅ Tipo padrão
                                 categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                 descricao: item.nomeProduto, // ✅ Usar nome do produto ao invés de texto genérico
-                                ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML (dado fiscal importante) - sempre string
+                                ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML preservado integralmente (NÃO alterado, apenas salvo)
                                 unidadeMedida: 'un',
                                 preco: item.valorUnit,
                                 estoque: 0, // Será atualizado depois se status = Recebido
@@ -179,26 +178,39 @@ export class ComprasService {
                         console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
                     } else {
                         console.log(`🔗 Material existente encontrado: ${material.id}`);
-                        // Atualizar preço se o novo for diferente
+                        
+                        // Preparar dados de atualização
+                        const updateData: any = {};
+                        let needsUpdate = false;
+                        
+                        // Atualizar preço se necessário
                         if (material.preco !== null && material.preco !== item.valorUnit) {
-                            await tx.material.update({
-                                where: { id: material.id },
-                                data: {
-                                    preco: item.valorUnit, // Atualizar com o preço mais recente
-                                    fornecedorId: fornecedor.id // Atualizar fornecedor
-                                }
-                            });
+                            updateData.preco = item.valorUnit;
+                            updateData.fornecedorId = fornecedor.id;
+                            needsUpdate = true;
                             console.log(`💰 Preço atualizado: R$ ${material.preco} → R$ ${item.valorUnit}`);
                         } else if (material.preco === null) {
-                            // Se o material não tinha preço, atualizar
+                            updateData.preco = item.valorUnit;
+                            updateData.fornecedorId = fornecedor.id;
+                            needsUpdate = true;
+                            console.log(`💰 Preço definido: R$ ${item.valorUnit}`);
+                        }
+                        
+                        // Atualizar NCM se o material não tem NCM e o item tem
+                        const materialNcm = (material as any).ncm;
+                        if (item.ncm && !materialNcm) {
+                            updateData.ncm = String(item.ncm);
+                            updateData.fornecedorId = fornecedor.id;
+                            needsUpdate = true;
+                            console.log(`🏷️ NCM atualizado: ${String(item.ncm)}`);
+                        }
+                        
+                        // Executar atualização se necessário
+                        if (needsUpdate) {
                             await tx.material.update({
                                 where: { id: material.id },
-                                data: {
-                                    preco: item.valorUnit,
-                                    fornecedorId: fornecedor.id
-                                }
+                                data: updateData
                             });
-                            console.log(`💰 Preço definido: R$ ${item.valorUnit}`);
                         }
                     }
                     
@@ -213,7 +225,7 @@ export class ComprasService {
                     itemsComMaterialId.push({
                         materialId,
                         nomeProduto: item.nomeProduto,
-                        ncm: item.ncm ? String(item.ncm) : null,
+                        ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado)
                         quantidade: item.quantidade,
                         valorUnit: item.valorUnit,
                         valorTotal: item.quantidade * item.valorUnit
@@ -390,7 +402,8 @@ export class ComprasService {
                                     id: true,
                                     nome: true,
                                     sku: true,
-                                    categoria: true
+                                    categoria: true,
+                                    ncm: true
                                 }
                             }
                         }
@@ -402,7 +415,31 @@ export class ComprasService {
                 throw new Error('Compra não encontrada');
             }
 
-            return compra;
+            // Buscar contas a pagar vinculadas
+            const contasPagar = await prisma.contaPagar.findMany({
+                where: { compraId: id },
+                orderBy: { dataVencimento: 'asc' }
+            });
+
+            // Parsear duplicatas do xmlData
+            let duplicatas: Array<{ numero: string; dataVencimento: string; valor: number }> = [];
+            if (compra.xmlData) {
+                try {
+                    const xmlMeta = JSON.parse(compra.xmlData);
+                    if (xmlMeta.duplicatas && Array.isArray(xmlMeta.duplicatas)) {
+                        duplicatas = xmlMeta.duplicatas;
+                    }
+                } catch (err) {
+                    console.error('Erro ao parsear duplicatas do xmlData:', err);
+                }
+            }
+
+            // Retornar compra com duplicatas e contas vinculadas
+            return {
+                ...compra,
+                duplicatas,
+                contasPagar
+            };
         } catch (error) {
             console.error('Erro ao buscar compra:', error);
             throw error;
@@ -532,10 +569,8 @@ export class ComprasService {
                         
                         // Criar novo Material se não encontrou
                         if (!material) {
-                            // Gerar SKU único (timestamp + random para garantir unicidade)
-                            const timestamp = Date.now();
-                            const random = Math.random().toString(36).substr(2, 9);
-                            const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
+                            // Gerar SKU único e aleatório
+                            const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
                             
                             // Classificar categoria automaticamente baseado no nome do produto
                             const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
@@ -547,7 +582,7 @@ export class ComprasService {
                                     tipo: 'Produto', // ✅ Campo obrigatório
                                     categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                     descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
-                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML - sempre string
+                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML - sempre string
                                     unidadeMedida: 'UN',
                                     preco: item.valorUnit,
                                     estoque: 0,
@@ -688,9 +723,8 @@ export class ComprasService {
                         
                         // Criar novo Material se não encontrou
                         if (!material) {
-                            const timestamp = Date.now();
-                            const random = Math.random().toString(36).substr(2, 9);
-                            const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
+                            // Gerar SKU único e aleatório
+                            const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
                             
                             // Classificar categoria automaticamente baseado no nome do produto
                             const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
@@ -698,11 +732,11 @@ export class ComprasService {
                             material = await tx.material.create({
                                 data: {
                                     nome: item.nomeProduto,
-                                    sku: skuGerado,
+                                    sku: skuGerado, // ✅ SKU único gerado (NCM usado apenas como referência)
                                     tipo: 'Produto',
                                     categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                     descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
-                                    ncm: item.ncm ? String(item.ncm) : null,
+                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM preservado do XML (NÃO alterado)
                                     unidadeMedida: 'UN',
                                     preco: item.valorUnit,
                                     estoque: 0,
@@ -853,9 +887,8 @@ export class ComprasService {
                 if (associacao.criarNovo) {
                     console.log(`🆕 Criando novo material para: "${item.nomeProduto}"`);
                     
-                    const timestamp = Date.now();
-                    const random = Math.random().toString(36).substr(2, 9);
-                    const skuGerado = item.ncm ? `NCM-${item.ncm}-${random}` : `AUTO-${timestamp}-${random}`;
+                    // Gerar SKU único e aleatório
+                    const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
 
                     // Classificar categoria automaticamente baseado no nome do produto
                     const nomeMaterial = associacao.nomeMaterial || item.nomeProduto;
@@ -868,7 +901,7 @@ export class ComprasService {
                             tipo: 'Material Elétrico',
                             categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                             descricao: nomeMaterial,
-                            ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM do XML - sempre string
+                            ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML - sempre string
                             unidadeMedida: 'un',
                             preco: item.valorUnit,
                             estoque: 0,

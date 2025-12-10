@@ -184,6 +184,73 @@ export class ContasPagarService {
             data: {
                 status: ContaStatus.Pago,
                 dataPagamento: new Date(),
+                dataAgendamento: null, // Limpar agendamento quando pago
+                updatedAt: new Date()
+            },
+            include: {
+                fornecedor: true
+            }
+        });
+
+        return contaAtualizada;
+    }
+
+    /**
+     * Agenda uma data de pagamento para uma conta a pagar
+     */
+    static async agendarPagamento(id: string, dataAgendamento: Date) {
+        const conta = await prisma.contaPagar.findUnique({
+            where: { id }
+        });
+
+        if (!conta) {
+            throw new Error('Conta a pagar não encontrada');
+        }
+
+        if (conta.status === ContaStatus.Pago) {
+            throw new Error('Não é possível agendar pagamento de uma conta já paga');
+        }
+
+        // Validar que a data de agendamento não seja no passado
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const dataAgendamentoLimpa = new Date(dataAgendamento);
+        dataAgendamentoLimpa.setHours(0, 0, 0, 0);
+
+        if (dataAgendamentoLimpa < hoje) {
+            throw new Error('Data de agendamento não pode ser no passado');
+        }
+
+        const contaAtualizada = await prisma.contaPagar.update({
+            where: { id },
+            data: {
+                dataAgendamento,
+                updatedAt: new Date()
+            },
+            include: {
+                fornecedor: true
+            }
+        });
+
+        return contaAtualizada;
+    }
+
+    /**
+     * Remove o agendamento de pagamento de uma conta
+     */
+    static async removerAgendamento(id: string) {
+        const conta = await prisma.contaPagar.findUnique({
+            where: { id }
+        });
+
+        if (!conta) {
+            throw new Error('Conta a pagar não encontrada');
+        }
+
+        const contaAtualizada = await prisma.contaPagar.update({
+            where: { id },
+            data: {
+                dataAgendamento: null,
                 updatedAt: new Date()
             },
             include: {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { financeiroService } from '../services/financeiroService';
 import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -65,6 +66,7 @@ interface ContaPagar {
     numeroParcela: number;
     descricao: string;
     dataVencimento: string;
+    dataAgendamento?: string;
     valor: number;
     valorPago?: number;
     dataPagamento?: string;
@@ -153,11 +155,21 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
     // AlertDialog de Confirmação
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
     const [confirmAction, setConfirmAction] = useState<'pagar' | 'atualizar' | null>(null);
+    
+    // Modal de Agendamento
+    const [isAgendamentoModalOpen, setIsAgendamentoModalOpen] = useState(false);
+    const [dataAgendamento, setDataAgendamento] = useState(new Date().toISOString().split('T')[0]);
 
     // Carregar dados
     useEffect(() => {
         loadContasPagar();
     }, []);
+
+    // Aplicar hook useEscapeKey em todos os modais
+    useEscapeKey(isPagamentoModalOpen, handleClosePagamentoModal);
+    useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
+    useEscapeKey(isAtualizarModalOpen, handleCloseAtualizarModal);
+    useEscapeKey(isAgendamentoModalOpen, handleCloseAgendamentoModal);
 
     const loadContasPagar = async () => {
         setLoading(true);
@@ -179,6 +191,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         numeroParcela: conta.numeroParcela || 1,
                         descricao: conta.descricao || `Parcela ${conta.numeroParcela || 1}`,
                         dataVencimento: conta.dataVencimento,
+                        dataAgendamento: conta.dataAgendamento,
                         valor: conta.valorParcela || conta.valor || 0,
                         valorPago: conta.valorPago,
                         dataPagamento: conta.dataPagamento,
@@ -998,6 +1011,9 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                     Vencimento
                                 </th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                    Agendamento
+                                </th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                     Valor
                                 </th>
@@ -1012,7 +1028,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         <tbody className="divide-y divide-gray-200">
                             {contasFiltradas.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-12 text-center">
+                                    <td colSpan={7} className="px-6 py-12 text-center">
                                         <div className="flex flex-col items-center justify-center">
                                             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                                                 <CurrencyDollarIcon className="w-8 h-8 text-gray-400" />
@@ -1048,6 +1064,33 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                                     <p className="text-xs text-green-600 mt-1">
                                                         Pago: {new Date(conta.dataPagamento).toLocaleDateString('pt-BR')}
                                                     </p>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <div>
+                                                {conta.dataAgendamento ? (
+                                                    <>
+                                                        <p className="text-sm font-medium text-blue-600">
+                                                            📅 {new Date(conta.dataAgendamento).toLocaleDateString('pt-BR')}
+                                                        </p>
+                                                        <button
+                                                            onClick={() => handleRemoverAgendamento(conta.id)}
+                                                            className="text-xs text-red-600 hover:text-red-800 mt-1 underline"
+                                                            title="Remover agendamento"
+                                                        >
+                                                            Remover
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => handleOpenAgendamentoModal(conta)}
+                                                        className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                                        title="Agendar pagamento"
+                                                        disabled={conta.status === 'Pago'}
+                                                    >
+                                                        Agendar
+                                                    </button>
                                                 )}
                                             </div>
                                         </td>
@@ -1618,6 +1661,93 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Modal de Agendamento de Pagamento */}
+            {isAgendamentoModalOpen && contaSelecionada && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-md w-full">
+                        {/* Header */}
+                        <div className="modal-header bg-gradient-to-r from-blue-50 to-cyan-50">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">Agendar Pagamento</h2>
+                                <p className="text-sm text-gray-600 mt-1">Defina uma data para o pagamento</p>
+                            </div>
+                            <button
+                                onClick={handleCloseAgendamentoModal}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="modal-body space-y-4">
+                            {/* Informações da Conta */}
+                            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                                <h3 className="font-semibold text-blue-900 mb-3">Informações da Conta</h3>
+                                <div className="grid grid-cols-1 gap-2 text-sm">
+                                    <div>
+                                        <span className="text-blue-700 font-medium">Fornecedor:</span>
+                                        <p className="text-blue-900 font-semibold">{contaSelecionada.fornecedorNome}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-blue-700 font-medium">Descrição:</span>
+                                        <p className="text-blue-900">{contaSelecionada.descricao}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-blue-700 font-medium">Vencimento:</span>
+                                        <p className="text-blue-900">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-blue-700 font-medium">Valor:</span>
+                                        <p className="text-blue-900 font-bold">
+                                            R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Formulário */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Data de Agendamento *
+                                </label>
+                                <input
+                                    type="date"
+                                    value={dataAgendamento}
+                                    onChange={(e) => setDataAgendamento(e.target.value)}
+                                    min={new Date().toISOString().split('T')[0]}
+                                    required
+                                    className="select-field focus:ring-blue-500 focus:border-blue-500 w-full"
+                                />
+                                <p className="text-xs text-gray-500 mt-1">
+                                    Selecione uma data futura para agendar o pagamento
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+                            <button
+                                onClick={handleCloseAgendamentoModal}
+                                className="btn-secondary"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleAgendarPagamento}
+                                className="btn-primary flex items-center gap-2"
+                                disabled={!dataAgendamento || new Date(dataAgendamento) < new Date()}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Agendar Pagamento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

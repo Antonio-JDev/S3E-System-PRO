@@ -260,6 +260,26 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
       
       custoTotal += subtotal;
 
+      // Obter NCM do material, cotação ou item editado manualmente
+      let ncm = item.ncm || null;
+      
+      if (!ncm) {
+        // Se não foi fornecido manualmente, buscar do material ou cotação
+        if (item.tipo === 'MATERIAL' && item.materialId) {
+          const material = await prisma.material.findUnique({
+            where: { id: item.materialId },
+            select: { ncm: true }
+          });
+          ncm = material?.ncm || null;
+        } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+          const cotacao = await prisma.cotacao.findUnique({
+            where: { id: item.cotacaoId },
+            select: { ncm: true }
+          });
+          ncm = cotacao?.ncm || null;
+        }
+      }
+
       itemsData.push({
         tipo: item.tipo,
         materialId: item.materialId,
@@ -271,6 +291,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         custoUnit,
         precoUnit,
         subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
+        ncm: ncm ? String(ncm) : null, // ✅ NCM para faturamento NF-e/NFS-e
         // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
         unidadeVenda: item.unidadeVenda || null,
         tipoMaterial: item.tipoMaterial || null
@@ -731,6 +752,26 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
         
         custoTotal += subtotal;
 
+        // Obter NCM do material, cotação ou item editado manualmente
+        let ncm = item.ncm || null;
+        
+        if (!ncm) {
+          // Se não foi fornecido manualmente, buscar do material ou cotação
+          if (item.tipo === 'MATERIAL' && item.materialId) {
+            const material = await prisma.material.findUnique({
+              where: { id: item.materialId },
+              select: { ncm: true }
+            });
+            ncm = material?.ncm || null;
+          } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+            const cotacao = await prisma.cotacao.findUnique({
+              where: { id: item.cotacaoId },
+              select: { ncm: true }
+            });
+            ncm = cotacao?.ncm || null;
+          }
+        }
+
         itemsData.push({
           tipo: item.tipo,
           materialId: item.materialId,
@@ -742,6 +783,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
           custoUnit,
           precoUnit,
           subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
+          ncm: ncm ? String(ncm) : null, // ✅ NCM para faturamento NF-e/NFS-e
           // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
           unidadeVenda: item.unidadeVenda || null,
           tipoMaterial: item.tipoMaterial || null

@@ -27,6 +27,7 @@ export interface ContaPagar {
   descricao: string;
   valor: number;
   dataVencimento: string;
+  dataAgendamento?: string;
   dataPagamento?: string;
   status: 'Pendente' | 'Pago' | 'Atrasado' | 'Cancelado';
   numeroParcela?: number;
@@ -215,6 +216,52 @@ class FinanceiroService {
       }
     } catch (error) {
       console.error('❌ Erro ao criar conta:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Agendar pagamento de conta a pagar
+   */
+  async agendarPagamento(id: string, dataAgendamento: string): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
+    try {
+      console.log(`📅 Agendando pagamento da conta ${id} para ${dataAgendamento}...`);
+      
+      const response = await axiosApiService.put<ContaPagar>(`/api/contas-pagar/${id}/agendar`, {
+        dataAgendamento
+      });
+      
+      if (response.success && response.data) {
+        console.log('✅ Pagamento agendado com sucesso:', response.data);
+        return { success: true, data: response.data };
+      } else {
+        console.warn('⚠️ Erro ao agendar pagamento:', response);
+        return { success: false, error: response.error || 'Erro ao agendar pagamento' };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao agendar pagamento:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Remover agendamento de pagamento
+   */
+  async removerAgendamento(id: string): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
+    try {
+      console.log(`🗑️ Removendo agendamento da conta ${id}...`);
+      
+      const response = await axiosApiService.put<ContaPagar>(`/api/contas-pagar/${id}/remover-agendamento`, {});
+      
+      if (response.success && response.data) {
+        console.log('✅ Agendamento removido com sucesso:', response.data);
+        return { success: true, data: response.data };
+      } else {
+        console.warn('⚠️ Erro ao remover agendamento:', response);
+        return { success: false, error: response.error || 'Erro ao remover agendamento' };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao remover agendamento:', error);
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }

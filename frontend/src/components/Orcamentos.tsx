@@ -117,6 +117,7 @@ interface OrcamentoItem {
     unidadeMedida: string; // Unidade de estoque
     unidadeVenda?: string; // Unidade de venda (pode ser diferente, ex: cm para barramentos)
     tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // Tipo especial para conversão
+    ncm?: string; // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
     quantidade: number;
     custoUnit: number;
     precoBase?: number; // Base do preço de venda (valorVenda || preco) sem BDI - usado para recalcular quando BDI muda
@@ -124,9 +125,9 @@ interface OrcamentoItem {
     subtotal: number;
     orcamentoId?: string;
     // Relações carregadas do backend
-    material?: { id: string; nome: string; sku?: string; unidadeMedida?: string };
+    material?: { id: string; nome: string; sku?: string; unidadeMedida?: string; ncm?: string };
     kit?: { id: string; nome: string };
-    cotacao?: { id: string; nome: string; dataAtualizacao?: string; fornecedorNome?: string };
+    cotacao?: { id: string; nome: string; dataAtualizacao?: string; fornecedorNome?: string; ncm?: string };
 }
 
 interface Foto {

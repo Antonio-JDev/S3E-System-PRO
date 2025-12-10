@@ -266,7 +266,8 @@ app.get('/api', (_req, res) => {
       planos: '/api/planos',
       despesasFixas: '/api/despesas-fixas',
       logs: '/api/logs',
-      tarefasObra: '/api/obras/tarefas'
+      tarefasObra: '/api/obras/tarefas',
+      bi: '/api/bi'
     }
   });
 });

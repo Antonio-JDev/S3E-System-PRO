@@ -207,6 +207,74 @@ export class BIController {
   }
 
   /**
+   * GET /api/bi/evolucao-orcamentos-servicos
+   * Evolução de orçamentos por tipo de serviço
+   */
+  static async getEvolucaoOrcamentosServicos(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getEvolucaoOrcamentosPorServico(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar evolução de orçamentos por serviço:', error);
+      res.status(500).json({
+        error: 'Erro ao buscar evolução de orçamentos por serviço',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/gastos-fixos
+   * Gastos fixos no período
+   */
+  static async getGastosFixos(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getGastosFixos(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar gastos fixos:', error);
+      res.status(500).json({
+        error: 'Erro ao buscar gastos fixos',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
    * GET /api/bi/resumo-geral
    * Resumo consolidado de todas as métricas
    */
@@ -235,6 +303,43 @@ export class BIController {
       console.error('Erro ao buscar resumo geral:', error);
       res.status(500).json({
         error: 'Erro ao buscar resumo geral',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/dashboard
+   * Métricas principais do dashboard: Vendas Total, CPV, Margem Bruta, Custos Fixos
+   * Inclui dados para gráficos: Investimentos por Mês e Gastos por Fornecedor Top 10
+   */
+  static async getDashboard(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getDashboardMetrics(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar métricas do dashboard:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar métricas do dashboard',
         message: error.message,
       });
     }
