@@ -9,6 +9,7 @@ import {
     despesasFixasService 
 } from '../services/gerenciamentoService';
 import { axiosApiService } from '../services/axiosApi';
+import BIDashboard from './BIDashboard';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -130,7 +131,7 @@ const GerenciamentoEmpresarial: React.FC<GerenciamentoEmpresarialProps> = ({ tog
 
             {/* Conteúdo das Subpáginas */}
             <div className="animate-fade-in">
-                {activeSubPage === 'dashboard' && <DashboardView />}
+                {activeSubPage === 'dashboard' && <BIDashboardView />}
                 {activeSubPage === 'rh' && <RHView />}
                 {activeSubPage === 'carros' && <CarrosView />}
                 {activeSubPage === 'planos' && <PlanosView />}
@@ -140,7 +141,12 @@ const GerenciamentoEmpresarial: React.FC<GerenciamentoEmpresarialProps> = ({ tog
     );
 };
 
-// ==================== DASHBOARD VIEW ====================
+// ==================== BI DASHBOARD VIEW ====================
+const BIDashboardView: React.FC = () => {
+    return <BIDashboard />;
+};
+
+// ==================== DASHBOARD VIEW (Legacy - mantido para referência) ====================
 const DashboardView: React.FC = () => {
     const [metricas, setMetricas] = useState({
         funcionarios: { total: 0, folhaPagamento: 0, valesMes: 0, custoTotal: 0 },

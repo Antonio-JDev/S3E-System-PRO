@@ -2,14 +2,13 @@
 # S3E System PRO - Docker Compose (Desenvolvimento)
 # ============================================
 # Este arquivo é para desenvolvimento local
+# Baseado na configuração de produção, mas com build local
 # 
 # Para usar:
-# 1. Copie .env.example para .env: cp .env.example .env
-# 2. Ajuste as variáveis no .env conforme necessário
-# 3. Execute: docker-compose up ou make dev
+# 1. Certifique-se de ter o arquivo .env configurado
+# 2. Execute: docker-compose up --build
 #
 # Para produção, use: docker-compose -f docker-compose.prod.yml up
-# NUNCA commite o arquivo .env.production
 # ============================================
 
 services:
@@ -20,18 +19,17 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-s3e_prod}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-s3e_password}
-      POSTGRES_DB: ${DB_NAME:-s3e_db}
-      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-s3e_prod_password_2024}
+      POSTGRES_DB: ${DB_NAME:-s3e_producao}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/database/init:/docker-entrypoint-initdb.d
+      - ./backups:/backups  # Pasta para backups manuais
     networks:
       - s3e-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U s3e_user -d s3e_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-s3e_prod} -d ${DB_NAME:-s3e_producao}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -41,17 +39,17 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      target: ${NODE_ENV:-development}
+      target: production
     container_name: s3e-backend
     restart: unless-stopped
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      PORT: ${BACKEND_PORT:-3001}
-      DATABASE_URL: postgresql://${DB_USER:-s3e_user}:${DB_PASSWORD:-s3e_password}@postgres:5432/${DB_NAME:-s3e_db}?schema=public
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://${DB_USER:-s3e_prod}:${DB_PASSWORD:-s3e_prod_password_2024}@postgres:5432/${DB_NAME:-s3e_producao}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-s3e-super-secret-jwt-key-production-change-in-real-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:80}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:80}
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
       # Email/SMTP (Opcional)
@@ -62,99 +60,71 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@s3eengenharia.com.br}
     ports:
-      - "${BACKEND_PORT:-3001}:3001"
+      - "3001:3001"
     volumes:
-      - ./backend:/app
-      - /app/node_modules
-      - ./backend/uploads:/app/uploads
-      - backend_logs:/app/logs
+      - backend_uploads:/app/uploads  # Uploads persistentes
+      - backend_logs:/app/logs        # Logs da aplicação
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - s3e-network
-    command: >
-      sh -c "
-        npx prisma generate &&
-        npx prisma migrate deploy &&
-        npm run seed &&
-        npm run dev
-      "
+    command: sh -c "npx prisma migrate resolve --applied 20241202_add_unit_conversion_fields 2>/dev/null || true; npx prisma migrate resolve --applied 20241204_add_ferramentas_kits 2>/dev/null || true; npx prisma migrate deploy || true; npx tsx prisma/seed.ts || true; node dist/app.js"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Frontend React App
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: ${NODE_ENV:-development}
+      target: production
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     container_name: s3e-frontend
     restart: unless-stopped
-    environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      backend:
-        condition: service_started
+      - "80:80"  # HTTP padrão
     networks:
       - s3e-network
-    command: npm run dev -- --host 0.0.0.0
-
-  # Nginx Reverse Proxy (Production)
-  nginx:
-    image: nginx:alpine
-    container_name: s3e-nginx
-    restart: unless-stopped
-    ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
-      - nginx_logs:/var/log/nginx
     depends_on:
       - backend
-      - frontend
-    networks:
-      - s3e-network
-    profiles:
-      - production
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # PgAdmin (Development)
+  # PgAdmin (Opcional)
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:8.11
     container_name: s3e-pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@s3e.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
-      - "${PGADMIN_PORT:-5050}:80"
+      - "5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     depends_on:
       - postgres
     networks:
       - s3e-network
-    profiles:
-      - development
 
 volumes:
   postgres_data:
     driver: local
-  pgadmin_data:
+  backend_uploads:
     driver: local
   backend_logs:
     driver: local
-  nginx_logs:
+  pgadmin_data:
     driver: local
 
 networks:
