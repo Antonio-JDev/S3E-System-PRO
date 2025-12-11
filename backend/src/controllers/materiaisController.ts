@@ -137,7 +137,7 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
 // Criar material
 export const createMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
-    let { categoria, nome, sku, ncm, ...rest } = req.body;
+    let { categoria, nome, sku, ncm, unidadeMedida, ...rest } = req.body;
     
     // Normalizar categoria se fornecida
     if (categoria) {
@@ -158,13 +158,44 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
       console.log(`✅ SKU gerado: ${skuFinal}`);
     }
     
+    // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
+    let unidadeMedidaFinal = unidadeMedida || 'un';
+    if (nome) {
+      const nomeMaterialLower = nome.toLowerCase();
+      
+      // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
+          unidadeMedidaFinal = 'm';
+        }
+      }
+      
+      // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
+          unidadeMedidaFinal = 'm';
+        }
+      }
+      
+      // Se for cabo, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
+          unidadeMedidaFinal = 'm';
+        }
+      }
+    }
+    
     const material = await prisma.material.create({
       data: {
         ...rest,
         nome,
         categoria,
         sku: skuFinal,
-        ncm: ncm || null
+        ncm: ncm || null,
+        unidadeMedida: unidadeMedidaFinal
       }
     });
 
@@ -179,32 +210,65 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
 export const updateMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    let { categoria, nome, ...rest } = req.body;
+    let { categoria, nome, unidadeMedida, ...rest } = req.body;
 
     // Normalizar categoria se fornecida
     if (categoria) {
       categoria = normalizarCategoria(categoria);
     }
 
+    // Buscar nome atual do material se não foi fornecido
+    let nomeFinal = nome;
+    if (!nomeFinal) {
+      const materialAtual = await prisma.material.findUnique({
+        where: { id },
+        select: { nome: true }
+      });
+      nomeFinal = materialAtual?.nome || '';
+    }
+
     // Se categoria não fornecida ou inválida, classificar automaticamente
     if (!categoria || !isCategoriaValida(categoria)) {
-      // Buscar nome atual do material se não foi fornecido
-      if (!nome) {
-        const materialAtual = await prisma.material.findUnique({
-          where: { id },
-          select: { nome: true }
-        });
-        nome = materialAtual?.nome || '';
+      categoria = classificarMaterialPorNome(nomeFinal);
+      console.log(`🔍 Categoria auto-classificada na atualização: "${categoria}" para "${nomeFinal}"`);
+    }
+
+    // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
+    let unidadeMedidaFinal = unidadeMedida;
+    if (nomeFinal) {
+      const nomeMaterialLower = nomeFinal.toLowerCase();
+      
+      // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
+          unidadeMedidaFinal = 'm';
+        }
       }
-      categoria = classificarMaterialPorNome(nome);
-      console.log(`🔍 Categoria auto-classificada na atualização: "${categoria}" para "${nome}"`);
+      
+      // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
+          unidadeMedidaFinal = 'm';
+        }
+      }
+      
+      // Se for cabo, garantir que a unidade seja 'm' (metro)
+      if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
+        if (unidadeMedidaFinal !== 'm') {
+          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
+          unidadeMedidaFinal = 'm';
+        }
+      }
     }
 
     const material = await prisma.material.update({
       where: { id },
       data: {
         ...rest,
-        ...(nome && { nome }),
+        ...(nomeFinal && { nome: nomeFinal }),
+        ...(unidadeMedidaFinal && { unidadeMedida: unidadeMedidaFinal }),
         categoria
       }
     });
@@ -1466,6 +1530,136 @@ export const uploadImagemMaterialHandler = async (req: Request, res: Response): 
       success: false,
       message: 'Erro ao fazer upload de imagem',
       error: error.message
+    });
+  }
+};
+
+/**
+ * POST /api/materiais/atualizar-skus-ncms
+ * Atualiza SKUs e NCMs de materiais existentes
+ * Gera SKUs únicos para materiais sem SKU ou com SKU no formato antigo
+ * Atualiza NCMs de materiais que não têm mas deveriam ter (baseado em compras)
+ */
+export const atualizarSKUsENCMs = async (req: Request, res: Response): Promise<void> => {
+  try {
+    console.log('🔄 Iniciando atualização de SKUs e NCMs...');
+
+    // Buscar todos os materiais ativos
+    const materiais = await prisma.material.findMany({
+      where: {
+        ativo: true,
+      },
+      include: {
+        compraItems: {
+          include: {
+            compra: {
+              select: {
+                dataCompra: true,
+              },
+            },
+          },
+          orderBy: {
+            compra: {
+              dataCompra: 'desc',
+            },
+          },
+          // Buscar todas as compras para encontrar NCM mais recente
+        },
+      },
+    });
+
+    let materiaisAtualizados = 0;
+    let skusGerados = 0;
+    let ncmsAtualizados = 0;
+    const erros: string[] = [];
+
+    // Padrões de SKU antigo para identificar
+    const padroesSKUAntigo = /^(NCM-|AUTO-)/i;
+    const padraoSKUCorreto = /^SKU-/;
+
+    for (const material of materiais) {
+      try {
+        let precisaAtualizarSKU = false;
+        let precisaAtualizarNCM = false;
+        let novoSKU: string | null = null;
+        let novoNCM: string | null = material.ncm || null;
+
+        // Verificar se precisa atualizar SKU
+        if (!material.sku || 
+            padroesSKUAntigo.test(material.sku) || 
+            !padraoSKUCorreto.test(material.sku)) {
+          precisaAtualizarSKU = true;
+          novoSKU = await gerarSKUUnico(prisma, material.ncm || null);
+          skusGerados++;
+          console.log(`📦 Gerando SKU para ${material.nome}: ${novoSKU}`);
+        }
+
+        // Verificar se precisa atualizar NCM
+        if (!material.ncm || material.ncm.trim() === '') {
+          // Buscar NCM em todas as compras relacionadas (pegar o mais recente)
+          if (material.compraItems && material.compraItems.length > 0) {
+            // Ordenar por data da compra (mais recente primeiro) e pegar o primeiro com NCM
+            const compraItemComNCM = material.compraItems
+              .filter((item: any) => item.ncm && item.ncm.trim() !== '')
+              .sort((a: any, b: any) => {
+                const dataA = a.compra?.dataCompra || new Date(0);
+                const dataB = b.compra?.dataCompra || new Date(0);
+                return new Date(dataB).getTime() - new Date(dataA).getTime();
+              })[0];
+            
+            if (compraItemComNCM && compraItemComNCM.ncm) {
+              novoNCM = String(compraItemComNCM.ncm);
+              precisaAtualizarNCM = true;
+              ncmsAtualizados++;
+              console.log(`🏷️ Encontrado NCM para ${material.nome}: ${novoNCM}`);
+            }
+          }
+        }
+
+        // Atualizar material se necessário
+        if (precisaAtualizarSKU || precisaAtualizarNCM) {
+          await prisma.material.update({
+            where: { id: material.id },
+            data: {
+              ...(precisaAtualizarSKU && novoSKU ? { sku: novoSKU } : {}),
+              ...(precisaAtualizarNCM && novoNCM ? { ncm: novoNCM } : {}),
+              updatedAt: new Date(),
+            },
+          });
+          materiaisAtualizados++;
+        }
+      } catch (error: any) {
+        const erroMsg = `Erro ao atualizar material ${material.id} (${material.nome}): ${error.message}`;
+        console.error(`❌ ${erroMsg}`);
+        erros.push(erroMsg);
+      }
+    }
+
+    console.log(`✅ Atualização concluída:`);
+    console.log(`   - Materiais atualizados: ${materiaisAtualizados}`);
+    console.log(`   - SKUs gerados: ${skusGerados}`);
+    console.log(`   - NCMs atualizados: ${ncmsAtualizados}`);
+    if (erros.length > 0) {
+      console.log(`   - Erros: ${erros.length}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Atualização de SKUs e NCMs concluída',
+      data: {
+        totalMateriais: materiais.length,
+        materiaisAtualizados,
+        skusGerados,
+        ncmsAtualizados,
+        erros: erros.length > 0 ? erros : undefined,
+      },
+    });
+  } catch (error: any) {
+    console.error('❌ Erro ao atualizar SKUs e NCMs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao atualizar SKUs e NCMs',
+      message: error.message,
     });
   }
 };

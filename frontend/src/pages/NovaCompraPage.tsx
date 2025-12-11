@@ -38,7 +38,7 @@ const DocumentArrowUpIcon = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 // Types
-type ExtendedItem = PurchaseOrderItem & { ncm?: string; sku?: string };
+type ExtendedItem = PurchaseOrderItem & { ncm?: string; sku?: string; unidadeMedida?: string };
 
 interface NovaCompraPageProps {
     toggleSidebar: () => void;
@@ -58,7 +58,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         cost: string;
         ncm?: string;
         sku?: string;
-    }>({ name: '', quantity: '1', cost: '' });
+        unidadeMedida?: string;
+    }>({ name: '', quantity: '1', cost: '', unidadeMedida: 'un' });
 
     // Fornecedor
     const [supplierName, setSupplierName] = useState('');
@@ -160,11 +161,12 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             unitCost,
             totalCost,
             ncm: productToAdd.ncm,
-            sku: productToAdd.sku
+            sku: productToAdd.sku,
+            unidadeMedida: productToAdd.unidadeMedida || (materialSelecionado?.unidadeMedida) || 'un'
         };
 
         setPurchaseItems(prev => [...prev, newItem]);
-        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '' });
+        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
         setMaterialSelecionado(null);
         setBuscaMaterial('');
         setIsItemNovo(false);
@@ -231,7 +233,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     unitCost: item.valorUnit || 0,
                     totalCost: item.valorTotal || 0,
                     ncm: item.ncm || '',
-                    sku: item.sku || ''
+                    sku: item.sku || '',
+                    unidadeMedida: item.unidadeMedida || item.unidade || 'un'
                 }));
                 setPurchaseItems(xmlItems);
                 console.log(`✅ ${xmlItems.length} itens adicionados ao formulário`);
@@ -297,7 +300,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     quantidade: it.quantity,
                     valorUnit: it.unitCost,
                     ncm: (it as any).ncm,
-                    sku: (it as any).sku
+                    sku: (it as any).sku,
+                    unidadeMedida: it.unidadeMedida || 'un'
                 })),
                 observacoes: '',
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
@@ -591,7 +595,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     {/* Adicionar Produto */}
                     <div className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl mb-4">
                         <h4 className="font-medium text-gray-800 dark:text-white mb-3">Adicionar Item</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
                             <div className="relative md:col-span-2">
                                 <div className="flex gap-2">
                                     <div className="flex-1 relative">
@@ -631,7 +635,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 ...productToAdd,
                                                                 name: material.nome,
                                                                 cost: String(material.preco || ''),
-                                                                sku: material.sku || ''
+                                                                sku: material.sku || '',
+                                                                unidadeMedida: material.unidadeMedida || 'un'
                                                             });
                                                             setShowMaterialSearch(false);
                                                         }}
@@ -723,6 +728,21 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 />
                             </div>
                             <div>
+                                <select
+                                    value={productToAdd.unidadeMedida || 'un'}
+                                    onChange={(e) => setProductToAdd({ ...productToAdd, unidadeMedida: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                                >
+                                    <option value="un">Unidade (un)</option>
+                                    <option value="m">Metro (m)</option>
+                                    <option value="cm">Centímetro (cm)</option>
+                                    <option value="kg">Quilograma (kg)</option>
+                                    <option value="l">Litro (l)</option>
+                                    <option value="m²">Metro² (m²)</option>
+                                    <option value="m³">Metro³ (m³)</option>
+                                </select>
+                            </div>
+                            <div>
                                 <button
                                     type="button"
                                     onClick={handleAddProduct}
@@ -751,11 +771,12 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                         <div className="flex-1">
                                             <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
                                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                {item.quantity} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                {item.quantity} {item.unidadeMedida || 'un'} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                             <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                                 {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
-                                                {item.sku && <span>SKU: {item.sku}</span>}
+                                                {item.sku && <span className="mr-3">SKU: {item.sku}</span>}
+                                                {item.unidadeMedida && <span>Unidade: {item.unidadeMedida}</span>}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-3">

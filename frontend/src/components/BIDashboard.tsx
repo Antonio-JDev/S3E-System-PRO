@@ -14,6 +14,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from './ui/chart';
 import {
   DollarSign,
   TrendingUp,
@@ -24,7 +25,7 @@ import {
   Download,
   Calendar,
 } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card';
 import { biService, type ResumoGeral, type DashboardMetrics } from '../services/biService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
@@ -79,7 +80,21 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       if (resumoResultado.success && resumoResultado.data) {
         setResumoGeral(resumoResultado.data);
       } else {
-        console.warn('Erro ao carregar resumo geral:', resumoResultado.error);
+        const errorMsg = resumoResultado.error || 'Erro desconhecido ao carregar resumo geral';
+        console.error('Erro ao carregar resumo geral:', errorMsg);
+        toast.error(`Erro ao carregar resumo geral: ${errorMsg}`);
+        // Definir dados vazios para evitar quebras
+        setResumoGeral({
+          investimentos: { total: 0, porMes: [] },
+          gastosFornecedor: [],
+          custosQuadros: { total: 0, quantidade: 0, media: 0 },
+          lucrosQuadros: { total: 0, quantidade: 0, media: 0, margemMedia: 0 },
+          vendas: { quantidade: 0, valorTotal: 0, media: 0 },
+          markupItens: { porTipo: [] },
+          evolucaoOrcamentosPorServico: [],
+          orcamentosPorTipoMensal: [],
+          gastosFixos: { totalMensal: 0, totalAnual: 0, porCategoria: {}, evolucaoMensal: [] },
+        });
       }
 
       if (dashboardResultado.success && dashboardResultado.data) {
@@ -238,6 +253,32 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     });
     return totais;
   }, [dadosEvolucaoOrcamentos, tiposServico]);
+
+  // Preparar dados para gráfico de barras múltiplas - Quadros vs Serviços
+  const dadosQuadrosServicos = useMemo(() => {
+    const dados = resumoGeral?.orcamentosPorTipoMensal || [];
+    return dados.map((item) => ({
+      month: new Date(item.mes + '-01').toLocaleDateString('pt-BR', {
+        month: 'short',
+        year: 'numeric',
+      }),
+      mes: item.mes,
+      quadros: item.quadros,
+      servicos: item.servicos,
+    }));
+  }, [resumoGeral]);
+
+  // Configuração do gráfico de barras múltiplas
+  const chartConfigQuadrosServicos = {
+    quadros: {
+      label: 'Quadros',
+      color: '#6366F1', // indigo-500 (primário do sistema)
+    },
+    servicos: {
+      label: 'Serviços',
+      color: '#10B981', // green-500
+    },
+  };
 
   if (loading) {
     return (
@@ -398,8 +439,13 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
             </p>
           </div>
           <div className="p-6">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dadosInvestimentosPorMes}>
+            {dadosInvestimentosPorMes.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-gray-500 dark:text-gray-400">
+                <p>Nenhum dado disponível para o período selecionado</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dadosInvestimentosPorMes}>
                 <CartesianGrid 
                   strokeDasharray="3 3" 
                   stroke={isDark ? '#334155' : '#e5e7eb'} 
@@ -452,10 +498,15 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
             </p>
           </div>
           <div className="p-6">
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={dadosPizzaFornecedor}
+            {dadosPizzaFornecedor.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-gray-500 dark:text-gray-400">
+                <p>Nenhum dado disponível para o período selecionado</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={dadosPizzaFornecedor}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
@@ -499,8 +550,13 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
             </p>
           </div>
           <div className="p-6">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dadosGastosFornecedor} layout="vertical">
+            {dadosGastosFornecedor.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-gray-500 dark:text-gray-400">
+                <p>Nenhum dado disponível para o período selecionado</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={dadosGastosFornecedor} layout="vertical">
                 <CartesianGrid 
                   strokeDasharray="3 3" 
                   stroke={isDark ? '#334155' : '#e5e7eb'} 
@@ -544,6 +600,123 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Gráfico de Barras Múltiplas - Comparação Quadros vs Serviços */}
+        <div className="card-primary">
+          <CardHeader>
+            <CardTitle>Comparação: Quadros vs Serviços</CardTitle>
+            <CardDescription>
+              Valor de orçamentos por tipo no período selecionado
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {dadosQuadrosServicos.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px] text-gray-500 dark:text-gray-400">
+                <p>Nenhum dado disponível para o período selecionado</p>
+              </div>
+            ) : (
+              <ChartContainer config={chartConfigQuadrosServicos}>
+                <BarChart
+                  accessibilityLayer
+                  data={dadosQuadrosServicos}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="month"
+                    tickLine={false}
+                    tickMargin={10}
+                    axisLine={false}
+                    tickFormatter={(value) => value.slice(0, 3)}
+                    style={{
+                      fontSize: '12px',
+                      fill: isDark ? '#CBD5E1' : '#6b7280',
+                    }}
+                  />
+                  <YAxis
+                    tickFormatter={(value) => {
+                      if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
+                      return `R$ ${value}`;
+                    }}
+                    style={{
+                      fontSize: '12px',
+                      fill: isDark ? '#CBD5E1' : '#6b7280',
+                    }}
+                  />
+                  <ChartTooltip
+                    cursor={false}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div
+                            className="rounded-lg border bg-background p-2 shadow-sm"
+                            style={{
+                              backgroundColor: isDark ? '#1E293B' : '#fff',
+                              borderColor: isDark ? '#334155' : '#e5e7eb',
+                            }}
+                          >
+                            <div className="grid gap-2">
+                              {payload.map((entry: any, index: number) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between gap-4"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className="h-2.5 w-2.5 rounded-full"
+                                      style={{ backgroundColor: entry.color }}
+                                    />
+                                    <span
+                                      className="text-sm"
+                                      style={{
+                                        color: isDark ? '#CBD5E1' : '#6b7280',
+                                      }}
+                                    >
+                                      {entry.dataKey === 'quadros' ? 'Quadros' : 'Serviços'}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className="font-medium"
+                                    style={{
+                                      color: isDark ? '#F8FAFC' : '#111827',
+                                    }}
+                                  >
+                                    {formatarMoeda(entry.value)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar
+                    dataKey="quadros"
+                    fill={chartConfigQuadrosServicos.quadros.color}
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar
+                    dataKey="servicos"
+                    fill={chartConfigQuadrosServicos.servicos.color}
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ChartContainer>
+            )}
+            </CardContent>
+          <CardFooter className="flex-col items-start gap-2 text-sm">
+            <div className="flex gap-2 leading-none font-medium">
+              <TrendingUp className="h-4 w-4" />
+              Comparação mensal de orçamentos por tipo
+            </div>
+            <div className="text-muted-foreground leading-none">
+                  Valores totais de orçamentos com itens de quadros e serviços
+                </div>
+            </CardFooter>
+          </div>
+        )}
 
         {/* Gráfico de Pizza - Markup por Tipo */}
         <div className="card-primary">

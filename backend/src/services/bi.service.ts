@@ -15,6 +15,7 @@ export interface GastoFornecedor {
   fornecedorNome: string;
   total: number;
   quantidadeCompras: number;
+  materiais?: MaterialInfo[]; // Materiais comprados deste fornecedor
 }
 
 export interface CustosQuadros {
@@ -47,6 +48,14 @@ export interface EvolucaoOrcamentosPorServico {
   [key: string]: string | number; // Tipo de serviço como chave, valor como número
 }
 
+export interface OrcamentosPorTipoMensal {
+  mes: string; // YYYY-MM
+  quadros: number; // Valor total de orçamentos com QUADRO_PRONTO
+  servicos: number; // Valor total de orçamentos com SERVICO
+  quantidadeQuadros: number; // Quantidade de orçamentos com quadros
+  quantidadeServicos: number; // Quantidade de orçamentos com serviços
+}
+
 export interface GastosFixos {
   totalMensal: number;
   totalAnual: number;
@@ -62,7 +71,32 @@ export interface ResumoGeral {
   vendas: VendasStats;
   markupItens: { porTipo: MarkupItem[] };
   evolucaoOrcamentosPorServico: EvolucaoOrcamentosPorServico[];
+  orcamentosPorTipoMensal: OrcamentosPorTipoMensal[]; // Novo: Comparação Quadros vs Serviços
   gastosFixos: GastosFixos;
+}
+
+export interface MaterialInfo {
+  materialId: string;
+  sku: string;
+  nome: string;
+  quantidade?: number;
+  valorTotal?: number;
+  custoMedio?: number;
+}
+
+export interface MaterialPorFornecedor {
+  fornecedorNome: string;
+  materiais: MaterialInfo[];
+  totalGasto: number;
+}
+
+export interface MaterialMaisVendido {
+  materialId: string;
+  sku: string;
+  nome: string;
+  quantidadeVendida: number;
+  valorTotalVendido: number;
+  quantidadeOrcamentos: number;
 }
 
 export interface DashboardMetrics {
@@ -75,6 +109,11 @@ export interface DashboardMetrics {
   // Dados para gráficos
   investimentosPorMes: Array<{ mes: string; cpv: number }>; // CPV por mês
   gastosPorFornecedorTop10: Array<{ nomeFornecedor: string; valorGasto: number }>; // Top 10 fornecedores
+  
+  // Novos dados com informações de materiais
+  materiaisPorFornecedor?: MaterialPorFornecedor[]; // Materiais agrupados por fornecedor
+  materiaisMaisComprados?: MaterialInfo[]; // Top materiais mais comprados
+  materiaisMaisVendidos?: MaterialMaisVendido[]; // Top materiais mais vendidos
 }
 
 export class BIService {
@@ -125,7 +164,7 @@ export class BIService {
   }
 
   /**
-   * Calcula gastos agrupados por fornecedor
+   * Calcula gastos agrupados por fornecedor (inclui informações de materiais)
    */
   static async getGastosPorFornecedor(
     dataInicio: Date,
@@ -143,21 +182,68 @@ export class BIService {
       },
       include: {
         fornecedor: true,
+        items: {
+          include: {
+            material: {
+              select: {
+                id: true,
+                sku: true,
+                nome: true,
+              },
+            },
+          },
+        },
       },
     });
 
-    const gastosMap = new Map<string, { total: number; quantidade: number; nome: string }>();
+    const gastosMap = new Map<string, { 
+      total: number; 
+      quantidade: number; 
+      nome: string;
+      materiais: Map<string, MaterialInfo>;
+    }>();
 
-      compras.forEach((compra) => {
-        const fornecedorId = compra.fornecedorId || 'sem-fornecedor';
-        const fornecedorNome = compra.fornecedor?.nome || compra.fornecedorNome || 'Fornecedor não identificado';
-        const valor = compra.valorTotal || 0;
+    compras.forEach((compra) => {
+      const fornecedorId = compra.fornecedorId || 'sem-fornecedor';
+      const fornecedorNome = compra.fornecedor?.nome || compra.fornecedorNome || 'Fornecedor não identificado';
+      const valor = compra.valorTotal || 0;
 
-      const atual = gastosMap.get(fornecedorId) || { total: 0, quantidade: 0, nome: fornecedorNome };
+      const atual = gastosMap.get(fornecedorId) || { 
+        total: 0, 
+        quantidade: 0, 
+        nome: fornecedorNome,
+        materiais: new Map<string, MaterialInfo>(),
+      };
+      
+      // Agregar materiais
+      compra.items.forEach((item) => {
+        if (item.materialId && item.material) {
+          const materialId = item.material.id;
+          let materialInfo = atual.materiais.get(materialId);
+          
+          if (!materialInfo) {
+            materialInfo = {
+              materialId: item.material.id,
+              sku: item.material.sku || 'N/A',
+              nome: item.material.nome || item.nomeProduto || 'Material não identificado',
+              quantidade: 0,
+              valorTotal: 0,
+            };
+          }
+
+          atual.materiais.set(materialId, {
+            ...materialInfo,
+            quantidade: (materialInfo.quantidade || 0) + (item.quantidade || 0),
+            valorTotal: (materialInfo.valorTotal || 0) + ((item.valorUnit || 0) * (item.quantidade || 0)),
+          });
+        }
+      });
+
       gastosMap.set(fornecedorId, {
         total: atual.total + valor,
         quantidade: atual.quantidade + 1,
         nome: fornecedorNome,
+        materiais: atual.materiais,
       });
     });
 
@@ -166,6 +252,12 @@ export class BIService {
       fornecedorNome: dados.nome,
       total: dados.total,
       quantidadeCompras: dados.quantidade,
+      materiais: Array.from(dados.materiais.values())
+        .map((m) => ({
+          ...m,
+          custoMedio: (m.quantidade || 0) > 0 ? (m.valorTotal || 0) / (m.quantidade || 0) : 0,
+        }))
+        .sort((a, b) => (b.valorTotal || 0) - (a.valorTotal || 0)),
     }));
   }
 
@@ -327,11 +419,24 @@ export class BIService {
       include: {
         items: {
           include: {
+            material: {
+              select: {
+                id: true,
+                sku: true,
+                nome: true,
+              },
+            },
             kit: {
               include: {
                 items: {
                   include: {
-                    material: true,
+                    material: {
+                      select: {
+                        id: true,
+                        sku: true,
+                        nome: true,
+                      },
+                    },
                   },
                 },
               },
@@ -364,8 +469,15 @@ export class BIService {
           if (tipo === 'KIT' && item.kit) {
             let custoKit = 0;
             for (const kitItem of item.kit.items) {
-              const materialCusto = kitItem.material?.preco || 0;
-              custoKit += materialCusto * kitItem.quantidade;
+              // Buscar preço do material se disponível
+              if (kitItem.materialId) {
+                const material = await prisma.material.findUnique({
+                  where: { id: kitItem.materialId },
+                  select: { preco: true },
+                });
+                const materialCusto = material?.preco || 0;
+                custoKit += materialCusto * kitItem.quantidade;
+              }
             }
             if (custoKit > 0) {
               custoTotal = custoKit;
@@ -397,6 +509,93 @@ export class BIService {
     );
 
     return { porTipo };
+  }
+
+  /**
+   * Retorna comparação de orçamentos por tipo (Quadros vs Serviços) agrupado por mês
+   */
+  static async getOrcamentosPorTipoMensal(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<OrcamentosPorTipoMensal[]> {
+    const orcamentos = await prisma.orcamento.findMany({
+      where: {
+        createdAt: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+      },
+      include: {
+        items: {
+          select: {
+            tipo: true,
+            subtotal: true,
+          },
+        },
+      },
+    });
+
+    // Agrupar por mês
+    const dadosPorMes = new Map<string, {
+      quadros: number;
+      servicos: number;
+      quantidadeQuadros: number;
+      quantidadeServicos: number;
+      orcamentosComQuadro: Set<string>;
+      orcamentosComServico: Set<string>;
+    }>();
+
+    orcamentos.forEach((orcamento) => {
+      const mes = orcamento.createdAt.toISOString().substring(0, 7); // YYYY-MM
+
+      let mesData = dadosPorMes.get(mes);
+      if (!mesData) {
+        mesData = {
+          quadros: 0,
+          servicos: 0,
+          quantidadeQuadros: 0,
+          quantidadeServicos: 0,
+          orcamentosComQuadro: new Set<string>(),
+          orcamentosComServico: new Set<string>(),
+        };
+        dadosPorMes.set(mes, mesData);
+      }
+
+      // Verificar itens do orçamento
+      let temQuadro = false;
+      let temServico = false;
+
+      orcamento.items.forEach((item) => {
+        if (item.tipo === 'QUADRO_PRONTO') {
+          mesData.quadros += item.subtotal || 0;
+          temQuadro = true;
+        } else if (item.tipo === 'SERVICO') {
+          mesData.servicos += item.subtotal || 0;
+          temServico = true;
+        }
+      });
+
+      // Contar orçamentos (não itens)
+      if (temQuadro) {
+        mesData.orcamentosComQuadro.add(orcamento.id);
+      }
+      if (temServico) {
+        mesData.orcamentosComServico.add(orcamento.id);
+      }
+    });
+
+    // Converter para array e calcular quantidades
+    const resultado = Array.from(dadosPorMes.entries())
+      .map(([mes, dados]) => ({
+        mes,
+        quadros: dados.quadros,
+        servicos: dados.servicos,
+        quantidadeQuadros: dados.orcamentosComQuadro.size,
+        quantidadeServicos: dados.orcamentosComServico.size,
+      }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+
+    return resultado;
   }
 
   /**
@@ -583,9 +782,14 @@ export class BIService {
             notIn: ['SERVICO', 'CUSTO_EXTRA'],
           },
         },
-        select: {
-          quantidade: true,
-          custoUnit: true,
+        include: {
+          material: {
+            select: {
+              id: true,
+              sku: true,
+              nome: true,
+            },
+          },
         },
       });
 
@@ -681,9 +885,14 @@ export class BIService {
             notIn: ['SERVICO', 'CUSTO_EXTRA'],
           },
         },
-        select: {
-          quantidade: true,
-          custoUnit: true,
+        include: {
+          material: {
+            select: {
+              id: true,
+              sku: true,
+              nome: true,
+            },
+          },
         },
       });
 
@@ -732,6 +941,13 @@ export class BIService {
       .sort((a, b) => b.valorGasto - a.valorGasto)
       .slice(0, 10);
 
+    // Buscar dados de materiais (paralelo para otimizar)
+    const [materiaisMaisComprados, materiaisMaisVendidos, materiaisPorFornecedor] = await Promise.all([
+      this.getMateriaisMaisComprados(dataInicio, dataFim, 10),
+      this.getMateriaisMaisVendidos(dataInicio, dataFim, 10),
+      this.getMateriaisPorFornecedor(dataInicio, dataFim),
+    ]);
+
     return {
       vendasTotal,
       cpv,
@@ -739,7 +955,281 @@ export class BIService {
       custosFixosTotal,
       investimentosPorMes,
       gastosPorFornecedorTop10,
+      materiaisMaisComprados,
+      materiaisMaisVendidos,
+      materiaisPorFornecedor,
     };
+  }
+
+  /**
+   * Retorna materiais mais comprados no período com informações de SKU e nome
+   */
+  static async getMateriaisMaisComprados(
+    dataInicio: Date,
+    dataFim: Date,
+    limit: number = 10
+  ): Promise<MaterialInfo[]> {
+    const compras = await prisma.compra.findMany({
+      where: {
+        dataCompra: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelado',
+        },
+      },
+      include: {
+        items: {
+          include: {
+            material: {
+              select: {
+                id: true,
+                sku: true,
+                nome: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Agregar por material
+    const materiaisMap = new Map<string, {
+      materialId: string;
+      sku: string;
+      nome: string;
+      quantidade: number;
+      valorTotal: number;
+    }>();
+
+    compras.forEach((compra) => {
+      compra.items.forEach((item) => {
+        if (item.materialId && item.material) {
+          const materialId = item.material.id;
+          const materialInfo = materiaisMap.get(materialId) || {
+            materialId: item.material.id,
+            sku: item.material.sku || 'N/A',
+            nome: item.material.nome || item.nomeProduto || 'Material não identificado',
+            quantidade: 0,
+            valorTotal: 0,
+          };
+
+          materiaisMap.set(materialId, {
+            ...materialInfo,
+            quantidade: materialInfo.quantidade + (item.quantidade || 0),
+            valorTotal: materialInfo.valorTotal + ((item.valorUnit || 0) * (item.quantidade || 0)),
+          });
+        }
+      });
+    });
+
+    // Converter para array, calcular custo médio e ordenar
+    const materiais = Array.from(materiaisMap.values())
+      .map((m) => ({
+        ...m,
+        custoMedio: m.quantidade > 0 ? m.valorTotal / m.quantidade : 0,
+      }))
+      .sort((a, b) => b.valorTotal - a.valorTotal)
+      .slice(0, limit);
+
+    return materiais;
+  }
+
+  /**
+   * Retorna materiais mais vendidos no período com informações de SKU e nome
+   */
+  static async getMateriaisMaisVendidos(
+    dataInicio: Date,
+    dataFim: Date,
+    limit: number = 10
+  ): Promise<MaterialMaisVendido[]> {
+    const vendas = await prisma.venda.findMany({
+      where: {
+        dataVenda: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelada',
+        },
+      },
+      include: {
+        orcamento: {
+          include: {
+            items: {
+              where: {
+                tipo: 'MATERIAL',
+                materialId: {
+                  not: null,
+                },
+              },
+              include: {
+                material: {
+                  select: {
+                    id: true,
+                    sku: true,
+                    nome: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Agregar por material
+    const materiaisMap = new Map<string, {
+      materialId: string;
+      sku: string;
+      nome: string;
+      quantidadeVendida: number;
+      valorTotalVendido: number;
+      orcamentosIds: Set<string>;
+    }>();
+
+    vendas.forEach((venda) => {
+      if (venda.orcamento?.items) {
+        venda.orcamento.items.forEach((item) => {
+          if (item.materialId && item.material) {
+            const materialId = item.material.id;
+            const materialInfo = materiaisMap.get(materialId) || {
+              materialId: item.material.id,
+              sku: item.material.sku || 'N/A',
+              nome: item.material.nome || 'Material não identificado',
+              quantidadeVendida: 0,
+              valorTotalVendido: 0,
+              orcamentosIds: new Set<string>(),
+            };
+
+            const orcamentoId = venda.orcamentoId || '';
+            materialInfo.orcamentosIds.add(orcamentoId);
+
+            materiaisMap.set(materialId, {
+              ...materialInfo,
+              quantidadeVendida: materialInfo.quantidadeVendida + (item.quantidade || 0),
+              valorTotalVendido: materialInfo.valorTotalVendido + ((item.precoUnit || 0) * (item.quantidade || 0)),
+            });
+          }
+        });
+      }
+    });
+
+    // Converter para array e ordenar
+    const materiais = Array.from(materiaisMap.values())
+      .map((m) => ({
+        materialId: m.materialId,
+        sku: m.sku,
+        nome: m.nome,
+        quantidadeVendida: m.quantidadeVendida,
+        valorTotalVendido: m.valorTotalVendido,
+        quantidadeOrcamentos: m.orcamentosIds.size,
+      }))
+      .sort((a, b) => b.quantidadeVendida - a.quantidadeVendida)
+      .slice(0, limit);
+
+    return materiais;
+  }
+
+  /**
+   * Retorna materiais agrupados por fornecedor com informações de SKU e nome
+   */
+  static async getMateriaisPorFornecedor(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<MaterialPorFornecedor[]> {
+    const compras = await prisma.compra.findMany({
+      where: {
+        dataCompra: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelado',
+        },
+      },
+      include: {
+        fornecedor: {
+          select: {
+            nome: true,
+          },
+        },
+        items: {
+          include: {
+            material: {
+              select: {
+                id: true,
+                sku: true,
+                nome: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Agregar por fornecedor
+    const fornecedoresMap = new Map<string, {
+      fornecedorNome: string;
+      materiais: Map<string, MaterialInfo>;
+      totalGasto: number;
+    }>();
+
+    compras.forEach((compra) => {
+      const fornecedorNome = compra.fornecedor?.nome || compra.fornecedorNome || 'Fornecedor não identificado';
+      
+      let fornecedor = fornecedoresMap.get(fornecedorNome);
+      if (!fornecedor) {
+        fornecedor = {
+          fornecedorNome,
+          materiais: new Map<string, MaterialInfo>(),
+          totalGasto: 0,
+        };
+        fornecedoresMap.set(fornecedorNome, fornecedor);
+      }
+
+      fornecedor.totalGasto += compra.valorTotal || 0;
+
+      compra.items.forEach((item) => {
+        if (item.materialId && item.material) {
+          const materialId = item.material.id;
+          let materialInfo = fornecedor.materiais.get(materialId);
+          
+          if (!materialInfo) {
+            materialInfo = {
+              materialId: item.material.id,
+              sku: item.material.sku || 'N/A',
+              nome: item.material.nome || item.nomeProduto || 'Material não identificado',
+              quantidade: 0,
+              valorTotal: 0,
+            };
+          }
+
+          fornecedor.materiais.set(materialId, {
+            ...materialInfo,
+            quantidade: (materialInfo.quantidade || 0) + (item.quantidade || 0),
+            valorTotal: (materialInfo.valorTotal || 0) + ((item.valorUnit || 0) * (item.quantidade || 0)),
+          });
+        }
+      });
+    });
+
+    // Converter para array e calcular custo médio
+    const resultado = Array.from(fornecedoresMap.values())
+      .map((fornecedor) => ({
+        fornecedorNome: fornecedor.fornecedorNome,
+        materiais: Array.from(fornecedor.materiais.values())
+          .map((m) => ({
+            ...m,
+            custoMedio: (m.quantidade || 0) > 0 ? (m.valorTotal || 0) / (m.quantidade || 0) : 0,
+          }))
+          .sort((a, b) => (b.valorTotal || 0) - (a.valorTotal || 0)),
+        totalGasto: fornecedor.totalGasto,
+      }))
+      .sort((a, b) => b.totalGasto - a.totalGasto);
+
+    return resultado;
   }
 
   /**
@@ -775,6 +1265,7 @@ export class BIService {
       vendas,
       markupItens,
       evolucaoOrcamentosPorServico,
+      orcamentosPorTipoMensal,
       gastosFixos,
     ] = await Promise.all([
       this.getInvestimentosProdutos(dataInicio, dataFim),
@@ -784,6 +1275,7 @@ export class BIService {
       this.getVendas(dataInicio, dataFim),
       this.getMarkupItens(dataInicio, dataFim),
       this.getEvolucaoOrcamentosPorServico(dataInicio, dataFim),
+      this.getOrcamentosPorTipoMensal(dataInicio, dataFim),
       this.getGastosFixos(dataInicio, dataFim),
     ]);
 
@@ -795,6 +1287,7 @@ export class BIService {
       vendas,
       markupItens,
       evolucaoOrcamentosPorServico,
+      orcamentosPorTipoMensal,
       gastosFixos,
     };
   }

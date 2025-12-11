@@ -134,6 +134,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [showCorrigirNomesDialog, setShowCorrigirNomesDialog] = useState(false);
+    const [atualizandoSKUs, setAtualizandoSKUs] = useState(false);
     const [viewModalOpen, setViewModalOpen] = useState(false);
     const [materialParaVisualizar, setMaterialParaVisualizar] = useState<MaterialItem | null>(null);
     const [historicoModalOpen, setHistoricoModalOpen] = useState(false);
@@ -190,16 +191,16 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 // Converter dados da API para o formato do componente
                 const materialsData = response.data.map((material: Material) => ({
                     id: material.id,
-                    name: material.descricao,
-                    sku: material.codigo,
-                    type: material.categoria || 'Material',
+                    name: material.nome || material.descricao,
+                    sku: material.sku || material.codigo || 'N/A', // ✅ Usar sku do backend
+                    type: material.tipo || material.categoria || 'Material',
                     category: MaterialCategory.ELETRICO, // Mapear conforme necessário
                     description: material.descricao,
                     ncm: material.ncm, // ✅ NCM do material (dado fiscal)
                     imagemUrl: material.imagemUrl, // ✅ URL da imagem do material
                     stock: material.estoque,
                     minStock: material.estoqueMinimo,
-                    unitOfMeasure: material.unidade,
+                    unitOfMeasure: material.unidadeMedida || material.unidade || 'un', // ✅ Usar unidadeMedida do backend
                     location: 'Estoque', // Campo não disponível na API
 
                     price: material.preco || 0,
@@ -300,16 +301,44 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         loadFornecedores();
         
         if (item) {
+            // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
+            let unidadeMedidaFinal = item.unitOfMeasure || 'un';
+            const nomeMaterialLower = (item.name || '').toLowerCase();
+            
+            // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+            
+            // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+            
+            // Se for cabo, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+            
             setItemToEdit(item);
             setFormState({
                 name: item.name,
-                sku: item.sku,
+                sku: item.sku || 'N/A', // ✅ Garantir que SKU seja exibido
                 type: item.type,
                 category: item.category,
                 description: item.description,
                 stock: item.stock.toString(),
                 minStock: item.minStock.toString(),
-                unitOfMeasure: item.unitOfMeasure,
+                unitOfMeasure: unidadeMedidaFinal, // ✅ Usar unidade ajustada
                 location: item.location || '',
                 imageUrl: item.imageUrl,
                 supplierId: item.supplier?.id || item.supplierId || '',
@@ -426,10 +455,39 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 }
             }
 
+            // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
+            let unidadeMedidaFinal = formState.unitOfMeasure;
+            const nomeMaterialLower = formState.name.toLowerCase();
+            
+            // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+            
+            // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+            
+            // Se for cabo, garantir que a unidade seja 'm' (metro)
+            if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
+                if (unidadeMedidaFinal !== 'm') {
+                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
+                    unidadeMedidaFinal = 'm';
+                }
+            }
+
             const materialData = {
-                codigo: formState.sku,
-                descricao: formState.name,
-                unidade: formState.unitOfMeasure,
+                sku: formState.sku, // ✅ Usar sku em vez de codigo
+                nome: formState.name, // ✅ Incluir nome
+                descricao: formState.name, // Manter descricao também
+                unidadeMedida: unidadeMedidaFinal, // ✅ Usar unidadeMedida em vez de unidade
 
                 preco: precoCusto,
                 valorVenda: valorVenda > 0 ? valorVenda : undefined,
@@ -437,6 +495,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 estoque: parseFloat(formState.stock),
                 estoqueMinimo: parseFloat(formState.minStock),
                 categoria: formState.type,
+                tipo: formState.type, // ✅ Incluir tipo também
                 fornecedorId: fornecedorIdFinal || undefined
             };
 
@@ -601,6 +660,34 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         }
     };
 
+
+    const handleAtualizarSKUsENCMs = async () => {
+        try {
+            setAtualizandoSKUs(true);
+            const response = await materiaisService.atualizarSKUsENCMs();
+            
+            if (response.success && response.data) {
+                const { materiaisAtualizados, skusGerados, ncmsAtualizados, totalMateriais } = response.data.data || {};
+                toast.success('✅ SKUs e NCMs atualizados com sucesso!', {
+                    description: `Atualizados ${materiaisAtualizados || 0} de ${totalMateriais || 0} materiais. ${skusGerados || 0} SKUs gerados, ${ncmsAtualizados || 0} NCMs atualizados.`,
+                    duration: 5000,
+                });
+                // Recarregar materiais para mostrar as atualizações
+                await loadMaterials();
+            } else {
+                toast.error('❌ Erro ao atualizar SKUs e NCMs', {
+                    description: response.error || 'Ocorreu um erro ao processar a atualização.',
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao atualizar SKUs e NCMs:', error);
+            toast.error('❌ Erro ao atualizar SKUs e NCMs', {
+                description: error.message || 'Ocorreu um erro inesperado.',
+            });
+        } finally {
+            setAtualizandoSKUs(false);
+        }
+    };
 
     const handleCorrigirNomesGenericos = async () => {
         setShowCorrigirNomesDialog(false);
@@ -906,13 +993,17 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 version: '1.0.0',
                 exportDate: new Date().toISOString(),
                 materiais: materials.map(material => ({
-                    codigo: material.sku,
+                    sku: material.sku, // ✅ Usar sku
+                    codigo: material.sku, // Manter para compatibilidade
                     descricao: material.name,
-                    unidade: material.unitOfMeasure,
+                    nome: material.name, // ✅ Incluir nome também
+                    unidadeMedida: material.unitOfMeasure, // ✅ Usar unidadeMedida
+                    unidade: material.unitOfMeasure, // Manter para compatibilidade
                     preco: material.price || 0,
                     estoque: material.stock,
                     estoqueMinimo: material.minStock,
                     categoria: material.type || material.category,
+                    tipo: material.type, // ✅ Incluir tipo também
                     fornecedorId: material.supplierId,
                     fornecedorNome: material.supplierName || material.supplier?.name,
                     ativo: material.ativo !== false,
@@ -966,13 +1057,15 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
                     // Criar material
                     const materialData = {
-                        codigo: materialTemplate.codigo,
+                        sku: materialTemplate.sku || materialTemplate.codigo, // ✅ Usar sku, com fallback para codigo
+                        nome: materialTemplate.nome || materialTemplate.descricao, // ✅ Incluir nome
                         descricao: materialTemplate.descricao,
-                        unidade: materialTemplate.unidade,
+                        unidadeMedida: materialTemplate.unidadeMedida || materialTemplate.unidade || 'un', // ✅ Usar unidadeMedida, com fallback
                         preco: materialTemplate.preco,
                         estoque: materialTemplate.estoque,
                         estoqueMinimo: materialTemplate.estoqueMinimo || 5,
                         categoria: materialTemplate.categoria,
+                        tipo: materialTemplate.tipo || materialTemplate.categoria, // ✅ Incluir tipo
                         fornecedorId,
                     };
 
@@ -1073,6 +1166,29 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-3">
+                    <button
+                        onClick={handleAtualizarSKUsENCMs}
+                        disabled={atualizandoSKUs}
+                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Gerar SKUs únicos e atualizar NCMs de materiais existentes"
+                    >
+                        {atualizandoSKUs ? (
+                            <>
+                                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Atualizando...
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Atualizar SKUs/NCMs
+                            </>
+                        )}
+                    </button>
                     <button
 
                         onClick={() => setShowCorrigirNomesDialog(true)}

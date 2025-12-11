@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import FinanceiroDashboard from './FinanceiroDashboard';
-import ContasAReceber from './ContasAReceber';
 import ContasAPagar from './ContasAPagar';
 import ExportarRelatorioFinanceiro from './ExportarRelatorioFinanceiro';
+
+const ContasAReceber = lazy(() => import('./ContasAReceber'));
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -95,7 +96,18 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
     }
 
     if (abaAtiva === 'receber') {
-        return <ContasAReceber setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />;
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Carregando Contas a Receber...</p>
+                    </div>
+                </div>
+            }>
+                <ContasAReceber setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+            </Suspense>
+        );
     }
 
     if (abaAtiva === 'pagar') {

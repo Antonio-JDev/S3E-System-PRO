@@ -272,6 +272,7 @@ export interface PurchaseOrderItem {
     totalCost?: number;
     ncm?: string;
     sku?: string;
+    unidadeMedida?: string; // Unidade de medida do material (ex: un, m, cm, kg, etc)
 }
 
 export interface PurchaseOrder {

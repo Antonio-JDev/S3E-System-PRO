@@ -116,6 +116,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [selectedSupplierId, setSelectedSupplierId] = useState('');
     const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
     const [invoiceNumber, setInvoiceNumber] = useState('');
+    const [serieNF, setSerieNF] = useState<string>('1'); // Série da NF (padrão "1")
     const [status, setStatus] = useState<PurchaseStatus>(PurchaseStatus.Pendente);
     type ExtendedItem = PurchaseOrderItem & { ncm?: string; sku?: string };
     const [purchaseItems, setPurchaseItems] = useState<ExtendedItem[]>([]);
@@ -222,6 +223,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setSelectedSupplierId('');
         setPurchaseDate(new Date().toISOString().split('T')[0]);
         setInvoiceNumber('');
+        setSerieNF('1');
         setStatus(PurchaseStatus.Pendente);
         setPurchaseItems([]);
         setSupplierName('');
@@ -383,6 +385,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 fornecedorCNPJ: supplierCNPJ,
                 fornecedorTel: supplierPhone,
                 numeroNF: invoiceNumber,
+                serieNF: serieNF || '1',
                 dataEmissaoNF: purchaseDate,
                 dataCompra: purchaseDate,
                 status: status,
@@ -483,6 +486,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             
             console.log('📄 Número NF:', data.numeroNF);
             setInvoiceNumber(data.numeroNF || '');
+            
+            console.log('📄 Série NF:', data.serieNF);
+            setSerieNF(data.serieNF || '1');
             
             console.log('📅 Data Emissão:', data.dataEmissao);
             setPurchaseDate(data.dataEmissao ? String(data.dataEmissao).slice(0, 10) : new Date().toISOString().split('T')[0]);
@@ -763,7 +769,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             {/* Botões de Ação */}
                             <div className="flex gap-2 pt-4 border-t border-gray-100">
                                 <button
-                                    onClick={() => setPurchaseToView(purchase)}
+                                    onClick={async () => {
+                                        try {
+                                            // ✅ FORÇAR recarregamento completo sempre que abrir o modal
+                                            console.log('🔄 Carregando detalhes completos da compra:', purchase.id);
+                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
+                                            console.log('✅ Compra carregada:', compraCompleta);
+                                            console.log('📦 Itens com dados:', compraCompleta.items?.map((it: any) => ({
+                                                nome: it.productName,
+                                                ncm: (it as any).material?.ncm || (it as any).ncm,
+                                                sku: (it as any).material?.sku || (it as any).sku
+                                            })));
+                                            setPurchaseToView(compraCompleta);
+                                        } catch (error) {
+                                            console.error('Erro ao buscar compra completa:', error);
+                                            toast.error('Erro ao carregar detalhes da compra');
+                                            setPurchaseToView(purchase);
+                                        }
+                                    }}
                                     className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
                                 >
                                     <EyeIcon className="w-4 h-4" />
@@ -848,7 +871,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex items-center gap-2">
                                                 <button
-                                                    onClick={() => setPurchaseToView(purchase)}
+                                                    onClick={async () => {
+                                                        try {
+                                                            // ✅ FORÇAR recarregamento completo sempre que abrir o modal
+                                                            console.log('🔄 Carregando detalhes completos da compra:', purchase.id);
+                                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
+                                                            console.log('✅ Compra carregada:', compraCompleta);
+                                                            setPurchaseToView(compraCompleta);
+                                                        } catch (error) {
+                                                            console.error('Erro ao buscar compra completa:', error);
+                                                            toast.error('Erro ao carregar detalhes da compra');
+                                                            setPurchaseToView(purchase);
+                                                        }
+                                                    }}
                                                     className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
@@ -1558,8 +1593,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </div>
                                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Nota Fiscal</h4>
-                                        <p className="text-gray-900 font-medium">{purchaseToView.invoiceNumber}</p>
+                                        <p className="text-gray-900 font-medium">
+                                            {purchaseToView.invoiceNumber}
+                                            {(purchaseToView as any).serieNF && (
+                                                <span className="text-gray-500 ml-2">Série {(purchaseToView as any).serieNF}</span>
+                                            )}
+                                        </p>
                                     </div>
+                                    {(purchaseToView as any).serieNF && (
+                                        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Série da NF</h4>
+                                            <p className="text-gray-900 font-medium">{(purchaseToView as any).serieNF}</p>
+                                        </div>
+                                    )}
                                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data da Compra</h4>
                                         <p className="text-gray-900 font-medium">
@@ -1654,6 +1700,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                     <tr>
                                                         <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Produto</th>
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Qtd</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Unidade</th>
                                                         <th className="px-4 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Valor Unit.</th>
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">NCM</th>
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
@@ -1669,6 +1716,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">{item.quantity}</span>
                                                             </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <span className="text-gray-600 dark:text-gray-400 font-medium text-sm">
+                                                                    {(item as any).unidadeMedida || 'un'}
+                                                                </span>
+                                                            </td>
                                                             <td className="px-4 py-4 text-right">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">
                                                                     R$ {(item.unitCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1676,12 +1728,12 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
-                                                                    {(item as any).ncm || '-'}
+                                                                    {(item as any).material?.ncm || (item as any).ncm || '-'}
                                                                 </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
-                                                                    {(item as any).sku || '-'}
+                                                                    {(item as any).material?.sku || (item as any).sku || '-'}
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-4 text-right">
@@ -1761,12 +1813,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </div>
                             </div>
 
-                            {/* Condições de Pagamento */}
-                            {((purchaseToView as any).condicoesPagamento || (purchaseToView as any).duplicatas?.length > 0) && (
+                            {/* Condições de Pagamento e Duplicatas */}
+                            {((purchaseToView as any).condicoesPagamento || 
+                              (purchaseToView as any).duplicatas?.length > 0 || 
+                              (purchaseToView as any).contasPagar?.length > 0) && (
                                 <div>
                                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                                         <span className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center text-green-600">💳</span>
-                                        Condições de Pagamento
+                                        Condições de Pagamento e Parcelas
                                     </h3>
                                     <div className="bg-white border border-gray-200 rounded-xl p-4">
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -1797,26 +1851,28 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         </div>
                                         
                                         {/* Duplicatas */}
-                                        {(purchaseToView as any).duplicatas && (purchaseToView as any).duplicatas.length > 0 && (
-                                            <div>
-                                                <h4 className="text-sm font-semibold text-gray-700 mb-3">Duplicatas/Parcelas</h4>
+                                        {((purchaseToView as any).duplicatas && (purchaseToView as any).duplicatas.length > 0) && (
+                                            <div className="mt-4">
+                                                <h4 className="text-sm font-semibold text-gray-700 mb-3">📋 Duplicatas/Parcelas do Boleto</h4>
                                                 <div className="space-y-2">
                                                     {(purchaseToView as any).duplicatas.map((dup: any, idx: number) => (
-                                                        <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                                        <div key={idx} className="flex justify-between items-center bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-lg border-2 border-green-200 shadow-sm">
                                                             <div className="flex items-center gap-3">
-                                                                <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center justify-center">
+                                                                <span className="w-8 h-8 rounded-full bg-green-500 text-white text-sm font-bold flex items-center justify-center shadow-md">
                                                                     {idx + 1}
                                                                 </span>
                                                                 <div>
-                                                                    <p className="text-xs text-gray-500">Duplicata {dup.numero || (idx + 1).toString().padStart(3, '0')}</p>
-                                                                    <p className="text-sm font-medium text-gray-900">
-                                                                        Vencimento: {new Date(dup.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                    <p className="text-xs font-semibold text-gray-600 uppercase">Duplicata {dup.numero || (idx + 1).toString().padStart(3, '0')}</p>
+                                                                    <p className="text-sm font-medium text-gray-900 mt-1">
+                                                                        📅 Vencimento: {new Date(dup.dataVencimento).toLocaleDateString('pt-BR')}
                                                                     </p>
                                                                 </div>
                                                             </div>
-                                                            <p className="text-lg font-bold text-green-700">
-                                                                R$ {parseFloat(dup.valor || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </p>
+                                                            <div className="text-right">
+                                                                <p className="text-lg font-bold text-green-700">
+                                                                    R$ {parseFloat(dup.valor || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </p>
+                                                            </div>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -2069,7 +2125,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                 <div className="flex-1">
                                                     <p className="font-semibold text-gray-900 text-base">{item.productName}</p>
                                                     <div className="flex gap-6 mt-2 text-sm text-gray-600">
-                                                        <span className="font-medium">Qtd: <span className="text-gray-900">{item.quantity}</span></span>
+                                                        <span className="font-medium">Qtd: <span className="text-gray-900">{item.quantity} {(item as any).unidadeMedida || 'un'}</span></span>
                                                         <span className="font-medium">Valor Unit.: <span className="text-gray-900">R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></span>
                                                         <span className="font-medium">Total: <span className="text-green-700 font-bold">R$ {(item.quantity * item.unitCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></span>
                                                     </div>

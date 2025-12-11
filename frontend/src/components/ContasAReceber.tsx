@@ -76,6 +76,7 @@ interface ContaReceber {
     observacoes?: string;
     statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null;
     projetoId?: string;
+    venda?: any; // Objeto venda completo (opcional, usado internamente)
 }
 
 interface ItemVenda {
@@ -394,6 +395,25 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setDetalhesVenda(null);
     };
 
+    const getStatusObraDisplay = (statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null) => {
+        if (!statusObra) {
+            return { text: 'Sem Obra', class: 'bg-gray-100 text-gray-600', icon: '—' };
+        }
+        
+        switch (statusObra) {
+            case 'BACKLOG':
+                return { text: 'Backlog', class: 'bg-gray-100 text-gray-700', icon: '📋' };
+            case 'A_FAZER':
+                return { text: 'A Fazer', class: 'bg-blue-100 text-blue-700', icon: '📝' };
+            case 'ANDAMENTO':
+                return { text: 'Em Andamento', class: 'bg-orange-100 text-orange-700', icon: '🚧' };
+            case 'CONCLUIDO':
+                return { text: 'Concluída', class: 'bg-green-100 text-green-700', icon: '✅' };
+            default:
+                return { text: 'Sem Obra', class: 'bg-gray-100 text-gray-600', icon: '—' };
+        }
+    };
+
     const handleGerarPDFVenda = () => {
         if (!detalhesVenda) return;
 
@@ -611,25 +631,6 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         }
     };
 
-    const getStatusObraDisplay = (statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null) => {
-        if (!statusObra) {
-            return { text: 'Sem Obra', class: 'bg-gray-100 text-gray-600', icon: '—' };
-        }
-        
-        switch (statusObra) {
-            case 'BACKLOG':
-                return { text: 'Backlog', class: 'bg-gray-100 text-gray-700', icon: '📋' };
-            case 'A_FAZER':
-                return { text: 'A Fazer', class: 'bg-blue-100 text-blue-700', icon: '📝' };
-            case 'ANDAMENTO':
-                return { text: 'Em Andamento', class: 'bg-orange-100 text-orange-700', icon: '🚧' };
-            case 'CONCLUIDO':
-                return { text: 'Concluída', class: 'bg-green-100 text-green-700', icon: '✅' };
-            default:
-                return { text: 'Sem Obra', class: 'bg-gray-100 text-gray-600', icon: '—' };
-        }
-    };
-
     const isVencida = (dataVencimento: string, status: string) => {
         if (status === 'Recebido') return false;
         return new Date(dataVencimento) < new Date();
@@ -842,7 +843,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         <td className="px-6 py-4">
                                             <div>
                                                 <p className="font-medium text-gray-900">
-                                                    {conta.clienteNome !== 'Cliente não informado' ? conta.clienteNome : (conta.venda?.cliente?.nome || 'Cliente não informado')}
+                                                    {conta.clienteNome}
                                                 </p>
                                                 <p className="text-sm text-gray-600">{conta.projetoTitulo}</p>
                                                 {conta.vendaId && conta.vendaId !== 'N/A' && (

@@ -42,6 +42,14 @@ export interface EvolucaoOrcamentosPorServico {
   [key: string]: string | number;
 }
 
+export interface OrcamentosPorTipoMensal {
+  mes: string; // YYYY-MM
+  quadros: number; // Valor total de orçamentos com QUADRO_PRONTO
+  servicos: number; // Valor total de orçamentos com SERVICO
+  quantidadeQuadros: number; // Quantidade de orçamentos com quadros
+  quantidadeServicos: number; // Quantidade de orçamentos com serviços
+}
+
 export interface GastosFixos {
   totalMensal: number;
   totalAnual: number;
@@ -57,6 +65,7 @@ export interface ResumoGeral {
   vendas: VendasStats;
   markupItens: { porTipo: MarkupItem[] };
   evolucaoOrcamentosPorServico: EvolucaoOrcamentosPorServico[];
+  orcamentosPorTipoMensal: OrcamentosPorTipoMensal[];
   gastosFixos: GastosFixos;
 }
 

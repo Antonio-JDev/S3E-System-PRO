@@ -84,22 +84,48 @@ class ComprasService {
       supplierName: compraDTO.fornecedorNome || compraDTO.fornecedor?.nome || compraDTO.supplierName || 'Fornecedor',
       orderDate: compraDTO.dataCompra || compraDTO.orderDate,
       invoiceNumber: compraDTO.numeroNF || compraDTO.invoiceNumber,
+      serieNF: compraDTO.serieNF || compraDTO.serie || compraDTO.numeroSerie || null, // ✅ Campo de série da NF
       status: (compraDTO.status as any) || 'Pendente',
-      items: (compraDTO.items || compraDTO.itens || []).map((it: any) => ({
-        id: it.id, // ✅ CRÍTICO: Preservar o ID do CompraItem para processamento no backend
-        productId: it.materialId || it.productId || it.id || '',
-        productName: it.nomeProduto || it.productName || it.nome || 'Item',
-        quantity: it.quantidade || it.quantity || 0,
-        unitCost: it.valorUnit || it.precoUnitario || it.unitCost || 0,
-        totalCost: (it.quantidade || it.quantity || 0) * (it.valorUnit || it.precoUnitario || it.unitCost || 0),
-        materialId: it.materialId, // Preservar materialId também
-        nomeProduto: it.nomeProduto || it.productName || it.nome // Preservar nome original
-      })),
+      items: (compraDTO.items || compraDTO.itens || []).map((it: any) => {
+        // ✅ CRÍTICO: Sempre buscar NCM e SKU do material quando disponível
+        // Prioridade: material.ncm/material.sku > item.ncm/item.sku
+        const ncm = it.material?.ncm || it.ncm || null;
+        const sku = it.material?.sku || it.sku || null;
+        const unidadeMedida = it.material?.unidadeMedida || it.unidadeMedida || 'un';
+        
+        return {
+          id: it.id, // ✅ CRÍTICO: Preservar o ID do CompraItem para processamento no backend
+          productId: it.materialId || it.productId || it.id || '',
+          productName: it.nomeProduto || it.productName || it.nome || 'Item',
+          quantity: it.quantidade || it.quantity || 0,
+          unitCost: it.valorUnit || it.precoUnitario || it.unitCost || 0,
+          totalCost: (it.quantidade || it.quantity || 0) * (it.valorUnit || it.precoUnitario || it.unitCost || 0),
+          materialId: it.materialId, // Preservar materialId também
+          nomeProduto: it.nomeProduto || it.productName || it.nome, // Preservar nome original
+          ncm: ncm, // ✅ Sempre usar NCM do material quando disponível
+          sku: sku, // ✅ Sempre usar SKU do material quando disponível
+          unidadeMedida: unidadeMedida, // ✅ Preservar unidade de medida
+          material: it.material // ✅ Preservar objeto material completo para referência
+        };
+      }),
       totalAmount: compraDTO.valorTotal || compraDTO.totalAmount || 0,
       notes: compraDTO.observacoes || compraDTO.notes || '',
       // Data de recebimento real da remessa, quando já recebida
-      dataRecebimento: compraDTO.dataRecebimento || compraDTO.dataEntregaReal || null
-    } as PurchaseOrder;
+      dataRecebimento: compraDTO.dataRecebimento || compraDTO.dataEntregaReal || null,
+      // ✅ Preservar dados adicionais do backend
+      duplicatas: compraDTO.duplicatas || [],
+      contasPagar: compraDTO.contasPagar || [],
+      condicoesPagamento: compraDTO.condicoesPagamento,
+      parcelas: compraDTO.parcelas,
+      dataPrimeiroVencimento: compraDTO.dataPrimeiroVencimento,
+      valorTotalProdutos: compraDTO.valorTotalProdutos,
+      frete: compraDTO.frete,
+      valorIPI: compraDTO.valorIPI,
+      outrasDespesas: compraDTO.outrasDespesas,
+      valorTotalNota: compraDTO.valorTotalNota,
+      destinatarioCNPJ: compraDTO.destinatarioCNPJ,
+      statusImportacao: compraDTO.statusImportacao
+    } as any;
   }
   /**
    * Listar todas as compras
@@ -179,6 +205,20 @@ class ComprasService {
       associacoes,
       dataRecebimento: dataRecebimento || new Date().toISOString()
     });
+  }
+
+  /**
+   * Buscar compra específica por ID com todos os detalhes (incluindo NCMs, duplicatas, contas a pagar)
+   */
+  async getCompraById(id: string) {
+    try {
+      const resp = await axiosApiService.get<any>(`/api/compras/${id}`);
+      const compraDTO = (resp as any)?.data?.data || (resp as any)?.data || resp;
+      return this.mapCompraToPurchaseOrder(compraDTO);
+    } catch (error) {
+      console.error('Erro ao buscar compra:', error);
+      throw error;
+    }
   }
 
   /**

@@ -27,12 +27,27 @@ export function identificarTipoMaterial(nomeProduto: string): TipoMaterial {
     
     const nomeLower = nomeProduto.toLowerCase();
     
-    // Barramentos de cobre
+    // Excluir blocos de distribuição modular - eles NÃO são barramentos
+    if (nomeLower.includes('bloco de distribuicao modular')) {
+        return TipoMaterial.PADRAO;
+    }
+    
+    // Barramentos DIN (1, 2 ou 3 polos) - devem ter opção de metros/cm
+    // Exemplos: "BARRAMENTO DIN 3 POLOS", "BARRAMENTO DIN 1 POLO", "BARRAMENTO DIN 2 POLOS"
+    if (nomeLower.includes('barramento') && nomeLower.includes('din')) {
+        // Verificar se é realmente um barramento DIN (não um bloco)
+        const temPolos = nomeLower.includes('polo') || nomeLower.includes('polos');
+        if (temPolos) {
+            return TipoMaterial.TRILHO_DIN;
+        }
+    }
+    
+    // Barramentos de cobre (que contêm "BARRAMENTO COBRE" ou similar)
     if (nomeLower.includes('barramento') && (nomeLower.includes('cobre') || nomeLower.includes('cu'))) {
         return TipoMaterial.BARRAMENTO_COBRE;
     }
     
-    // Trilhos DIN
+    // Trilhos DIN (sem a palavra "barramento")
     if (nomeLower.includes('trilho') && nomeLower.includes('din')) {
         return TipoMaterial.TRILHO_DIN;
     }

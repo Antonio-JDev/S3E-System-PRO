@@ -521,6 +521,7 @@ model Compra {
   fornecedorCNPJ  String
   fornecedorTel   String?
   numeroNF        String
+  serieNF         String?   // Série da Nota Fiscal (ex: "1", "2", etc.)
   dataEmissaoNF   DateTime
   dataCompra      DateTime
   dataRecebimento DateTime?

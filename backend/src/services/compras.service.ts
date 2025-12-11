@@ -19,6 +19,7 @@ export interface CompraPayload {
     fornecedorCNPJ: string;
     fornecedorTel?: string;
     numeroNF: string;
+    serieNF?: string; // Série da Nota Fiscal (ex: "1", "2", etc.)
     dataEmissaoNF: Date;
     dataCompra: Date;
     dataRecebimento?: Date;
@@ -49,6 +50,7 @@ export class ComprasService {
             fornecedorCNPJ,
             fornecedorTel,
             numeroNF,
+            serieNF,
             dataEmissaoNF,
             dataCompra,
             dataRecebimento,
@@ -257,6 +259,7 @@ export class ComprasService {
                     fornecedorCNPJ: cnpjString,
                     fornecedorTel: fornecedorTel || null,
                     numeroNF: String(numeroNF),
+                    serieNF: serieNF || null,
                     dataEmissaoNF,
                     dataCompra,
                     dataRecebimento: dataRecebimento || null,

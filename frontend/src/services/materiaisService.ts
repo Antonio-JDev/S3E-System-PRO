@@ -3,9 +3,12 @@ import { ENDPOINTS } from '../config/api';
 
 export interface Material {
   id: string;
-  codigo: string;
+  nome: string; // Nome do material
+  sku: string; // Código SKU único
+  codigo?: string; // Alias para compatibilidade (deprecated, usar sku)
   descricao: string;
-  unidade: string;
+  unidadeMedida: string; // Unidade de medida (un, m, kg, l, etc)
+  unidade?: string; // Alias para compatibilidade (deprecated, usar unidadeMedida)
   ncm?: string; // Nomenclatura Comum do Mercosul (dado fiscal)
   imagemUrl?: string; // URL da imagem do material
 
@@ -15,6 +18,7 @@ export interface Material {
   estoque: number;
   estoqueMinimo: number;
   categoria?: string;
+  tipo?: string; // Tipo do material
   fornecedorId?: string;
   fornecedor?: {
     id: string;
@@ -246,6 +250,36 @@ class MateriaisService {
   /**
    * Corrigir nomes genéricos de materiais importados via XML
    */
+  /**
+   * Atualizar SKUs e NCMs de materiais existentes
+   */
+  async atualizarSKUsENCMs(): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('🔄 Atualizando SKUs e NCMs...');
+      const response = await axiosApiService.post<any>(`${ENDPOINTS.MATERIAIS}/atualizar-skus-ncms`);
+      
+      if (response.success && response.data) {
+        console.log('✅ SKUs e NCMs atualizados com sucesso:', response.data);
+        return {
+          success: true,
+          data: response.data,
+        };
+      } else {
+        console.warn('⚠️ Erro ao atualizar SKUs e NCMs:', response);
+        return {
+          success: false,
+          error: response.error || 'Erro ao atualizar SKUs e NCMs',
+        };
+      }
+    } catch (error: any) {
+      console.error('❌ Erro ao atualizar SKUs e NCMs:', error);
+      return {
+        success: false,
+        error: 'Erro de conexão com o backend',
+      };
+    }
+  }
+
   async corrigirNomesGenericos() {
     try {
       console.log('🔄 Corrigindo nomes genéricos de materiais...');

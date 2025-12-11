@@ -81,6 +81,7 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       fornecedorCNPJ: req.body.fornecedorCNPJ,
       fornecedorTel: req.body.fornecedorTel,
       numeroNF: req.body.numeroNF,
+      serieNF: req.body.serieNF || req.body.serie || null,
       dataEmissaoNF: new Date(req.body.dataEmissaoNF),
       dataCompra: new Date(req.body.dataCompra),
       dataRecebimento: req.body.dataRecebimento ? new Date(req.body.dataRecebimento) : undefined,
@@ -165,6 +166,7 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
     const destinatarioRazaoSocial = nfe.dest?.xNome || '';
 
     const numeroNF = nfe.ide?.nNF || '';
+    const serieNF = nfe.ide?.serie || nfe.ide?.serieNF || '1'; // Série da NF (padrão "1" se não informado)
     const dataEmissao = nfe.ide?.dhEmi || nfe.ide?.dEmi || '';
 
     // Itens
@@ -228,6 +230,7 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         destinatarioCNPJ,
         destinatarioRazaoSocial,
         numeroNF,
+        serieNF,
         dataEmissao,
         items,
         valorFrete,

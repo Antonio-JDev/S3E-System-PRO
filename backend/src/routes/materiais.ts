@@ -10,6 +10,7 @@ import {
   getHistoricoCompras,
   corrigirNomesGenericos,
   buscarMateriaisSimilares,
+  atualizarSKUsENCMs,
   exportarMateriaisCriticos,
   importarPrecos,
   uploadImportFile,
@@ -31,6 +32,7 @@ router.get('/', getMateriais);
 router.get('/movimentacoes/historico', getMovimentacoes);
 router.post('/corrigir-nomes', corrigirNomesGenericos); // Rota de correção
 router.post('/buscar-similares', buscarMateriaisSimilares); // Nova rota para verificação de duplicatas
+router.post('/atualizar-skus-ncms', atualizarSKUsENCMs); // Atualizar SKUs e NCMs de materiais existentes
 
 // Rotas de exportação/importação (antes das rotas com :id)
 router.get('/exportar-criticos', exportarMateriaisCriticos);
