@@ -1,0 +1,11 @@
+-- CreateEnum
+CREATE TYPE "ClassificacaoOrcamento" AS ENUM ('MAO_DE_OBRA', 'MATERIAIS', 'ENGENHARIA_PROJETOS', 'MAO_DE_OBRA_MATERIAIS');
+
+-- CreateEnum
+CREATE TYPE "TipoServico" AS ENUM ('MAO_DE_OBRA', 'MONTAGEM', 'ENGENHARIA', 'PROJETOS', 'ADMINISTRATIVO');
+
+-- AlterTable
+ALTER TABLE "orcamentos" ADD COLUMN IF NOT EXISTS "classificacao" "ClassificacaoOrcamento" NOT NULL DEFAULT 'MAO_DE_OBRA_MATERIAIS';
+
+-- AlterTable
+ALTER TABLE "servicos" ADD COLUMN IF NOT EXISTS "tipoServico" "TipoServico" NOT NULL DEFAULT 'MAO_DE_OBRA';
