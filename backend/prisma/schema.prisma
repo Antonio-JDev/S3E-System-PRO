@@ -50,11 +50,19 @@ model AuditLog {
   metadata    Json? // Dados adicionais em JSON
   createdAt   DateTime @default(now())
 
+  // Campos adicionais para auditoria imutável em cadeia (ex: NF-e)
+  hash         String? // Hash SHA-256 deste registro
+  previousHash String? // Hash do registro anterior na mesma cadeia
+  chainId      String? // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
+  sequence     Int?    // Ordem dentro da cadeia (1, 2, 3, ...)
+
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])
   @@index([entity])
+   @@index([entity, entityId])
+  @@index([chainId])
   @@index([createdAt])
   @@map("audit_logs")
 }
@@ -85,6 +93,7 @@ model ConfiguracaoSistema {
   temaPreferido   String   @default("light") // light, dark, system
   logoUrl         String? // URL da logo/perfil da empresa (uso geral)
   logoLoginUrl    String? // URL da logo específica para a página de login
+  logoDanfeUrl    String? // URL da logo específica para impressão na DANFE
   nomeEmpresa     String   @default("S3E Engenharia")
   emailContato    String?
   telefoneContato String?
@@ -224,6 +233,7 @@ model Servico {
   codigo    String   @unique
   descricao String?
   tipo      String // Instalacao, Manutencao, Consultoria, LaudoTecnico
+  tipoServico TipoServico @default(MAO_DE_OBRA) // ✅ NOVO: Tipo de serviço para classificação
   preco     Float
   unidade   String   @default("un") // un, hora, m2, etc
   ativo     Boolean  @default(true)
@@ -365,6 +375,15 @@ enum ProjetoStatus {
   EXECUCAO
   CONCLUIDO
   CANCELADO
+}
+
+// Tipo de Serviço
+enum TipoServico {
+  MAO_DE_OBRA
+  MONTAGEM
+  ENGENHARIA
+  PROJETOS
+  ADMINISTRATIVO
 }
 
 model Projeto {
@@ -532,10 +551,12 @@ model Compra {
   status          String    @default("Pendente") // Pendente, Recebido, Cancelado
   xmlData         String? // JSON string com dados completos do XML
   observacoes     String?
+  obraId          String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   fornecedor Fornecedor   @relation(fields: [fornecedorId], references: [id])
+  obra       Obra?        @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
   items      CompraItem[]
 
   @@map("compras")
@@ -677,6 +698,10 @@ model EmpresaFiscal {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  // Relações
+  notasFiscais NotaFiscal[]
+  nfeFila      NFeFila[]
+
   @@map("empresas_fiscais")
 }
 
@@ -704,9 +729,36 @@ model NotaFiscal {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  projeto Projeto? @relation(fields: [projetoId], references: [id])
+  projeto       Projeto?       @relation(fields: [projetoId], references: [id])
+  empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id])
+  nfeFila       NFeFila[]
 
   @@map("notas_fiscais")
+}
+
+// ============================================
+// FILA DE ENVIO DE NF-e (CONTINGÊNCIA)
+// ============================================
+
+model NFeFila {
+  id              String   @id @default(uuid())
+  notaFiscalId    String?
+  empresaFiscalId String?
+  ambiente        String   // '1' = Produção, '2' = Homologação
+  modo            String   // NORMAL, SVC-AN, SVC-RS
+  xmlAssinado     String   // XML da NF-e já assinado (pronto para envio)
+  status          String   @default("PENDENTE") // PENDENTE, ENVIANDO, ENVIADA, FALHA
+  tentativas      Int      @default(0)
+  ultimoErro      String?
+  proximaTentativa DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  notaFiscal    NotaFiscal?    @relation(fields: [notaFiscalId], references: [id])
+  empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id])
+
+  @@index([status, proximaTentativa])
+  @@map("nfe_fila")
 }
 
 // ============================================
@@ -808,6 +860,7 @@ model Obra {
   projeto Projeto?     @relation(fields: [projetoId], references: [id], onDelete: Cascade)
   cliente Cliente?     @relation(fields: [clienteId], references: [id])
   tarefas TarefaObra[]
+  compras Compra[]     // ✅ NOVO: Compras avulsas vinculadas a esta obra
 
   @@map("obras")
 }
@@ -1023,6 +1076,7 @@ model Ferramenta {
   modelo      String?
   descricao   String?
   valorCompra Float?
+  quantidade  Int      @default(0) // Quantidade em estoque da ferramenta
   imagemUrl   String? // URL da foto da ferramenta
   ativo       Boolean  @default(true)
   createdAt   DateTime @default(now())
