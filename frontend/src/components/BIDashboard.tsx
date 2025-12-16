@@ -459,15 +459,15 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
                   stroke={isDark ? '#334155' : '#e5e7eb'}
                   tickFormatter={(value) => {
-                    if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
-                    return `R$ ${value}`;
+                    if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
+                    return 'R$ ' + value;
                   }}
                 />
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
                     backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                     borderRadius: '8px',
                     color: isDark ? '#F8FAFC' : '#111827',
                   }}
@@ -484,6 +484,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -528,7 +529,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
                     backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                     borderRadius: '8px',
                     color: isDark ? '#F8FAFC' : '#111827',
                   }}
@@ -536,6 +537,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 />
               </PieChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -566,8 +568,8 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
                   stroke={isDark ? '#334155' : '#e5e7eb'}
                   tickFormatter={(value) => {
-                    if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
-                    return `R$ ${value}`;
+                    if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
+                    return 'R$ ' + value;
                   }}
                 />
                 <YAxis
@@ -581,7 +583,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   formatter={(value: number) => formatarMoeda(value)}
                   contentStyle={{
                     backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                     borderRadius: '8px',
                     color: isDark ? '#F8FAFC' : '#111827',
                   }}
@@ -598,6 +600,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -634,10 +637,10 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     }}
                   />
                   <YAxis
-                    tickFormatter={(value) => {
-                      if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
-                      return `R$ ${value}`;
-                    }}
+                  tickFormatter={(value) => {
+                    if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
+                    return 'R$ ' + value;
+                  }}
                     style={{
                       fontSize: '12px',
                       fill: isDark ? '#CBD5E1' : '#6b7280',
@@ -705,18 +708,17 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 </BarChart>
               </ChartContainer>
             )}
-            </CardContent>
+          </CardContent>
           <CardFooter className="flex-col items-start gap-2 text-sm">
             <div className="flex gap-2 leading-none font-medium">
               <TrendingUp className="h-4 w-4" />
               Comparação mensal de orçamentos por tipo
             </div>
             <div className="text-muted-foreground leading-none">
-                  Valores totais de orçamentos com itens de quadros e serviços
-                </div>
-            </CardFooter>
-          </div>
-        )}
+              Valores totais de orçamentos com itens de quadros e serviços
+            </div>
+          </CardFooter>
+        </div>
 
         {/* Gráfico de Pizza - Markup por Tipo */}
         <div className="card-primary">
@@ -752,7 +754,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   formatter={(value: number) => `${value.toFixed(2)}%`}
                   contentStyle={{
                     backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                     borderRadius: '8px',
                     color: isDark ? '#F8FAFC' : '#111827',
                   }}
@@ -854,12 +856,12 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 <YAxis
                   tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
                   stroke={isDark ? '#334155' : '#e5e7eb'}
-                  tickFormatter={(value) => {
-                    if (value >= 1000) {
-                      return `R$ ${(value / 1000).toFixed(1)}k`;
-                    }
-                    return `R$ ${value}`;
-                  }}
+                    tickFormatter={(value) => {
+                      if (value >= 1000) {
+                        return 'R$ ' + (value / 1000).toFixed(1) + 'k';
+                      }
+                      return 'R$ ' + value;
+                    }}
                 />
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
@@ -872,7 +874,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   }}
                   contentStyle={{
                     backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                     borderRadius: '8px',
                     color: isDark ? '#F8FAFC' : '#111827',
                   }}
@@ -1020,18 +1022,18 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     <YAxis
                       tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
                       stroke={isDark ? '#334155' : '#e5e7eb'}
-                      tickFormatter={(value) => {
-                        if (value >= 1000) {
-                          return `R$ ${(value / 1000).toFixed(1)}k`;
-                        }
-                        return `R$ ${value}`;
-                      }}
+                    tickFormatter={(value) => {
+                      if (value >= 1000) {
+                        return 'R$ ' + (value / 1000).toFixed(1) + 'k';
+                      }
+                      return 'R$ ' + value;
+                    }}
                     />
                     <Tooltip
                       formatter={(value: number) => formatarMoeda(value)}
                       contentStyle={{
                         backgroundColor: isDark ? '#1E293B' : '#fff',
-                        border: `1px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+                        border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
                         borderRadius: '8px',
                         color: isDark ? '#F8FAFC' : '#111827',
                       }}

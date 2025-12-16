@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { type PurchaseOrder, type Supplier, PurchaseStatus, type PurchaseOrderItem, type Product, CatalogItemType } from '../types';
 import { parseNFeXML, readFileAsText } from '../utils/xmlParser';
 import { comprasService } from '../services/comprasService';
+import { obrasService, type Obra } from '../services/obrasService';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { AuthContext } from '../contexts/AuthContext';
@@ -92,6 +93,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     };
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isXMLModalOpen, setIsXMLModalOpen] = useState(false);
+    const [isCompraAvulsa, setIsCompraAvulsa] = useState(false); // ✅ NOVO: Modo compra avulsa
+    const [obraId, setObraId] = useState<string>(''); // ✅ NOVO: Obra vinculada
+    const [obrasEmAndamento, setObrasEmAndamento] = useState<Obra[]>([]); // ✅ NOVO: Lista de obras em andamento
 
     // Action states
     const [purchaseToView, setPurchaseToView] = useState<PurchaseOrder | null>(null);
@@ -183,6 +187,26 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         loadPurchaseOrders();
     }, [loadPurchaseOrders]);
 
+    // ✅ NOVO: Carregar obras em andamento para compra avulsa
+    useEffect(() => {
+        const carregarObras = async () => {
+            try {
+                const response = await obrasService.getObrasKanban();
+                if (response.success && response.data) {
+                    // Filtrar apenas obras em ANDAMENTO
+                    const obrasAndamento = [
+                        ...(response.data.ANDAMENTO || []),
+                        ...(response.data.A_FAZER || []) // Incluir também obras "A_FAZER" que podem estar prestes a iniciar
+                    ];
+                    setObrasEmAndamento(obrasAndamento);
+                }
+            } catch (error) {
+                console.error('Erro ao carregar obras:', error);
+            }
+        };
+        carregarObras();
+    }, []);
+
     const filteredPurchases = useMemo(() => {
         let filtered = purchaseOrders;
         
@@ -203,7 +227,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     }, [filter, searchTerm, purchaseOrders]);
 
     // Handlers
-    const handleOpenModal = (purchase: PurchaseOrder | null = null) => {
+    const handleOpenModal = (purchase: PurchaseOrder | null = null, compraAvulsa: boolean = false) => {
         if (purchase) {
             setPurchaseToEdit(purchase);
             setSelectedSupplierId(purchase.supplierId || '');
@@ -212,8 +236,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             setStatus(purchase.status);
             setPurchaseItems(purchase.items);
             setSupplierName(purchase.supplierName || '');
+            setIsCompraAvulsa(false); // Edição não é compra avulsa
+            setObraId((purchase as any).obraId || '');
         } else {
             resetForm();
+            setIsCompraAvulsa(compraAvulsa); // ✅ NOVO: Definir modo compra avulsa
         }
         setIsModalOpen(true);
     };
@@ -231,6 +258,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setSupplierPhone('');
         setSupplierEmail('');
         setSupplierAddress('');
+        setIsCompraAvulsa(false); // ✅ NOVO: Resetar modo compra avulsa
+        setObraId(''); // ✅ NOVO: Resetar obra selecionada
     };
 
     const handleOpenReceivingModal = () => {
@@ -407,7 +436,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 valorIPI: parseFloat(valorIPI || '0') || 0,
                 valorTotalProdutos: parseFloat(valorTotalProdutos || '0') || 0,
                 valorTotalNota: valorTotalNotaCalculado,
-                duplicatas
+                duplicatas,
+                obraId: isCompraAvulsa && obraId ? obraId : undefined // ✅ NOVO: Incluir obraId se for compra avulsa
             };
 
             console.log('📤 Criando nova compra:', payload);
@@ -628,13 +658,20 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie pedidos de compra e fornecedores</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                     <button
                         onClick={() => setIsXMLModalOpen(true)}
                         className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                     >
                         <DocumentArrowUpIcon className="w-5 h-5" />
                         Importar XML
+                    </button>
+                    <button
+                        onClick={() => handleOpenModal(null, true)}
+                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold"
+                    >
+                        <PlusIcon className="w-5 h-5" />
+                        Compra Avulsa
                     </button>
                     <button
                         onClick={() => navigate('/compras/nova')}
@@ -728,11 +765,16 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
                                     <h3 className="font-bold text-lg text-gray-900 mb-1">{purchase.supplierName}</h3>
-                                    <div className="flex items-center gap-2">
-                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
-                                            🛒 Compra
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="px-3 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
+                                        🛒 Compra
+                                    </span>
+                                    {purchase.obra && (
+                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-800 ring-1 ring-purple-200" title={`Obra: ${purchase.obra.nomeObra}`}>
+                                            🏗️ {purchase.obra.nomeObra}
                                         </span>
-                                    </div>
+                                    )}
+                                </div>
                                 </div>
                                 <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(purchase.status)}`}>
                                     {purchase.status === PurchaseStatus.Pendente && '⏳ '}
@@ -1022,6 +1064,37 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* ✅ NOVO: Campo de Obra (apenas para compra avulsa) */}
+                            {isCompraAvulsa && (
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">🏗️</span>
+                                        Classificação - Obra em Andamento
+                                    </h3>
+                                    <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6">
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Vincular a Obra em Andamento *
+                                        </label>
+                                        <select
+                                            value={obraId}
+                                            onChange={(e) => setObraId(e.target.value)}
+                                            required={isCompraAvulsa}
+                                            className="w-full px-4 py-3 border border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500 bg-white"
+                                        >
+                                            <option value="">Selecione uma obra em andamento</option>
+                                            {obrasEmAndamento.map((obra) => (
+                                                <option key={obra.id} value={obra.id}>
+                                                    {obra.nomeObra} - {obra.status === 'ANDAMENTO' ? '🟢 Em Andamento' : '🟡 A Fazer'}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-purple-600 mt-2">
+                                            💡 Esta compra será vinculada à obra selecionada para rastreamento de materiais por obra
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Informações da Compra */}
                             <div>
@@ -1681,6 +1754,15 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             }`}>
                                                 {(purchaseToView as any).statusImportacao === 'XML' ? '📄 XML' : '✏️ Manual'}
                                             </span>
+                                        </div>
+                                    )}
+                                    {(purchaseToView as any).obra && (
+                                        <div className="bg-purple-50 p-4 rounded-xl border-2 border-purple-200">
+                                            <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1 flex items-center gap-1">
+                                                🏗️ Obra Vinculada
+                                            </h4>
+                                            <p className="text-purple-900 font-bold">{purchaseToView.obra.nomeObra}</p>
+                                            <p className="text-xs text-purple-600 mt-1">Status: {purchaseToView.obra.status}</p>
                                         </div>
                                     )}
                                 </div>

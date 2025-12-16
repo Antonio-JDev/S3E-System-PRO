@@ -50,6 +50,7 @@ export interface OrcamentosPorTipoMensal {
   quantidadeServicos: number; // Quantidade de orçamentos com serviços
 }
 
+
 export interface GastosFixos {
   totalMensal: number;
   totalAnual: number;
@@ -312,4 +313,237 @@ class BIService {
 }
 
 export const biService = new BIService();
+
+// ============================================
+// RESUMO ADMINISTRATIVO - Interfaces e Serviço
+// ============================================
+
+export interface LucroPorMaterial {
+  mes: string;
+  lucroTotal: number;
+  quantidadeVendas: number;
+  valorVendido: number;
+  custoTotal: number;
+  margemPercentual: number;
+}
+
+export interface LucroPorServico {
+  mes: string;
+  lucroTotal: number;
+  quantidadeVendas: number;
+  valorVendido: number;
+  custoTotal: number;
+  margemPercentual: number;
+}
+
+export interface BDIPorOrcamento {
+  orcamentoId: string;
+  numeroSequencial: number;
+  clienteNome: string;
+  dataVenda: string;
+  valorTotal: number;
+  bdiPercentual: number;
+  valorBDI: number;
+  custoTotal: number;
+  lucroTotal: number;
+}
+
+export interface LucroMaoDeObra {
+  mes: string;
+  lucroTotal: number;
+  quantidadeServicos: number;
+  valorVendido: number;
+  custoTotal: number;
+  margemPercentual: number;
+}
+
+export interface ResumoMensal {
+  mes: string;
+  lucroMateriais: number;
+  lucroServicos: number;
+  lucroMaoDeObra: number;
+  totalBDI: number;
+  receitaTotal: number;
+  custoTotal: number;
+  lucroLiquido: number;
+  margemPercentual: number;
+}
+
+export interface EvolucaoFinanceira {
+  periodo: string;
+  dados: ResumoMensal[];
+  totalReceita: number;
+  totalCusto: number;
+  totalLucro: number;
+  margemMedia: number;
+}
+
+export interface ResumoAdministrativoCompleto {
+  lucroPorMaterial: LucroPorMaterial[];
+  lucroPorServico: LucroPorServico[];
+  bdiPorOrcamento: BDIPorOrcamento[];
+  lucroMaoDeObra: LucroMaoDeObra[];
+  resumoMensal: ResumoMensal[];
+  evolucaoFinanceira: {
+    mensal: EvolucaoFinanceira;
+    semestral: EvolucaoFinanceira;
+    anual: EvolucaoFinanceira;
+  };
+}
+
+class ResumoAdministrativoService {
+  /**
+   * Busca resumo administrativo completo
+   */
+  async getResumoCompleto(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<ResumoAdministrativoCompleto>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/completo', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar resumo administrativo:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar resumo administrativo',
+      };
+    }
+  }
+
+  /**
+   * Busca lucro por material
+   */
+  async getLucroMaterial(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<LucroPorMaterial[]>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/lucro-material', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar lucro por material:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar lucro por material',
+      };
+    }
+  }
+
+  /**
+   * Busca lucro por serviço
+   */
+  async getLucroServico(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<LucroPorServico[]>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/lucro-servico', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar lucro por serviço:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar lucro por serviço',
+      };
+    }
+  }
+
+  /**
+   * Busca BDI por orçamento
+   */
+  async getBDIOrcamentos(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<BDIPorOrcamento[]>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/bdi-orcamentos', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar BDI por orçamento:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar BDI por orçamento',
+      };
+    }
+  }
+
+  /**
+   * Busca lucro por mão de obra
+   */
+  async getLucroMaoDeObra(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<LucroMaoDeObra[]>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/lucro-mao-de-obra', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar lucro por mão de obra:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar lucro por mão de obra',
+      };
+    }
+  }
+
+  /**
+   * Busca resumo mensal
+   */
+  async getResumoMensal(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<ResumoMensal[]>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/resumo-mensal', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar resumo mensal:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar resumo mensal',
+      };
+    }
+  }
+
+  /**
+   * Busca evolução financeira
+   */
+  async getEvolucaoFinanceira(
+    periodo: 'mensal' | '6meses' | 'anual'
+  ): Promise<BIServiceResponse<EvolucaoFinanceira>> {
+    try {
+      const response = await axiosApiService.get('/api/resumo-administrativo/evolucao-financeira', {
+        periodo,
+      });
+      return { success: true, data: response.data?.data };
+    } catch (error: any) {
+      console.error('Erro ao buscar evolução financeira:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar evolução financeira',
+      };
+    }
+  }
+}
+
+export const resumoAdministrativoService = new ResumoAdministrativoService();
 

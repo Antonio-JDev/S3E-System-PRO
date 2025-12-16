@@ -160,16 +160,91 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
     const [isAgendamentoModalOpen, setIsAgendamentoModalOpen] = useState(false);
     const [dataAgendamento, setDataAgendamento] = useState(new Date().toISOString().split('T')[0]);
 
+    // Handlers de Modal - Declarados antes do useEscapeKey para evitar erro de inicialização
+    const handleClosePagamentoModal = () => {
+        setIsPagamentoModalOpen(false);
+        setContaSelecionada(null);
+        setValorPago('0');
+        setObservacoesPagamento('');
+    };
+
+    const handleCloseVisualizarModal = () => {
+        setIsVisualizarModalOpen(false);
+        setCompraDetalhada(null);
+    };
+
+    const handleCloseAtualizarModal = () => {
+        setIsAtualizarModalOpen(false);
+        setContaSelecionada(null);
+        setNovaDataVencimento('');
+        setNovasObservacoes('');
+    };
+
+    const handleCloseAgendamentoModal = () => {
+        setIsAgendamentoModalOpen(false);
+        setContaSelecionada(null);
+        setDataAgendamento(new Date().toISOString().split('T')[0]);
+    };
+
+    const handleOpenAgendamentoModal = (conta: ContaPagar) => {
+        setContaSelecionada(conta);
+        setDataAgendamento(new Date().toISOString().split('T')[0]);
+        setIsAgendamentoModalOpen(true);
+    };
+
+    const handleAgendarPagamento = async () => {
+        if (!contaSelecionada) return;
+
+        try {
+            console.log('📅 Agendando pagamento...');
+            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}/agendar`, {
+                dataAgendamento
+            });
+
+            if (response.success) {
+                toast.success('✅ Pagamento agendado com sucesso!', {
+                    description: `Data: ${new Date(dataAgendamento).toLocaleDateString('pt-BR')}`
+                });
+                handleCloseAgendamentoModal();
+                await loadContasPagar();
+            } else {
+                toast.error('❌ Erro ao agendar pagamento', {
+                    description: response.error || 'Tente novamente.'
+                });
+            }
+        } catch (error) {
+            console.error('❌ Erro ao agendar pagamento:', error);
+            toast.error('❌ Erro ao agendar pagamento', {
+                description: 'Erro de conexão com o servidor.'
+            });
+        }
+    };
+
+    const handleRemoverAgendamento = async (contaId: string) => {
+        try {
+            console.log('🗑️ Removendo agendamento...');
+            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaId}/remover-agendamento`);
+
+            if (response.success) {
+                toast.success('✅ Agendamento removido com sucesso!');
+                await loadContasPagar();
+            } else {
+                toast.error('❌ Erro ao remover agendamento', {
+                    description: response.error || 'Tente novamente.'
+                });
+            }
+        } catch (error) {
+            console.error('❌ Erro ao remover agendamento:', error);
+            toast.error('❌ Erro ao remover agendamento', {
+                description: 'Erro de conexão com o servidor.'
+            });
+        }
+    };
+
     // Carregar dados
     useEffect(() => {
         loadContasPagar();
     }, []);
-
-    // Aplicar hook useEscapeKey em todos os modais
-    useEscapeKey(isPagamentoModalOpen, handleClosePagamentoModal);
-    useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
-    useEscapeKey(isAtualizarModalOpen, handleCloseAtualizarModal);
-    useEscapeKey(isAgendamentoModalOpen, handleCloseAgendamentoModal);
 
     const loadContasPagar = async () => {
         setLoading(true);
@@ -336,13 +411,6 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         setIsPagamentoModalOpen(true);
     };
 
-    const handleClosePagamentoModal = () => {
-        setIsPagamentoModalOpen(false);
-        setContaSelecionada(null);
-        setValorPago('0');
-        setObservacoesPagamento('');
-    };
-
     const handleOpenConfirmPagamento = () => {
         setConfirmAction('pagar');
         setIsConfirmDialogOpen(true);
@@ -447,23 +515,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         }
     };
 
-    const handleCloseVisualizarModal = () => {
-        setIsVisualizarModalOpen(false);
-        setCompraDetalhada(null);
-    };
-
     const handleOpenAtualizarModal = (conta: ContaPagar) => {
         setContaSelecionada(conta);
         setNovaDataVencimento(conta.dataVencimento.split('T')[0]);
         setNovasObservacoes(conta.observacoes || '');
         setIsAtualizarModalOpen(true);
-    };
-
-    const handleCloseAtualizarModal = () => {
-        setIsAtualizarModalOpen(false);
-        setContaSelecionada(null);
-        setNovaDataVencimento('');
-        setNovasObservacoes('');
     };
 
     const handleOpenConfirmAtualizar = () => {
@@ -720,6 +776,12 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         if (status === 'Pago') return false;
         return new Date(dataVencimento) < new Date();
     };
+
+    // Aplicar hook useEscapeKey em todos os modais (depois de todas as declarações de handlers)
+    useEscapeKey(isPagamentoModalOpen, handleClosePagamentoModal);
+    useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
+    useEscapeKey(isAtualizarModalOpen, handleCloseAtualizarModal);
+    useEscapeKey(isAgendamentoModalOpen, handleCloseAgendamentoModal);
 
     if (loading) {
         return (

@@ -7,6 +7,7 @@ export interface Servico {
   codigo: string;
   descricao?: string;
   tipo: string;
+  tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
   preco: number;
   unidade: string;
   ativo: boolean;
@@ -22,12 +23,20 @@ export interface CreateServicoData {
   codigo: string;
   descricao?: string;
   tipo: string;
+  tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
   preco: number;
   unidade?: string;
 }
 
 export interface UpdateServicoData extends Partial<CreateServicoData> {
   ativo?: boolean;
+}
+
+export interface ServicoFilters {
+  tipo?: string;
+  tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Filtro por tipo de serviço
+  ativo?: boolean;
+  search?: string;
 }
 
 export interface ServicoFilters {

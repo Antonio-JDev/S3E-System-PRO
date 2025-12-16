@@ -184,6 +184,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     // Estados para importação/exportação
     const [importing, setImporting] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+    // Importação de orçamentos históricos (JSON simples vindo do sistema antigo)
+    const [importingHistorico, setImportingHistorico] = useState(false);
+    const historicoFileInputRef = React.useRef<HTMLInputElement>(null);
     
     // Estados para modal de preview de importação
     const [modalPreviewImportOpen, setModalPreviewImportOpen] = useState(false);
@@ -816,6 +820,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         fileInputRef.current?.click();
     };
 
+    const handleImportHistoricoClick = () => {
+        historicoFileInputRef.current?.click();
+    };
+
     const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -910,6 +918,42 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             toast.error('❌ Erro ao importar arquivo: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
         } finally {
             setImporting(false);
+        }
+    };
+
+    // Importação direta de orçamentos históricos em formato simples
+    const handleImportHistoricoFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        try {
+            setImportingHistorico(true);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await axiosApiService.post(`${ENDPOINTS.ORCAMENTOS}/import`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+
+            if (response.data?.success) {
+                const criados = response.data.data?.criados ?? 0;
+                const erros = response.data.data?.erros ?? 0;
+                toast.success(`✅ Importação de históricos concluída. ${criados} orçamento(s) criado(s), ${erros} erro(s).`);
+                await loadData();
+            } else {
+                toast.error(response.data?.error || '❌ Erro ao importar orçamentos históricos');
+            }
+        } catch (error: any) {
+            console.error('Erro ao importar orçamentos históricos:', error);
+            toast.error('❌ Erro ao importar orçamentos históricos: ' + (error?.message || 'Erro desconhecido'));
+        } finally {
+            setImportingHistorico(false);
+            if (historicoFileInputRef.current) {
+                historicoFileInputRef.current.value = '';
+            }
         }
     };
 
@@ -1787,7 +1831,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie seus orçamentos e propostas comerciais</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex flex-col sm:flex-row gap-3">
                     <div className="flex gap-2">
                         <ActionsDropdown
                             label="Ações"
@@ -1831,6 +1875,25 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             type="file"
                             accept=".json"
                             onChange={handleImportFile}
+                            style={{ display: 'none' }}
+                        />
+                    </div>
+                    {/* Botão separado para importação de orçamentos antigos (JSON simples) */}
+                    <div className="flex gap-2">
+                        <button
+                            type="button"
+                            onClick={handleImportHistoricoClick}
+                            disabled={importingHistorico}
+                            className="btn-secondary flex items-center gap-2"
+                        >
+                            <DocumentArrowUpIcon className={`w-5 h-5 ${importingHistorico ? 'animate-spin' : ''}`} />
+                            {importingHistorico ? 'Importando Históricos...' : 'Importar Orçamentos Antigos (JSON)'}
+                        </button>
+                        <input
+                            ref={historicoFileInputRef}
+                            type="file"
+                            accept=".json"
+                            onChange={handleImportHistoricoFile}
                             style={{ display: 'none' }}
                         />
                         <button

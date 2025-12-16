@@ -276,6 +276,12 @@ export interface PurchaseOrderItem {
 }
 
 export interface PurchaseOrder {
+    obraId?: string; // ✅ NOVO: Obra vinculada (para compras avulsas)
+    obra?: { // ✅ NOVO: Dados da obra (quando carregada)
+        id: string;
+        nomeObra: string;
+        status: string;
+    };
     id: string;
     // Campos originais
     fornecedorId?: string;
@@ -326,6 +332,15 @@ export enum MaterialCategory {
     FERRAMENTA = 'FERRAMENTA',
     SEGURANCA = 'SEGURANCA',
     OUTRO = 'OUTRO'
+}
+
+// Tipo de Serviço
+export enum TipoServico {
+    MAO_DE_OBRA = 'MAO_DE_OBRA',
+    MONTAGEM = 'MONTAGEM',
+    ENGENHARIA = 'ENGENHARIA',
+    PROJETOS = 'PROJETOS',
+    ADMINISTRATIVO = 'ADMINISTRATIVO'
 }
 
 // Tipos para Projetos

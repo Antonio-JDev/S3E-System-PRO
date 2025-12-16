@@ -21,6 +21,25 @@ export interface CorrecaoNFeRequest {
   empresaId: string;
 }
 
+export interface InutilizacaoNFeRequest {
+  empresaId: string;
+  ano: string;
+  modelo?: string;
+  serie: string;
+  numeroInicial: string;
+  numeroFinal: string;
+  justificativa: string;
+  ambiente?: '1' | '2';
+}
+
+export interface ManifestacaoNFeRequest {
+  empresaId: string;
+  chaveAcesso: string;
+  tipoEvento: '210200' | '210210' | '210220' | '210240';
+  justificativa?: string;
+  ambiente?: '1' | '2';
+}
+
 export interface ConfigFiscalRequest {
   certificadoPFX: string; // Base64
   senhaCertificado: string;
@@ -83,9 +102,27 @@ class NFeFiscalService {
   /**
    * Consultar status de NF-e na SEFAZ
    */
-  async consultarNFe(chaveAcesso: string) {
+  async consultarNFe(chaveAcesso: string, empresaId: string, ambiente: '1' | '2' = '2') {
     console.log('🔍 Consultando NF-e:', chaveAcesso);
-    return axiosApiService.get<ConsultaNFeResponse>(`/api/nfe/consultar/${chaveAcesso}`);
+    return axiosApiService.get<ConsultaNFeResponse>(`/api/nfe/consultar/${chaveAcesso}`, {
+      params: { empresaId, ambiente }
+    });
+  }
+
+  /**
+   * Inutilizar faixa de numeração de NF-e
+   */
+  async inutilizarNumeracao(data: InutilizacaoNFeRequest) {
+    console.log('🚫 Inutilizando numeração:', data);
+    return axiosApiService.post<any>('/api/nfe/inutilizar', data);
+  }
+
+  /**
+   * Manifestação do destinatário de NF-e
+   */
+  async manifestarDestinatario(data: ManifestacaoNFeRequest) {
+    console.log('📋 Manifestando destinatário:', data);
+    return axiosApiService.post<any>('/api/nfe/manifestar', data);
   }
 
   /**

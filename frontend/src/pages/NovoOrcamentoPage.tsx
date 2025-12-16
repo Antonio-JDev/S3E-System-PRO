@@ -1170,6 +1170,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 descricaoProjeto: formState.descricaoProjeto,
                 validade: formState.validade,
                 bdi: formState.bdi,
+                classificacao: formState.classificacao, // ✅ NOVO: Classificação do orçamento
                 observacoes: formState.observacoes,
                 empresaCNPJ: formState.empresaCNPJ,
                 enderecoObra: formState.enderecoObra,
@@ -1422,6 +1423,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 className="input-field"
                             />
                         </div>
+
 
                         <div className="md:col-span-2">
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">

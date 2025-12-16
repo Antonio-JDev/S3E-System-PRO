@@ -112,6 +112,9 @@ class ComprasService {
       notes: compraDTO.observacoes || compraDTO.notes || '',
       // Data de recebimento real da remessa, quando já recebida
       dataRecebimento: compraDTO.dataRecebimento || compraDTO.dataEntregaReal || null,
+      // ✅ NOVO: Obra vinculada (para compras avulsas)
+      obraId: compraDTO.obraId || undefined,
+      obra: compraDTO.obra || undefined,
       // ✅ Preservar dados adicionais do backend
       duplicatas: compraDTO.duplicatas || [],
       contasPagar: compraDTO.contasPagar || [],

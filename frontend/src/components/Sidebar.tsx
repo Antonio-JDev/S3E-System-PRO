@@ -337,13 +337,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                 )}
 
                 {/* SUPRIMENTOS / ESTOQUE */}
-                {filteredNavLinks.filter(link => ['Fornecedores', 'Compras', 'Estoque', 'Movimentações', 'Catálogo', 'Atualização de Preços'].includes(link.name)).length > 0 && (
+                {filteredNavLinks.filter(link => ['Fornecedores', 'Estoque', 'Movimentações', 'Catálogo', 'Atualização de Preços'].includes(link.name)).length > 0 && (
                     <div className="mb-6">
                         {!isCollapsed && (
                             <span className="block px-3 py-1.5 mb-2 text-xs font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider bg-orange-50 dark:bg-orange-900/20 rounded-lg">Suprimentos</span>
                         )}
                         <ul className="space-y-1">
-                            {filteredNavLinks.filter(link => ['Fornecedores', 'Compras', 'Estoque', 'Movimentações', 'Catálogo', 'Atualização de Preços'].includes(link.name)).map((link) => (
+                            {filteredNavLinks.filter(link => ['Fornecedores', 'Estoque', 'Movimentações', 'Catálogo', 'Atualização de Preços'].includes(link.name)).map((link) => (
                             <li key={link.name}>
                                 <a
                                     href="#"
@@ -401,13 +401,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeView, on
                 )}
 
                 {/* FINANCEIRO / CONTÁBIL */}
-                {filteredNavLinks.filter(link => ['Financeiro', 'Emissão NF-e', 'Logs'].includes(link.name)).length > 0 && (
+                {filteredNavLinks.filter(link => ['Financeiro', 'Compras', 'Emissão NF-e', 'Logs'].includes(link.name)).length > 0 && (
                     <div className="mb-6">
                         {!isCollapsed && (
                             <span className="block px-3 py-1.5 mb-2 text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 rounded-lg">Financeiro</span>
                         )}
                         <ul className="space-y-1">
-                            {filteredNavLinks.filter(link => ['Financeiro', 'Emissão NF-e', 'Logs'].includes(link.name)).map((link) => {
+                            {filteredNavLinks.filter(link => ['Financeiro', 'Compras', 'Emissão NF-e', 'Logs'].includes(link.name)).map((link) => {
                             // Usar tema vermelho para Logs (desenvolvedor)
                             const isDevPage = link.name === 'Logs';
                             const activeClass = isDevPage && activeView === link.name

@@ -104,10 +104,57 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
     const [empresaCorrecaoId, setEmpresaCorrecaoId] = useState('');
     const [corrigindo, setCorrigindo] = useState(false);
     const [resultadoCorrecao, setResultadoCorrecao] = useState<any>(null);
+
+    // Estados para Consulta de NF-e
+    const [chaveAcessoConsulta, setChaveAcessoConsulta] = useState('');
+    const [empresaConsultaId, setEmpresaConsultaId] = useState('');
+    const [ambienteConsulta, setAmbienteConsulta] = useState<'1' | '2'>('2');
+    const [consultando, setConsultando] = useState(false);
+    const [resultadoConsulta, setResultadoConsulta] = useState<any>(null);
+
+    // Estados para Inutilização
+    const [empresaInutilizacaoId, setEmpresaInutilizacaoId] = useState('');
+    const [anoInutilizacao, setAnoInutilizacao] = useState(new Date().getFullYear().toString());
+    const [serieInutilizacao, setSerieInutilizacao] = useState('1');
+    const [numeroInicialInutilizacao, setNumeroInicialInutilizacao] = useState('');
+    const [numeroFinalInutilizacao, setNumeroFinalInutilizacao] = useState('');
+    const [justificativaInutilizacao, setJustificativaInutilizacao] = useState('');
+    const [ambienteInutilizacao, setAmbienteInutilizacao] = useState<'1' | '2'>('2');
+    const [inutilizando, setInutilizando] = useState(false);
+    const [resultadoInutilizacao, setResultadoInutilizacao] = useState<any>(null);
+
+    // Estados para Manifestação
+    const [empresaManifestacaoId, setEmpresaManifestacaoId] = useState('');
+    const [chaveAcessoManifestacao, setChaveAcessoManifestacao] = useState('');
+    const [tipoEventoManifestacao, setTipoEventoManifestacao] = useState<'210200' | '210210' | '210220' | '210240'>('210210');
+    const [justificativaManifestacao, setJustificativaManifestacao] = useState('');
+    const [ambienteManifestacao, setAmbienteManifestacao] = useState<'1' | '2'>('2');
+    const [manifestando, setManifestando] = useState(false);
+    const [resultadoManifestacao, setResultadoManifestacao] = useState<any>(null);
+
+    // Histórico de NF-es
+    const [notasFiscais, setNotasFiscais] = useState<any[]>([]);
+    const [loadingNotas, setLoadingNotas] = useState(false);
+
+    // Itens da venda selecionada (para revisão)
+    const [itensVendaEditados, setItensVendaEditados] = useState<any[]>([]);
+
+    // Pré-visualização de XML da NF-e
+    const [xmlPreview, setXmlPreview] = useState<string | null>(null);
+    const [previewingXml, setPreviewingXml] = useState(false);
+    const [isXmlPreviewOpen, setIsXmlPreviewOpen] = useState(false);
     
     // AlertDialog para exclusão de empresa
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [empresaParaExcluir, setEmpresaParaExcluir] = useState<string | null>(null);
+
+    // Venda atualmente selecionada (objeto completo)
+    const vendaAtual = vendas.find(v => v.id === vendaSelecionada);
+
+    // Resetar itens editados ao trocar de venda
+    useEffect(() => {
+        setItensVendaEditados([]);
+    }, [vendaSelecionada]);
 
     // Carregar empresas ao montar componente ou trocar de seção
     useEffect(() => {
@@ -117,6 +164,9 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
         if (activeSection === 'emitir') {
             loadVendas();
             loadEmpresas();
+        }
+        if (activeSection === 'historico') {
+            loadNotasFiscais();
         }
     }, [activeSection]);
 
@@ -233,6 +283,44 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             });
         } finally {
             setEmitindo(false);
+        }
+    };
+
+    // Handler para pré-visualizar XML da NF-e (sem emitir)
+    const handlePreviewXmlNFe = async () => {
+        if (!vendaSelecionada || !empresaEmissoraId) {
+            toast.error('❌ Dados incompletos', {
+                description: 'Selecione a venda e a empresa emissora antes de pré-visualizar o XML.'
+            });
+            return;
+        }
+
+        try {
+            setPreviewingXml(true);
+            console.log('👀 Gerando pré-visualização do XML da NF-e...');
+
+            const response = await axiosApiService.post<any>('/api/nfe/preview-xml', {
+                pedidoId: vendaSelecionada,
+                empresaId: empresaEmissoraId,
+                ambiente: ambiente
+            });
+
+            if (response.success && response.data?.xml) {
+                setXmlPreview(response.data.xml);
+                setIsXmlPreviewOpen(true);
+                toast.success('✅ XML gerado para pré-visualização');
+            } else {
+                toast.error('❌ Erro ao gerar XML de pré-visualização', {
+                    description: response.error || response.message || 'Resposta inválida do servidor.'
+                });
+            }
+        } catch (error: any) {
+            console.error('❌ Erro ao gerar XML de pré-visualização:', error);
+            toast.error('❌ Falha ao gerar XML da NF-e', {
+                description: error.response?.data?.message || error.message || 'Erro de conexão com o servidor.'
+            });
+        } finally {
+            setPreviewingXml(false);
         }
     };
 
@@ -499,6 +587,188 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const loadNotasFiscais = async () => {
+        try {
+            setLoadingNotas(true);
+            const response = await axiosApiService.get<any>('/api/nfe/notas');
+            if (response.success && Array.isArray(response.data)) {
+                setNotasFiscais(response.data);
+            } else {
+                setNotasFiscais([]);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar notas fiscais:', error);
+            toast.error('❌ Erro ao carregar histórico de NF-es');
+            setNotasFiscais([]);
+        } finally {
+            setLoadingNotas(false);
+        }
+    };
+
+    const handleVerDanfeNota = (notaId: string) => {
+        if (!notaId) return;
+        const url = `/api/nfe/notas/${notaId}/danfe`;
+        window.open(url, '_blank');
+    };
+
+    // Handler para Consulta de NF-e
+    const handleConsultarNFe = async () => {
+        try {
+            if (!chaveAcessoConsulta || !empresaConsultaId) {
+                toast.error('❌ Campos obrigatórios não preenchidos', {
+                    description: 'Preencha chave de acesso e empresa.'
+                });
+                return;
+            }
+
+            if (chaveAcessoConsulta.length !== 44) {
+                toast.error('❌ Chave de acesso inválida', {
+                    description: 'A chave de acesso deve ter 44 dígitos.'
+                });
+                return;
+            }
+
+            setConsultando(true);
+            setResultadoConsulta(null);
+
+            const response = await nfeFiscalService.consultarNFe(
+                chaveAcessoConsulta,
+                empresaConsultaId,
+                ambienteConsulta
+            );
+
+            if (response.success) {
+                setResultadoConsulta(response.data);
+                toast.success('✅ NF-e consultada com sucesso!', {
+                    description: `Status: ${response.data?.situacao || 'N/A'}`
+                });
+            } else {
+                toast.error('❌ Erro ao consultar NF-e', {
+                    description: response.error || 'Erro ao processar consulta.'
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao consultar NF-e:', error);
+            toast.error('❌ Falha na consulta da NF-e', {
+                description: error.response?.data?.message || error.message || 'Erro de conexão.'
+            });
+        } finally {
+            setConsultando(false);
+        }
+    };
+
+    // Handler para Inutilização
+    const handleInutilizarNumeracao = async () => {
+        try {
+            if (!empresaInutilizacaoId || !anoInutilizacao || !serieInutilizacao || !numeroInicialInutilizacao || !numeroFinalInutilizacao || !justificativaInutilizacao) {
+                toast.error('❌ Campos obrigatórios não preenchidos', {
+                    description: 'Preencha todos os campos obrigatórios.'
+                });
+                return;
+            }
+
+            if (justificativaInutilizacao.length < 15) {
+                toast.error('❌ Justificativa muito curta', {
+                    description: 'A justificativa deve ter pelo menos 15 caracteres.'
+                });
+                return;
+            }
+
+            setInutilizando(true);
+            setResultadoInutilizacao(null);
+
+            const response = await nfeFiscalService.inutilizarNumeracao({
+                empresaId: empresaInutilizacaoId,
+                ano: anoInutilizacao,
+                modelo: '55',
+                serie: serieInutilizacao,
+                numeroInicial: numeroInicialInutilizacao,
+                numeroFinal: numeroFinalInutilizacao,
+                justificativa: justificativaInutilizacao,
+                ambiente: ambienteInutilizacao
+            });
+
+            if (response.success) {
+                setResultadoInutilizacao(response.data);
+                toast.success('✅ Numeração inutilizada com sucesso!', {
+                    description: `Protocolo: ${response.data?.protocolo || 'N/A'}`
+                });
+                // Limpar campos
+                setNumeroInicialInutilizacao('');
+                setNumeroFinalInutilizacao('');
+                setJustificativaInutilizacao('');
+            } else {
+                toast.error('❌ Erro ao inutilizar numeração', {
+                    description: response.error || 'Erro ao processar inutilização.'
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao inutilizar numeração:', error);
+            toast.error('❌ Falha na inutilização', {
+                description: error.response?.data?.message || error.message || 'Erro de conexão.'
+            });
+        } finally {
+            setInutilizando(false);
+        }
+    };
+
+    // Handler para Manifestação
+    const handleManifestarDestinatario = async () => {
+        try {
+            if (!empresaManifestacaoId || !chaveAcessoManifestacao) {
+                toast.error('❌ Campos obrigatórios não preenchidos', {
+                    description: 'Preencha empresa e chave de acesso.'
+                });
+                return;
+            }
+
+            if (chaveAcessoManifestacao.length !== 44) {
+                toast.error('❌ Chave de acesso inválida', {
+                    description: 'A chave de acesso deve ter 44 dígitos.'
+                });
+                return;
+            }
+
+            if (tipoEventoManifestacao === '210240' && justificativaManifestacao.length < 15) {
+                toast.error('❌ Justificativa obrigatória', {
+                    description: 'Para "Operação não realizada", a justificativa deve ter pelo menos 15 caracteres.'
+                });
+                return;
+            }
+
+            setManifestando(true);
+            setResultadoManifestacao(null);
+
+            const response = await nfeFiscalService.manifestarDestinatario({
+                empresaId: empresaManifestacaoId,
+                chaveAcesso: chaveAcessoManifestacao,
+                tipoEvento: tipoEventoManifestacao,
+                justificativa: tipoEventoManifestacao === '210240' ? justificativaManifestacao : undefined,
+                ambiente: ambienteManifestacao
+            });
+
+            if (response.success) {
+                setResultadoManifestacao(response.data);
+                toast.success('✅ Manifestação registrada com sucesso!', {
+                    description: `Protocolo: ${response.data?.protocolo || 'N/A'}`
+                });
+                setChaveAcessoManifestacao('');
+                setJustificativaManifestacao('');
+            } else {
+                toast.error('❌ Erro ao manifestar destinatário', {
+                    description: response.error || 'Erro ao processar manifestação.'
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao manifestar destinatário:', error);
+            toast.error('❌ Falha na manifestação', {
+                description: error.response?.data?.message || error.message || 'Erro de conexão.'
+            });
+        } finally {
+            setManifestando(false);
+        }
+    };
+
     return (
         <div className="p-4 sm:p-8">
             {/* Header Principal */}
@@ -529,6 +799,19 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Emitir NF-e
+                    </button>
+                    <button
+                        onClick={() => setActiveSection('historico')}
+                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
+                            activeSection === 'historico'
+                                ? 'bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg'
+                                : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3M5 11h14M5 19h14M5 7h14M5 15h14" />
+                        </svg>
+                        Histórico de NF-e
                     </button>
                     <button
                         onClick={() => setActiveSection('operacoes')}
@@ -843,6 +1126,12 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                         </p>
                                     </div>
                                     <div>
+                                        <p className="text-gray-600">Cliente:</p>
+                                        <p className="font-semibold text-gray-900">
+                                            {vendas.find(v => v.id === vendaSelecionada)?.cliente?.nome || 'Cliente não informado'}
+                                        </p>
+                                    </div>
+                                    <div>
                                         <p className="text-gray-600">Ambiente:</p>
                                         <p className={`font-semibold ${ambiente === '1' ? 'text-green-700' : 'text-yellow-700'}`}>
                                             {ambiente === '1' ? '🚀 Produção' : '🧪 Homologação'}
@@ -879,6 +1168,155 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                 </div>
                             </div>
 
+                            {/* Bloco de ajustes rápidos (editável) */}
+                            <div className="bg-white dark:bg-dark-card rounded-xl border border-gray-200 dark:border-dark-border p-6 space-y-4">
+                                <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">
+                                    Ajustar dados fiscais antes da emissão
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">
+                                            Tipo de NF-e
+                                        </label>
+                                        <select
+                                            value={tipoNF}
+                                            onChange={(e) => setTipoNF(e.target.value as 'PRODUTO' | 'SERVICO')}
+                                            className="w-full px-4 py-2.5 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text rounded-lg focus:ring-2 focus:ring-green-500"
+                                        >
+                                            <option value="PRODUTO">NF-e de Produto</option>
+                                            <option value="SERVICO">NF-e de Serviço</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">
+                                            Série
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={serie}
+                                            onChange={(e) => setSerie(e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary rounded-lg focus:ring-2 focus:ring-green-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">
+                                            CFOP
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={cfop}
+                                            onChange={(e) => setCfop(e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary rounded-lg focus:ring-2 focus:ring-green-500"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">
+                                            Natureza da Operação
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={naturezaOperacao}
+                                            onChange={(e) => setNaturezaOperacao(e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary rounded-lg focus:ring-2 focus:ring-green-500"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Quadro de itens da venda para revisão */}
+                            <div className="bg-white dark:bg-dark-card rounded-xl border border-gray-200 dark:border-dark-border p-6 space-y-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text">
+                                        Itens da venda para revisão
+                                    </h3>
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                                        Os itens serão carregados do orçamento vinculado à venda.
+                                    </p>
+                                </div>
+
+                                {vendaAtual?.orcamento?.items && vendaAtual.orcamento.items.length > 0 ? (
+                                    <div className="overflow-x-auto -mx-2 md:mx-0">
+                                        <table className="min-w-full text-sm">
+                                            <thead>
+                                                <tr className="border-b border-gray-200 dark:border-dark-border">
+                                                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                                        Item
+                                                    </th>
+                                                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                                        Descrição
+                                                    </th>
+                                                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                                        Qtde
+                                                    </th>
+                                                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                                        Vlr Unit.
+                                                    </th>
+                                                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                                        Subtotal
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(vendaAtual.orcamento.items || []).map((item: any, index: number) => {
+                                                    const nomeItem =
+                                                        item.nome ||
+                                                        item.material?.nome ||
+                                                        item.servico?.nome ||
+                                                        item.descricao ||
+                                                        'Item';
+                                                    const quantidade = item.quantidade || 1;
+                                                    const precoUnit =
+                                                        item.material?.valorVenda ||
+                                                        item.precoUnitario ||
+                                                        item.precoUnit ||
+                                                        0;
+                                                    const subtotal =
+                                                        item.subtotal || precoUnit * quantidade;
+
+                                                    return (
+                                                        <tr
+                                                            key={item.id || index}
+                                                            className="border-b border-gray-100 dark:border-dark-border/60"
+                                                        >
+                                                            <td className="px-2 py-2 align-top text-gray-800 dark:text-dark-text text-xs md:text-sm">
+                                                                {nomeItem}
+                                                            </td>
+                                                            <td className="px-2 py-2 align-top text-gray-600 dark:text-dark-text-secondary text-xs md:text-sm">
+                                                                {item.descricao || '-'}
+                                                            </td>
+                                                            <td className="px-2 py-2 align-top text-right text-gray-800 dark:text-dark-text text-xs md:text-sm">
+                                                                {quantidade.toLocaleString('pt-BR', {
+                                                                    minimumFractionDigits: 2,
+                                                                    maximumFractionDigits: 2
+                                                                })}
+                                                            </td>
+                                                            <td className="px-2 py-2 align-top text-right text-gray-800 dark:text-dark-text text-xs md:text-sm">
+                                                                R{' '}
+                                                                {precoUnit.toLocaleString('pt-BR', {
+                                                                    minimumFractionDigits: 2,
+                                                                    maximumFractionDigits: 2
+                                                                })}
+                                                            </td>
+                                                            <td className="px-2 py-2 align-top text-right text-gray-900 dark:text-dark-text font-semibold text-xs md:text-sm">
+                                                                R{' '}
+                                                                {subtotal.toLocaleString('pt-BR', {
+                                                                    minimumFractionDigits: 2,
+                                                                    maximumFractionDigits: 2
+                                                                })}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500 dark:text-dark-text-secondary">
+                                        Não foram encontrados itens vinculados ao orçamento desta venda.
+                                    </p>
+                                )}
+                            </div>
+
                             {ambiente === '1' && (
                                 <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
                                     <div className="flex items-center gap-2">
@@ -892,7 +1330,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                 </div>
                             )}
 
-                            <div className="flex justify-between">
+                            <div className="flex justify-between items-center gap-4">
                                 <button
                                     onClick={() => setStep(2)}
                                     disabled={emitindo}
@@ -900,29 +1338,52 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                 >
                                     ← Voltar
                                 </button>
-                                <button
-                                    onClick={handleEmitirNFe}
-                                    disabled={emitindo}
-                                    className={`px-8 py-3 bg-gradient-to-r ${
-                                        ambiente === '1' 
-                                            ? 'from-green-600 to-green-700 hover:from-green-700 hover:to-green-800' 
-                                            : 'from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700'
-                                    } text-white font-semibold rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2`}
-                                >
-                                    {emitindo ? (
-                                        <>
-                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                            Emitindo NF-e...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            Emitir NF-e
-                                        </>
-                                    )}
-                                </button>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handlePreviewXmlNFe}
+                                        disabled={previewingXml || !vendaSelecionada || !empresaEmissoraId}
+                                        className="px-4 py-2.5 bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-700 dark:text-dark-text text-sm font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-dark-card disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                                    >
+                                        {previewingXml ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                                                Gerando XML...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                </svg>
+                                                Pré-visualizar XML
+                                            </>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={handleEmitirNFe}
+                                        disabled={emitindo}
+                                        className={`px-8 py-3 bg-gradient-to-r ${
+                                            ambiente === '1' 
+                                                ? 'from-green-600 to-green-700 hover:from-green-700 hover:to-green-800' 
+                                                : 'from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700'
+                                        } text-white font-semibold rounded-lg shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2`}
+                                    >
+                                        {emitindo ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                                Emitindo NF-e...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                Emitir NF-e
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1024,8 +1485,168 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                             <p><strong>Protocolo:</strong> {resultadoCancelamento.protocolo}</p>
                                             <p><strong>Mensagem:</strong> {resultadoCancelamento.mensagem}</p>
                                         </div>
-                                    </div>
-                                )}
+            </div>
+            )}
+
+            {/* SEÇÃO: Histórico de NF-e */}
+            {activeSection === 'historico' && (
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-sm border border-gray-200 dark:border-dark-border p-6 max-w-5xl mx-auto">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-800 dark:text-dark-text">Histórico de NF-e</h2>
+                            <p className="text-sm text-gray-500 dark:text-dark-text-secondary">
+                                Últimas notas fiscais emitidas pelo sistema.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={loadNotasFiscais}
+                            disabled={loadingNotas}
+                            className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-300 dark:border-dark-border text-gray-700 dark:text-dark-text bg-white dark:bg-dark-bg hover:bg-gray-50 dark:hover:bg-dark-card disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {loadingNotas ? (
+                                <>
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                                    Atualizando...
+                                </>
+                            ) : (
+                                <>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582M20 20v-5h-.581M5.636 18.364A9 9 0 005.582 9M18.364 5.636A9 9 0 0018.418 15" />
+                                    </svg>
+                                    Atualizar
+                                </>
+                            )}
+                        </button>
+                    </div>
+
+                    {loadingNotas ? (
+                        <div className="py-10 text-center">
+                            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600 mx-auto mb-3"></div>
+                            <p className="text-gray-500 dark:text-dark-text-secondary text-sm">Carregando notas fiscais...</p>
+                        </div>
+                    ) : notasFiscais.length === 0 ? (
+                        <div className="py-10 text-center border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl">
+                            <p className="text-gray-500 dark:text-dark-text-secondary font-medium">
+                                Nenhuma NF-e registrada ainda.
+                            </p>
+                            <p className="text-xs text-gray-400 dark:text-dark-text-secondary mt-1">
+                                As notas emitidas aparecerão aqui automaticamente.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto -mx-2 md:mx-0">
+                            <table className="min-w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-gray-200 dark:border-dark-border">
+                                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Número / Série
+                                        </th>
+                                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Chave
+                                        </th>
+                                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Tipo
+                                        </th>
+                                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Valor
+                                        </th>
+                                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Status
+                                        </th>
+                                        <th className="px-2 py-2 text-right text-xs font-semibold text-gray-600 dark:text-dark-text-secondary">
+                                            Ações
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {notasFiscais.map((nota) => (
+                                        <tr key={nota.id} className="border-b border-gray-100 dark:border-dark-border/60">
+                                            <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-800 dark:text-dark-text">
+                                                <div className="font-semibold">
+                                                    {nota.numero}
+                                                </div>
+                                                <div className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                                                    Série {nota.serie}
+                                                </div>
+                                            </td>
+                                            <td className="px-2 py-2 align-top text-xs md:text-[11px] text-gray-600 dark:text-dark-text-secondary max-w-[200px] truncate">
+                                                {nota.chaveAcesso || '-'}
+                                            </td>
+                                            <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-700 dark:text-dark-text-secondary">
+                                                {nota.tipo}
+                                            </td>
+                                            <td className="px-2 py-2 align-top text-xs md:text-sm text-gray-900 dark:text-dark-text font-semibold">
+                                                R{' '}
+                                                {Number(nota.valorTotal || 0).toLocaleString('pt-BR', {
+                                                    minimumFractionDigits: 2,
+                                                    maximumFractionDigits: 2
+                                                })}
+                                            </td>
+                                            <td className="px-2 py-2 align-top text-xs md:text-sm">
+                                                <span
+                                                    className={`inline-flex px-2 py-1 rounded-full text-[11px] font-semibold ${
+                                                        nota.status === 'Autorizada'
+                                                            ? 'bg-green-100 text-green-700'
+                                                            : nota.status === 'Cancelada'
+                                                            ? 'bg-red-100 text-red-700'
+                                                            : 'bg-yellow-100 text-yellow-700'
+                                                    }`}
+                                                >
+                                                    {nota.status}
+                                                </span>
+                                            </td>
+                                            <td className="px-2 py-2 align-top text-right text-xs md:text-sm">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleVerDanfeNota(nota.id)}
+                                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-700 dark:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-card"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                    </svg>
+                                                    Ver DANFE
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Modal simples para exibir o XML de pré-visualização */}
+            {isXmlPreviewOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                    <div className="bg-white dark:bg-dark-card rounded-xl shadow-xl max-w-5xl w-full mx-4 max-h-[80vh] flex flex-col border border-gray-200 dark:border-dark-border">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-dark-border">
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-800 dark:text-dark-text">
+                                    Pré-visualização do XML da NF-e
+                                </h3>
+                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                                    XML gerado pelo backend antes da assinatura/envio para a SEFAZ.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsXmlPreviewOpen(false)}
+                                className="p-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-dark-text-secondary dark:hover:text-dark-text dark:hover:bg-dark-bg"
+                            >
+                                <XCircleIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-4 overflow-auto text-xs">
+                            <pre className="whitespace-pre text-gray-800 dark:text-dark-text">
+                                {xmlPreview}
+                            </pre>
+                        </div>
+                    </div>
+                </div>
+            )}
                             </div>
                         </div>
 
@@ -1117,6 +1738,209 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                         <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
                                             <p><strong>Protocolo:</strong> {resultadoCorrecao.protocolo}</p>
                                             <p><strong>Mensagem:</strong> {resultadoCorrecao.mensagem}</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* CARD: CONSULTA DE NF-E */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl shadow-lg border-2 border-green-200 dark:border-green-800 overflow-hidden">
+                            <div className="bg-gradient-to-r from-green-600 to-green-500 px-6 py-4 flex items-center gap-3">
+                                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">Consulta de NF-e</h2>
+                                    <p className="text-sm text-white/80">Consultar status de NF-e na SEFAZ</p>
+                                </div>
+                            </div>
+
+                            <div className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Empresa *</label>
+                                    <select
+                                        value={empresaConsultaId}
+                                        onChange={(e) => setEmpresaConsultaId(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                    >
+                                        <option value="">Selecione a empresa...</option>
+                                        {empresas.map(emp => (
+                                            <option key={emp.id} value={emp.id}>{emp.razaoSocial} ({emp.cnpj})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Ambiente *</label>
+                                    <select
+                                        value={ambienteConsulta}
+                                        onChange={(e) => setAmbienteConsulta(e.target.value as '1' | '2')}
+                                        className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                    >
+                                        <option value="2">Homologação</option>
+                                        <option value="1">Produção</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Chave de Acesso da NF-e *</label>
+                                    <input
+                                        type="text"
+                                        value={chaveAcessoConsulta}
+                                        onChange={(e) => setChaveAcessoConsulta(e.target.value)}
+                                        placeholder="44 dígitos"
+                                        maxLength={44}
+                                        className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-green-500 font-mono bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleConsultarNFe}
+                                    disabled={consultando}
+                                    className="w-full px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white font-bold rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {consultando ? (
+                                        <> <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div> Consultando... </>
+                                    ) : (
+                                        <> <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg> Consultar NF-e </>)}
+                                </button>
+                                {resultadoConsulta && (
+                                    <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                        <h4 className="font-bold text-green-800 dark:text-green-400 mb-2">✅ Resultado da Consulta</h4>
+                                        <div className="text-sm text-green-700 dark:text-green-300 space-y-1">
+                                            <p><strong>Situação:</strong> {resultadoConsulta.situacao}</p>
+                                            <p><strong>Código Status:</strong> {resultadoConsulta.codigoStatus}</p>
+                                            <p><strong>Mensagem:</strong> {resultadoConsulta.mensagem}</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Segunda linha: Inutilização e Manifestação */}
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+                        {/* CARD: INUTILIZAÇÃO */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl shadow-lg border-2 border-orange-200 dark:border-orange-800 overflow-hidden">
+                            <div className="bg-gradient-to-r from-orange-600 to-orange-500 px-6 py-4 flex items-center gap-3">
+                                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">Inutilização de Numeração</h2>
+                                    <p className="text-sm text-white/80">Inutilizar faixa de números de NF-e</p>
+                                </div>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Empresa *</label>
+                                    <select value={empresaInutilizacaoId} onChange={(e) => setEmpresaInutilizacaoId(e.target.value)} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text">
+                                        <option value="">Selecione a empresa...</option>
+                                        {empresas.map(emp => <option key={emp.id} value={emp.id}>{emp.razaoSocial} ({emp.cnpj})</option>)}
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Ano *</label>
+                                        <input type="text" value={anoInutilizacao} onChange={(e) => setAnoInutilizacao(e.target.value)} placeholder="2025" maxLength={4} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Série *</label>
+                                        <input type="text" value={serieInutilizacao} onChange={(e) => setSerieInutilizacao(e.target.value)} placeholder="1" className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Ambiente *</label>
+                                        <select value={ambienteInutilizacao} onChange={(e) => setAmbienteInutilizacao(e.target.value as '1' | '2')} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text">
+                                            <option value="2">Homologação</option>
+                                            <option value="1">Produção</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Número Inicial *</label>
+                                        <input type="text" value={numeroInicialInutilizacao} onChange={(e) => setNumeroInicialInutilizacao(e.target.value)} placeholder="100" className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Número Final *</label>
+                                        <input type="text" value={numeroFinalInutilizacao} onChange={(e) => setNumeroFinalInutilizacao(e.target.value)} placeholder="150" className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Justificativa *</label>
+                                    <textarea value={justificativaInutilizacao} onChange={(e) => setJustificativaInutilizacao(e.target.value)} placeholder="Mínimo de 15 caracteres..." rows={3} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{justificativaInutilizacao.length}/15 caracteres mínimos</p>
+                                </div>
+                                <button onClick={handleInutilizarNumeracao} disabled={inutilizando} className="w-full px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white font-bold rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {inutilizando ? (<> <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div> Inutilizando... </>) : (<> <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg> Inutilizar Numeração </>)}
+                                </button>
+                                {resultadoInutilizacao && (
+                                    <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl">
+                                        <h4 className="font-bold text-orange-800 dark:text-orange-400 mb-2">✅ Numeração Inutilizada</h4>
+                                        <div className="text-sm text-orange-700 dark:text-orange-300 space-y-1">
+                                            <p><strong>Protocolo:</strong> {resultadoInutilizacao.protocolo}</p>
+                                            <p><strong>Mensagem:</strong> {resultadoInutilizacao.mensagem}</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* CARD: MANIFESTAÇÃO */}
+                        <div className="bg-white dark:bg-dark-card rounded-2xl shadow-lg border-2 border-purple-200 dark:border-purple-800 overflow-hidden">
+                            <div className="bg-gradient-to-r from-purple-600 to-purple-500 px-6 py-4 flex items-center gap-3">
+                                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <div>
+                                    <h2 className="text-xl font-bold text-white">Manifestação do Destinatário</h2>
+                                    <p className="text-sm text-white/80">Manifestar ciência/confirmação de NF-e</p>
+                                </div>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Empresa *</label>
+                                    <select value={empresaManifestacaoId} onChange={(e) => setEmpresaManifestacaoId(e.target.value)} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text">
+                                        <option value="">Selecione a empresa...</option>
+                                        {empresas.map(emp => <option key={emp.id} value={emp.id}>{emp.razaoSocial} ({emp.cnpj})</option>)}
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Ambiente *</label>
+                                        <select value={ambienteManifestacao} onChange={(e) => setAmbienteManifestacao(e.target.value as '1' | '2')} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text">
+                                            <option value="2">Homologação</option>
+                                            <option value="1">Produção</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Tipo de Manifestação *</label>
+                                        <select value={tipoEventoManifestacao} onChange={(e) => setTipoEventoManifestacao(e.target.value as '210200' | '210210' | '210220' | '210240')} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text">
+                                            <option value="210200">Confirmar Operação</option>
+                                            <option value="210210">Ciência da Operação</option>
+                                            <option value="210220">Desconhecimento</option>
+                                            <option value="210240">Operação não Realizada</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Chave de Acesso da NF-e *</label>
+                                    <input type="text" value={chaveAcessoManifestacao} onChange={(e) => setChaveAcessoManifestacao(e.target.value)} placeholder="44 dígitos" maxLength={44} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 font-mono bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                </div>
+                                {tipoEventoManifestacao === '210240' && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">Justificativa * (obrigatória para "Operação não Realizada")</label>
+                                        <textarea value={justificativaManifestacao} onChange={(e) => setJustificativaManifestacao(e.target.value)} placeholder="Mínimo de 15 caracteres..." rows={3} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-purple-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text" />
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{justificativaManifestacao.length}/15 caracteres mínimos</p>
+                                    </div>
+                                )}
+                                <button onClick={handleManifestarDestinatario} disabled={manifestando} className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white font-bold rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                                    {manifestando ? (<> <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div> Manifestando... </>) : (<> <svg className="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> Manifestar Destinatário </>)}
+                                </button>
+                                {resultadoManifestacao && (
+                                    <div className="mt-4 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl">
+                                        <h4 className="font-bold text-purple-800 dark:text-purple-400 mb-2">✅ Manifestação Registrada</h4>
+                                        <div className="text-sm text-purple-700 dark:text-purple-300 space-y-1">
+                                            <p><strong>Protocolo:</strong> {resultadoManifestacao.protocolo}</p>
+                                            <p><strong>Mensagem:</strong> {resultadoManifestacao.mensagem}</p>
                                         </div>
                                     </div>
                                 )}

@@ -10,6 +10,8 @@ import {
 } from '../services/gerenciamentoService';
 import { axiosApiService } from '../services/axiosApi';
 import BIDashboard from './BIDashboard';
+import ResumoAdministrativo from './ResumoAdministrativo';
+import { DollarSign } from 'lucide-react';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -46,7 +48,7 @@ interface GerenciamentoEmpresarialProps {
     toggleSidebar: () => void;
 }
 
-type SubPage = 'dashboard' | 'rh' | 'carros' | 'planos' | 'despesas';
+type SubPage = 'dashboard' | 'resumo-administrativo' | 'rh' | 'carros' | 'planos' | 'despesas';
 
 const GerenciamentoEmpresarial: React.FC<GerenciamentoEmpresarialProps> = ({ toggleSidebar }) => {
     const [activeSubPage, setActiveSubPage] = useState<SubPage>('dashboard');
@@ -132,6 +134,7 @@ const GerenciamentoEmpresarial: React.FC<GerenciamentoEmpresarialProps> = ({ tog
             {/* Conteúdo das Subpáginas */}
             <div className="animate-fade-in">
                 {activeSubPage === 'dashboard' && <BIDashboardView />}
+                {activeSubPage === 'resumo-administrativo' && <ResumoAdministrativoView />}
                 {activeSubPage === 'rh' && <RHView />}
                 {activeSubPage === 'carros' && <CarrosView />}
                 {activeSubPage === 'planos' && <PlanosView />}
@@ -144,6 +147,11 @@ const GerenciamentoEmpresarial: React.FC<GerenciamentoEmpresarialProps> = ({ tog
 // ==================== BI DASHBOARD VIEW ====================
 const BIDashboardView: React.FC = () => {
     return <BIDashboard />;
+};
+
+// ==================== RESUMO ADMINISTRATIVO VIEW ====================
+const ResumoAdministrativoView: React.FC = () => {
+    return <ResumoAdministrativo />;
 };
 
 // ==================== DASHBOARD VIEW (Legacy - mantido para referência) ====================

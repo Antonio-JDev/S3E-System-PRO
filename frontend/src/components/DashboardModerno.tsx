@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { 
   LineChart, Line, AreaChart, Area, BarChart, Bar, 
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
@@ -7,8 +7,8 @@ import {
 import { 
   TrendingUp, TrendingDown, Users, DollarSign, 
   Package, AlertTriangle, Building2, Zap, 
-  ArrowUpRight, Calendar, Download, FileText,
-  Activity, Star, Eye, Printer, X, ChevronDown, ChevronUp
+  Calendar, Download, FileText,
+  Activity, Star, Printer, X, ChevronDown
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -44,7 +44,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const [atividadesData, setAtividadesData] = useState<any[]>([]);
   const [materiaisCriticos, setMateriaisCriticos] = useState<any[]>([]);
   const [exportando, setExportando] = useState(false);
-  const [estoqueExpandido, setEstoqueExpandido] = useState(false);
   const [filtroEstoque, setFiltroEstoque] = useState<'todos' | 'criticos' | 'abaixo-minimo'>('todos');
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [filtroFornecedor, setFiltroFornecedor] = useState<string>('todos');
@@ -235,18 +234,23 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     }
   };
 
-  // Filtrar materiais críticos
-  const getMateriaisFiltrados = () => {
-    let materiaisFiltrados = materiaisCriticos;
+  // Filtrar materiais críticos (usando useMemo para recalcular quando dependências mudarem)
+  const materiaisFiltrados = useMemo(() => {
+    // Se não há materiais críticos, retornar array vazio
+    if (!materiaisCriticos || materiaisCriticos.length === 0) {
+      return [];
+    }
+    
+    let resultado = [...materiaisCriticos]; // Criar cópia para não mutar o array original
     
     // Filtrar por nível de estoque
     if (filtroEstoque === 'criticos') {
-      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
+      resultado = resultado.filter((material: any) => {
         const estoque = material.estoque || material.stock || 0;
         return estoque === 0;
       });
     } else if (filtroEstoque === 'abaixo-minimo') {
-      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
+      resultado = resultado.filter((material: any) => {
         const estoque = material.estoque || material.stock || 0;
         const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
         return estoque > 0 && estoque <= estoqueMinimo;
@@ -255,23 +259,30 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     
     // Filtrar por fornecedor
     if (filtroFornecedor !== 'todos') {
-      const antesDoFiltro = materiaisFiltrados.length;
-      materiaisFiltrados = materiaisFiltrados.filter((material: any) => {
+      resultado = resultado.filter((material: any) => {
         // Suportar tanto fornecedorId direto quanto fornecedor.id (objetos aninhados)
         const fornecedorIdMaterial = material.fornecedorId || material.fornecedor?.id;
-        return fornecedorIdMaterial === filtroFornecedor;
+        
+        // Se o material não tem fornecedor, não deve aparecer quando filtrado por fornecedor específico
+        if (!fornecedorIdMaterial) {
+          return false;
+        }
+        
+        // Normalizar IDs para string para comparação correta (evita problemas de tipo)
+        const fornecedorIdMaterialStr = String(fornecedorIdMaterial).trim();
+        const filtroFornecedorStr = String(filtroFornecedor).trim();
+        
+        return fornecedorIdMaterialStr === filtroFornecedorStr;
       });
-      console.log(`🔍 Filtro de fornecedor: ${antesDoFiltro} materiais → ${materiaisFiltrados.length} após filtrar por fornecedor ${filtroFornecedor}`);
     }
     
-    return materiaisFiltrados;
-  };
+    return resultado;
+  }, [materiaisCriticos, filtroEstoque, filtroFornecedor]);
 
   // Gerar PDF para cotação com fornecedor
   const handleGerarPDFCotacao = () => {
     try {
-      const materiaisFiltrados = getMateriaisFiltrados();
-      
+      // Usar materiaisFiltrados já calculado pelo useMemo
       if (materiaisFiltrados.length === 0) {
         alert('⚠️ Não há materiais para gerar a cotação.');
         return;
@@ -1183,10 +1194,10 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         </Card>
       </div>
 
-      {/* Seção inferior - Cards adicionais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Seção inferior - Card de Estoque Crítico (ocupando todo o espaço) */}
+      <div className="grid grid-cols-1 gap-6">
         {/* Alertas - Materiais com Estoque Crítico */}
-        <Card className={estoqueExpandido ? 'lg:col-span-2' : ''}>
+        <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex-1">
@@ -1200,28 +1211,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     : 'Nenhum material com estoque crítico'}
                 </CardDescription>
               </div>
-              {materiaisCriticos.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    onClick={() => setEstoqueExpandido(!estoqueExpandido)}
-                  >
-                    {estoqueExpandido ? (
-                      <>
-                        <ChevronUp className="w-4 h-4" />
-                        Ocultar
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-4 h-4" />
-                        Visualizar
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -1233,57 +1222,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                 <p className="text-sm text-gray-600 dark:text-dark-text-secondary font-medium">
                   Todos os materiais estão com estoque adequado
                 </p>
-              </div>
-            ) : !estoqueExpandido ? (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {materiaisCriticos.slice(0, 5).map((material: any) => {
-                  const estoque = material.estoque || material.stock || 0;
-                  const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
-                  const isCritico = estoque === 0;
-                  
-                  return (
-                    <div
-                      key={material.id || material.sku}
-                      className={`flex items-center justify-between p-3 rounded-lg border ${
-                        isCritico
-                          ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-                          : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-dark-text truncate">
-                          {material.nome || material.name || 'Material sem nome'}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                            SKU: {material.sku || 'N/A'}
-                          </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">•</span>
-                          <span className={`text-xs font-medium ${
-                            isCritico ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'
-                          }`}>
-                            Estoque: {estoque} {material.unidadeMedida || 'un'}
-                          </span>
-                        </div>
-                      </div>
-                      <Badge 
-                        variant={isCritico ? "destructive" : "warning"}
-                        className="ml-2 flex-shrink-0"
-                      >
-                        {isCritico ? 'Crítico' : 'Baixo'}
-                      </Badge>
-                    </div>
-                  );
-                })}
-                {materiaisCriticos.length > 5 && (
-                  <Button
-                    variant="outline"
-                    className="w-full mt-2"
-                    onClick={() => setEstoqueExpandido(true)}
-                  >
-                    Ver todos ({materiaisCriticos.length})
-                  </Button>
-                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -1343,7 +1281,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                   
                   <div className="flex items-center gap-3">
                     <Badge variant="outline" className="text-sm">
-                      {getMateriaisFiltrados().length} {getMateriaisFiltrados().length === 1 ? 'item' : 'itens'}
+                      {materiaisFiltrados.length} {materiaisFiltrados.length === 1 ? 'item' : 'itens'}
                     </Badge>
                     <Button
                       variant="default"
@@ -1370,116 +1308,86 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
                 {/* Tabela de Materiais */}
                 <div className="border rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                    <table className="w-full">
-                      <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Nome do Item</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Atual</th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Mínimo</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unidade</th>
-                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                        {getMateriaisFiltrados().map((material: any) => {
-                          const estoque = material.estoque || material.stock || 0;
-                          const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
-                          const isCritico = estoque === 0;
-                          
-                          return (
-                            <tr
-                              key={material.id || material.sku}
-                              className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
-                                isCritico
-                                  ? 'bg-red-50/50 dark:bg-red-900/10'
-                                  : 'bg-orange-50/50 dark:bg-orange-900/10'
-                              }`}
-                            >
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-dark-text">
-                                {material.nome || material.name || 'Material sem nome'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
-                                {material.sku || 'N/A'}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-dark-text">
-                                {estoque}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-dark-text-secondary">
-                                {estoqueMinimo}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
-                                {material.unidadeMedida || 'un'}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <Badge 
-                                  variant={isCritico ? "destructive" : "warning"}
-                                >
-                                  {isCritico ? 'Crítico' : 'Baixo'}
-                                </Badge>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  {getMateriaisFiltrados().length === 0 && (
-                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                      Nenhum material encontrado com o filtro selecionado.
+                  {materiaisFiltrados.length > 0 ? (
+                    <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                      <table className="w-full">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Nome do Item</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Atual</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque Mínimo</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Unidade</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                          {materiaisFiltrados.map((material: any) => {
+                            const estoque = material.estoque || material.stock || 0;
+                            const estoqueMinimo = material.estoqueMinimo || material.minStock || 5;
+                            const isCritico = estoque === 0;
+                            
+                            return (
+                              <tr
+                                key={material.id || material.sku}
+                                className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
+                                  isCritico
+                                    ? 'bg-red-50/50 dark:bg-red-900/10'
+                                    : 'bg-orange-50/50 dark:bg-orange-900/10'
+                                }`}
+                              >
+                                <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-dark-text">
+                                  {material.nome || material.name || 'Material sem nome'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
+                                  {material.sku || 'N/A'}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-dark-text">
+                                  {estoque}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-right text-gray-600 dark:text-dark-text-secondary">
+                                  {estoqueMinimo}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">
+                                  {material.unidadeMedida || 'un'}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <Badge 
+                                    variant={isCritico ? "destructive" : "warning"}
+                                  >
+                                    {isCritico ? 'Crítico' : 'Baixo'}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                      <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p className="text-sm font-medium">
+                        Nenhum material encontrado com o filtro selecionado.
+                      </p>
+                      {(filtroEstoque !== 'todos' || filtroFornecedor !== 'todos') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-4"
+                          onClick={() => {
+                            setFiltroEstoque('todos');
+                            setFiltroFornecedor('todos');
+                          }}
+                        >
+                          Limpar Filtros
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Ações Rápidas */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-brand-blue" />
-              Ações Rápidas
-            </CardTitle>
-            <CardDescription>Acesso rápido às funcionalidades</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Button 
-                variant="outline" 
-                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
-                onClick={() => onNavigate('Estoque')}
-              >
-                <span>Gerenciar Estoque</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
-                onClick={() => onNavigate('Obras')}
-              >
-                <span>Nova Obra</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
-                onClick={() => onNavigate('Orçamentos')}
-              >
-                <span>Criar Orçamento</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-between hover:bg-gray-50 dark:hover:bg-dark-bg transition-colors"
-                onClick={() => onNavigate('Projetos')}
-              >
-                <span>Ver Projetos</span>
-                <ArrowUpRight className="w-4 h-4" />
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>

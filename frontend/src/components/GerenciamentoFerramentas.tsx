@@ -73,6 +73,7 @@ interface Ferramenta {
     modelo?: string;
     descricao?: string;
     valorCompra?: number;
+    quantidade?: number; // Quantidade em estoque
     imagemUrl?: string;
     ativo: boolean;
     createdAt: string;
@@ -91,6 +92,7 @@ interface KitFerramenta {
     observacoes?: string;
     ativo: boolean;
     createdAt: string;
+    precoTotal?: number; // Preço total do kit (soma dos subtotais das ferramentas)
     itens: KitItem[];
 }
 
@@ -158,6 +160,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         modelo: '',
         descricao: '',
         valorCompra: '',
+        quantidade: '0',
         imagemUrl: ''
     });
 
@@ -289,7 +292,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         try {
             const ferramentaData = {
                 ...formFerramenta,
-                valorCompra: formFerramenta.valorCompra ? parseFloat(formFerramenta.valorCompra) : null
+                valorCompra: formFerramenta.valorCompra ? parseFloat(formFerramenta.valorCompra) : null,
+                quantidade: formFerramenta.quantidade ? parseInt(formFerramenta.quantidade) : 0
             };
 
             if (ferramentaEditando) {
@@ -318,6 +322,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 modelo: '',
                 descricao: '',
                 valorCompra: '',
+                quantidade: '0',
                 imagemUrl: ''
             });
         } catch (error: any) {
@@ -511,6 +516,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             modelo: ferramenta.modelo || '',
             descricao: ferramenta.descricao || '',
             valorCompra: ferramenta.valorCompra?.toString() || '',
+            quantidade: ferramenta.quantidade?.toString() || '0',
             imagemUrl: ferramenta.imagemUrl || ''
         });
         setModalEditarFerramenta(true);

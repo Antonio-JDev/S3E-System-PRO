@@ -1,9 +1,9 @@
 import React, { useState, lazy, Suspense } from 'react';
 import FinanceiroDashboard from './FinanceiroDashboard';
-import ContasAPagar from './ContasAPagar';
-import ExportarRelatorioFinanceiro from './ExportarRelatorioFinanceiro';
 
 const ContasAReceber = lazy(() => import('./ContasAReceber'));
+const ContasAPagar = lazy(() => import('./ContasAPagar'));
+const ExportarRelatorioFinanceiro = lazy(() => import('./ExportarRelatorioFinanceiro'));
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -111,11 +111,33 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
     }
 
     if (abaAtiva === 'pagar') {
-        return <ContasAPagar setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />;
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Carregando Contas a Pagar...</p>
+                    </div>
+                </div>
+            }>
+                <ContasAPagar setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+            </Suspense>
+        );
     }
 
     if (abaAtiva === 'exportar') {
-        return <ExportarRelatorioFinanceiro setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />;
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Carregando Exportar Relatório...</p>
+                    </div>
+                </div>
+            }>
+                <ExportarRelatorioFinanceiro setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+            </Suspense>
+        );
     }
 
     if (abaAtiva === 'ajuda') {

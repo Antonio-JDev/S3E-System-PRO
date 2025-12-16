@@ -64,6 +64,7 @@ type ServiceFormState = {
     codigo: string;
     descricao: string;
     tipo: ServiceType;
+    tipoServico: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
     price: string; 
     unidade: string;
     name: string;
@@ -96,6 +97,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         codigo: '',
         descricao: '',
         tipo: ServiceType.Instalacao,
+        tipoServico: 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço padrão
         price: '',
         unidade: 'un',
         name: '',
@@ -199,11 +201,12 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 codigo: service.codigo || '',
                 descricao: service.descricao || '',
                 tipo: service.tipo || ServiceType.Instalacao,
+                tipoServico: (service as any).tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
                 name,
                 internalCode,
                 description,
                 type,
-                price, 
+                price,
                 unidade
             });
         } else {
@@ -261,6 +264,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     codigo: formState.internalCode.trim(),
                     descricao: formState.description?.trim() || '',
                     tipo: formState.type,
+                    tipoServico: formState.tipoServico, // ✅ NOVO: Tipo de serviço
                     preco: priceValue,
                     unidade: formState.unidade || 'un'
                 };
@@ -284,6 +288,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     codigo: formState.internalCode.trim(),
                     descricao: formState.description?.trim() || '',
                     tipo: formState.type,
+                    tipoServico: formState.tipoServico, // ✅ NOVO: Tipo de serviço
                     preco: priceValue,
                     unidade: formState.unidade || 'un'
                 };
@@ -865,6 +870,28 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     >
                                         {Object.values(ServiceType).map(t => <option key={t} value={t}>{t}</option>)}
                                     </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        Classificação do Serviço *
+                                    </label>
+                                    <select
+                                        name="tipoServico"
+                                        value={formState.tipoServico}
+                                        onChange={(e) => setFormState({...formState, tipoServico: e.target.value as any})}
+                                        className="select-field"
+                                        required
+                                    >
+                                        <option value="MAO_DE_OBRA">Mão de Obra</option>
+                                        <option value="MONTAGEM">Montagem</option>
+                                        <option value="ENGENHARIA">Engenharia</option>
+                                        <option value="PROJETOS">Projetos</option>
+                                        <option value="ADMINISTRATIVO">Administrativo</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Selecione a classificação do serviço para métricas no BI
+                                    </p>
                                 </div>
 
                                 <div>

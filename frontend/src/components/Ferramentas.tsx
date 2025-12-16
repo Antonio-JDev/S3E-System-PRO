@@ -71,6 +71,7 @@ interface Ferramenta {
     modelo?: string;
     descricao?: string;
     valorCompra?: number;
+    quantidade?: number; // Quantidade em estoque
     imagemUrl?: string;
     ativo: boolean;
     createdAt: string;
@@ -89,6 +90,7 @@ interface KitFerramenta {
     observacoes?: string;
     ativo: boolean;
     createdAt: string;
+    precoTotal?: number; // Preço total do kit (soma dos subtotais das ferramentas)
     itens: KitItem[];
 }
 
@@ -146,6 +148,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         modelo: '',
         descricao: '',
         valorCompra: '',
+        quantidade: '0',
         imagemUrl: ''
     });
 
@@ -181,6 +184,19 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         loadData();
     }, []);
+
+    // Função auxiliar para calcular preço total do kit
+    const calcularPrecoTotalKit = (kit: KitFerramenta): number => {
+        if (kit.precoTotal !== undefined) {
+            return kit.precoTotal;
+        }
+        // Calcular baseado nos itens se não tiver precoTotal
+        return kit.itens.reduce((total, item) => {
+            const valorUnitario = item.ferramenta.valorCompra || 0;
+            const quantidade = item.quantidade || 1;
+            return total + (valorUnitario * quantidade);
+        }, 0);
+    };
 
     // Filtrar ferramentas por pesquisa
     const ferramentasFiltradas = useMemo(() => {
@@ -266,7 +282,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         try {
             const ferramentaData = {
                 ...formFerramenta,
-                valorCompra: formFerramenta.valorCompra ? parseFloat(formFerramenta.valorCompra) : null
+                valorCompra: formFerramenta.valorCompra ? parseFloat(formFerramenta.valorCompra) : null,
+                quantidade: formFerramenta.quantidade ? parseInt(formFerramenta.quantidade) : 0
             };
 
             if (ferramentaEditando) {
@@ -295,6 +312,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 modelo: '',
                 descricao: '',
                 valorCompra: '',
+                quantidade: '0',
                 imagemUrl: ''
             });
         } catch (error: any) {
@@ -480,6 +498,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             modelo: ferramenta.modelo || '',
             descricao: ferramenta.descricao || '',
             valorCompra: ferramenta.valorCompra?.toString() || '',
+            quantidade: ferramenta.quantidade?.toString() || '0',
             imagemUrl: ferramenta.imagemUrl || ''
         });
         setModalEditarFerramenta(true);
@@ -669,6 +688,20 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                 </span>
                                             </div>
                                         )}
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                            <span>📊</span>
+                                            <span className="font-semibold text-gray-900">
+                                                Qtd: {ferramenta.quantidade || 0}
+                                            </span>
+                                        </div>
+                                        {ferramenta.valorCompra && ferramenta.quantidade && (
+                                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                                                <span>💵</span>
+                                                <span className="font-bold text-blue-700">
+                                                    Subtotal: R$ {(ferramenta.valorCompra * (ferramenta.quantidade || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                            </div>
+                                        )}
                                         {ferramenta.marca && (
                                             <div className="flex items-center gap-2 text-sm text-gray-600">
                                                 <span>🏭</span>
@@ -721,7 +754,9 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Código</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Categoria</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Marca/Modelo</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Valor</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Valor Unit.</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Quantidade</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Subtotal</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Ações</th>
                                         </tr>
                                     </thead>
@@ -759,6 +794,20 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                     {ferramenta.valorCompra ? (
                                                         <span className="font-bold text-green-700">
                                                             R$ {ferramenta.valorCompra.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="font-semibold text-gray-900">
+                                                        {ferramenta.quantidade || 0}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    {ferramenta.valorCompra && ferramenta.quantidade ? (
+                                                        <span className="font-bold text-blue-700">
+                                                            R$ {(ferramenta.valorCompra * (ferramenta.quantidade || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                         </span>
                                                     ) : (
                                                         <span className="text-gray-400">-</span>
@@ -842,6 +891,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         <div className="flex items-center gap-2 text-sm text-gray-600">
                                             <span>🔧</span>
                                             <span>{kit.itens.length} ferramenta(s)</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                            <span>💰</span>
+                                            <span className="font-bold text-green-700">
+                                                Valor Total: R$ {calcularPrecoTotalKit(kit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
                                         </div>
                                     </div>
 
@@ -984,6 +1039,22 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Quantidade em Estoque
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={formFerramenta.quantidade}
+                                        onChange={(e) => setFormFerramenta({...formFerramenta, quantidade: e.target.value})}
+                                        className="input-field"
+                                        placeholder="0"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Marca
                                     </label>
                                     <input
@@ -1113,6 +1184,20 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         value={formFerramenta.valorCompra}
                                         onChange={(e) => setFormFerramenta({...formFerramenta, valorCompra: e.target.value})}
                                         className="input-field"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Quantidade em Estoque</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={formFerramenta.quantidade}
+                                        onChange={(e) => setFormFerramenta({...formFerramenta, quantidade: e.target.value})}
+                                        className="input-field"
+                                        placeholder="0"
                                     />
                                 </div>
                             </div>
@@ -1560,7 +1645,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                         <div className="p-6 space-y-6">
                             {/* Informações do Kit */}
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-3 gap-4">
                                 <div className="bg-blue-50 p-4 rounded-xl">
                                     <p className="text-xs text-blue-600 font-semibold mb-1">👤 Eletricista</p>
                                     <p className="font-bold text-gray-900 text-lg">{kitVisualizando.eletricistaNome}</p>
@@ -1569,6 +1654,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     <p className="text-xs text-blue-600 font-semibold mb-1">📅 Data de Entrega</p>
                                     <p className="font-bold text-gray-900 text-lg">
                                         {new Date(kitVisualizando.dataEntrega).toLocaleDateString('pt-BR')}
+                                    </p>
+                                </div>
+                                <div className="bg-green-50 p-4 rounded-xl">
+                                    <p className="text-xs text-green-600 font-semibold mb-1">💰 Valor Total do Kit</p>
+                                    <p className="font-bold text-green-700 text-lg">
+                                        R$ {calcularPrecoTotalKit(kitVisualizando).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>
@@ -1595,7 +1686,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                     <p className="text-xs text-gray-500 mb-2">
                                                         Código: {item.ferramenta.codigo} | Categoria: {item.ferramenta.categoria}
                                                     </p>
-                                                    <div className="flex items-center gap-4 text-sm">
+                                                    <div className="flex items-center gap-4 text-sm flex-wrap">
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-gray-600">Quantidade:</span>
                                                             <span className="font-bold text-gray-900">x{item.quantidade}</span>
@@ -1611,6 +1702,14 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                                 {item.estadoEntrega}
                                                             </span>
                                                         </div>
+                                                        {item.ferramenta.valorCompra && (
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600">Subtotal:</span>
+                                                                <span className="font-bold text-blue-700">
+                                                                    R$ {(item.ferramenta.valorCompra * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     {item.observacoes && (
                                                         <p className="text-xs text-gray-600 mt-2 italic">💡 {item.observacoes}</p>
