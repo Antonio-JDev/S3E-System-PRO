@@ -236,6 +236,126 @@ export class LogsController {
       });
     }
   }
+
+  /**
+   * Exportar trilha de auditoria específica de NF-e (cadeia imutável)
+   * GET /api/logs/audit/nfe/export
+   * Acesso: Apenas Desenvolvedor
+   *
+   * Query params:
+   * - from (ISO)   -> data inicial
+   * - to   (ISO)   -> data final
+   * - chainId      -> opcional (chave de acesso / notaFiscalId / pedidoId)
+   * - format       -> 'json' (padrão) ou 'csv'
+   */
+  async exportNFeAudit(req: Request, res: Response): Promise<void> {
+    try {
+      const userRole = (req as any).user?.role;
+
+      if (userRole?.toLowerCase() !== 'desenvolvedor') {
+        res.status(403).json({
+          success: false,
+          error: '🚫 Acesso negado. Esta funcionalidade é restrita a desenvolvedores.'
+        });
+        return;
+      }
+
+      const { from, to, chainId, format = 'json' } = req.query as {
+        from?: string;
+        to?: string;
+        chainId?: string;
+        format?: string;
+      };
+
+      const where: any = {
+        entity: 'NFe'
+      };
+
+      if (from || to) {
+        where.createdAt = {};
+        if (from) {
+          where.createdAt.gte = new Date(from);
+        }
+        if (to) {
+          where.createdAt.lte = new Date(to);
+        }
+      }
+
+      if (chainId) {
+        where.chainId = chainId;
+      }
+
+      const logs = await prisma.auditLog.findMany({
+        where,
+        orderBy: [
+          { chainId: 'asc' },
+          { sequence: 'asc' },
+          { createdAt: 'asc' }
+        ]
+      });
+
+      if ((format || '').toLowerCase() === 'csv') {
+        // Exportar como CSV simples
+        const header = [
+          'id',
+          'createdAt',
+          'action',
+          'entity',
+          'entityId',
+          'description',
+          'userName',
+          'userRole',
+          'hash',
+          'previousHash',
+          'chainId',
+          'sequence',
+          'metadata'
+        ];
+
+        const rows = logs.map((log) => {
+          return [
+            log.id,
+            log.createdAt.toISOString(),
+            log.action,
+            log.entity || '',
+            log.entityId || '',
+            (log.description || '').replace(/\r?\n/g, ' '),
+            log.userName || '',
+            log.userRole || '',
+            log.hash || '',
+            log.previousHash || '',
+            log.chainId || '',
+            log.sequence != null ? String(log.sequence) : '',
+            log.metadata ? JSON.stringify(log.metadata) : ''
+          ]
+            .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+            .join(',');
+        });
+
+        const csv = [header.join(','), ...rows].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="nfe_audit_${new Date().toISOString()}.csv"`
+        );
+        res.send(csv);
+        return;
+      }
+
+      // Resposta padrão em JSON
+      res.json({
+        success: true,
+        data: logs
+      });
+    } catch (error) {
+      console.error('Erro ao exportar auditoria de NF-e:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao exportar auditoria de NF-e'
+      });
+    }
+  }
 }
 
 export const logsController = new LogsController();
@@ -243,4 +363,5 @@ export const getAuditLogs = logsController.getAuditLogs.bind(logsController);
 export const createAuditLog = logsController.createAuditLog.bind(logsController);
 export const healthCheck = logsController.healthCheck.bind(logsController);
 export const getAnalytics = logsController.getAnalytics.bind(logsController);
+export const exportNFeAudit = logsController.exportNFeAudit.bind(logsController);
 

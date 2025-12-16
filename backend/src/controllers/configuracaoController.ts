@@ -87,7 +87,15 @@ export class ConfiguracaoController {
    */
   static async salvarConfiguracoes(req: Request, res: Response): Promise<void> {
     try {
-      const { temaPreferido, logoUrl, logoLoginUrl, nomeEmpresa, emailContato, telefoneContato } = req.body;
+      const {
+        temaPreferido,
+        logoUrl,
+        logoLoginUrl,
+        logoDanfeUrl,
+        nomeEmpresa,
+        emailContato,
+        telefoneContato
+      } = req.body;
 
       // Validação básica
       if (temaPreferido && !['light', 'dark', 'system'].includes(temaPreferido)) {
@@ -102,6 +110,7 @@ export class ConfiguracaoController {
         temaPreferido,
         logoUrl,
         logoLoginUrl,
+        logoDanfeUrl,
         nomeEmpresa,
         emailContato,
         telefoneContato
@@ -211,10 +220,15 @@ export class ConfiguracaoController {
         await configuracaoService.salvarConfiguracoes({ logoUrl: undefined });
         console.log('⚠️ Logo removida da configuração logoUrl');
       }
-      
+
       if (configuracoes.logoLoginUrl === logoUrl) {
         await configuracaoService.salvarConfiguracoes({ logoLoginUrl: undefined });
         console.log('⚠️ Logo removida da configuração logoLoginUrl');
+      }
+
+      if (configuracoes.logoDanfeUrl === logoUrl) {
+        await configuracaoService.salvarConfiguracoes({ logoDanfeUrl: undefined });
+        console.log('⚠️ Logo removida da configuração logoDanfeUrl');
       }
 
       // Deletar arquivo
@@ -403,6 +417,67 @@ export class ConfiguracaoController {
       res.status(500).json({
         success: false,
         message: 'Erro ao atualizar logo da página de login',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * PUT /api/configuracoes/logo-danfe
+   * Atualiza a logo utilizada na DANFE selecionando uma logo existente
+   * Requer: Admin
+   */
+  static async atualizarLogoDanfe(req: Request, res: Response): Promise<void> {
+    try {
+      const { logoUrl } = req.body;
+
+      // Se logoUrl for vazio, remover a logo específica da DANFE (usar logo geral como fallback)
+      if (logoUrl === '' || logoUrl === null || logoUrl === undefined) {
+        const configuracoes = await configuracaoService.salvarConfiguracoes({ logoDanfeUrl: undefined });
+        res.status(200).json({
+          success: true,
+          data: configuracoes,
+          message: 'Logo da DANFE removida. A logo geral será utilizada como fallback.'
+        });
+        return;
+      }
+
+      // Validar se a logo existe fisicamente
+      const cwd = process.cwd();
+      const isBackendFolder = cwd.endsWith('backend');
+      let logosDir: string;
+
+      if (isBackendFolder) {
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      } else {
+        // Docker: usar /app/uploads diretamente
+        logosDir = path.join(cwd, 'uploads', 'logos');
+      }
+
+      const filename = path.basename(logoUrl);
+      const logoPath = path.join(logosDir, filename);
+
+      if (!fs.existsSync(logoPath)) {
+        res.status(404).json({
+          success: false,
+          message: 'Logo não encontrada'
+        });
+        return;
+      }
+
+      // Salvar URL no banco de dados
+      const configuracoes = await configuracaoService.salvarConfiguracoes({ logoDanfeUrl: logoUrl });
+
+      res.status(200).json({
+        success: true,
+        data: configuracoes,
+        message: 'Logo da DANFE atualizada com sucesso'
+      });
+    } catch (error: any) {
+      console.error('Erro ao atualizar logo da DANFE:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao atualizar logo da DANFE',
         error: error.message
       });
     }

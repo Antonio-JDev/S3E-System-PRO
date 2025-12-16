@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAuditLogs, createAuditLog, healthCheck, getAnalytics } from '../controllers/logsController';
+import { getAuditLogs, createAuditLog, healthCheck, getAnalytics, exportNFeAudit } from '../controllers/logsController';
 import { authenticate } from '../middlewares/auth';
 
 const router = Router();
@@ -24,6 +24,13 @@ router.post('/audit', authenticate, createAuditLog);
  * @access Private (Desenvolvedor)
  */
 router.get('/analytics', authenticate, getAnalytics);
+
+/**
+ * @route GET /api/logs/audit/nfe/export
+ * @desc Exportar trilha de auditoria específica de NF-e (JSON ou CSV)
+ * @access Private (Desenvolvedor)
+ */
+router.get('/audit/nfe/export', authenticate, exportNFeAudit);
 
 /**
  * NOTA: O health check também está disponível em /api/health diretamente (configurado no app.ts)

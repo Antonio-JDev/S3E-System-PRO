@@ -56,6 +56,13 @@ router.put('/logo', authorize('admin'), ConfiguracaoController.atualizarLogo);
 router.put('/logo-login', authorize('admin'), ConfiguracaoController.atualizarLogoLogin);
 
 /**
+ * @route PUT /api/configuracoes/logo-danfe
+ * @desc Atualiza a logo utilizada na DANFE selecionando uma logo existente
+ * @access Admin only
+ */
+router.put('/logo-danfe', authorize('admin'), ConfiguracaoController.atualizarLogoDanfe);
+
+/**
  * @route GET /api/configuracoes/usuarios
  * @desc Lista todos os usuários
  * @access Admin only
