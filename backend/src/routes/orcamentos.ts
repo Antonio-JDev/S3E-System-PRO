@@ -12,6 +12,7 @@ import {
   exportarTemplateOrcamentos,
   previewImportacaoOrcamentos,
   importarOrcamentos,
+  resetarOrcamentos,
   uploadJSON
 } from '../controllers/orcamentosController';
 import { PDFOrcamentoController } from '../controllers/pdfOrcamentoController';
@@ -30,6 +31,13 @@ router.get('/:id/pdf/html', PDFOrcamentoController.gerarHTML);
 router.get('/:id/pdf/preview', PDFOrcamentoController.gerarPreview);
 
 router.get('/proximo-numero', getProximoNumeroOrcamento);
+
+/**
+ * @route POST /api/orcamentos/reset
+ * @desc Resetar todos os orçamentos e a sequência (APENAS ADMIN)
+ * @access RBAC: Apenas admin
+ */
+router.post('/reset', checkPermission('delete_orcamento'), resetarOrcamentos);
 
 // ==================== ROTAS DE IMPORTAÇÃO (DEVEM VIR ANTES DAS ROTAS GENÉRICAS) ====================
 

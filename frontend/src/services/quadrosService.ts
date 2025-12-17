@@ -4,7 +4,7 @@ export interface QuadroConfig {
   tipo: 'POLICARBONATO' | 'ALUMINIO' | 'COMANDO';
   caixas: { materialId: string; quantidade: number }[];
   disjuntorGeral?: { materialId: string; quantidade: number };
-  barramento?: { materialId: string; quantidade: number };
+  barramento?: { materialId: string; quantidade: number; unidade?: 'METROS' | 'CM' };
   medidores: { disjuntorId: string; medidorId?: string; quantidade: number }[];
   cabos: { materialId: string; quantidade: number; unidade: 'METROS' | 'CM' }[];
   dps?: {

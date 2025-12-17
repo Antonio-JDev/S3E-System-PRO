@@ -289,7 +289,12 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
 
         // Usar valorVenda se disponível, senão usar preco (preço de compra)
-        const precoVenda = (material as any).valorVenda || material.preco || 0;
+        let precoVenda = (material as any).valorVenda || material.preco || 0;
+        
+        // Se for barramento e a unidade for cm, ajustar o preço (dividir por 100)
+        if ((tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') && unidadeVenda === 'cm') {
+            precoVenda = precoVenda / 100; // Preço por metro / 100 = preço por cm
+        }
         
         const novoItem: ItemKit = {
             materialId: material.id,

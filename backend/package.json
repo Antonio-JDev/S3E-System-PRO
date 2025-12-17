@@ -16,7 +16,8 @@
     "prisma:deploy:prod": "dotenv -e .env.production -- npx prisma migrate deploy",
     "prisma:studio": "npx prisma studio",
     "prisma:generate": "npx prisma generate",
-    "normalizar:categorias": "npx tsx src/scripts/normalizarCategoriasMateriais.ts"
+    "normalizar:categorias": "npx tsx src/scripts/normalizarCategoriasMateriais.ts",
+    "resetar:orcamentos": "npx tsx src/scripts/resetarOrcamentos.ts"
   },
   "keywords": [
     "api",

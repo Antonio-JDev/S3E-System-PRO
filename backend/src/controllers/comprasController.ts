@@ -99,7 +99,9 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       // Campos para geração de contas a pagar (fallback quando não há duplicatas)
       condicoesPagamento: req.body.condicoesPagamento,
       parcelas: req.body.parcelas,
-      dataPrimeiroVencimento: req.body.dataPrimeiroVencimento ? new Date(req.body.dataPrimeiroVencimento) : undefined
+      dataPrimeiroVencimento: req.body.dataPrimeiroVencimento ? new Date(req.body.dataPrimeiroVencimento) : undefined,
+      // ✅ NOVO: Obra vinculada (para compras avulsas)
+      obraId: req.body.obraId || undefined
     };
 
     // Validar dados obrigatórios

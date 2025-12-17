@@ -7,6 +7,7 @@ export interface ServicoTemplate {
     nome: string;
     descricao?: string;
     tipo: string;
+    tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO';
     preco: number;
     unidade: string;
     ativo?: boolean;
@@ -40,30 +41,43 @@ export function generateEmptyTemplate(): ServicosImportData {
         dataExportacao: new Date().toISOString(),
         servicos: [
             {
-                codigo: 'SERV-001',
+                codigo: 'MOB-001',
                 nome: 'Instalação de Tomada',
                 descricao: 'Instalação de tomada padrão 2P+T',
                 tipo: 'Instalação',
+                tipoServico: 'MAO_DE_OBRA',
                 preco: 50.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'SERV-002',
-                nome: 'Instalação de Interruptor',
-                descricao: 'Instalação de interruptor simples',
+                codigo: 'MONT-001',
+                nome: 'Montagem de Quadro Elétrico',
+                descricao: 'Montagem e instalação de quadro de distribuição',
                 tipo: 'Instalação',
-                preco: 40.00,
+                tipoServico: 'MONTAGEM',
+                preco: 500.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'SERV-003',
-                nome: 'Lançamento de Cabo',
-                descricao: 'Lançamento de cabo em eletroduto',
-                tipo: 'Instalação',
-                preco: 15.00,
-                unidade: 'm',
+                codigo: 'ENG-PRO-001',
+                nome: 'Projeto Elétrico Residencial',
+                descricao: 'Elaboração de projeto elétrico residencial completo',
+                tipo: 'Projeto',
+                tipoServico: 'PROJETOS',
+                preco: 1500.00,
+                unidade: 'un',
+                ativo: true
+            },
+            {
+                codigo: 'ADM-001',
+                nome: 'Serviço Administrativo',
+                descricao: 'Serviço administrativo padrão',
+                tipo: 'Outro',
+                tipoServico: 'ADMINISTRATIVO',
+                preco: 100.00,
+                unidade: 'hora',
                 ativo: true
             }
         ]
@@ -78,117 +92,108 @@ export function generateExampleTemplate(): ServicosImportData {
         versao: '1.0.0',
         dataExportacao: new Date().toISOString(),
         servicos: [
-            // Instalações Elétricas
+            // Mão de Obra
             {
-                codigo: 'INST-001',
+                codigo: 'MOB-001',
                 nome: 'Instalação de Tomada 2P+T',
                 descricao: 'Instalação de tomada padrão brasileiro 2P+T 10A/20A',
                 tipo: 'Instalação',
+                tipoServico: 'MAO_DE_OBRA',
                 preco: 50.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'INST-002',
+                codigo: 'MOB-002',
                 nome: 'Instalação de Interruptor Simples',
                 descricao: 'Instalação de interruptor simples 10A',
                 tipo: 'Instalação',
+                tipoServico: 'MAO_DE_OBRA',
                 preco: 40.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'INST-003',
-                nome: 'Instalação de Interruptor Paralelo',
-                descricao: 'Instalação de interruptor paralelo (three-way)',
-                tipo: 'Instalação',
-                preco: 60.00,
-                unidade: 'un',
-                ativo: true
-            },
-            {
-                codigo: 'INST-004',
-                nome: 'Instalação de Luminária',
-                descricao: 'Instalação de luminária de teto ou parede',
-                tipo: 'Instalação',
-                preco: 80.00,
-                unidade: 'un',
-                ativo: true
-            },
-            // Lançamentos
-            {
-                codigo: 'LANC-001',
+                codigo: 'MOB-003',
                 nome: 'Lançamento de Cabo em Eletroduto',
                 descricao: 'Lançamento de cabo elétrico em eletroduto existente',
-                tipo: 'Lançamento',
+                tipo: 'Instalação',
+                tipoServico: 'MAO_DE_OBRA',
                 preco: 15.00,
                 unidade: 'm',
                 ativo: true
             },
+            // Montagem
             {
-                codigo: 'LANC-002',
-                nome: 'Instalação de Eletroduto',
-                descricao: 'Instalação de eletroduto rígido ou flexível',
-                tipo: 'Instalação',
-                preco: 25.00,
-                unidade: 'm',
-                ativo: true
-            },
-            // Quadros Elétricos
-            {
-                codigo: 'QUAD-001',
+                codigo: 'MONT-001',
                 nome: 'Montagem de Quadro de Distribuição',
                 descricao: 'Montagem e instalação de quadro de distribuição até 12 disjuntores',
-                tipo: 'Montagem',
+                tipo: 'Instalação',
+                tipoServico: 'MONTAGEM',
                 preco: 500.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'QUAD-002',
-                nome: 'Instalação de Disjuntor',
-                descricao: 'Instalação de disjuntor em quadro existente',
+                codigo: 'MONT-002',
+                nome: 'Montagem de Painel Elétrico',
+                descricao: 'Montagem de painel elétrico industrial',
                 tipo: 'Instalação',
-                preco: 35.00,
+                tipoServico: 'MONTAGEM',
+                preco: 800.00,
                 unidade: 'un',
                 ativo: true
             },
-            // Manutenção
+            // Engenharia / Projetos
             {
-                codigo: 'MANUT-001',
-                nome: 'Manutenção Preventiva',
-                descricao: 'Manutenção preventiva de instalações elétricas',
-                tipo: 'Manutenção',
-                preco: 200.00,
-                unidade: 'h',
-                ativo: true
-            },
-            {
-                codigo: 'MANUT-002',
-                nome: 'Manutenção Corretiva',
-                descricao: 'Manutenção corretiva de instalações elétricas',
-                tipo: 'Manutenção',
-                preco: 150.00,
-                unidade: 'h',
-                ativo: true
-            },
-            // Projetos
-            {
-                codigo: 'PROJ-001',
+                codigo: 'ENG-PRO-001',
                 nome: 'Projeto Elétrico Residencial',
                 descricao: 'Elaboração de projeto elétrico residencial completo',
                 tipo: 'Projeto',
+                tipoServico: 'PROJETOS',
                 preco: 1500.00,
                 unidade: 'un',
                 ativo: true
             },
             {
-                codigo: 'PROJ-002',
+                codigo: 'ENG-PRO-002',
                 nome: 'Projeto Elétrico Comercial',
                 descricao: 'Elaboração de projeto elétrico comercial',
                 tipo: 'Projeto',
+                tipoServico: 'PROJETOS',
                 preco: 3000.00,
                 unidade: 'un',
+                ativo: true
+            },
+            {
+                codigo: 'ENG-PRO-003',
+                nome: 'Laudo Técnico de Instalações',
+                descricao: 'Elaboração de laudo técnico de instalações elétricas',
+                tipo: 'LaudoTecnico',
+                tipoServico: 'ENGENHARIA',
+                preco: 800.00,
+                unidade: 'un',
+                ativo: true
+            },
+            // Administrativo
+            {
+                codigo: 'ADM-001',
+                nome: 'Serviço Administrativo',
+                descricao: 'Serviço administrativo padrão',
+                tipo: 'Outro',
+                tipoServico: 'ADMINISTRATIVO',
+                preco: 100.00,
+                unidade: 'hora',
+                ativo: true
+            },
+            {
+                codigo: 'ADM-002',
+                nome: 'Consultoria Administrativa',
+                descricao: 'Consultoria em processos administrativos',
+                tipo: 'Consultoria',
+                tipoServico: 'ADMINISTRATIVO',
+                preco: 150.00,
+                unidade: 'hora',
                 ativo: true
             }
         ]
@@ -207,6 +212,7 @@ export function exportToJSON(servicos: ServicoTemplate[]): ServicosImportData {
             nome: s.nome,
             descricao: s.descricao || '',
             tipo: s.tipo,
+            tipoServico: s.tipoServico,
             preco: s.preco,
             unidade: s.unidade || 'un',
             ativo: s.ativo !== false

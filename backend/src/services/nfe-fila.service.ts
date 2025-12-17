@@ -19,7 +19,7 @@ export class NFeFilaService {
    * Enfileira uma NF-e para envio posterior (contingência).
    */
   static async enfileirar(params: EnfileirarParams) {
-    const { notaFiscalId, empresaFiscalId, ambiente, modo, xmlAsserto } = params as any;
+    const { notaFiscalId, empresaFiscalId, ambiente, modo, xmlAssinado } = params;
 
     const registro = await prisma.nFeFila.create({
       data: {
@@ -27,7 +27,7 @@ export class NFeFilaService {
         empresaFiscalId: empresaFiscalId || null,
         ambiente,
         modo,
-        xmlAssinado: params.xmlAssinado,
+        xmlAssinado,
         status: 'PENDENTE',
         tentativas: 0,
         ultimoErro: params.motivo || null,

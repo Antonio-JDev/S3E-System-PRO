@@ -3,7 +3,7 @@ REM Script para build e push das imagens Docker para Docker Hub
 REM Uso: build-and-push.bat [version]
 REM Exemplo: build-and-push.bat 1.0.0
 
-set DOCKER_USER=seu-usuario-dockerhub
+set DOCKER_USER=odev10antonio
 set VERSION=%1
 if "%VERSION%"=="" set VERSION=latest
 

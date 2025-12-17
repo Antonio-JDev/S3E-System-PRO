@@ -38,6 +38,8 @@ export interface CompraPayload {
     condicoesPagamento?: string;
     parcelas?: number;
     dataPrimeiroVencimento?: Date;
+    // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
+    obraId?: string;
 }
 
 export class ComprasService {
@@ -66,7 +68,8 @@ export class ComprasService {
             statusImportacao,
             condicoesPagamento,
             parcelas,
-            dataPrimeiroVencimento
+            dataPrimeiroVencimento,
+            obraId
         } = data;
 
         // Validações
@@ -270,6 +273,7 @@ export class ComprasService {
                     status,
                     observacoes,
                     xmlData: JSON.stringify(xmlMeta),
+                    obraId: obraId || null, // ✅ NOVO: Vincular obra se fornecida
                     items: {
                         create: itemsComMaterialId
                     }
@@ -398,6 +402,13 @@ export class ComprasService {
                             endereco: true
                         }
                     },
+                    obra: {
+                        select: {
+                            id: true,
+                            nomeObra: true,
+                            status: true
+                        }
+                    },
                     items: {
                         include: {
                             material: {
@@ -494,6 +505,13 @@ export class ComprasService {
                             nome: true,
                             cnpj: true,
                             telefone: true
+                        }
+                    },
+                    obra: {
+                        select: {
+                            id: true,
+                            nomeObra: true,
+                            status: true
                         }
                     },
                     items: true

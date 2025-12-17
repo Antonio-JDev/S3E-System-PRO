@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
 import fs from 'fs/promises';
 import path from 'path';
+import { CryptoUtil } from '../utils/crypto.util';
 
 const prisma = new PrismaClient();
 const CERTIFICADOS_DIR = path.join(process.cwd(), 'data', 'certificados');
@@ -139,8 +139,8 @@ export const createConfiguracao = async (req: Request, res: Response): Promise<v
       const buffer = Buffer.from(certificadoBase64, 'base64');
       await fs.writeFile(certificadoPath, buffer);
 
-      // Criptografar senha do certificado
-      certificadoSenhaCriptografada = await bcrypt.hash(certificadoSenha, 10);
+      // Criptografar senha do certificado usando AES (reversível)
+      certificadoSenhaCriptografada = CryptoUtil.encrypt(certificadoSenha);
 
       // TODO: Extrair data de validade do certificado usando node-forge ou similar
       // Por enquanto, definir validade padrão de 1 ano
@@ -245,7 +245,7 @@ export const updateConfiguracao = async (req: Request, res: Response): Promise<v
       await fs.writeFile(certificadoPath, buffer);
 
       dataToUpdate.certificadoPath = certificadoPath;
-      dataToUpdate.certificadoSenha = await bcrypt.hash(certificadoSenha, 10);
+      dataToUpdate.certificadoSenha = CryptoUtil.encrypt(certificadoSenha);
       
       // Atualizar validade
       const certificadoValidade = new Date();

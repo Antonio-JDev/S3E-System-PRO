@@ -572,34 +572,82 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // Criar kit com itens
-    const kit = await prisma.kitFerramenta.create({
-      data: {
-        nome,
-        descricao: descricao || null,
-        eletricistaId,
-        eletricistaNome,
-        dataEntrega: new Date(dataEntrega),
-        imagemUrl: imagemUrl || null,
-        assinatura: assinatura || null,
-        observacoes: observacoes || null,
-        ativo: true,
-        itens: {
-          create: itens.map((item: any) => ({
-            ferramentaId: item.ferramentaId,
-            quantidade: item.quantidade || 1,
-            estadoEntrega: item.estadoEntrega || 'Novo',
-            observacoes: item.observacoes || null
-          }))
+    // Validar estoque e calcular preço total antes de criar o kit
+    let precoTotalKit = 0;
+    const ferramentasParaValidar = await Promise.all(
+      itens.map(async (item: any) => {
+        const ferramenta = await prisma.ferramenta.findUnique({
+          where: { id: item.ferramentaId }
+        });
+        
+        if (!ferramenta) {
+          throw new Error(`Ferramenta ${item.ferramentaId} não encontrada`);
         }
-      },
-      include: {
-        itens: {
-          include: {
-            ferramenta: true
+        
+        const quantidadeNecessaria = item.quantidade || 1;
+        const estoqueDisponivel = ferramenta.quantidade || 0;
+        
+        // Verificar se há estoque suficiente
+        if (estoqueDisponivel < quantidadeNecessaria) {
+          throw new Error(
+            `Estoque insuficiente para ${ferramenta.nome}. ` +
+            `Disponível: ${estoqueDisponivel}, Necessário: ${quantidadeNecessaria}`
+          );
+        }
+        
+        // Calcular subtotal (valorCompra * quantidade)
+        const subtotal = (ferramenta.valorCompra || 0) * quantidadeNecessaria;
+        precoTotalKit += subtotal;
+        
+        return { ferramenta, quantidadeNecessaria, subtotal };
+      })
+    );
+
+    // Criar kit com itens e dar baixa no estoque em transação
+    const kit = await prisma.$transaction(async (tx) => {
+      // 1. Criar o kit
+      const kitCriado = await tx.kitFerramenta.create({
+        data: {
+          nome,
+          descricao: descricao || null,
+          eletricistaId,
+          eletricistaNome,
+          dataEntrega: new Date(dataEntrega),
+          imagemUrl: imagemUrl || null,
+          assinatura: assinatura || null,
+          observacoes: observacoes || null,
+          ativo: true,
+          itens: {
+            create: itens.map((item: any) => ({
+              ferramentaId: item.ferramentaId,
+              quantidade: item.quantidade || 1,
+              estadoEntrega: item.estadoEntrega || 'Novo',
+              observacoes: item.observacoes || null
+            }))
+          }
+        },
+        include: {
+          itens: {
+            include: {
+              ferramenta: true
+            }
           }
         }
+      });
+
+      // 2. Dar baixa no estoque de cada ferramenta
+      for (const { ferramenta, quantidadeNecessaria } of ferramentasParaValidar) {
+        await tx.ferramenta.update({
+          where: { id: ferramenta.id },
+          data: {
+            quantidade: {
+              decrement: quantidadeNecessaria
+            }
+          }
+        });
       }
+
+      return kitCriado;
     });
 
     // Audit log
@@ -612,16 +660,20 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
         description: `Kit "${nome}" criado e entregue para ${eletricistaNome}`,
         metadata: {
           eletricistaId,
-          totalFerramentas: itens.length
+          totalFerramentas: itens.length,
+          precoTotal: precoTotalKit
         }
       }
     });
 
-    console.log(`✅ Kit criado: ${kit.nome} para ${eletricistaNome} (${itens.length} ferramentas)`);
+    console.log(`✅ Kit criado: ${kit.nome} para ${eletricistaNome} (${itens.length} ferramentas) - Valor Total: R$ ${precoTotalKit.toFixed(2)}`);
 
     res.json({
       success: true,
-      data: kit,
+      data: {
+        ...kit,
+        precoTotal: precoTotalKit // Incluir preço total no retorno
+      },
       message: '✅ Kit de ferramentas criado com sucesso!'
     });
   } catch (error) {
@@ -635,7 +687,7 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
 
 /**
  * PUT /api/kits-ferramenta/:id
- * Atualiza um kit
+ * Atualiza um kit (suporta edição completa: nome, descrição, imagem, observações e itens)
  */
 export const atualizarKit = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -645,11 +697,19 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
       nome,
       descricao,
       imagemUrl,
-      observacoes
+      observacoes,
+      itens // Array de itens para adicionar/atualizar
     } = req.body;
 
     const kit = await prisma.kitFerramenta.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        itens: {
+          include: {
+            ferramenta: true
+          }
+        }
+      }
     });
 
     if (!kit) {
@@ -660,22 +720,84 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // Atualizar kit (apenas campos editáveis)
-    const kitAtualizado = await prisma.kitFerramenta.update({
-      where: { id },
-      data: {
-        nome: nome || kit.nome,
-        descricao: descricao !== undefined ? descricao : kit.descricao,
-        imagemUrl: imagemUrl !== undefined ? imagemUrl : kit.imagemUrl,
-        observacoes: observacoes !== undefined ? observacoes : kit.observacoes
-      },
-      include: {
-        itens: {
-          include: {
-            ferramenta: true
+    // Atualizar kit em transação para garantir consistência
+    const kitAtualizado = await prisma.$transaction(async (tx) => {
+      // 1. Atualizar dados básicos do kit
+      const kitAtualizado = await tx.kitFerramenta.update({
+        where: { id },
+        data: {
+          nome: nome !== undefined ? nome : kit.nome,
+          descricao: descricao !== undefined ? descricao : kit.descricao,
+          imagemUrl: imagemUrl !== undefined ? imagemUrl : kit.imagemUrl,
+          observacoes: observacoes !== undefined ? observacoes : kit.observacoes,
+          updatedAt: new Date() // Garantir atualização da data
+        }
+      });
+
+      // 2. Se itens foram fornecidos, adicionar novos itens
+      if (itens && Array.isArray(itens) && itens.length > 0) {
+        // Validar estoque para novos itens
+        for (const item of itens) {
+          const ferramenta = await tx.ferramenta.findUnique({
+            where: { id: item.ferramentaId }
+          });
+
+          if (!ferramenta) {
+            throw new Error(`Ferramenta ${item.ferramentaId} não encontrada`);
+          }
+
+          const quantidadeNecessaria = item.quantidade || 1;
+          
+          // Verificar se há estoque suficiente
+          if (ferramenta.quantidade < quantidadeNecessaria) {
+            throw new Error(
+              `Estoque insuficiente para ${ferramenta.nome}. ` +
+              `Disponível: ${ferramenta.quantidade}, Necessário: ${quantidadeNecessaria}`
+            );
+          }
+        }
+
+        // Adicionar novos itens ao kit
+        for (const item of itens) {
+          await tx.kitFerramentaItem.create({
+            data: {
+              kitId: id,
+              ferramentaId: item.ferramentaId,
+              quantidade: item.quantidade || 1,
+              estadoEntrega: item.estadoEntrega || 'Novo',
+              observacoes: item.observacoes || null
+            }
+          });
+
+          // Dar baixa no estoque
+          const ferramenta = await tx.ferramenta.findUnique({
+            where: { id: item.ferramentaId }
+          });
+
+          if (ferramenta) {
+            await tx.ferramenta.update({
+              where: { id: item.ferramentaId },
+              data: {
+                quantidade: {
+                  decrement: item.quantidade || 1
+                }
+              }
+            });
           }
         }
       }
+
+      // 3. Retornar kit atualizado com todos os itens
+      return await tx.kitFerramenta.findUnique({
+        where: { id },
+        include: {
+          itens: {
+            include: {
+              ferramenta: true
+            }
+          }
+        }
+      });
     });
 
     // Audit log
@@ -685,23 +807,29 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
         action: 'UPDATE',
         entity: 'KitFerramenta',
         entityId: id,
-        description: `Kit "${kitAtualizado.nome}" atualizado`,
-        metadata: req.body
+        description: `Kit "${kitAtualizado?.nome}" atualizado`,
+        metadata: {
+          nome: nome !== undefined,
+          descricao: descricao !== undefined,
+          imagemUrl: imagemUrl !== undefined,
+          observacoes: observacoes !== undefined,
+          novosItens: itens ? itens.length : 0
+        }
       }
     });
 
-    console.log(`✅ Kit atualizado: ${kitAtualizado.nome}`);
+    console.log(`✅ Kit atualizado: ${kitAtualizado?.nome}`);
 
     res.json({
       success: true,
       data: kitAtualizado,
       message: '✅ Kit atualizado com sucesso!'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Erro ao atualizar kit:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao atualizar kit'
+      error: error.message || 'Erro ao atualizar kit'
     });
   }
 };

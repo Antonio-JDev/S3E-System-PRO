@@ -4,7 +4,8 @@ import {
   buscarFerramenta,
   criarFerramenta,
   atualizarFerramenta,
-  deletarFerramenta
+  deletarFerramenta,
+  getEstatisticas
 } from '../controllers/ferramentasController';
 import { authenticate } from '../middlewares/auth';
 
@@ -12,6 +13,9 @@ const router = Router();
 
 // Todas as rotas requerem autenticação
 router.use(authenticate);
+
+// GET /api/ferramentas/estatisticas - Estatísticas
+router.get('/estatisticas', getEstatisticas);
 
 // GET /api/ferramentas - Listar todas
 router.get('/', listarFerramentas);

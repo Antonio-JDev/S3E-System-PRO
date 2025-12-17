@@ -48,6 +48,7 @@ export interface EvolucaoOrcamentosPorServico {
   [key: string]: string | number; // Tipo de serviço como chave, valor como número
 }
 
+
 export interface OrcamentosPorTipoMensal {
   mes: string; // YYYY-MM
   quadros: number; // Valor total de orçamentos com QUADRO_PRONTO
@@ -71,7 +72,7 @@ export interface ResumoGeral {
   vendas: VendasStats;
   markupItens: { porTipo: MarkupItem[] };
   evolucaoOrcamentosPorServico: EvolucaoOrcamentosPorServico[];
-  orcamentosPorTipoMensal: OrcamentosPorTipoMensal[]; // Novo: Comparação Quadros vs Serviços
+  orcamentosPorTipoMensal: OrcamentosPorTipoMensal[]; // Comparação Quadros vs Serviços
   gastosFixos: GastosFixos;
 }
 
@@ -1249,6 +1250,7 @@ export class BIService {
     
     return meses;
   }
+
 
   /**
    * Resumo consolidado de todas as métricas

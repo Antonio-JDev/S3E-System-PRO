@@ -13,8 +13,25 @@ class AxiosApiService {
   private token: string | null = null;
 
   constructor(baseURL: string) {
+    // Validar e normalizar baseURL
+    let normalizedBaseURL = baseURL || '';
+    
+    // Se baseURL estiver vazio, tentar usar window.location.origin em desenvolvimento
+    if (!normalizedBaseURL && typeof window !== 'undefined') {
+      // Em desenvolvimento, usar a origem atual
+      normalizedBaseURL = window.location.origin;
+      console.warn('⚠️ [AxiosApi] BASE_URL não configurado, usando origem atual:', normalizedBaseURL);
+    }
+    
+    // Remover barra final se houver
+    if (normalizedBaseURL.endsWith('/')) {
+      normalizedBaseURL = normalizedBaseURL.slice(0, -1);
+    }
+
+    console.log('🔧 [AxiosApi] Inicializando com baseURL:', normalizedBaseURL || '(vazio - usando URLs relativas)');
+
     this.axiosInstance = axios.create({
-      baseURL,
+      baseURL: normalizedBaseURL,
       timeout: API_CONFIG.TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
@@ -112,6 +129,15 @@ class AxiosApiService {
   // GET request
   async get<T>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
     try {
+      // Validar endpoint
+      if (!endpoint || !endpoint.startsWith('/')) {
+        console.error('❌ [AxiosApi] Endpoint inválido:', endpoint);
+        return {
+          success: false,
+          error: `Endpoint inválido: ${endpoint}. Deve começar com "/"`,
+        };
+      }
+
       const response = await this.axiosInstance.get(endpoint, { params });
       
       // Se o backend já retorna { success, data }, retornar direto
@@ -124,10 +150,18 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ [AxiosApi] Erro na requisição GET:', {
+        endpoint,
+        params,
+        error: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error?.response?.data?.error || error?.response?.data?.message || (error instanceof Error ? error.message : 'Unknown error'),
       };
     }
   }

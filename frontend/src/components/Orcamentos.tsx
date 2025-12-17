@@ -634,7 +634,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             .filter(orc =>
                 orc.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (orc.cliente?.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
-            );
+            )
+            .sort((a, b) => {
+                // Ordenar por data de criação (mais recente primeiro)
+                const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return dateB - dateA; // Mais recente primeiro
+            });
     }, [orcamentos, searchTerm]);
 
     const filteredOrcamentos = useMemo(() => {
@@ -657,7 +663,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             .filter(orc =>
                 orc.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (orc.cliente?.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
-            );
+            )
+            .sort((a, b) => {
+                // Ordenar por data de criação (mais recente primeiro)
+                const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return dateB - dateA; // Mais recente primeiro
+            });
     }, [orcamentos, statusFilter, searchTerm, abaAtiva, orcamentosReprovadosExpirados]);
 
     // Calcular totais do orçamento (NOVA LÓGICA)
@@ -1006,6 +1018,47 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             toast.error('❌ Erro ao confirmar importação');
         } finally {
             setImporting(false);
+        }
+    };
+
+    // Função para resetar todos os orçamentos (apenas admin)
+    const [resetting, setResetting] = useState(false);
+    const handleResetarOrcamentos = async () => {
+        // Confirmar ação destrutiva
+        const confirmar = window.confirm(
+            '⚠️ ATENÇÃO: Esta ação irá DELETAR TODOS os orçamentos permanentemente!\n\n' +
+            'Isso não pode ser desfeito. Deseja continuar?'
+        );
+
+        if (!confirmar) return;
+
+        const confirmarNovamente = window.confirm(
+            '🚨 ÚLTIMA CONFIRMAÇÃO\n\n' +
+            'Você tem certeza que deseja deletar TODOS os orçamentos?\n' +
+            'Esta ação é IRREVERSÍVEL!'
+        );
+
+        if (!confirmarNovamente) return;
+
+        try {
+            setResetting(true);
+            const response = await axiosApiService.post('/api/orcamentos/reset');
+
+            if (response.success) {
+                const totalDeletados = (response.data as any)?.totalDeletados || 0;
+                toast.success(
+                    `✅ Reset concluído! ${totalDeletados} orçamento(s) deletado(s) e sequência resetada.`,
+                    { duration: 5000 }
+                );
+                await loadData(); // Recarregar lista
+            } else {
+                toast.error(response.error || 'Erro ao resetar orçamentos');
+            }
+        } catch (error: any) {
+            console.error('Erro ao resetar orçamentos:', error);
+            toast.error('Erro ao resetar orçamentos: ' + (error?.message || 'Erro desconhecido'));
+        } finally {
+            setResetting(false);
         }
     };
 
@@ -1903,6 +1956,21 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             <PlusIcon className="w-5 h-5" />
                             Novo Orçamento
                         </button>
+                        {/* Botão de Reset (apenas para admin) */}
+                        {user?.role?.toLowerCase() === 'admin' && (
+                            <button
+                                type="button"
+                                onClick={handleResetarOrcamentos}
+                                disabled={resetting}
+                                className="btn-danger flex items-center gap-2"
+                                title="Resetar todos os orçamentos e a sequência (apenas admin)"
+                            >
+                                <svg className={`w-5 h-5 ${resetting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                {resetting ? 'Resetando...' : 'Resetar Orçamentos'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </header>

@@ -75,6 +75,7 @@ export const criarFerramenta = async (req: Request, res: Response): Promise<void
       modelo,
       descricao,
       valorCompra,
+      quantidade,
       imagemUrl
     } = req.body;
 
@@ -110,6 +111,7 @@ export const criarFerramenta = async (req: Request, res: Response): Promise<void
         modelo: modelo || null,
         descricao: descricao || null,
         valorCompra: valorCompra ? parseFloat(valorCompra) : null,
+        quantidade: quantidade !== undefined && quantidade !== null ? parseInt(quantidade) || 0 : 0,
         imagemUrl: imagemUrl || null,
         ativo: true
       }
@@ -159,6 +161,7 @@ export const atualizarFerramenta = async (req: Request, res: Response): Promise<
       modelo,
       descricao,
       valorCompra,
+      quantidade,
       imagemUrl
     } = req.body;
 
@@ -203,6 +206,7 @@ export const atualizarFerramenta = async (req: Request, res: Response): Promise<
         modelo: modelo !== undefined ? modelo : ferramenta.modelo,
         descricao: descricao !== undefined ? descricao : ferramenta.descricao,
         valorCompra: valorCompra !== undefined ? (valorCompra ? parseFloat(valorCompra) : null) : ferramenta.valorCompra,
+        quantidade: quantidade !== undefined ? parseInt(quantidade) || 0 : ferramenta.quantidade,
         imagemUrl: imagemUrl !== undefined ? imagemUrl : ferramenta.imagemUrl
       }
     });
@@ -285,6 +289,83 @@ export const deletarFerramenta = async (req: Request, res: Response): Promise<vo
     res.status(500).json({
       success: false,
       error: 'Erro ao desativar ferramenta'
+    });
+  }
+};
+
+/**
+ * GET /api/ferramentas/estatisticas
+ * Retorna estatísticas das ferramentas
+ */
+export const getEstatisticas = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Buscar todas as ferramentas
+    const ferramentas = await prisma.ferramenta.findMany({
+      where: { ativo: true }
+    });
+
+    // Buscar todos os kits ativos
+    const kits = await prisma.kitFerramenta.findMany({
+      where: { ativo: true },
+      include: {
+        itens: {
+          include: {
+            ferramenta: true
+          }
+        }
+      }
+    });
+
+    // Calcular estatísticas
+    const totalFerramentas = ferramentas.length;
+    const totalEmEstoque = ferramentas.reduce((sum, f) => sum + (f.quantidade || 0), 0);
+    const totalKits = kits.length;
+    
+    // Calcular ferramentas em uso (em kits)
+    const ferramentasEmUso = new Set<string>();
+    kits.forEach(kit => {
+      kit.itens.forEach(item => {
+        ferramentasEmUso.add(item.ferramentaId);
+      });
+    });
+    const totalFerramentasEmUso = ferramentasEmUso.size;
+    
+    // Calcular valor total do estoque
+    const valorTotalEstoque = ferramentas.reduce((sum, f) => {
+      const quantidade = f.quantidade || 0;
+      const valor = f.valorCompra || 0;
+      return sum + (quantidade * valor);
+    }, 0);
+
+    // Ferramentas por categoria
+    const porCategoria = ferramentas.reduce((acc, f) => {
+      const categoria = f.categoria || 'Sem categoria';
+      acc[categoria] = (acc[categoria] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    // Ferramentas com estoque baixo (menos de 5 unidades)
+    const estoqueBaixo = ferramentas.filter(f => (f.quantidade || 0) < 5).length;
+
+    const estatisticas = {
+      totalFerramentas,
+      totalEmEstoque,
+      totalFerramentasEmUso,
+      totalKits,
+      valorTotalEstoque,
+      estoqueBaixo,
+      porCategoria
+    };
+
+    res.json({
+      success: true,
+      data: estatisticas
+    });
+  } catch (error) {
+    console.error('❌ Erro ao buscar estatísticas:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao buscar estatísticas de ferramentas'
     });
   }
 };

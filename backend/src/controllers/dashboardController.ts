@@ -178,6 +178,7 @@ export class DashboardController {
         projetosAtrasados
       ] = await Promise.all([
         // Materiais com estoque baixo
+        // Buscar materiais e enriquecer com fornecedor da última compra
         prisma.material.findMany({
           where: {
             ativo: true,
@@ -197,9 +198,27 @@ export class DashboardController {
                 nome: true,
                 email: true
               }
+            },
+            compraItems: {
+              select: {
+                compra: {
+                  select: {
+                    fornecedorId: true,
+                    fornecedorNome: true,
+                    fornecedor: {
+                      select: {
+                        id: true,
+                        nome: true,
+                        email: true
+                      }
+                    },
+                    dataCompra: true
+                  }
+                }
+              }
             }
           },
-          take: 10
+          take: 100 // Aumentar limite para ter mais materiais para filtrar
         }),
 
         // Orçamentos vencendo (próximos 7 dias)
@@ -256,14 +275,61 @@ export class DashboardController {
         estoqueBaixo: {
           titulo: 'Estoque Baixo',
           nivel: 'warning',
-          itens: estoqueBaixo.map(item => ({
-            id: item.id,
-            nome: item.nome,
-            sku: item.sku,
-            estoque: item.estoque,
-            estoqueMinimo: item.estoqueMinimo,
-            diferenca: item.estoque - item.estoqueMinimo
-          }))
+          itens: estoqueBaixo.map(item => {
+            // Determinar fornecedor: priorizar fornecedorId direto, senão usar fornecedor da última compra
+            const fornecedorDireto = item.fornecedor;
+            
+            // Buscar última compra ordenando por dataCompra
+            let ultimaCompra = null;
+            if (item.compraItems && item.compraItems.length > 0) {
+              // Ordenar compras por dataCompra (mais recente primeiro)
+              const comprasOrdenadas = [...item.compraItems]
+                .map(ci => ci.compra)
+                .filter(c => c && c.dataCompra)
+                .sort((a, b) => new Date(b.dataCompra).getTime() - new Date(a.dataCompra).getTime());
+              
+              ultimaCompra = comprasOrdenadas[0] || null;
+            }
+            
+            const fornecedorUltimaCompra = ultimaCompra?.fornecedor; // Objeto fornecedor da relação
+            const fornecedorIdUltimaCompra = ultimaCompra?.fornecedorId;
+            const fornecedorNomeUltimaCompra = ultimaCompra?.fornecedorNome;
+            
+            // Usar fornecedor direto se existir, senão usar fornecedor da última compra
+            let fornecedorFinal = fornecedorDireto;
+            let fornecedorIdFinal = item.fornecedorId;
+            
+            // Se não tem fornecedor direto, usar da última compra
+            if (!fornecedorFinal && fornecedorUltimaCompra) {
+              // Usar objeto fornecedor da relação (mais completo)
+              fornecedorIdFinal = fornecedorUltimaCompra.id;
+              fornecedorFinal = fornecedorUltimaCompra;
+            } else if (!fornecedorFinal && fornecedorIdUltimaCompra) {
+              // Se não tem objeto fornecedor mas tem fornecedorId, criar objeto básico
+              fornecedorIdFinal = fornecedorIdUltimaCompra;
+              fornecedorFinal = {
+                id: fornecedorIdUltimaCompra,
+                nome: fornecedorNomeUltimaCompra || 'Fornecedor não informado',
+                email: null
+              };
+            }
+            
+            return {
+              id: item.id,
+              nome: item.nome,
+              sku: item.sku,
+              estoque: item.estoque,
+              estoqueMinimo: item.estoqueMinimo,
+              unidadeMedida: item.unidadeMedida,
+              diferenca: item.estoque - item.estoqueMinimo,
+              fornecedorId: fornecedorIdFinal, // ✅ Fornecedor direto ou da última compra
+              fornecedor: fornecedorFinal ? {
+                id: fornecedorFinal.id,
+                nome: fornecedorFinal.nome,
+                email: fornecedorFinal.email || null
+              } : null // ✅ Fornecedor direto ou da última compra
+            };
+          })
         },
         orcamentosVencendo: {
           titulo: 'Orçamentos Vencendo',

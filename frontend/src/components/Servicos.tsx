@@ -14,6 +14,12 @@ import {
     type ServicosImportData,
     type ImportResult
 } from '../utils/servicosImportExport';
+import {
+    gerarProximoCodigo,
+    formatTipoServicoNome,
+    getTipoServicoStyle,
+    type TipoServicoClassificacao
+} from '../utils/servicoCodeGenerator';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>;
@@ -91,6 +97,12 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const [importResult, setImportResult] = useState<ImportResult | null>(null);
     const [isImporting, setIsImporting] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    
+    // ✅ NOVOS ESTADOS: Classificação e Visualização
+    const [tipoServicoFilter, setTipoServicoFilter] = useState<TipoServicoClassificacao | 'TODOS' | 'ENGENHARIA_PROJETOS'>('TODOS');
+    const [viewModeClassificacao, setViewModeClassificacao] = useState<'separada' | 'completa'>('separada');
+    const [showImportPreview, setShowImportPreview] = useState(false);
+    const [importPreviewData, setImportPreviewData] = useState<any[]>([]);
 
     const [formState, setFormState] = useState<ServiceFormState>({
         nome: '',
@@ -110,6 +122,18 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         loadServices();
     }, []);
+
+    // Gerar código automaticamente quando tipoServico mudar (apenas para novos serviços)
+    useEffect(() => {
+        if (!serviceToEdit && formState.tipoServico) {
+            const novoCodigo = gerarProximoCodigo(services, formState.tipoServico);
+            setFormState(prev => ({
+                ...prev,
+                codigo: novoCodigo,
+                internalCode: novoCodigo
+            }));
+        }
+    }, [formState.tipoServico, serviceToEdit]);
 
     const loadServices = async () => {
         try {
@@ -154,12 +178,22 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const filteredServices = useMemo(() => {
         return services
             .filter(s => typeFilter === 'Todos' || s.type === typeFilter || s.tipo === typeFilter)
+            .filter(s => {
+                // Filtro por tipo de serviço (classificação)
+                if (tipoServicoFilter === 'TODOS') return true;
+                if (tipoServicoFilter === 'ENGENHARIA_PROJETOS') {
+                    const tipoServico = (s as any).tipoServico;
+                    return tipoServico === 'ENGENHARIA' || tipoServico === 'PROJETOS';
+                }
+                const tipoServico = (s as any).tipoServico;
+                return tipoServico === tipoServicoFilter;
+            })
             .filter(s =>
                 (s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (s.internalCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (s.description || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
-    }, [services, searchTerm, typeFilter]);
+    }, [services, searchTerm, typeFilter, tipoServicoFilter]);
 
     // Estatísticas calculadas
     const stats = useMemo(() => {
@@ -177,6 +211,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             codigo: '',
             descricao: '',
             tipo: ServiceType.Instalacao,
+            tipoServico: 'MAO_DE_OBRA',
             name: '', 
             internalCode: '', 
             description: '', 
@@ -228,7 +263,19 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        setFormState(prev => ({ ...prev, [name]: value }));
+        
+        // Se mudou o tipoServico e não está editando, gerar código automaticamente
+        if (name === 'tipoServico' && !serviceToEdit) {
+            const novoCodigo = gerarProximoCodigo(services, value as TipoServicoClassificacao);
+            setFormState(prev => ({ 
+                ...prev, 
+                [name]: value,
+                codigo: novoCodigo,
+                internalCode: novoCodigo
+            }));
+        } else {
+            setFormState(prev => ({ ...prev, [name]: value }));
+        }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -315,10 +362,18 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     };
 
     // ✅ FUNÇÕES DE IMPORTAÇÃO/EXPORTAÇÃO
+    const handleDownloadTemplate = () => {
+        const template = generateEmptyTemplate();
+        downloadJSON(template, 'template-servicos-s3e.json');
+        toast.success('Template baixado!', {
+            description: 'Preencha o arquivo JSON e importe de volta'
+        });
+    };
+
     const handleDownloadEmptyTemplate = () => {
         const template = generateEmptyTemplate();
-        downloadJSON(template, 'servicos-template-vazio.json');
-        toast.success('Template vazio baixado!', {
+        downloadJSON(template, 'template-servicos-s3e.json');
+        toast.success('Template baixado!', {
             description: 'Preencha o arquivo JSON e importe de volta'
         });
     };
@@ -327,7 +382,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         const template = generateExampleTemplate();
         downloadJSON(template, 'servicos-template-exemplo.json');
         toast.success('Template com exemplos baixado!', {
-            description: '12 serviços de exemplo incluídos'
+            description: '10 serviços de exemplo incluídos'
         });
     };
 
@@ -362,13 +417,41 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 return;
             }
 
-            setIsImporting(true);
-            const response = await servicosService.importarJSON(data.servicos);
+            // Preparar dados para preview
+            const previewData = data.servicos.map((serv: any) => ({
+                codigo: serv.codigo || 'N/A',
+                nome: serv.nome || 'N/A',
+                tipoServico: serv.tipoServico || 'MAO_DE_OBRA',
+                preco: serv.preco || 0,
+                unidade: serv.unidade || 'un',
+                descricao: serv.descricao || ''
+            }));
+
+            // Mostrar preview antes de importar
+            setImportPreviewData(previewData);
+            setShowImportPreview(true);
+        } catch (error: any) {
+            console.error('Erro ao ler arquivo:', error);
+            toast.error('Erro ao ler arquivo', {
+                description: error.message || 'Verifique o formato do arquivo'
+            });
+        } finally {
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleConfirmImport = async () => {
+        setIsImporting(true);
+        try {
+            const response = await servicosService.importarJSON(importPreviewData);
 
             if (response.success && response.data) {
                 const importData = response.data as ImportResult;
                 setImportResult(importData);
                 setShowImportModal(true);
+                setShowImportPreview(false);
                 loadServices(); // Recarregar lista
                 
                 toast.success('Importação concluída!', {
@@ -382,9 +465,6 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             });
         } finally {
             setIsImporting(false);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
         }
     };
 
@@ -448,16 +528,16 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     <ActionsDropdown
                         actions={[
                             {
-                                label: 'Template Vazio',
-                                onClick: handleDownloadEmptyTemplate,
+                                label: 'Baixar Template JSON',
+                                onClick: handleDownloadTemplate,
                                 icon: <DocumentTextIcon className="w-4 h-4" />,
-                                variant: 'default'
+                                variant: 'primary'
                             },
                             {
                                 label: 'Template com Exemplos',
                                 onClick: handleDownloadExampleTemplate,
                                 icon: <DocumentTextIcon className="w-4 h-4" />,
-                                variant: 'primary'
+                                variant: 'default'
                             },
                             {
                                 label: 'Exportar JSON',
@@ -539,11 +619,105 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
+            {/* Botões de Classificação e Visualização */}
+            {viewModeClassificacao === 'separada' && (
+                <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">Classificação de Serviços</h3>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setViewModeClassificacao('completa')}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            >
+                                <ListBulletIcon className="w-5 h-5" />
+                                Visualização Completa
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                        <button
+                            onClick={() => setTipoServicoFilter('TODOS')}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                                tipoServicoFilter === 'TODOS'
+                                    ? 'bg-gradient-to-r from-gray-600 to-gray-500 text-white shadow-lg'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                        >
+                            Todos
+                        </button>
+                        <button
+                            onClick={() => setTipoServicoFilter('MAO_DE_OBRA')}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                                tipoServicoFilter === 'MAO_DE_OBRA'
+                                    ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg'
+                                    : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                            }`}
+                        >
+                            🔧 {formatTipoServicoNome('MAO_DE_OBRA')}
+                            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">
+                                {services.filter(s => (s as any).tipoServico === 'MAO_DE_OBRA').length}
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setTipoServicoFilter('MONTAGEM')}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                                tipoServicoFilter === 'MONTAGEM'
+                                    ? 'bg-gradient-to-r from-green-600 to-green-500 text-white shadow-lg'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                            }`}
+                        >
+                            ⚙️ {formatTipoServicoNome('MONTAGEM')}
+                            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">
+                                {services.filter(s => (s as any).tipoServico === 'MONTAGEM').length}
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setTipoServicoFilter('ENGENHARIA_PROJETOS')}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                                tipoServicoFilter === 'ENGENHARIA_PROJETOS'
+                                    ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-lg'
+                                    : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                            }`}
+                        >
+                            📐 Engenharia / Projetos
+                            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">
+                                {services.filter(s => {
+                                    const tipo = (s as any).tipoServico;
+                                    return tipo === 'ENGENHARIA' || tipo === 'PROJETOS';
+                                }).length}
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setTipoServicoFilter('ADMINISTRATIVO')}
+                            className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                                tipoServicoFilter === 'ADMINISTRATIVO'
+                                    ? 'bg-gradient-to-r from-orange-600 to-orange-500 text-white shadow-lg'
+                                    : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                            }`}
+                        >
+                            📋 {formatTipoServicoNome('ADMINISTRATIVO')}
+                            <span className="text-xs bg-white/20 px-2 py-1 rounded-full">
+                                {services.filter(s => (s as any).tipoServico === 'ADMINISTRATIVO').length}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Filtros e Toggle de Visualização */}
             <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
                     <div className="flex items-center gap-2">
+                        {viewModeClassificacao === 'completa' && (
+                            <button
+                                onClick={() => setViewModeClassificacao('separada')}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            >
+                                <Squares2X2Icon className="w-5 h-5" />
+                                Visualização Separada
+                            </button>
+                        )}
                         <button
                             onClick={() => setViewMode('grid')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
@@ -732,6 +906,14 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
                                             {getTypeIcon(service.type || service.tipo || ServiceType.Instalacao)} {service.type || service.tipo}
                                         </span>
+                                        {(service as any).tipoServico && (() => {
+                                            const style = getTipoServicoStyle((service as any).tipoServico);
+                                            return (
+                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${style.bg} ${style.text} ${style.ring}`}>
+                                                    {style.icon} {formatTipoServicoNome((service as any).tipoServico)}
+                                                </span>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                                 <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-green-100 text-green-800 ring-1 ring-green-200">
@@ -1052,6 +1234,97 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                 className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold"
                             >
                                 Desativar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ✅ MODAL DE PREVIEW DA IMPORTAÇÃO */}
+            {showImportPreview && importPreviewData.length > 0 && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-cyan-50">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-lg">
+                                        <EyeIcon className="w-7 h-7 text-white" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-gray-900">Preview da Importação</h2>
+                                        <p className="text-sm text-gray-600 mt-1">
+                                            {importPreviewData.length} serviço(s) serão importados
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setShowImportPreview(false);
+                                        setImportPreviewData([]);
+                                    }}
+                                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Lista de Serviços */}
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <div className="space-y-3">
+                                {importPreviewData.map((servico, index) => {
+                                    const style = getTipoServicoStyle(servico.tipoServico);
+                                    return (
+                                        <div
+                                            key={index}
+                                            className="bg-white border-2 border-gray-200 rounded-xl p-4 hover:border-blue-300 transition-all"
+                                        >
+                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                                <div className="md:col-span-2">
+                                                    <div className="flex items-center gap-3 mb-2">
+                                                        <span className={`px-3 py-1 text-xs font-bold rounded-lg ${style.bg} ${style.text} ${style.ring}`}>
+                                                            {style.icon} {formatTipoServicoNome(servico.tipoServico)}
+                                                        </span>
+                                                    </div>
+                                                    <h3 className="font-bold text-gray-900 mb-1">{servico.nome}</h3>
+                                                    <p className="text-sm text-gray-600">{servico.descricao || 'Sem descrição'}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-gray-500 mb-1">Código</p>
+                                                    <p className="font-mono font-semibold text-gray-900">{servico.codigo}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs text-gray-500 mb-1">Valor / Unidade</p>
+                                                    <p className="font-bold text-green-600">
+                                                        R$ {servico.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500">/{servico.unidade}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setShowImportPreview(false);
+                                    setImportPreviewData([]);
+                                }}
+                                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 font-semibold transition-all"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmImport}
+                                disabled={isImporting}
+                                className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isImporting ? 'Importando...' : 'Confirmar Importação'}
                             </button>
                         </div>
                     </div>

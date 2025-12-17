@@ -779,7 +779,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
         
         // Usar valorVenda se disponível, senão usar preco (preço de compra)
-        const precoVenda = material.valorVenda || material.preco;
+        let precoVenda = material.valorVenda || material.preco;
+        
+        // Se for barramento e a unidade for cm, ajustar o preço (dividir por 100)
+        if ((tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') && unidadeVenda === 'cm') {
+            precoVenda = precoVenda / 100; // Preço por metro / 100 = preço por cm
+        }
+        
         const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
 
         const newItem: OrcamentoItem = {

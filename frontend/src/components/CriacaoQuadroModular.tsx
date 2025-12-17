@@ -4,6 +4,7 @@ import { quadrosService, type QuadroConfig, type CaixaEstoque } from '../service
 import { axiosApiService } from '../services/axiosApi';
 import QuantityDialog from './ui/QuantityDialog';
 import AlertDialog from './ui/AlertDialog';
+import { identificarTipoMaterial, converterUnidade } from '../utils/unitConverter';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -356,7 +357,14 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
             const material = getItemById(config.barramento.materialId);
             if (material) {
                 const preco = getItemPrice(material);
-                total += preco * config.barramento.quantidade;
+                // Se a unidade for CM, o preço por metro deve ser dividido por 100 para obter preço por cm
+                if (config.barramento.unidade === 'CM') {
+                    const precoPorCm = preco / 100; // Preço por metro / 100 = preço por cm
+                    total += precoPorCm * config.barramento.quantidade;
+                } else {
+                    // Se for METROS, usar o preço direto
+                    total += preco * config.barramento.quantidade;
+                }
             }
         }
         
@@ -516,10 +524,12 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         setSearchDisjuntorTerm('');
     };
 
-    const handleSetBarramento = (materialId: string, quantidade: number) => {
+    const handleSetBarramento = (materialId: string, quantidade: number, unidade: 'METROS' | 'CM' = 'METROS') => {
+        // Se a unidade for CM, converter a quantidade para metros (quantidade em cm / 100)
+        // Mas manter a quantidade original e a unidade para cálculo correto de preço
         setConfig(prev => ({
             ...prev,
-            barramento: { materialId, quantidade }
+            barramento: { materialId, quantidade, unidade }
         }));
         setSearchBarramentoTerm('');
     };
@@ -1081,7 +1091,13 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                                 )}
                                             </div>
                                             <p className="text-sm text-gray-600">
-                                                Qtd: {config.barramento.quantidade} • Subtotal: R$ {(preco * config.barramento.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                Qtd: {config.barramento.quantidade} {config.barramento.unidade === 'CM' ? 'cm' : 'm'} • Subtotal: R$ {(() => {
+                                                    if (config.barramento.unidade === 'CM') {
+                                                        const precoPorCm = preco / 100;
+                                                        return (precoPorCm * config.barramento.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                                                    }
+                                                    return (preco * config.barramento.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                                                })()}
                                             </p>
                                         </div>
                                         <button
@@ -1107,18 +1123,92 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
                                     
                                     {searchBarramentoTerm && barramentosFiltrados.length > 0 && (
                                         <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-xl">
-                                            {barramentosFiltrados.slice(0, 10).map(material => 
-                                                renderItemInList(
-                                                    material,
-                                                    () => {
-                                                        abrirDialogoQuantidade(material, (qty) => {
-                                                            handleSetBarramento(material.id, qty);
-                                                            toast.success('Barramento adicionado!');
-                                                        });
-                                                    },
-                                                    'sm'
-                                                )
-                                            )}
+                                            {barramentosFiltrados.slice(0, 10).map(material => {
+                                                const tipoMat = identificarTipoMaterial(material.nome);
+                                                const isBarramento = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                const isCotacao = (material as any)._isCotacao;
+                                                const precoVenda = getItemPrice(material);
+                                                
+                                                if (isBarramento) {
+                                                    // Renderizar com botões CM/M para barramentos
+                                                    return (
+                                                        <div
+                                                            key={material.id}
+                                                            className="p-3 hover:bg-gray-50 flex justify-between items-center border-b border-gray-100 last:border-b-0 bg-blue-50/50"
+                                                        >
+                                                            <div className="flex-1">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <p className="font-semibold text-gray-900 text-sm">{material.nome}</p>
+                                                                    {isCotacao && (
+                                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                                            ❄️ Banco Frio
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-gray-600">
+                                                                    {isCotacao ? (
+                                                                        <>
+                                                                            <span className="text-gray-500 line-through mr-2">
+                                                                                Cotação: R$ {material.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                            </span>
+                                                                            <span className="font-semibold text-blue-700">
+                                                                                Venda: R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                            </span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            Estoque: {material.estoque} {material.unidadeMedida} • R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        </>
+                                                                    )}
+                                                                </p>
+                                                                <p className="text-xs text-indigo-600 mt-1">
+                                                                    💡 Pode ser inserido em metros ou centímetros
+                                                                </p>
+                                                            </div>
+                                                            <div className="flex gap-1 flex-shrink-0">
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        abrirDialogoQuantidade(material, (qty) => {
+                                                                            handleSetBarramento(material.id, qty, 'METROS');
+                                                                            toast.success('Barramento adicionado em metros!');
+                                                                        });
+                                                                    }}
+                                                                    className="px-2 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+                                                                    title="Adicionar em metros"
+                                                                >
+                                                                    + m
+                                                                </button>
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        abrirDialogoQuantidade(material, (qty) => {
+                                                                            handleSetBarramento(material.id, qty, 'CM');
+                                                                            toast.success('Barramento adicionado em centímetros!');
+                                                                        });
+                                                                    }}
+                                                                    className="px-2 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                                                                    title="Adicionar em centímetros"
+                                                                >
+                                                                    + cm
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                } else {
+                                                    // Renderizar normalmente para outros materiais
+                                                    return renderItemInList(
+                                                        material,
+                                                        () => {
+                                                            abrirDialogoQuantidade(material, (qty) => {
+                                                                handleSetBarramento(material.id, qty);
+                                                                toast.success('Barramento adicionado!');
+                                                            });
+                                                        },
+                                                        'sm'
+                                                    );
+                                                }
+                                            })}
                                         </div>
                                     )}
                                 </>

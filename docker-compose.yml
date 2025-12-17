@@ -1,12 +1,14 @@
 # ============================================
-# S3E System PRO - Docker Compose (Desenvolvimento)
+# S3E System PRO - Docker Compose (Desenvolvimento com Hot Reload)
 # ============================================
-# Este arquivo é para desenvolvimento local
-# Baseado na configuração de produção, mas com build local
+# Este arquivo é para desenvolvimento local com hot reload
+# Mantém as mesmas configurações de produção, mas com volumes montados
 # 
 # Para usar:
 # 1. Certifique-se de ter o arquivo .env configurado
 # 2. Execute: docker-compose up --build
+# 3. Frontend: http://localhost:5173 (Vite dev server)
+# 4. Backend: http://localhost:3001
 #
 # Para produção, use: docker-compose -f docker-compose.prod.yml up
 # ============================================
@@ -34,22 +36,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # Backend API
+  # Backend API - Desenvolvimento com Hot Reload
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      target: production
-    container_name: s3e-backend
+      target: development  # ✅ Usa stage de desenvolvimento para hot reload
+    container_name: s3e-backend-dev
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      NODE_ENV: development  # ✅ Modo desenvolvimento
       PORT: 3001
       DATABASE_URL: postgresql://${DB_USER:-s3e_prod}:${DB_PASSWORD:-s3e_prod_password_2024}@postgres:5432/${DB_NAME:-s3e_producao}?schema=public
       JWT_SECRET: ${JWT_SECRET:-s3e-super-secret-jwt-key-production-change-in-real-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:80}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:80}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:80,http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
       # Email/SMTP (Opcional)
@@ -62,14 +64,22 @@ services:
     ports:
       - "3001:3001"
     volumes:
+      # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
+      - ./backend/src:/app/src  # Código fonte (rw para hot reload)
+      - ./backend/prisma:/app/prisma  # Schema Prisma
+      - ./backend/package.json:/app/package.json
+      - ./backend/tsconfig.json:/app/tsconfig.json
+      - ./backend/tsconfig.build.json:/app/tsconfig.build.json
       - backend_uploads:/app/uploads  # Uploads persistentes
       - backend_logs:/app/logs        # Logs da aplicação
+      - backend_node_modules:/app/node_modules  # node_modules isolado
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - s3e-network
-    command: sh -c "npx prisma migrate resolve --applied 20241202_add_unit_conversion_fields 2>/dev/null || true; npx prisma migrate resolve --applied 20241204_add_ferramentas_kits 2>/dev/null || true; npx prisma migrate deploy || true; npx tsx prisma/seed.ts || true; node dist/app.js"
+    # ✅ Comando de desenvolvimento: tsx watch monitora mudanças e reinicia automaticamente
+    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run dev"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s
@@ -77,27 +87,38 @@ services:
       retries: 3
       start_period: 60s
 
-  # Frontend React App
+  # Frontend React App - Desenvolvimento com Hot Reload
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: production
+      target: development  # ✅ Usa stage de desenvolvimento para hot reload
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
-    container_name: s3e-frontend
+    container_name: s3e-frontend-dev
     restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
-      - "80:80"  # HTTP padrão
+      - "5173:5173"  # ✅ Porta do Vite dev server (hot reload)
+    volumes:
+      # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
+      - ./frontend/src:/app/src  # Código fonte (rw para hot reload)
+      - ./frontend/public:/app/public  # Arquivos públicos
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/package.json:/app/package.json
+      - ./frontend/vite.config.ts:/app/vite.config.ts
+      - ./frontend/tsconfig.json:/app/tsconfig.json
+      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
+      - frontend_node_modules:/app/node_modules  # node_modules isolado
     networks:
       - s3e-network
     depends_on:
       - backend
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # ✅ Comando de desenvolvimento: Vite monitora mudanças e recarrega automaticamente
+    # Não precisa de healthcheck no modo dev, Vite já tem seu próprio sistema
 
   # PgAdmin (Opcional)
   pgadmin:
@@ -124,6 +145,12 @@ volumes:
     driver: local
   backend_logs:
     driver: local
+  backend_node_modules:
+    driver: local
+    # ✅ Volume isolado para node_modules do backend (evita conflitos com host)
+  frontend_node_modules:
+    driver: local
+    # ✅ Volume isolado para node_modules do frontend (evita conflitos com host)
   pgadmin_data:
     driver: local
 

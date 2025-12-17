@@ -47,6 +47,12 @@ export function identificarTipoMaterial(nomeProduto: string): TipoMaterial {
         return TipoMaterial.BARRAMENTO_COBRE;
     }
     
+    // Barramentos genéricos (qualquer item com "barramento" no nome)
+    // Isso inclui "barramento" e "barramento cobre" conforme solicitado pelo usuário
+    if (nomeLower.includes('barramento')) {
+        return TipoMaterial.BARRAMENTO_COBRE;
+    }
+    
     // Trilhos DIN (sem a palavra "barramento")
     if (nomeLower.includes('trilho') && nomeLower.includes('din')) {
         return TipoMaterial.TRILHO_DIN;

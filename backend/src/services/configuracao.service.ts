@@ -6,6 +6,7 @@ export interface ConfiguracaoData {
   temaPreferido?: string; // 'light' | 'dark' | 'system'
   logoUrl?: string; // Logo geral da empresa
   logoLoginUrl?: string; // Logo específica para página de login
+  logoDanfeUrl?: string; // Logo específica para DANFE
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
@@ -61,6 +62,7 @@ export class ConfiguracaoService {
           temaPreferido: data.temaPreferido || 'light',
           logoUrl: data.logoUrl,
           logoLoginUrl: data.logoLoginUrl,
+          logoDanfeUrl: data.logoDanfeUrl,
           nomeEmpresa: data.nomeEmpresa || 'S3E Engenharia',
           emailContato: data.emailContato,
           telefoneContato: data.telefoneContato

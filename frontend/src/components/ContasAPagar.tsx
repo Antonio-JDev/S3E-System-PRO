@@ -299,7 +299,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
             });
             
             if (response.success) {
-                const message = response.data?.message || 'Contas de salários geradas!';
+                const message = (response.data as any)?.message || response.message || 'Contas de salários geradas!';
                 toast.success(message);
                 loadContasPagar();
             }
@@ -320,7 +320,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
             });
             
             if (response.success) {
-                const message = response.data?.message || 'Contas de despesas fixas geradas!';
+                const message = (response.data as any)?.message || response.message || 'Contas de despesas fixas geradas!';
                 toast.success(message);
                 loadContasPagar();
             }
@@ -935,9 +935,9 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                     </div>
                 </button>
 
-                <button
+                <div
                     onClick={() => setFilterTipo('RH')}
-                    className={`card-primary text-left transition-all transform hover:scale-105 relative ${
+                    className={`card-primary text-left transition-all transform hover:scale-105 relative cursor-pointer ${
                         filterTipo === 'RH' ? 'ring-4 ring-green-300 bg-green-50' : 'hover:shadow-lg'
                     }`}
                 >
@@ -956,21 +956,20 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                 <p className="text-xs text-gray-500 mt-1">Salários e Vales</p>
                             </div>
                         </div>
-                        <div onClick={(e) => { e.stopPropagation(); gerarContasSalarios(); }}>
-                            <button
-                                disabled={gerandoContas}
-                                className="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 transition-colors disabled:opacity-50"
-                                title="Gerar contas do mês atual"
-                            >
-                                {gerandoContas ? '...' : '+ Gerar'}
-                            </button>
-                        </div>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); gerarContasSalarios(); }}
+                            disabled={gerandoContas}
+                            className="px-3 py-2 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 transition-colors disabled:opacity-50"
+                            title="Gerar contas do mês atual"
+                        >
+                            {gerandoContas ? '...' : '+ Gerar'}
+                        </button>
                     </div>
-                </button>
+                </div>
 
-                <button
+                <div
                     onClick={() => setFilterTipo('DESPESA_FIXA')}
-                    className={`card-primary text-left transition-all transform hover:scale-105 relative ${
+                    className={`card-primary text-left transition-all transform hover:scale-105 relative cursor-pointer ${
                         filterTipo === 'DESPESA_FIXA' ? 'ring-4 ring-orange-300 bg-orange-50' : 'hover:shadow-lg'
                     }`}
                 >
@@ -989,17 +988,16 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                 <p className="text-xs text-gray-500 mt-1">Sede e Estrutura</p>
                             </div>
                         </div>
-                        <div onClick={(e) => { e.stopPropagation(); gerarContasDespesasFixas(); }}>
-                            <button
-                                disabled={gerandoContas}
-                                className="px-3 py-2 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-700 transition-colors disabled:opacity-50"
-                                title="Gerar contas do mês atual"
-                            >
-                                {gerandoContas ? '...' : '+ Gerar'}
-                            </button>
-                        </div>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); gerarContasDespesasFixas(); }}
+                            disabled={gerandoContas}
+                            className="px-3 py-2 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-700 transition-colors disabled:opacity-50"
+                            title="Gerar contas do mês atual"
+                        >
+                            {gerandoContas ? '...' : '+ Gerar'}
+                        </button>
                     </div>
-                </button>
+                </div>
             </div>
 
             {/* Botão para ver todas */}

@@ -49,8 +49,39 @@ export function ChartTooltipContent({
   nameKey,
   labelFormatter,
   formatter,
+  indicator,
+  hideLabel,
   ...props
-}: ChartTooltipContentProps) {
+}: ChartTooltipContentProps & { indicator?: "line" | "dot" | "dashed" | "none"; hideLabel?: boolean }) {
   return <div className={cn("", className)} {...props} />
+}
+
+interface ChartStyleProps {
+  id: string
+  config: ChartConfig
+}
+
+export function ChartStyle({ id, config }: ChartStyleProps) {
+  const colorConfig = Object.entries(config).filter(
+    ([_, config]) => config.color
+  )
+
+  if (!colorConfig.length) {
+    return null
+  }
+
+  return (
+    <style
+      dangerouslySetInnerHTML={{
+        __html: Object.entries(config)
+          .filter(([_, config]) => config.color)
+          .map(([key, itemConfig]) => {
+            const color = itemConfig.color || ''
+            return `[data-chart=${id}] { --color-${key}: ${color}; }`
+          })
+          .join("\n"),
+      }}
+    />
+  )
 }
 

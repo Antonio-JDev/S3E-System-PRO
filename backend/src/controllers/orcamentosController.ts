@@ -55,7 +55,7 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
           }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' } // Ordenar por data de criação (mais recente primeiro)
     });
 
     res.json(orcamentos);
@@ -194,60 +194,90 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         
         // Se for kit, calcular custo baseado nos materiais
         if (item.tipo === 'KIT' && item.kitId) {
-          const kit = await prisma.kit.findUnique({
-            where: { id: item.kitId },
-            include: {
-              items: {
-                include: { 
-                  material: {
-                    select: { preco: true, valorVenda: true }
+          try {
+            const kit = await prisma.kit.findUnique({
+              where: { id: item.kitId },
+              include: {
+                items: {
+                  include: { 
+                    material: {
+                      select: { preco: true, valorVenda: true }
+                    }
                   }
                 }
               }
+            });
+            
+            if (!kit) {
+              console.error(`❌ Kit não encontrado: ${item.kitId}`);
+              throw new Error(`Kit não encontrado: ${item.kitId}`);
             }
-          });
-          
-          if (kit) {
-            // Calcular custo total (soma dos preços de compra dos materiais do estoque real)
-            const custoTotalKit = kit.items.reduce((sum, kitItem) => 
-              sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
-            );
-            
-            // Calcular preço de venda total (soma dos valorVenda || preco dos materiais do estoque real)
-            let precoVendaTotalKit = kit.items.reduce((sum, kitItem) => {
-              const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
-              return sum + precoVendaItem * kitItem.quantidade;
-            }, 0);
-            
-            // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
-            if (kit.itensFaltantes) {
-              let itensFaltantesArray: any[] = [];
-              // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
-              if (typeof kit.itensFaltantes === 'string') {
-                try {
-                  const parsed = JSON.parse(kit.itensFaltantes);
-                  itensFaltantesArray = Array.isArray(parsed) ? parsed : [parsed];
-                } catch (e) {
-                  console.error('Erro ao fazer parse de itensFaltantes:', e);
-                  itensFaltantesArray = [];
+
+            if (!kit.items || kit.items.length === 0) {
+              console.warn(`⚠️ Kit ${kit.id} não possui itens cadastrados`);
+              // Se o kit não tem itens, usar valores padrão ou do item
+              custoUnit = item.custoUnit || 0;
+              precoVendaUnit = item.precoUnitario || item.custoUnit || 0;
+            } else {
+              // Calcular custo total (soma dos preços de compra dos materiais do estoque real)
+              const custoTotalKit = kit.items.reduce((sum, kitItem) => {
+                if (!kitItem.material) {
+                  console.warn(`⚠️ KitItem ${kitItem.id} não possui material associado`);
+                  return sum;
                 }
-              } else if (Array.isArray(kit.itensFaltantes)) {
-                itensFaltantesArray = kit.itensFaltantes;
-              } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
-                itensFaltantesArray = [kit.itensFaltantes];
+                return sum + (kitItem.material.preco || 0) * kitItem.quantidade;
+              }, 0);
+              
+              // Calcular preço de venda total (soma dos valorVenda || preco dos materiais do estoque real)
+              let precoVendaTotalKit = kit.items.reduce((sum, kitItem) => {
+                if (!kitItem.material) {
+                  return sum;
+                }
+                const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
+                return sum + precoVendaItem * kitItem.quantidade;
+              }, 0);
+              
+              // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
+              if (kit.itensFaltantes) {
+                let itensFaltantesArray: any[] = [];
+                // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
+                if (typeof kit.itensFaltantes === 'string') {
+                  try {
+                    const parsed = JSON.parse(kit.itensFaltantes);
+                    itensFaltantesArray = Array.isArray(parsed) ? parsed : [parsed];
+                  } catch (e) {
+                    console.error('Erro ao fazer parse de itensFaltantes:', e);
+                    itensFaltantesArray = [];
+                  }
+                } else if (Array.isArray(kit.itensFaltantes)) {
+                  itensFaltantesArray = kit.itensFaltantes;
+                } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
+                  itensFaltantesArray = [kit.itensFaltantes];
+                }
+                
+                // Somar preços dos itens do banco frio
+                const precoVendaBancoFrio = itensFaltantesArray.reduce((sum: number, itemBancoFrio: any) => {
+                  const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
+                  const quantidade = itemBancoFrio.quantidade || 0;
+                  return sum + (precoUnit * quantidade);
+                }, 0);
+                precoVendaTotalKit += precoVendaBancoFrio;
               }
               
-              // Somar preços dos itens do banco frio
-              const precoVendaBancoFrio = itensFaltantesArray.reduce((sum: number, itemBancoFrio: any) => {
-                const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
-                const quantidade = itemBancoFrio.quantidade || 0;
-                return sum + (precoUnit * quantidade);
-              }, 0);
-              precoVendaTotalKit += precoVendaBancoFrio;
+              custoUnit = custoTotalKit;
+              precoVendaUnit = precoVendaTotalKit;
             }
-            
-            custoUnit = custoTotalKit;
-            precoVendaUnit = precoVendaTotalKit;
+          } catch (error: any) {
+            console.error(`❌ Erro ao processar kit ${item.kitId}:`, error);
+            // Se houver erro ao buscar o kit, usar valores do item ou lançar erro
+            if (item.precoUnitario !== undefined && item.precoUnitario !== null) {
+              // Se o usuário já editou o preço, usar esse valor
+              precoUnit = item.precoUnitario;
+              custoUnit = item.custoUnit || 0;
+            } else {
+              // Se não, lançar erro para o usuário saber que o kit não foi encontrado
+              throw new Error(`Erro ao processar kit: ${error.message || 'Kit não encontrado ou inválido'}`);
+            }
           }
         }
         
@@ -349,11 +379,107 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
     });
 
     res.status(201).json(orcamento);
-  } catch (error) {
-    console.error('Erro ao criar orçamento:', error);
-    res.status(500).json({ error: 'Erro ao criar orçamento' });
+  } catch (error: any) {
+    console.error('❌ Erro ao criar orçamento:', error);
+    
+    // Retornar mensagem de erro mais específica
+    const errorMessage = error?.message || 'Erro ao criar orçamento';
+    const statusCode = error?.statusCode || 500;
+    
+    res.status(statusCode).json({ 
+      success: false,
+      error: errorMessage,
+      details: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+    });
   }
 };
+
+/**
+ * Resetar todos os orçamentos e a sequência
+ * ATENÇÃO: Esta função deleta TODOS os orçamentos permanentemente!
+ * @route POST /api/orcamentos/reset
+ * @access RBAC: Apenas admin
+ */
+export const resetarOrcamentos = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Verificar se o usuário é admin
+    const user = (req as any).user;
+    if (!user || user.role?.toLowerCase() !== 'admin') {
+      res.status(403).json({
+        success: false,
+        error: 'Acesso negado. Apenas administradores podem resetar orçamentos.'
+      });
+      return;
+    }
+
+    console.log('🗑️  Iniciando reset de orçamentos...');
+
+    // 1. Contar orçamentos antes de deletar
+    const totalOrcamentos = await prisma.orcamento.count();
+    console.log(`📊 Total de orçamentos encontrados: ${totalOrcamentos}`);
+
+    if (totalOrcamentos === 0) {
+      // Mesmo assim, resetar a sequência
+      await resetarSequenciaOrcamentos();
+      res.json({
+        success: true,
+        message: 'Não havia orçamentos para deletar. Sequência resetada.',
+        totalDeletados: 0
+      });
+      return;
+    }
+
+    // 2. Deletar todos os orçamentos (os itens serão deletados automaticamente por cascade)
+    console.log('🗑️  Deletando orçamentos...');
+    const resultado = await prisma.orcamento.deleteMany({});
+    console.log(`✅ ${resultado.count} orçamento(s) deletado(s)`);
+
+    // 3. Resetar a sequência do numeroSequencial
+    await resetarSequenciaOrcamentos();
+
+    console.log('✅ Reset completo!');
+
+    res.json({
+      success: true,
+      message: `Reset concluído! ${resultado.count} orçamento(s) deletado(s) e sequência resetada.`,
+      totalDeletados: resultado.count
+    });
+
+  } catch (error: any) {
+    console.error('❌ Erro ao resetar orçamentos:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Erro ao resetar orçamentos'
+    });
+  }
+};
+
+/**
+ * Função auxiliar para resetar a sequência do numeroSequencial
+ */
+async function resetarSequenciaOrcamentos() {
+  try {
+    // Resetar a sequência do PostgreSQL para o numeroSequencial
+    await prisma.$executeRawUnsafe(`
+      ALTER SEQUENCE "orcamentos_numeroSequencial_seq" RESTART WITH 1;
+    `);
+    console.log('✅ Sequência resetada para 1');
+  } catch (error: any) {
+    console.warn('⚠️  Erro ao resetar sequência:', error.message);
+    console.log('ℹ️  Tentando método alternativo...');
+    
+    try {
+      // Método alternativo
+      await prisma.$executeRawUnsafe(`
+        SELECT setval('orcamentos_numeroSequencial_seq', 1, false);
+      `);
+      console.log('✅ Sequência resetada (método alternativo)');
+    } catch (error2: any) {
+      console.error('❌ Erro ao resetar sequência:', error2.message);
+      throw new Error('Não foi possível resetar a sequência. Verifique as permissões do banco de dados.');
+    }
+  }
+}
 
 // Atualizar status do orçamento
 export const updateOrcamentoStatus = async (req: Request, res: Response): Promise<void> => {
@@ -636,6 +762,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       bdi,
       items,
       observacoes,
+      classificacao, // ✅ NOVO: Classificação do orçamento
       empresaCNPJ,
       enderecoObra,
       cidade,
@@ -996,7 +1123,12 @@ function mapearStatus(status: string): string {
     return 'Aprovado';
   }
   
-  if (statusLower.includes('recusado') || statusLower.includes('cancelado')) {
+  // Cancelados do sistema antigo devem ir para a aba/categorização de cancelados
+  if (statusLower.includes('cancelado') || statusLower.includes('cancelada')) {
+    return 'Cancelado';
+  }
+
+  if (statusLower.includes('recusado') || statusLower.includes('reprovado')) {
     return 'Recusado';
   }
   
@@ -1313,27 +1445,47 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
         // Mapear status
         const status = mapearStatus(orcamentoData.status || 'Aberto');
 
-        // Valor do orçamento
+        // Valor do orçamento (total da planilha)
         const valorTotal = parseFloat(orcamentoData.valorTotal) || 0;
 
-        // Criar itens do orçamento
-        const itemsData = [];
-        if (valorTotal > 0) {
-          // Criar item genérico "Serviço" com o valor total
-          itemsData.push({
-            tipo: 'SERVICO',
-            servicoNome: 'Serviço de Engenharia Elétrica',
-            descricao: `Orçamento migrado do sistema antigo (Número: ${orcamentoData.numero})`,
-            quantidade: 1,
-            custoUnit: valorTotal,
-            precoUnit: valorTotal,
-            subtotal: valorTotal
+        // Obter o número sequencial original do JSON
+        const numeroOriginal = parseInt(orcamentoData.numero) || null;
+        
+        if (!numeroOriginal) {
+          resultados.erros++;
+          resultados.detalhes.push({
+            linha,
+            numero: orcamentoData.numero || 'N/A',
+            cliente: orcamentoData.cliente,
+            status: 'erro',
+            mensagem: 'Número do orçamento inválido ou não fornecido'
           });
+          continue;
         }
 
-        // Criar orçamento
+        // Verificar se já existe um orçamento com esse número sequencial
+        const orcamentoExistente = await prisma.orcamento.findUnique({
+          where: { numeroSequencial: numeroOriginal }
+        });
+
+        if (orcamentoExistente) {
+          console.warn(`⚠️ Orçamento com número ${numeroOriginal} já existe. Pulando...`);
+          resultados.erros++;
+          resultados.detalhes.push({
+            linha,
+            numero: orcamentoData.numero,
+            cliente: orcamentoData.cliente,
+            status: 'erro',
+            mensagem: `Orçamento com número ${numeroOriginal} já existe no banco`
+          });
+          continue;
+        }
+
+        // Criar orçamento com o número sequencial original
+        // IMPORTANTE: Mesmo com @default(autoincrement()), podemos especificar manualmente o valor
         const orcamento = await prisma.orcamento.create({
           data: {
+            numeroSequencial: numeroOriginal, // ✅ Usar o número original do JSON
             clienteId,
             titulo: `Orçamento - ${orcamentoData.cliente}`,
             descricao: `Orçamento migrado do sistema antigo${orcamentoData.numero ? ` (Número Original: ${orcamentoData.numero})` : ''}`,
@@ -1343,9 +1495,9 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
             custoTotal: valorTotal,
             precoVenda: valorTotal,
             observacoes: `Orçamento histórico importado. Número original: ${orcamentoData.numero}`,
-            items: {
-              create: itemsData
-            },
+            // ⚠️ IMPORTANTE: não criar itens para orçamentos históricos
+            // Eles serão apenas cabeçalhos, mantendo o valor total e permitindo visualização,
+            // mas com a lista de itens vazia.
             createdAt: dataEmissao // Preservar data original
           }
         });
@@ -1358,7 +1510,7 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
           status: 'sucesso'
         });
 
-        console.log(`✅ Orçamento criado: #${orcamento.numeroSequencial} - ${orcamentoData.cliente} - R$ ${valorTotal.toFixed(2)}`);
+        console.log(`✅ Orçamento criado: #${orcamento.numeroSequencial} (original: ${orcamentoData.numero}) - ${orcamentoData.cliente} - R$ ${valorTotal.toFixed(2)}`);
 
       } catch (error: any) {
         resultados.erros++;
@@ -1371,6 +1523,30 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
         });
 
         console.error(`❌ Erro ao processar linha ${linha}:`, error.message);
+      }
+    }
+
+    // Atualizar a sequência do PostgreSQL para o próximo número após a importação
+    // Isso garante que novos orçamentos criados manualmente tenham números maiores que os importados
+    if (resultados.criados > 0) {
+      try {
+        // Encontrar o maior número sequencial importado
+        const maiorNumero = await prisma.orcamento.findFirst({
+          orderBy: { numeroSequencial: 'desc' },
+          select: { numeroSequencial: true }
+        });
+
+        if (maiorNumero) {
+          // Atualizar a sequência para o próximo número após o maior importado
+          const proximoNumero = maiorNumero.numeroSequencial + 1;
+          await prisma.$executeRawUnsafe(`
+            SELECT setval('orcamentos_numeroSequencial_seq', ${proximoNumero}, false);
+          `);
+          console.log(`✅ Sequência atualizada para começar em ${proximoNumero}`);
+        }
+      } catch (error: any) {
+        console.warn('⚠️  Erro ao atualizar sequência:', error.message);
+        // Não é crítico, apenas um aviso
       }
     }
 

@@ -50,6 +50,7 @@ import diagnosticoRoutes from './routes/diagnostico';
 import ferramentasRoutes from './routes/ferramentas.routes';
 import kitsFerramentaRoutes from './routes/kits-ferramenta.routes';
 import biRoutes from './routes/bi.routes';
+import resumoAdministrativoRoutes from './routes/resumoAdministrativo.routes';
 import { healthCheck } from './controllers/logsController';
 
 const app = express();
@@ -313,6 +314,7 @@ app.use('/api/diagnostico', diagnosticoRoutes);
 app.use('/api/ferramentas', ferramentasRoutes);
 app.use('/api/kits-ferramenta', kitsFerramentaRoutes);
 app.use('/api/bi', biRoutes);
+app.use('/api/resumo-administrativo', resumoAdministrativoRoutes);
 
 // Error handling middleware
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

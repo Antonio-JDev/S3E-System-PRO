@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { CryptoUtil } from '../utils/crypto.util';
 import { NFeSoapService } from '../services/nfe-soap.service';
+import { NFeSignatureService } from '../services/nfe-signature.service';
+import { NFeProcNFeUtil } from '../utils/nfe-procnfe.util';
 import NFeFilaService from '../services/nfe-fila.service';
 import NFeAuditService from '../services/nfe-audit.service';
 
@@ -61,7 +63,7 @@ export async function processarFilaNFe(limit = 10) {
 
       // Carregar certificado em PEM
       const pfxPath = empresa.certificadoPath;
-      const { key, cert } = require('../services/nfe-signature.service').NFeSignatureService.carregarCertificado(
+      const { key, cert } = NFeSignatureService.carregarCertificado(
         pfxPath,
         senhaDescriptografada
       );
@@ -109,14 +111,21 @@ export async function processarFilaNFe(limit = 10) {
       }
 
       // Atualizar NotaFiscal associada, se houver
-      if (item.notaFiscalId) {
+      if (item.notaFiscalId && resultado.protocolo) {
         try {
+          // Extrair chave de acesso e gerar procNFe completo
+          const dadosProtocolo = NFeProcNFeUtil.extrairDadosProtocolo(resultado.protocolo);
+          const chaveAcesso = dadosProtocolo.chaveAcesso;
+          
+          // Gerar procNFe completo (XML original + protocolo)
+          const procNFe = NFeProcNFeUtil.gerarProcNFe(item.xmlAssinado, resultado.protocolo);
+
           await prisma.notaFiscal.update({
             where: { id: item.notaFiscalId },
             data: {
               status: 'Autorizada',
-              chaveAcesso: resultado.protocolo || undefined,
-              xmlNFe: resultado.protocolo || undefined
+              chaveAcesso: chaveAcesso || undefined,
+              xmlNFe: procNFe || undefined
             }
           });
         } catch (nfError: any) {

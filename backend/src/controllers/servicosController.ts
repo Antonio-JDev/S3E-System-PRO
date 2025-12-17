@@ -10,6 +10,7 @@ export class ServicosController {
       const where: any = {};
       
       if (tipo) where.tipo = tipo;
+      if (req.query.tipoServico) where.tipoServico = req.query.tipoServico; // ✅ NOVO: Filtro por tipo de serviço
       if (ativo !== undefined) where.ativo = ativo === 'true';
       if (search) {
         where.OR = [
@@ -52,7 +53,7 @@ export class ServicosController {
 
   static async criarServico(req: Request, res: Response): Promise<void> {
     try {
-      const { nome, codigo, descricao, tipo, preco, unidade } = req.body;
+      const { nome, codigo, descricao, tipo, tipoServico, preco, unidade } = req.body;
 
       // Validação básica
       if (!nome || !codigo || !tipo || preco === undefined) {
@@ -82,6 +83,7 @@ export class ServicosController {
           codigo,
           descricao,
           tipo,
+          tipoServico: tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
           preco,
           unidade: unidade || 'un'
         }
@@ -97,7 +99,7 @@ export class ServicosController {
   static async atualizarServico(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { nome, codigo, descricao, tipo, preco, unidade, ativo } = req.body;
+      const { nome, codigo, descricao, tipo, tipoServico, preco, unidade, ativo } = req.body;
 
       // Verificar se serviço existe
       const servicoExistente = await prisma.servico.findUnique({
@@ -131,6 +133,7 @@ export class ServicosController {
           codigo,
           descricao,
           tipo,
+          tipoServico: tipoServico !== undefined ? tipoServico : servicoExistente.tipoServico, // ✅ NOVO: Tipo de serviço
           preco,
           unidade,
           ativo
@@ -219,6 +222,7 @@ export class ServicosController {
                 nome: servico.nome,
                 descricao: servico.descricao || null,
                 tipo: servico.tipo,
+                tipoServico: servico.tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
                 preco: servico.preco,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
@@ -241,6 +245,7 @@ export class ServicosController {
                 codigo: servico.codigo,
                 descricao: servico.descricao || null,
                 tipo: servico.tipo,
+                tipoServico: servico.tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
                 preco: servico.preco,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
@@ -308,6 +313,7 @@ export class ServicosController {
           nome: s.nome,
           descricao: s.descricao || '',
           tipo: s.tipo,
+          tipoServico: s.tipoServico, // ✅ NOVO: Tipo de serviço
           preco: s.preco,
           unidade: s.unidade,
           ativo: s.ativo

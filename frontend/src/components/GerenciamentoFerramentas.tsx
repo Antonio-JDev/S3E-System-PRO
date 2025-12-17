@@ -117,6 +117,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [ferramentas, setFerramentas] = useState<Ferramenta[]>([]);
     const [kits, setKits] = useState<KitFerramenta[]>([]);
     const [loading, setLoading] = useState(true);
+    const [estatisticas, setEstatisticas] = useState<any>(null);
     
     // Pesquisa e visualização
     const [pesquisa, setPesquisa] = useState('');
@@ -144,6 +145,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [ferramentaVisualizando, setFerramentaVisualizando] = useState<Ferramenta | null>(null);
     const [modalVisualizarKit, setModalVisualizarKit] = useState(false);
     const [kitVisualizando, setKitVisualizando] = useState<KitFerramenta | null>(null);
+    const [modalEditarKit, setModalEditarKit] = useState(false);
+    const [kitEditando, setKitEditando] = useState<KitFerramenta | null>(null);
     const [modalPersonalizarPDF, setModalPersonalizarPDF] = useState(false);
     const [kitParaPDF, setKitParaPDF] = useState<KitFerramenta | null>(null);
     const [kitPDFData, setKitPDFData] = useState<KitFerramentasPDFData | null>(null);
@@ -192,6 +195,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setModalVisualizarKit(false);
         setKitVisualizando(null);
     });
+    useEscapeKey(modalEditarKit, () => {
+        setModalEditarKit(false);
+        setKitEditando(null);
+        setFotoKitEntregue(null);
+        setFotoKitPreview('');
+    });
 
     useEffect(() => {
         loadData();
@@ -225,11 +234,22 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const loadData = async () => {
         setLoading(true);
         try {
-            await Promise.all([loadFerramentas(), loadKits(), loadEletricistas()]);
+            await Promise.all([loadFerramentas(), loadKits(), loadEletricistas(), loadEstatisticas()]);
         } catch (error) {
             console.error('Erro ao carregar dados:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadEstatisticas = async () => {
+        try {
+            const response = await axiosApiService.get('/api/ferramentas/estatisticas');
+            if (response.success && response.data) {
+                setEstatisticas(response.data);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar estatísticas:', error);
         }
     };
 
@@ -293,7 +313,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             const ferramentaData = {
                 ...formFerramenta,
                 valorCompra: formFerramenta.valorCompra ? parseFloat(formFerramenta.valorCompra) : null,
-                quantidade: formFerramenta.quantidade ? parseInt(formFerramenta.quantidade) : 0
+                quantidade: parseInt(formFerramenta.quantidade) || 0
             };
 
             if (ferramentaEditando) {
@@ -342,6 +362,23 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         if (!assinaturaEletricista.trim()) {
             toast.error('❌ A assinatura do eletricista é obrigatória!');
             return;
+        }
+
+        // Validar estoque antes de criar o kit
+        for (const item of formKit.itens) {
+            const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+            if (ferramenta) {
+                const quantidadeNecessaria = item.quantidade || 1;
+                const estoqueDisponivel = ferramenta.quantidade || 0;
+                
+                if (estoqueDisponivel < quantidadeNecessaria) {
+                    toast.error(
+                        `❌ Estoque insuficiente para ${ferramenta.nome}. ` +
+                        `Disponível: ${estoqueDisponivel}, Necessário: ${quantidadeNecessaria}`
+                    );
+                    return;
+                }
+            }
         }
 
         try {
@@ -403,6 +440,16 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
             });
         } else {
+            // Verificar se há estoque disponível antes de adicionar
+            const ferramenta = ferramentas.find(f => f.id === ferramentaId);
+            if (ferramenta) {
+                const estoqueDisponivel = ferramenta.quantidade || 0;
+                if (estoqueDisponivel <= 0) {
+                    toast.error(`❌ ${ferramenta.nome} não possui estoque disponível!`);
+                    return;
+                }
+            }
+            
             // Adicionar
             setFerramentasSelecionadas([...ferramentasSelecionadas, ferramentaId]);
             setFormKit({
@@ -493,6 +540,75 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const handleVisualizarKit = (kit: KitFerramenta) => {
         setKitVisualizando(kit);
         setModalVisualizarKit(true);
+    };
+
+    const handleEditarKit = (kit: KitFerramenta) => {
+        setKitEditando(kit);
+        setFormKit({
+            nome: kit.nome,
+            descricao: kit.descricao || '',
+            eletricistaId: kit.eletricistaId,
+            eletricistaNome: kit.eletricistaNome,
+            dataEntrega: new Date(kit.dataEntrega).toISOString().split('T')[0],
+            observacoes: kit.observacoes || '',
+            itens: kit.itens.map(item => ({
+                ferramentaId: item.ferramentaId,
+                quantidade: item.quantidade,
+                estadoEntrega: item.estadoEntrega,
+                observacoes: item.observacoes || ''
+            }))
+        });
+        setFotoKitPreview(kit.imagemUrl || '');
+        setModalEditarKit(true);
+    };
+
+    const handleSalvarEdicaoKit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!kitEditando) return;
+
+        try {
+            // Upload da foto se houver nova
+            let imagemUrl = kitEditando.imagemUrl;
+            if (fotoKitEntregue) {
+                const formData = new FormData();
+                formData.append('imagem', fotoKitEntregue);
+                
+                const uploadResponse = await axiosApiService.post('/api/kits-ferramenta/upload-foto', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                
+                if (uploadResponse.success && uploadResponse.data?.url) {
+                    imagemUrl = uploadResponse.data.url;
+                }
+            }
+
+            // Preparar novos itens (apenas os que não existem no kit original)
+            const itensExistentes = new Set(kitEditando.itens.map(i => i.ferramentaId));
+            const novosItens = formKit.itens.filter(item => !itensExistentes.has(item.ferramentaId));
+
+            const response = await axiosApiService.put(`/api/kits-ferramenta/${kitEditando.id}`, {
+                nome: formKit.nome,
+                descricao: formKit.descricao,
+                imagemUrl,
+                observacoes: formKit.observacoes,
+                itens: novosItens
+            });
+
+            if (response.success) {
+                toast.success('✅ Kit atualizado com sucesso!');
+                setModalEditarKit(false);
+                setKitEditando(null);
+                setFotoKitEntregue(null);
+                setFotoKitPreview('');
+                loadKits();
+                loadEstatisticas();
+            } else {
+                toast.error('❌ Erro ao atualizar kit: ' + (response.error || 'Erro desconhecido'));
+            }
+        } catch (error: any) {
+            console.error('Erro ao atualizar kit:', error);
+            toast.error('❌ Erro ao atualizar kit: ' + (error.response?.data?.error || error.message));
+        }
     };
 
     const handleEletricistaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -619,6 +735,52 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 </div>
             </div>
 
+            {/* Estatísticas - Aba Ferramentas */}
+            {activeTab === 'ferramentas' && estatisticas && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-2xl shadow-medium text-white">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-blue-100 text-sm font-semibold mb-1">Total de Ferramentas</p>
+                                <p className="text-3xl font-bold">{estatisticas.totalFerramentas || 0}</p>
+                            </div>
+                            <WrenchIcon className="w-12 h-12 text-blue-200 opacity-50" />
+                        </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-green-500 to-green-600 p-6 rounded-2xl shadow-medium text-white">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-green-100 text-sm font-semibold mb-1">Em Estoque</p>
+                                <p className="text-3xl font-bold">{estatisticas.totalEmEstoque || 0}</p>
+                            </div>
+                            <svg className="w-12 h-12 text-green-200 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-2xl shadow-medium text-white">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-purple-100 text-sm font-semibold mb-1">Em Uso</p>
+                                <p className="text-3xl font-bold">{estatisticas.totalFerramentasEmUso || 0}</p>
+                            </div>
+                            <BriefcaseIcon className="w-12 h-12 text-purple-200 opacity-50" />
+                        </div>
+                    </div>
+                    <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-6 rounded-2xl shadow-medium text-white">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-orange-100 text-sm font-semibold mb-1">Valor Total</p>
+                                <p className="text-2xl font-bold">R$ {(estatisticas.valorTotalEstoque || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                            </div>
+                            <svg className="w-12 h-12 text-orange-200 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Filtros */}
             {activeTab === 'ferramentas' && (
                 <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
@@ -698,6 +860,16 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             <span>🔢</span>
                                             <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{ferramenta.codigo}</span>
                                         </div>
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <span>📦</span>
+                                            <span className={`font-bold ${
+                                                (ferramenta.quantidade || 0) > 0 
+                                                    ? 'text-green-700' 
+                                                    : 'text-red-600'
+                                            }`}>
+                                                Estoque: {ferramenta.quantidade || 0} unidade(s)
+                                            </span>
+                                        </div>
                                         {ferramenta.valorCompra && (
                                             <div className="flex items-center gap-2 text-sm text-gray-600">
                                                 <span>💰</span>
@@ -758,6 +930,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Código</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Categoria</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Marca/Modelo</th>
+                                            <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Estoque</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Valor</th>
                                             <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Ações</th>
                                         </tr>
@@ -791,6 +964,15 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                         {ferramenta.modelo && <div>📦 {ferramenta.modelo}</div>}
                                                         {!ferramenta.marca && !ferramenta.modelo && <span className="text-gray-400">-</span>}
                                                     </div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${
+                                                        (ferramenta.quantidade || 0) > 0 
+                                                            ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
+                                                            : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                                                    }`}>
+                                                        {ferramenta.quantidade || 0}
+                                                    </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     {ferramenta.valorCompra ? (
@@ -938,7 +1120,14 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
                                         >
                                             <EyeIcon className="w-4 h-4" />
-                                            Ver Detalhes
+                                            Ver
+                                        </button>
+                                        <button
+                                            onClick={() => handleEditarKit(kit)}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
+                                        >
+                                            <PencilIcon className="w-4 h-4" />
+                                            Editar
                                         </button>
                                         <button
                                             onClick={() => handleGerarRecibo(kit)}
@@ -994,12 +1183,21 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                         <button
                                                             onClick={() => handleVisualizarKit(kit)}
                                                             className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                            title="Ver Detalhes"
                                                         >
                                                             <EyeIcon className="w-4 h-4" />
                                                         </button>
                                                         <button
+                                                            onClick={() => handleEditarKit(kit)}
+                                                            className="px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
+                                                            title="Editar Kit"
+                                                        >
+                                                            <PencilIcon className="w-4 h-4" />
+                                                        </button>
+                                                        <button
                                                             onClick={() => handleGerarRecibo(kit)}
                                                             className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                                            title="Gerar PDF"
                                                         >
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1099,6 +1297,22 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         className="input-field"
                                         placeholder="0.00"
                                     />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Quantidade em Estoque *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={formFerramenta.quantidade}
+                                        onChange={(e) => setFormFerramenta({...formFerramenta, quantidade: e.target.value})}
+                                        required
+                                        className="input-field"
+                                        placeholder="0"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">Quantidade disponível no estoque</p>
                                 </div>
                             </div>
 
@@ -1235,6 +1449,18 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         onChange={(e) => setFormFerramenta({...formFerramenta, valorCompra: e.target.value})}
                                         className="input-field"
                                     />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Quantidade em Estoque *</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={formFerramenta.quantidade}
+                                        onChange={(e) => setFormFerramenta({...formFerramenta, quantidade: e.target.value})}
+                                        required
+                                        className="input-field"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-1">Quantidade disponível no estoque</p>
                                 </div>
                             </div>
 
@@ -1403,21 +1629,53 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                     <div className="flex-1">
                                                         <p className="font-semibold text-gray-900">{ferramenta.nome}</p>
                                                         <p className="text-xs text-gray-500">{ferramenta.codigo} - {ferramenta.categoria}</p>
+                                                        <p className={`text-xs font-semibold mt-1 ${
+                                                            (ferramenta.quantidade || 0) > 0 
+                                                                ? 'text-green-600' 
+                                                                : 'text-red-600'
+                                                        }`}>
+                                                            Estoque: {ferramenta.quantidade || 0} unidade(s)
+                                                        </p>
                                                     </div>
                                                 </div>
 
                                                 {isSelected && itemKit && (
                                                     <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
                                                         <div>
-                                                            <label className="text-xs text-gray-600">Quantidade</label>
+                                                            <label className="text-xs text-gray-600">
+                                                                Quantidade
+                                                                {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                    <span className="text-red-600 ml-1">⚠️</span>
+                                                                )}
+                                                            </label>
                                                             <input
                                                                 type="number"
                                                                 min="1"
+                                                                max={ferramenta.quantidade || 0}
                                                                 value={itemKit.quantidade}
-                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'quantidade', parseInt(e.target.value))}
-                                                                className="input-field text-sm"
+                                                                onChange={(e) => {
+                                                                    const qty = parseInt(e.target.value) || 1;
+                                                                    const maxQty = ferramenta.quantidade || 0;
+                                                                    const finalQty = Math.max(1, Math.min(qty, maxQty));
+                                                                    handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
+                                                                }}
+                                                                className={`input-field text-sm ${
+                                                                    (ferramenta.quantidade || 0) < itemKit.quantidade 
+                                                                        ? 'border-red-500 bg-red-50' 
+                                                                        : ''
+                                                                }`}
                                                                 onClick={(e) => e.stopPropagation()}
                                                             />
+                                                            {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                <p className="text-xs text-red-600 mt-1">
+                                                                    Máximo disponível: {ferramenta.quantidade || 0}
+                                                                </p>
+                                                            )}
+                                                            {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
+                                                                <p className="text-xs text-green-600 mt-1">
+                                                                    Disponível: {ferramenta.quantidade || 0}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                         <div>
                                                             <label className="text-xs text-gray-600">Estado</label>
@@ -1814,6 +2072,296 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                 Gerar Recibo (PDF)
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Editar Kit */}
+            {modalEditarKit && kitEditando && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="modal-header bg-gradient-to-r from-yellow-600 to-yellow-500">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">✏️ Editar Kit de Ferramentas</h2>
+                                <p className="text-yellow-100 text-sm mt-1">{kitEditando.nome}</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setModalEditarKit(false);
+                                    setKitEditando(null);
+                                    setFotoKitEntregue(null);
+                                    setFotoKitPreview('');
+                                }}
+                                className="text-white/80 hover:text-white transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSalvarEdicaoKit} className="p-6 space-y-6">
+                            {/* Informações do Kit */}
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                                <h3 className="font-bold text-blue-900 mb-4">📋 Informações do Kit</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Nome do Kit *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.nome}
+                                            onChange={(e) => setFormKit({...formKit, nome: e.target.value})}
+                                            required
+                                            className="input-field"
+                                            placeholder="Ex: Kit Eletricista Completo"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Eletricista
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.eletricistaNome}
+                                            disabled
+                                            className="input-field bg-gray-100"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Eletricista não pode ser alterado</p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4 mt-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Data de Entrega
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={formKit.dataEntrega}
+                                            disabled
+                                            className="input-field bg-gray-100"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Data de entrega não pode ser alterada</p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Descrição
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.descricao}
+                                            onChange={(e) => setFormKit({...formKit, descricao: e.target.value})}
+                                            className="input-field"
+                                            placeholder="Opcional"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Itens Existentes */}
+                            <div>
+                                <h3 className="font-bold text-gray-900 mb-4">🔧 Ferramentas Atuais ({kitEditando.itens.length})</h3>
+                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2 max-h-48 overflow-y-auto">
+                                    {kitEditando.itens.map((item) => (
+                                        <div key={item.id} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+                                            <div>
+                                                <p className="font-semibold text-gray-900">{item.ferramenta.nome}</p>
+                                                <p className="text-xs text-gray-500">{item.ferramenta.codigo} - Qtd: {item.quantidade}</p>
+                                            </div>
+                                            <span className="px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800">
+                                                {item.estadoEntrega}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Adicionar Novos Itens */}
+                            <div>
+                                <h3 className="font-bold text-gray-900 mb-4">➕ Adicionar Novas Ferramentas</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200">
+                                    {ferramentas.filter(f => f.ativo && !kitEditando.itens.some(i => i.ferramentaId === f.id)).map((ferramenta) => {
+                                        const isSelected = ferramentasSelecionadas.includes(ferramenta.id);
+                                        const itemKit = formKit.itens.find(i => i.ferramentaId === ferramenta.id);
+
+                                        return (
+                                            <div key={ferramenta.id} className="bg-white border-2 rounded-xl p-4">
+                                                <div
+                                                    className={`flex items-start gap-3 cursor-pointer ${isSelected ? 'mb-3' : ''}`}
+                                                    onClick={() => handleAdicionarFerramentaAoKit(ferramenta.id)}
+                                                >
+                                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                                        isSelected ? 'bg-green-600 border-green-600' : 'border-gray-300 bg-white'
+                                                    }`}>
+                                                        {isSelected && (
+                                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <p className="font-semibold text-gray-900">{ferramenta.nome}</p>
+                                                        <p className="text-xs text-gray-500">{ferramenta.codigo} - {ferramenta.categoria}</p>
+                                                        <p className={`text-xs font-semibold mt-1 ${
+                                                            (ferramenta.quantidade || 0) > 0 
+                                                                ? 'text-green-600' 
+                                                                : 'text-red-600'
+                                                        }`}>
+                                                            Estoque: {ferramenta.quantidade || 0} unidade(s)
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {isSelected && itemKit && (
+                                                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
+                                                        <div>
+                                                            <label className="text-xs text-gray-600">
+                                                                Quantidade
+                                                                {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                    <span className="text-red-600 ml-1">⚠️</span>
+                                                                )}
+                                                            </label>
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                max={ferramenta.quantidade || 0}
+                                                                value={itemKit.quantidade}
+                                                                onChange={(e) => {
+                                                                    const qty = parseInt(e.target.value) || 1;
+                                                                    const maxQty = ferramenta.quantidade || 0;
+                                                                    const finalQty = Math.max(1, Math.min(qty, maxQty));
+                                                                    handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
+                                                                }}
+                                                                className={`input-field text-sm ${
+                                                                    (ferramenta.quantidade || 0) < itemKit.quantidade 
+                                                                        ? 'border-red-500 bg-red-50' 
+                                                                        : ''
+                                                                }`}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                            {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                <p className="text-xs text-red-600 mt-1">
+                                                                    Máximo disponível: {ferramenta.quantidade || 0}
+                                                                </p>
+                                                            )}
+                                                            {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
+                                                                <p className="text-xs text-green-600 mt-1">
+                                                                    Disponível: {ferramenta.quantidade || 0}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-xs text-gray-600">Estado</label>
+                                                            <select
+                                                                value={itemKit.estadoEntrega}
+                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
+                                                                className="select-field text-sm"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            >
+                                                                <option value="Novo">Novo</option>
+                                                                <option value="Bom">Bom</option>
+                                                                <option value="Regular">Regular</option>
+                                                                <option value="Desgastado">Desgastado</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Observações de Atualização */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    📝 Observações de Atualização
+                                </label>
+                                <textarea
+                                    value={formKit.observacoes}
+                                    onChange={(e) => setFormKit({...formKit, observacoes: e.target.value})}
+                                    className="input-field"
+                                    rows={3}
+                                    placeholder="Descreva as alterações realizadas no kit..."
+                                />
+                            </div>
+
+                            {/* Upload de Nova Foto */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    📷 Nova Foto do Kit
+                                </label>
+                                <div className="flex items-center gap-4">
+                                    {fotoKitPreview && (
+                                        <div className="w-32 h-32 border-2 border-gray-300 rounded-lg overflow-hidden">
+                                            <img 
+                                                src={fotoKitPreview} 
+                                                alt="Preview do kit" 
+                                                className="w-full h-full object-cover"
+                                            />
+                                        </div>
+                                    )}
+                                    <label className="flex-1 cursor-pointer">
+                                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                </svg>
+                                                <span className="text-sm text-gray-600">
+                                                    {fotoKitEntregue ? fotoKitEntregue.name : 'Clique para selecionar nova foto'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleFotoKitChange}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* Histórico */}
+                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                                <h4 className="font-bold text-gray-900 mb-3">📅 Histórico</h4>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <p className="text-xs text-gray-600 font-semibold mb-1">Data de Criação</p>
+                                        <p className="text-gray-900">{new Date(kitEditando.createdAt).toLocaleString('pt-BR')}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-600 font-semibold mb-1">Última Atualização</p>
+                                        <p className="text-gray-900">{new Date(kitEditando.updatedAt).toLocaleString('pt-BR')}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="modal-footer">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setModalEditarKit(false);
+                                        setKitEditando(null);
+                                        setFotoKitEntregue(null);
+                                        setFotoKitPreview('');
+                                    }}
+                                    className="btn-secondary"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="btn-primary"
+                                >
+                                    Salvar Alterações
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}

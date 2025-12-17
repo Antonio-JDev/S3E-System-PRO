@@ -274,16 +274,32 @@ class BIService {
     dataFim: string
   ): Promise<BIServiceResponse<ResumoGeral>> {
     try {
+      // Validar parâmetros
+      if (!dataInicio || !dataFim) {
+        return {
+          success: false,
+          error: 'Data de início e data de fim são obrigatórias',
+        };
+      }
+
       const response = await axiosApiService.get('/api/bi/resumo-geral', {
         dataInicio,
         dataFim,
       });
-      return { success: true, data: response.data?.data };
+
+      if (!response.success) {
+        return {
+          success: false,
+          error: response.error || 'Erro ao buscar resumo geral',
+        };
+      }
+
+      return { success: true, data: response.data?.data || response.data };
     } catch (error: any) {
       console.error('Erro ao buscar resumo geral:', error);
       return {
         success: false,
-        error: error.response?.data?.error || error.message || 'Erro ao buscar resumo geral',
+        error: error?.response?.data?.error || error?.message || 'Erro ao buscar resumo geral',
       };
     }
   }
@@ -297,16 +313,32 @@ class BIService {
     dataFim: string
   ): Promise<BIServiceResponse<DashboardMetrics>> {
     try {
+      // Validar parâmetros
+      if (!dataInicio || !dataFim) {
+        return {
+          success: false,
+          error: 'Data de início e data de fim são obrigatórias',
+        };
+      }
+
       const response = await axiosApiService.get('/api/bi/dashboard', {
         dataInicio,
         dataFim,
       });
-      return { success: true, data: response.data?.data };
+
+      if (!response.success) {
+        return {
+          success: false,
+          error: response.error || 'Erro ao buscar métricas do dashboard',
+        };
+      }
+
+      return { success: true, data: response.data?.data || response.data };
     } catch (error: any) {
       console.error('Erro ao buscar métricas do dashboard:', error);
       return {
         success: false,
-        error: error.response?.data?.error || error.message || 'Erro ao buscar métricas do dashboard',
+        error: error?.response?.data?.error || error?.message || 'Erro ao buscar métricas do dashboard',
       };
     }
   }
