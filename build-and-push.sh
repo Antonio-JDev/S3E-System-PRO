@@ -3,7 +3,7 @@
 # Uso: ./build-and-push.sh [version]
 # Exemplo: ./build-and-push.sh 1.0.0
 
-DOCKER_USER="seu-usuario-dockerhub"
+DOCKER_USER="odev10antonio"
 VERSION="${1:-latest}"
 
 echo "========================================"

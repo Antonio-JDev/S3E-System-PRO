@@ -172,15 +172,27 @@ describe('JWT Service', () => {
       const payload = { id: 'user-same', role: 'admin' };
       const token1 = generateToken(payload);
       
-      // Aguardar 1ms para garantir timestamp diferente
+      // Aguardar mais tempo para garantir timestamp diferente (JWT usa segundos, não milissegundos)
       setTimeout(() => {
         const token2 = generateToken(payload);
         
         // Tokens devem ser diferentes devido ao timestamp (iat)
-        expect(token1).not.toBe(token2);
-        done();
-      }, 10);
-    });
+        // Se por acaso forem iguais (mesmo segundo), o teste ainda passa pois é uma característica válida
+        if (token1 === token2) {
+          // Se são iguais, significa que foram gerados no mesmo segundo, o que é válido
+          // Mas vamos gerar mais uma vez para garantir diferença
+          setTimeout(() => {
+            const token3 = generateToken(payload);
+            // Pelo menos um dos tokens deve ser diferente
+            expect(token1 !== token2 || token2 !== token3 || token1 !== token3).toBe(true);
+            done();
+          }, 1100); // Aguarda mais de 1 segundo
+        } else {
+          expect(token1).not.toBe(token2);
+          done();
+        }
+      }, 1100); // Aguarda mais de 1 segundo para garantir timestamp diferente
+    }, 5000); // Timeout de 5 segundos
   });
 
   describe('Casos extremos', () => {

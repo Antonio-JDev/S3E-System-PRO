@@ -541,6 +541,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                         descricao: item.descricao || '',
                         unidadeMedida: item.unidadeMedida || item.material?.unidadeMedida || 'UN',
                         quantidade: item.quantidade || 1,
+                        ncm: item.cotacao?.ncm || item.material?.ncm || '', // ✅ NCM para faturamento
                         custoUnit: item.custoUnitario || item.custoUnit || item.material?.preco || 0,
                         // Usar valorVenda do material se disponível, senão usar precoUnit do orçamento
                         precoUnit: item.material?.valorVenda || item.precoUnitario || item.precoUnit || 0,
@@ -1134,7 +1135,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                     <div className="border border-gray-200 rounded-xl overflow-hidden">
                                         {/* Header da Tabela */}
                                         <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 px-6 py-3 grid grid-cols-12 gap-4 text-xs font-semibold text-gray-700 uppercase">
-                                            <div className="col-span-5">Item/Serviço</div>
+                                            <div className="col-span-4">Item/Serviço</div>
+                                            <div className="col-span-1 text-center">NCM</div>
                                             <div className="col-span-2 text-center">Quantidade</div>
                                             <div className="col-span-2 text-right">Valor Unit.</div>
                                             <div className="col-span-3 text-right">Subtotal</div>
@@ -1146,9 +1148,11 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                 const nomeItem = getItemNomeVenda(item);
                                                 const dataFrio = getItemDataBancoFrioVenda(item);
                                                 const isBancoFrio = getItemTipoVenda(item) === 'COTACAO' || getItemTipoVenda(item) === 'BANCO_FRIO' || item.cotacaoId || item.cotacao;
+                                                // Obter NCM: prioridade para cotação, depois material
+                                                const ncm = item.cotacao?.ncm || item.material?.ncm || '-';
                                                 return (
                                                 <div key={index} className="px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 transition-colors">
-                                                    <div className="col-span-5">
+                                                    <div className="col-span-4">
                                                         <p className="font-semibold text-gray-900">{nomeItem}</p>
                                                         {item.descricao && item.descricao !== nomeItem && (
                                                             <p className="text-xs text-gray-500 mt-1">{item.descricao}</p>
@@ -1170,6 +1174,11 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                                 )}
                                                             </div>
                                                         )}
+                                                    </div>
+                                                    <div className="col-span-1 text-center">
+                                                        <span className="text-gray-700 font-medium text-sm">
+                                                            {ncm}
+                                                        </span>
                                                     </div>
                                                     <div className="col-span-2 text-center">
                                                         <span className="text-gray-900 font-medium">
@@ -2063,6 +2072,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                                 Material/Serviço
                                                             </th>
                                                             <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
+                                                                NCM
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
                                                                 Quantidade
                                                             </th>
                                                             <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
@@ -2080,10 +2092,15 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                             const valorVenda = item.material?.valorVenda;
                                                             const precoUnit = valorVenda || item.precoUnit || item.precoUnitario || (item.subtotal / (item.quantidade || 1)) || 0;
                                                             const valorTotal = item.subtotal || (quantidade * precoUnit);
+                                                            // Obter NCM: prioridade para cotação, depois material
+                                                            const ncm = item.cotacao?.ncm || item.material?.ncm || '-';
                                                             return (
                                                                 <tr key={item.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                                                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                                                                         {item.material?.nome || item.servico?.nome || item.kit?.nome || item.descricao || 'Item sem nome'}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
+                                                                        {ncm}
                                                                     </td>
                                                                     <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                                                                         {quantidade} {item.unidadeMedida || 'UN'}

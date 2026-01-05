@@ -63,13 +63,30 @@ const envOrigins = process.env.CORS_ORIGIN
   : [];
 const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
+// Em desenvolvimento, permitir qualquer origem para facilitar testes (incluindo Tailscale)
+const isDevelopment = process.env.NODE_ENV === 'development';
+
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
+    // Em desenvolvimento, permitir qualquer origem (útil para Tailscale e testes locais)
+    if (isDevelopment) {
+      console.log(`✅ CORS permitido (dev mode) para origem: ${origin || 'undefined'}`);
+      return callback(null, true);
+    }
+    
     // Browsers podem enviar origin undefined em requests como curl ou same-origin
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
+    
+    // Verificar se é um IP do Tailscale (formato: http://100.x.x.x ou https://100.x.x.x)
+    if (origin && /^https?:\/\/100\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin)) {
+      console.log(`✅ CORS permitido para IP Tailscale: ${origin}`);
+      return callback(null, true);
+    }
+    
     console.warn(`🚫 CORS bloqueado para origem: ${origin}`);
+    console.warn(`   Origens permitidas: ${allowedOrigins.join(', ')}`);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,

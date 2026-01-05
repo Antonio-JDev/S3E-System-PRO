@@ -49,9 +49,9 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
         },
         items: {
           include: {
-            material: { select: { id: true, nome: true, sku: true, valorVenda: true, preco: true } },
+            material: { select: { id: true, nome: true, sku: true, valorVenda: true, preco: true, ncm: true } },
             kit: { select: { id: true, nome: true } },
-            cotacao: { select: { id: true, nome: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ NOVO
+            cotacao: { select: { id: true, nome: true, ncm: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ NOVO: Incluir NCM
           }
         }
       },
@@ -338,8 +338,38 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
     // 3. Aplicar impostos
     const precoVenda = valorComDesconto * (1 + (impostoPercentual || 0) / 100);
 
+    // Buscar o próximo número sequencial disponível
+    // Isso garante que não haverá conflito mesmo após importações com números específicos
+    const ultimoOrcamento = await prisma.orcamento.findFirst({
+      orderBy: { numeroSequencial: 'desc' },
+      select: { numeroSequencial: true }
+    });
+
+    const proximoNumero = (ultimoOrcamento?.numeroSequencial || 0) + 1;
+
+    // Atualizar a sequência do PostgreSQL para evitar conflitos futuros
+    // Tentar diferentes nomes possíveis da sequência
+    try {
+      // Tentar com o nome padrão do Prisma (case-sensitive)
+      await prisma.$executeRawUnsafe(`
+        SELECT setval('"orcamentos_numeroSequencial_seq"', ${proximoNumero}, true);
+      `);
+    } catch (error: any) {
+      try {
+        // Tentar com nome em minúsculas (PostgreSQL pode criar assim)
+        await prisma.$executeRawUnsafe(`
+          SELECT setval('orcamentos_numerosequencial_seq', ${proximoNumero}, true);
+        `);
+      } catch (error2: any) {
+        // Se não conseguir atualizar a sequência, não é crítico
+        // O importante é que estamos especificando o número manualmente
+        console.warn('⚠️  Não foi possível atualizar a sequência (não crítico):', error2.message);
+      }
+    }
+
     const orcamento = await prisma.orcamento.create({
       data: {
+        numeroSequencial: proximoNumero, // ✅ Especificar manualmente o número para evitar conflitos
         clienteId,
         titulo,
         descricao,
@@ -460,6 +490,7 @@ export const resetarOrcamentos = async (req: Request, res: Response): Promise<vo
 async function resetarSequenciaOrcamentos() {
   try {
     // Resetar a sequência do PostgreSQL para o numeroSequencial
+    // Tentar com o nome padrão do Prisma (case-sensitive)
     await prisma.$executeRawUnsafe(`
       ALTER SEQUENCE "orcamentos_numeroSequencial_seq" RESTART WITH 1;
     `);
@@ -469,14 +500,23 @@ async function resetarSequenciaOrcamentos() {
     console.log('ℹ️  Tentando método alternativo...');
     
     try {
-      // Método alternativo
+      // Método alternativo 1: setval com nome case-sensitive
       await prisma.$executeRawUnsafe(`
-        SELECT setval('orcamentos_numeroSequencial_seq', 1, false);
+        SELECT setval('"orcamentos_numeroSequencial_seq"', 1, false);
       `);
-      console.log('✅ Sequência resetada (método alternativo)');
+      console.log('✅ Sequência resetada (método alternativo 1)');
     } catch (error2: any) {
-      console.error('❌ Erro ao resetar sequência:', error2.message);
-      throw new Error('Não foi possível resetar a sequência. Verifique as permissões do banco de dados.');
+      try {
+        // Método alternativo 2: setval com nome em minúsculas
+        await prisma.$executeRawUnsafe(`
+          SELECT setval('orcamentos_numerosequencial_seq', 1, false);
+        `);
+        console.log('✅ Sequência resetada (método alternativo 2)');
+      } catch (error3: any) {
+        console.error('❌ Erro ao resetar sequência:', error3.message);
+        // Não lançar erro, apenas avisar - a sequência será ajustada automaticamente na próxima criação
+        console.warn('ℹ️  A sequência será ajustada automaticamente na próxima criação de orçamento');
+      }
     }
   }
 }
@@ -552,6 +592,7 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
 // Aprovar orçamento
 export const aprovarOrcamento = async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log('✅ Função aprovarOrcamento chamada!', { id: req.params.id, method: req.method });
     const { id } = req.params;
 
     const orcamento = await prisma.orcamento.findUnique({
@@ -1538,11 +1579,26 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
 
         if (maiorNumero) {
           // Atualizar a sequência para o próximo número após o maior importado
+          // Usar true (is_called) para que o próximo nextval() retorne o número correto
           const proximoNumero = maiorNumero.numeroSequencial + 1;
-          await prisma.$executeRawUnsafe(`
-            SELECT setval('orcamentos_numeroSequencial_seq', ${proximoNumero}, false);
-          `);
-          console.log(`✅ Sequência atualizada para começar em ${proximoNumero}`);
+          try {
+            // Tentar com o nome padrão do Prisma (case-sensitive)
+            await prisma.$executeRawUnsafe(`
+              SELECT setval('"orcamentos_numeroSequencial_seq"', ${proximoNumero}, true);
+            `);
+            console.log(`✅ Sequência atualizada para começar em ${proximoNumero}`);
+          } catch (error: any) {
+            try {
+              // Tentar com nome em minúsculas
+              await prisma.$executeRawUnsafe(`
+                SELECT setval('orcamentos_numerosequencial_seq', ${proximoNumero}, true);
+              `);
+              console.log(`✅ Sequência atualizada para começar em ${proximoNumero} (método alternativo)`);
+            } catch (error2: any) {
+              console.warn('⚠️  Não foi possível atualizar a sequência:', error2.message);
+              // Não é crítico, apenas um aviso
+            }
+          }
         }
       } catch (error: any) {
         console.warn('⚠️  Erro ao atualizar sequência:', error.message);

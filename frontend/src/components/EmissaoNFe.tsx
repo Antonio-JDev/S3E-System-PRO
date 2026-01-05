@@ -302,7 +302,10 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             const response = await axiosApiService.post<any>('/api/nfe/preview-xml', {
                 pedidoId: vendaSelecionada,
                 empresaId: empresaEmissoraId,
-                ambiente: ambiente
+                ambiente: ambiente,
+                cfop: cfop,
+                naturezaOperacao: naturezaOperacao,
+                serie: serie
             });
 
             if (response.success && response.data?.xml) {

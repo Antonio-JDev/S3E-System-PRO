@@ -50,13 +50,12 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-${CORS_ORIGIN}}
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
-      # Email/SMTP (Opcional)
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-noreply@s3eengenharia.com.br}
+      SMTP_HOST: ${SMTP_HOST:-smtps.uhserver.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-contato@s3eengenharia.com.br}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM:-contato@s3eengenharia.com.br}
     ports:
       - "3001:3001"
     volumes:

@@ -26,8 +26,7 @@ export class NFeDanfeService {
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
       textNodeName: '#text',
-      parseAttributeValue: true,
-      parseTrueNumberOnly: false
+      parseAttributeValue: true
     });
 
     let nfe: any;
@@ -145,8 +144,7 @@ export class NFeDanfeService {
     if (logoPath) {
       try {
         doc.image(logoPath, margin, 10, {
-          fit: [80, 40],
-          align: 'left'
+          fit: [80, 40]
         });
       } catch (error) {
         console.warn('⚠️ Erro ao adicionar logo:', error);

@@ -144,7 +144,7 @@ export class NFeController {
    */
   static async emitirNFe(req: Request, res: Response): Promise<void> {
     try {
-      const { pedidoId, empresaId, ambiente } = req.body;
+      const { pedidoId, empresaId, ambiente, cfop, naturezaOperacao, serie } = req.body;
 
       if (!pedidoId || !empresaId) {
         res.status(400).json({
@@ -160,11 +160,23 @@ export class NFeController {
       if (ambiente) {
         console.log(`   Ambiente (frontend): ${ambiente === '1' ? 'Produção' : 'Homologação'}`);
       }
+      if (cfop) {
+        console.log(`   CFOP: ${cfop}`);
+      }
+      if (naturezaOperacao) {
+        console.log(`   Natureza: ${naturezaOperacao}`);
+      }
+      if (serie) {
+        console.log(`   Série: ${serie}`);
+      }
 
       const resultado = await nfeService.processarEmissao(
         pedidoId,
         empresaId,
-        ambiente === '1' ? '1' : ambiente === '2' ? '2' : undefined
+        ambiente === '1' ? '1' : ambiente === '2' ? '2' : undefined,
+        cfop,
+        naturezaOperacao,
+        serie
       );
 
       res.status(200).json({
@@ -643,7 +655,7 @@ export class NFeController {
    */
   static async previewXmlNFe(req: Request, res: Response): Promise<void> {
     try {
-      const { pedidoId, empresaId, ambiente } = req.body;
+      const { pedidoId, empresaId, ambiente, cfop, naturezaOperacao, serie } = req.body;
 
       if (!pedidoId || !empresaId) {
         res.status(400).json({
@@ -663,7 +675,10 @@ export class NFeController {
       const resultado = await nfeService.gerarXmlPreview(
         pedidoId,
         empresaId,
-        ambiente === '1' ? '1' : ambiente === '2' ? '2' : undefined
+        ambiente === '1' ? '1' : ambiente === '2' ? '2' : undefined,
+        cfop,
+        naturezaOperacao,
+        serie
       );
 
       res.status(200).json({

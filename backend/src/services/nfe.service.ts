@@ -7,6 +7,7 @@ import { NFeChaveAcessoUtil } from '../utils/nfe-chave-acesso.util';
 import { NFeProcNFeUtil } from '../utils/nfe-procnfe.util';
 import { NFeXMLValidatorService } from './nfe-xml-validator.service';
 import NFeFilaService, { NFeModoEnvio } from './nfe-fila.service';
+import { VendasService } from './vendas.service';
 import * as fs from 'fs';
 
 const prisma = new PrismaClient();
@@ -22,6 +23,7 @@ export interface DadosNFe {
     inscricaoEstadual: string;
     endereco: any;
     regimeTributario: string; // 'SimplesNacional' | 'RegimeNormal'
+    codigoEstado?: string; // Código IBGE do estado (2 dígitos)
   };
   destinatario: {
     cnpj?: string;
@@ -95,95 +97,287 @@ export interface DadosNFe {
  */
 export class NFeService {
   /**
-   * Mock de pedido de venda para geração de NF-e
-   * Em produção, buscar do banco de dados
+   * Busca dados reais da venda para geração de NF-e
+   * @param vendaId - ID da venda
+   * @param empresaId - ID da empresa fiscal emissora
+   * @param cfop - CFOP da operação (opcional, padrão: 5101)
+   * @param naturezaOperacao - Natureza da operação (opcional)
+   * @param serie - Série da NF-e (opcional, padrão: '1')
+   * @returns Dados formatados para geração de NF-e
    */
-  async mockSalesOrder(pedidoId: string): Promise<DadosNFe> {
-    console.log(`📦 Buscando dados do pedido: ${pedidoId}`);
+  async buscarDadosVendaParaNFe(
+    vendaId: string,
+    empresaId: string,
+    cfop: string = '5101',
+    naturezaOperacao: string = 'Venda de Mercadoria',
+    serie: string = '1'
+  ): Promise<DadosNFe> {
+    console.log(`📦 Buscando dados reais da venda: ${vendaId}`);
 
-    // Mock baseado no XML fornecido
+    // 1. Buscar venda com orçamento e itens
+    const venda = await VendasService.buscarVenda(vendaId);
+    
+    if (!venda) {
+      throw new Error(`Venda não encontrada: ${vendaId}`);
+    }
+
+    if (!venda.orcamento) {
+      throw new Error(`Venda ${vendaId} não possui orçamento vinculado`);
+    }
+
+    // 2. Buscar empresa fiscal
+    const empresa = await prisma.empresaFiscal.findUnique({
+      where: { id: empresaId }
+    });
+
+    if (!empresa) {
+      throw new Error(`Empresa fiscal não encontrada: ${empresaId}`);
+    }
+
+    // 3. Buscar cliente
+    const cliente = venda.cliente;
+    if (!cliente) {
+      throw new Error(`Cliente não encontrado para a venda ${vendaId}`);
+    }
+
+    // 4. Preparar dados do emitente (empresa fiscal)
+    const emitente = {
+      cnpj: empresa.cnpj.replace(/\D/g, ''),
+      razaoSocial: empresa.razaoSocial,
+      nomeFantasia: empresa.nomeFantasia || empresa.razaoSocial,
+      inscricaoEstadual: empresa.inscricaoEstadual,
+      regimeTributario: empresa.regimeTributario === 'SimplesNacional' ? 'SimplesNacional' : 'RegimeNormal',
+      endereco: {
+        logradouro: empresa.endereco || '',
+        numero: empresa.numero || 'S/N',
+        complemento: empresa.complemento || '',
+        bairro: empresa.bairro || '',
+        codigoMunicipio: this.obterCodigoMunicipio(empresa.cidade, empresa.estado),
+        municipio: empresa.cidade || '',
+        uf: empresa.estado || '',
+        cep: empresa.cep.replace(/\D/g, '') || '',
+        telefone: empresa.telefone?.replace(/\D/g, '') || ''
+      }
+    };
+
+    // 5. Preparar dados do destinatário (cliente)
+    const cpfCnpjCliente = cliente.cpfCnpj.replace(/\D/g, '');
+    const isPessoaFisica = cpfCnpjCliente.length === 11;
+    
+    // Parsear endereço do cliente (pode estar em formato string ou objeto)
+    let enderecoCliente: any = {};
+    if (typeof cliente.endereco === 'string') {
+      // Tentar parsear endereço se estiver em formato estruturado
+      try {
+        enderecoCliente = JSON.parse(cliente.endereco);
+      } catch {
+        // Se não for JSON, usar como logradouro simples
+        enderecoCliente = { logradouro: cliente.endereco };
+      }
+    } else if (cliente.endereco) {
+      enderecoCliente = cliente.endereco;
+    }
+
+    const destinatario = {
+      [isPessoaFisica ? 'cpf' : 'cnpj']: cpfCnpjCliente,
+      razaoSocial: cliente.nome,
+      inscricaoEstadual: '', // Cliente pode não ter IE
+      indIEDest: 9, // 9 = Não contribuinte (padrão se não tiver IE)
+      endereco: {
+        logradouro: enderecoCliente.logradouro || cliente.endereco || '',
+        numero: enderecoCliente.numero || 'S/N',
+        complemento: enderecoCliente.complemento || '',
+        bairro: enderecoCliente.bairro || '',
+        codigoMunicipio: this.obterCodigoMunicipio(cliente.cidade || '', cliente.estado || ''),
+        municipio: cliente.cidade || '',
+        uf: cliente.estado || '',
+        cep: (cliente.cep || '').replace(/\D/g, '') || '',
+        telefone: (cliente.telefone || '').replace(/\D/g, '') || ''
+      }
+    };
+
+    // 6. Preparar produtos/itens do orçamento
+    const produtos: Array<{
+      codigo: string;
+      descricao: string;
+      ncm: string;
+      cfop: string;
+      unidade: string;
+      quantidade: number;
+      valorUnitario: number;
+      valorTotal: number;
+      gtin?: string;
+      impostos: any;
+    }> = [];
+
+    let valorTotalProdutos = 0;
+    let baseICMS = 0;
+    let valorICMS = 0;
+    let valorIPI = 0;
+    let valorPIS = 0;
+    let valorCOFINS = 0;
+
+    if (venda.orcamento.items && venda.orcamento.items.length > 0) {
+      for (const item of venda.orcamento.items) {
+        // Pular serviços (não vão na NF-e de produto)
+        if (item.tipo === 'SERVICO') {
+          continue;
+        }
+
+        // Obter SKU do material (código do produto na NFe)
+        const sku = item.material?.sku || item.cotacao?.nome?.substring(0, 6) || `ITEM${item.id.substring(0, 6).toUpperCase()}`;
+        
+        // Obter NCM (prioridade: cotação > material)
+        const ncm = item.cotacao?.ncm || item.material?.ncm || '00000000';
+        
+        // Obter descrição
+        const descricao = item.descricao || item.material?.nome || item.cotacao?.nome || 'Produto sem descrição';
+        
+        // Obter unidade de medida
+        const unidade = item.unidadeVenda || (item.material ? (item.material as any).unidadeMedida : undefined) || 'UN';
+        
+        // Obter quantidade
+        const quantidade = item.quantidade || 1;
+        
+        // Obter valor unitário (preço de venda)
+        const valorUnitario = item.precoUnit || 
+          (item.material ? ((item.material as any).valorVenda || (item.material as any).preco) : undefined) ||
+          (item.cotacao ? ((item.cotacao as any).valorVenda || (item.cotacao as any).valorUnitario) : undefined) || 0;
+        
+        // Calcular valor total
+        const valorTotal = item.subtotal || (quantidade * valorUnitario);
+        
+        valorTotalProdutos += valorTotal;
+
+        // Calcular impostos (valores padrão - podem ser ajustados conforme configuração fiscal)
+        const aliquotaICMS = 12; // 12% padrão
+        const aliquotaIPI = 0; // 0% padrão (pode ser ajustado)
+        const aliquotaPIS = 1.65; // 1.65% padrão
+        const aliquotaCOFINS = 7.60; // 7.60% padrão
+
+        const baseICMSItem = valorTotal;
+        const valorICMSItem = (baseICMSItem * aliquotaICMS) / 100;
+        const valorIPIItem = (valorTotal * aliquotaIPI) / 100;
+        const valorPISItem = (valorTotal * aliquotaPIS) / 100;
+        const valorCOFINSItem = (valorTotal * aliquotaCOFINS) / 100;
+
+        baseICMS += baseICMSItem;
+        valorICMS += valorICMSItem;
+        valorIPI += valorIPIItem;
+        valorPIS += valorPISItem;
+        valorCOFINS += valorCOFINSItem;
+
+        produtos.push({
+          codigo: sku, // ✅ SKU do material como código do produto
+          descricao: descricao.substring(0, 120), // Limitar a 120 caracteres (padrão NFe)
+          ncm: ncm.padStart(8, '0'), // Garantir 8 dígitos
+          cfop: cfop,
+          unidade: unidade,
+          quantidade: quantidade,
+          valorUnitario: valorUnitario,
+          valorTotal: valorTotal,
+          impostos: {
+            icms: {
+              origem: '0', // 0 = Nacional
+              cst: empresa.regimeTributario === 'SimplesNacional' ? '102' : '00',
+              aliquota: aliquotaICMS,
+              valor: valorICMSItem
+            },
+            ipi: {
+              cst: aliquotaIPI > 0 ? '50' : '99',
+              aliquota: aliquotaIPI,
+              valor: valorIPIItem
+            },
+            pis: {
+              cst: '01',
+              aliquota: aliquotaPIS,
+              valor: valorPISItem
+            },
+            cofins: {
+              cst: '01',
+              aliquota: aliquotaCOFINS,
+              valor: valorCOFINSItem
+            },
+            vTotTrib: valorICMSItem + valorIPIItem + valorPISItem + valorCOFINSItem
+          }
+        });
+      }
+    }
+
+    // 7. Obter próximo número da NF-e (buscar última nota da empresa)
+    const ultimaNota = await prisma.notaFiscal.findFirst({
+      where: {
+        empresaFiscalId: empresaId,
+        serie: serie
+      },
+      orderBy: {
+        numero: 'desc'
+      },
+      select: {
+        numero: true
+      }
+    });
+
+    const proximoNumero = ultimaNota ? parseInt(ultimaNota.numero) + 1 : 1;
+
+    // 8. Retornar dados formatados
     return {
       emitente: {
-        cnpj: '79502563000138',
-        razaoSocial: 'CCA IND. E COM. DE MATERIAIS ELETRICOS LTDA',
-        nomeFantasia: 'SIBRATEC',
-        inscricaoEstadual: '251387186',
-        regimeTributario: 'RegimeNormal',
-        endereco: {
-          logradouro: 'RUA SELESTA FRONZA',
-          numero: '430',
-          complemento: 'SALA 01',
-          bairro: 'TABOAO',
-          codigoMunicipio: '4214805',
-          municipio: 'Rio do Sul',
-          uf: 'SC',
-          cep: '89160540',
-          telefone: '4735212986'
-        }
+        ...emitente,
+        codigoEstado: this.obterCodigoEstado(empresa.estado || 'SC') // Adicionar código do estado
       },
-      destinatario: {
-        cnpj: '16625927000157',
-        razaoSocial: 'S3E SERVICOS DE MANUTENCAO ELETRICA LTDA',
-        inscricaoEstadual: '256792518',
-        endereco: {
-          logradouro: 'R BLUMENAU',
-          numero: '1622',
-          bairro: 'BARRA DO RIO',
-          codigoMunicipio: '4208203',
-          municipio: 'Itajai',
-          uf: 'SC',
-          cep: '88305104',
-          telefone: '4730838361'
-        }
-      },
-      produtos: [
-        {
-          codigo: '4714',
-          descricao: 'CONTATOR CC63 (CJ19-63) 220V - SIBRATEC',
-          ncm: '85364900',
-          cfop: '5102',
-          unidade: 'PC',
-          quantidade: 2,
-          valorUnitario: 218.15,
-          valorTotal: 436.30,
-          impostos: {
-            icms: { origem: '1', cst: '00', aliquota: 12, valor: 52.36 },
-            ipi: { cst: '50', aliquota: 3.25, valor: 14.18 },
-            pis: { cst: '01', aliquota: 1.65, valor: 6.34 },
-            cofins: { cst: '01', aliquota: 7.60, valor: 29.18 }
-          }
-        },
-        {
-          codigo: '10292',
-          descricao: 'DISJUNTOR DIN MONO JD156-63-1P-C20 - 20A - 6KA - SIBRATEC',
-          ncm: '85362000',
-          cfop: '5102',
-          unidade: 'PC',
-          quantidade: 12,
-          valorUnitario: 4.94,
-          valorTotal: 59.28,
-          impostos: {
-            icms: { origem: '1', cst: '00', aliquota: 12, valor: 7.11 },
-            ipi: { cst: '50', aliquota: 6.50, valor: 3.85 },
-            pis: { cst: '01', aliquota: 1.65, valor: 0.86 },
-            cofins: { cst: '01', aliquota: 7.60, valor: 3.96 }
-          }
-        }
-      ],
+      destinatario,
+      produtos,
       totais: {
-        valorProdutos: 4000.98,
-        valorNF: 4272.22,
-        baseICMS: 4000.98,
-        valorICMS: 480.14,
-        valorIPI: 271.24,
-        valorPIS: 58.09,
-        valorCOFINS: 267.58
+        valorProdutos: valorTotalProdutos,
+        valorNF: valorTotalProdutos, // Valor total da NF (pode incluir frete, desconto, etc)
+        baseICMS: baseICMS,
+        valorICMS: valorICMS,
+        valorIPI: valorIPI,
+        valorPIS: valorPIS,
+        valorCOFINS: valorCOFINS
       },
-      naturezaOperacao: 'Venda de Mercadoria',
-      serie: '1',
-      numero: 399171,
+      naturezaOperacao: naturezaOperacao,
+      serie: serie,
+      numero: proximoNumero,
       dataEmissao: new Date()
     };
+  }
+
+  /**
+   * Obtém código do município (IBGE) - função auxiliar
+   * Em produção, buscar de uma tabela de municípios
+   * Por enquanto, retorna código padrão baseado no estado
+   */
+  private obterCodigoMunicipio(cidade: string, estado: string): string {
+    // Códigos de exemplo - em produção, buscar de uma tabela de municípios
+    const codigosExemplo: { [key: string]: string } = {
+      'SC': '4208203', // Itajaí (padrão SC)
+      'SP': '3550308', // São Paulo
+      'RJ': '3304557', // Rio de Janeiro
+      'MG': '3106200', // Belo Horizonte
+      'RS': '4314902', // Porto Alegre
+      'PR': '4106902', // Curitiba
+    };
+
+    return codigosExemplo[estado] || '4208203'; // Padrão: Itajaí/SC
+  }
+
+  /**
+   * Obtém código do estado (UF) - função auxiliar
+   * Retorna código IBGE do estado (2 dígitos)
+   */
+  private obterCodigoEstado(uf: string): string {
+    const codigosEstados: { [key: string]: string } = {
+      'AC': '12', 'AL': '27', 'AP': '16', 'AM': '13', 'BA': '29',
+      'CE': '23', 'DF': '53', 'ES': '32', 'GO': '52', 'MA': '21',
+      'MT': '51', 'MS': '50', 'MG': '31', 'PA': '15', 'PB': '25',
+      'PR': '41', 'PE': '26', 'PI': '22', 'RJ': '33', 'RN': '24',
+      'RS': '43', 'RO': '11', 'RR': '14', 'SC': '42', 'SP': '35',
+      'SE': '28', 'TO': '17'
+    };
+
+    return codigosEstados[uf.toUpperCase()] || '42'; // Padrão: SC
   }
 
   /**
@@ -219,7 +413,7 @@ export class NFeService {
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
   <infNFe Id="NFe${chaveAcesso}" versao="4.00">
     <ide>
-      <cUF>42</cUF>
+      <cUF>${dados.emitente.codigoEstado || '42'}</cUF>
       <cNF>${cNF}</cNF>
       <natOp>${dados.naturezaOperacao}</natOp>
       <mod>55</mod>
@@ -940,7 +1134,10 @@ export class NFeService {
   async processarEmissao(
     pedidoId: string,
     empresaId: string,
-    ambienteSelecionado?: '1' | '2'
+    ambienteSelecionado?: '1' | '2',
+    cfop?: string,
+    naturezaOperacao?: string,
+    serie?: string
   ): Promise<any> {
     let xmlNFe: string | null = null;
     let xmlAssinado: string | null = null;
@@ -983,8 +1180,18 @@ export class NFeService {
         throw new Error('Senha do certificado não pode ser descriptografada. Reconfigure o certificado.');
       }
 
-      // 2. Buscar dados do pedido (mock)
-      const dadosPedido = await this.mockSalesOrder(pedidoId);
+      // 2. Buscar dados reais da venda do banco de dados
+      const cfopFinal = cfop || '5101'; // CFOP padrão se não fornecido
+      const naturezaFinal = naturezaOperacao || 'Venda de Mercadoria'; // Natureza padrão
+      const serieFinal = serie || '1'; // Série padrão
+      
+      const dadosPedido = await this.buscarDadosVendaParaNFe(
+        pedidoId,
+        empresaId,
+        cfopFinal,
+        naturezaFinal,
+        serieFinal
+      );
       
       // Definir ambiente: prioriza seleção do frontend; se não vier, usa sempre homologação ('2')
       const ambiente: '1' | '2' =
@@ -1246,7 +1453,10 @@ export class NFeService {
   async gerarXmlPreview(
     pedidoId: string,
     empresaId: string,
-    ambienteSelecionado?: '1' | '2'
+    ambienteSelecionado?: '1' | '2',
+    cfop?: string,
+    naturezaOperacao?: string,
+    serie?: string
   ): Promise<{
     ambiente: '1' | '2';
     xml: string;
@@ -1273,8 +1483,18 @@ export class NFeService {
       throw new Error('Empresa fiscal não encontrada');
     }
 
-    // 2. Buscar dados do pedido (mock por enquanto)
-    const dadosPedido = await this.mockSalesOrder(pedidoId);
+    // 2. Buscar dados reais da venda do banco de dados
+    const cfopFinal = cfop || '5101'; // CFOP padrão se não fornecido
+    const naturezaFinal = naturezaOperacao || 'Venda de Mercadoria'; // Natureza padrão
+    const serieFinal = serie || '1'; // Série padrão
+    
+    const dadosPedido = await this.buscarDadosVendaParaNFe(
+      pedidoId,
+      empresaId,
+      cfopFinal,
+      naturezaFinal,
+      serieFinal
+    );
 
     // 3. Definir ambiente (mesma regra da emissão)
     const ambiente: '1' | '2' =

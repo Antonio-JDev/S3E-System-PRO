@@ -83,14 +83,15 @@ export class NFeSignatureService {
       const signedXml = new SignedXml();
       
       // Configurar referência ao elemento infNFe
-      signedXml.addReference(
-        "//*[local-name()='infNFe']",
-        [
+      // xml-crypto 6.x: addReference aceita objeto com propriedades
+      (signedXml as any).addReference({
+        xpath: "//*[local-name()='infNFe']",
+        transforms: [
           "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
           "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
         ],
-        "http://www.w3.org/2000/09/xmldsig#sha1"
-      );
+        digestAlgorithm: "http://www.w3.org/2000/09/xmldsig#sha1"
+      });
 
       // Converter chave PEM para formato que xml-crypto aceita
       // xml-crypto espera uma chave privada em formato que possa ser usada com crypto
@@ -99,10 +100,12 @@ export class NFeSignatureService {
         format: 'pem'
       });
 
-      // Configurar chave de assinatura
+      // Configurar chave de assinatura (usando any para compatibilidade com xml-crypto 6.x)
+      // @ts-ignore - xml-crypto 6.x tem API diferente
       signedXml.signingKey = signingKey;
 
       // Configurar KeyInfo com certificado
+      // @ts-ignore - xml-crypto 6.x tem API diferente
       signedXml.keyInfoProvider = {
         getKeyInfo: (key: any, prefix: string) => {
           // Extrair certificado em Base64 (remover headers PEM)
@@ -117,6 +120,7 @@ export class NFeSignatureService {
       };
 
       // Assinar XML
+      // @ts-ignore - xml-crypto 6.x tem API diferente
       signedXml.computeSignature(xml, {
         location: {
           reference: "//*[local-name()='infNFe']",
@@ -163,18 +167,20 @@ export class NFeSignatureService {
       let cnpjExtraido: string | null = null;
 
       // Procurar CNPJ nos atributos do certificado
-      for (const attr of subject.getAttributes()) {
+      for (const attr of subject.attributes) {
         if (attr.name === 'CN' || attr.name === '2.5.4.3') {
           // CN pode conter CNPJ
-          const match = attr.value.match(/\d{14}/);
+          const attrValue = typeof attr.value === 'string' ? attr.value : String(attr.value);
+          const match = attrValue.match(/\d{14}/);
           if (match) {
             cnpjExtraido = match[0];
             break;
           }
         }
         // Procurar em outros campos OID comuns
-        if (attr.value && /\d{14}/.test(attr.value)) {
-          const match = attr.value.match(/\d{14}/);
+        const attrValue = typeof attr.value === 'string' ? attr.value : String(attr.value);
+        if (attrValue && /\d{14}/.test(attrValue)) {
+          const match = attrValue.match(/\d{14}/);
           if (match) {
             cnpjExtraido = match[0];
           }

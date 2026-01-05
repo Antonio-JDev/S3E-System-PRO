@@ -66,7 +66,7 @@ export const buscarFerramenta = async (req: Request, res: Response): Promise<voi
  */
 export const criarFerramenta = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = (req as any).user?.userId || (req as any).user?.id;
     const {
       nome,
       codigo,
@@ -117,17 +117,24 @@ export const criarFerramenta = async (req: Request, res: Response): Promise<void
       }
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'CREATE',
-        entity: 'Ferramenta',
-        entityId: ferramenta.id,
-        description: `Ferramenta "${nome}" cadastrada`,
-        metadata: { codigo, categoria }
+    // Audit log (apenas se userId estiver disponível)
+    if (userId) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: userId,
+            action: 'CREATE',
+            entity: 'Ferramenta',
+            entityId: ferramenta.id,
+            description: `Ferramenta "${nome}" cadastrada`,
+            metadata: { codigo, categoria }
+          }
+        });
+      } catch (logError) {
+        console.error('❌ Erro ao criar audit log:', logError);
+        // Não interromper o fluxo se o log falhar
       }
-    });
+    }
 
     console.log(`✅ Ferramenta criada: ${ferramenta.nome} (${ferramenta.codigo})`);
 
@@ -151,7 +158,7 @@ export const criarFerramenta = async (req: Request, res: Response): Promise<void
  */
 export const atualizarFerramenta = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = (req as any).user?.userId || (req as any).user?.id;
     const { id } = req.params;
     const {
       nome,
@@ -211,17 +218,24 @@ export const atualizarFerramenta = async (req: Request, res: Response): Promise<
       }
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'UPDATE',
-        entity: 'Ferramenta',
-        entityId: id,
-        description: `Ferramenta "${ferramentaAtualizada.nome}" atualizada`,
-        metadata: req.body
+    // Audit log (apenas se userId estiver disponível)
+    if (userId) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: userId,
+            action: 'UPDATE',
+            entity: 'Ferramenta',
+            entityId: id,
+            description: `Ferramenta "${ferramentaAtualizada.nome}" atualizada`,
+            metadata: req.body
+          }
+        });
+      } catch (logError) {
+        console.error('❌ Erro ao criar audit log:', logError);
+        // Não interromper o fluxo se o log falhar
       }
-    });
+    }
 
     console.log(`✅ Ferramenta atualizada: ${ferramentaAtualizada.nome}`);
 
@@ -245,7 +259,7 @@ export const atualizarFerramenta = async (req: Request, res: Response): Promise<
  */
 export const deletarFerramenta = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = (req as any).user?.userId;
+    const userId = (req as any).user?.userId || (req as any).user?.id;
     const { id } = req.params;
 
     const ferramenta = await prisma.ferramenta.findUnique({
@@ -266,17 +280,24 @@ export const deletarFerramenta = async (req: Request, res: Response): Promise<vo
       data: { ativo: false }
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        userId: userId,
-        action: 'DELETE',
-        entity: 'Ferramenta',
-        entityId: id,
-        description: `Ferramenta "${ferramenta.nome}" desativada`,
-        metadata: { codigo: ferramenta.codigo }
+    // Audit log (apenas se userId estiver disponível)
+    if (userId) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            userId: userId,
+            action: 'DELETE',
+            entity: 'Ferramenta',
+            entityId: id,
+            description: `Ferramenta "${ferramenta.nome}" desativada`,
+            metadata: { codigo: ferramenta.codigo }
+          }
+        });
+      } catch (logError) {
+        console.error('❌ Erro ao criar audit log:', logError);
+        // Não interromper o fluxo se o log falhar
       }
-    });
+    }
 
     console.log(`✅ Ferramenta desativada: ${ferramenta.nome}`);
 

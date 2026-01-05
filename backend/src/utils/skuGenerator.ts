@@ -36,19 +36,18 @@ function gerarCodigoAleatorio(length: number = 8): string {
 
 /**
  * Gera um SKU único e aleatório para materiais
- * Formato: SKU-XXXX-XXXX (8 caracteres aleatórios divididos em 2 grupos)
+ * Formato: XXXXXX (6 caracteres alfanuméricos)
  * 
  * Esta função garante que cada material terá um SKU único, mesmo quando há muitos
  * materiais com nomes parecidos. A aleatoriedade é alta para evitar colisões.
  * 
  * IMPORTANTE: O NCM fornecido NÃO é alterado - ele é apenas usado como referência
- * opcional para incluir no SKU (últimos 4 dígitos). O NCM original do material
- * deve ser salvo separadamente no campo 'ncm' do material.
+ * opcional. O NCM original do material deve ser salvo separadamente no campo 'ncm' do material.
  * 
  * @param prismaTransaction - Transação do Prisma (opcional, usa prisma padrão se não fornecido)
- * @param ncm - NCM do material (opcional, usado apenas como referência para o SKU - NÃO altera o NCM)
+ * @param ncm - NCM do material (opcional, não usado mais no SKU - mantido apenas para compatibilidade)
  * @param maxTentativas - Número máximo de tentativas para gerar SKU único (padrão: 20)
- * @returns SKU único e válido
+ * @returns SKU único e válido com 6 caracteres
  */
 export async function gerarSKUUnico(
     prismaTransaction?: any,
@@ -62,18 +61,9 @@ export async function gerarSKUUnico(
     const delayAleatorio = () => new Promise(resolve => setTimeout(resolve, Math.random() * 10));
     
     while (tentativas < maxTentativas) {
-        // Gerar três partes aleatórias para maior variabilidade
-        // Parte 1: 4 caracteres aleatórios
-        // Parte 2: 4 caracteres aleatórios
-        // Isso gera 36^8 = 2.8 trilhões de combinações possíveis
-        const parte1 = gerarCodigoAleatorio(4);
-        const parte2 = gerarCodigoAleatorio(4);
-        
-        // Se tem NCM, usar apenas os últimos 4 dígitos como identificador adicional
-        // mas manter a aleatoriedade como principal garantia de unicidade
-        const skuGerado = ncm && ncm.length >= 4
-            ? `SKU-${parte1}-${parte2}-${ncm.slice(-4)}` // SKU-XXXX-XXXX-NNNN (NCM)
-            : `SKU-${parte1}-${parte2}`; // Formato padrão: SKU-XXXX-XXXX
+        // Gerar 6 caracteres aleatórios alfanuméricos
+        // Isso gera 36^6 = 2.176 bilhões de combinações possíveis
+        const skuGerado = gerarCodigoAleatorio(6);
         
         // Verificar se já existe no banco
         const existe = await tx.material.findUnique({
@@ -98,12 +88,9 @@ export async function gerarSKUUnico(
     
     // Se não conseguiu em maxTentativas, usar timestamp + aleatório como fallback
     // Isso garante unicidade absoluta mesmo em casos extremos
-    const timestamp = Date.now().toString().slice(-8); // Últimos 8 dígitos do timestamp
-    const parteAleatoria1 = gerarCodigoAleatorio(4);
-    const parteAleatoria2 = gerarCodigoAleatorio(4);
-    const skuFallback = ncm && ncm.length >= 4
-        ? `SKU-${timestamp}-${parteAleatoria1}-${ncm.slice(-4)}`
-        : `SKU-${timestamp}-${parteAleatoria1}-${parteAleatoria2}`;
+    const timestamp = Date.now().toString().slice(-6); // Últimos 6 dígitos do timestamp
+    const parteAleatoria = gerarCodigoAleatorio(3);
+    const skuFallback = `${timestamp}${parteAleatoria}`.slice(0, 6); // Garantir exatamente 6 caracteres
     
     // Verificar uma última vez se o fallback não existe (extremamente improvável)
     const existeFallback = await tx.material.findUnique({
@@ -112,9 +99,22 @@ export async function gerarSKUUnico(
     });
     
     if (existeFallback) {
-        // Último recurso: adicionar mais aleatoriedade
-        const ultimoRecurso = `SKU-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-        console.warn(`⚠️ SKU fallback também duplicado! Usando último recurso: ${ultimoRecurso}`);
+        // Último recurso: usar apenas aleatório com mais tentativas
+        let ultimoRecurso = '';
+        for (let i = 0; i < 10; i++) {
+            ultimoRecurso = gerarCodigoAleatorio(6);
+            const existeUltimo = await tx.material.findUnique({
+                where: { sku: ultimoRecurso },
+                select: { id: true }
+            });
+            if (!existeUltimo) {
+                console.warn(`⚠️ SKU fallback duplicado! Usando último recurso: ${ultimoRecurso}`);
+                return ultimoRecurso;
+            }
+        }
+        // Se ainda assim não conseguir, usar timestamp completo
+        ultimoRecurso = Date.now().toString().slice(-6);
+        console.warn(`⚠️ Usando timestamp como último recurso: ${ultimoRecurso}`);
         return ultimoRecurso;
     }
     

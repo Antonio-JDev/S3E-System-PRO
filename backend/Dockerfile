@@ -19,8 +19,8 @@ RUN apk add --no-cache \
 # Install dependencies only when needed
 FROM base AS deps
 COPY package*.json ./
-# Try npm ci first, fallback to npm install if package-lock.json doesn't exist
-RUN (npm ci || npm install)
+# Install dependencies (using npm install to handle lock file sync issues)
+RUN npm install
 
 # Development stage
 FROM base AS development
