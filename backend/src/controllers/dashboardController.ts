@@ -239,10 +239,10 @@ export class DashboardController {
           take: 10
         }),
 
-        // Contas a pagar vencidas
+        // Contas a pagar vencidas (excluir canceladas)
         prisma.contaPagar.findMany({
           where: {
-            status: { not: 'Pago' },
+            status: { notIn: ['Pago', 'Cancelado'] }, // ✅ Excluir pagas e canceladas
             dataVencimento: { lt: hoje }
           },
           select: {
@@ -738,9 +738,13 @@ export class DashboardController {
           _sum: { precoVenda: true },
           _count: { id: true }
         }),
-        // Contas a pagar
+        // Contas a pagar (excluir canceladas)
         prisma.contaPagar.aggregate({
-          where: { status: { not: 'Pago' } },
+          where: { 
+            status: { 
+              notIn: ['Pago', 'Cancelado'] // ✅ Excluir pagas e canceladas
+            } 
+          },
           _sum: { valorParcela: true }
         }),
         // Projetos em execução

@@ -385,12 +385,15 @@ export class RelatoriosService {
             orderBy: { dataVencimento: 'asc' }
         });
 
-        // Buscar contas a pagar do período
+        // Buscar contas a pagar do período (excluir canceladas)
         const contasPagar = await prisma.contaPagar.findMany({
             where: {
                 dataVencimento: {
                     gte: dataInicio,
                     lte: dataFim
+                },
+                status: {
+                    not: 'Cancelado' // ✅ Excluir contas a pagar canceladas
                 }
             },
             select: {
