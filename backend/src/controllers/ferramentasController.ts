@@ -9,20 +9,26 @@ const prisma = new PrismaClient();
  */
 export const listarFerramentas = async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log('🔍 Iniciando listagem de ferramentas...');
     const ferramentas = await prisma.ferramenta.findMany({
       orderBy: { nome: 'asc' }
     });
 
+    console.log(`✅ ${ferramentas.length} ferramentas encontradas`);
     res.json({
       success: true,
       data: ferramentas,
       count: ferramentas.length
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Erro ao listar ferramentas:', error);
+    console.error('❌ Stack trace:', error?.stack);
+    console.error('❌ Mensagem:', error?.message);
     res.status(500).json({
       success: false,
-      error: 'Erro ao listar ferramentas'
+      error: 'Erro ao listar ferramentas',
+      message: error?.message || 'Erro desconhecido',
+      details: process.env.NODE_ENV === 'development' ? error?.stack : undefined
     });
   }
 };
@@ -320,10 +326,12 @@ export const deletarFerramenta = async (req: Request, res: Response): Promise<vo
  */
 export const getEstatisticas = async (req: Request, res: Response): Promise<void> => {
   try {
+    console.log('🔍 Buscando estatísticas de ferramentas...');
     // Buscar todas as ferramentas
     const ferramentas = await prisma.ferramenta.findMany({
       where: { ativo: true }
     });
+    console.log(`✅ ${ferramentas.length} ferramentas ativas encontradas`);
 
     // Buscar todos os kits ativos
     const kits = await prisma.kitFerramenta.findMany({
@@ -336,6 +344,7 @@ export const getEstatisticas = async (req: Request, res: Response): Promise<void
         }
       }
     });
+    console.log(`✅ ${kits.length} kits ativos encontrados`);
 
     // Calcular estatísticas
     const totalFerramentas = ferramentas.length;
@@ -382,11 +391,15 @@ export const getEstatisticas = async (req: Request, res: Response): Promise<void
       success: true,
       data: estatisticas
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Erro ao buscar estatísticas:', error);
+    console.error('❌ Stack trace:', error?.stack);
+    console.error('❌ Mensagem:', error?.message);
     res.status(500).json({
       success: false,
-      error: 'Erro ao buscar estatísticas de ferramentas'
+      error: 'Erro ao buscar estatísticas de ferramentas',
+      message: error?.message || 'Erro desconhecido',
+      details: process.env.NODE_ENV === 'development' ? error?.stack : undefined
     });
   }
 };

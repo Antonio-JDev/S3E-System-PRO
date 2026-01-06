@@ -83,12 +83,12 @@ export class ComprasService {
 
         // Buscar ou criar fornecedor (garantir que CNPJ seja string)
         const cnpjString = String(fornecedorCNPJ);
-        let fornecedor = await prisma.fornecedor.findUnique({
+        let fornecedorTemp = await prisma.fornecedor.findUnique({
             where: { cnpj: cnpjString }
         });
 
-        if (!fornecedor) {
-            fornecedor = await prisma.fornecedor.create({
+        if (!fornecedorTemp) {
+            fornecedorTemp = await prisma.fornecedor.create({
                 data: {
                     nome: fornecedorNome,
                     cnpj: cnpjString,
@@ -96,6 +96,14 @@ export class ComprasService {
                 }
             });
         }
+
+        // Garantir que fornecedor não é null após criação/busca
+        if (!fornecedorTemp) {
+            throw new Error('Erro ao buscar ou criar fornecedor');
+        }
+
+        // Variável final garantidamente não-null para o TypeScript
+        const fornecedor = fornecedorTemp;
 
         // Calcular valores básicos
         const valorSubtotal = items.reduce(
@@ -110,8 +118,37 @@ export class ComprasService {
             ? valorTotalNota
             : valorSubtotal + valorFrete + outrasDespesas + (valorIPI || 0);
 
+        // Buscar o próximo número sequencial disponível
+        // Isso garante que não haverá conflito mesmo após importações com números específicos
+        const ultimaCompra = await prisma.compra.findFirst({
+            orderBy: { numeroSequencial: 'desc' },
+            select: { numeroSequencial: true }
+        });
+
+        const proximoNumero = (ultimaCompra?.numeroSequencial || 0) + 1;
+
+        // Atualizar a sequência do PostgreSQL para evitar conflitos futuros
+        // Tentar diferentes nomes possíveis da sequência
+        try {
+            // Tentar com o nome padrão do Prisma (case-sensitive)
+            await prisma.$executeRawUnsafe(`
+                SELECT setval('"compras_numeroSequencial_seq"', ${proximoNumero}, true);
+            `);
+        } catch (error: any) {
+            try {
+                // Tentar com nome em minúsculas (PostgreSQL pode criar assim)
+                await prisma.$executeRawUnsafe(`
+                    SELECT setval('compras_numerosequencial_seq', ${proximoNumero}, true);
+                `);
+            } catch (error2: any) {
+                // Se não conseguir atualizar a sequência, não é crítico
+                // O importante é que estamos especificando o número manualmente
+                console.warn('⚠️  Não foi possível atualizar a sequência (não crítico):', error2.message);
+            }
+        }
+
         // Usar transação para garantir consistência
-        return await prisma.$transaction(async (tx) => {
+        const resultado = await prisma.$transaction(async (tx) => {
             // 0. CRIAR MATERIALS AUTOMATICAMENTE para itens novos
             console.log('🔍 Processando items da compra...');
             const itemsComMaterialId: Array<{
@@ -257,6 +294,7 @@ export class ComprasService {
 
             const compra = await tx.compra.create({
                 data: {
+                    numeroSequencial: proximoNumero, // ✅ Especificar manualmente o número para evitar conflitos
                     fornecedorId: fornecedor.id,
                     fornecedorNome,
                     fornecedorCNPJ: cnpjString,
@@ -284,7 +322,7 @@ export class ComprasService {
                 }
             });
             
-            console.log(`✅ Compra criada com ${compra.items.length} itens`);
+            console.log(`✅ Compra criada: #${compra.numeroSequencial} com ${compra.items.length} itens`);
 
             // ✅ CORREÇÃO: NÃO atualizar estoque automaticamente ao criar compra
             // O estoque só deve ser atualizado quando o usuário confirmar o recebimento
@@ -305,6 +343,15 @@ export class ComprasService {
                 estoqueAtualizado: false // Sempre false na criação
             };
         });
+
+        // ✅ CORREÇÃO CRÍTICA: Se a compra foi criada com status "Recebido",
+        // gerar contas a pagar imediatamente (caso contrário nunca serão criadas)
+        if (status === 'Recebido') {
+            console.log('💰 Compra criada com status Recebido - gerando contas a pagar...');
+            await ComprasService.gerarContasPagarAoReceberCompra(resultado.compra.id);
+        }
+
+        return resultado;
     }
 
     /**
@@ -497,7 +544,7 @@ export class ComprasService {
                 where,
                 skip,
                 take: limit,
-                orderBy: { dataCompra: 'desc' },
+                orderBy: { numeroSequencial: 'desc' }, // ✅ Ordenar por número sequencial (mais recente no topo)
                 include: {
                     fornecedor: {
                         select: {
@@ -992,14 +1039,23 @@ export class ComprasService {
             console.log('✅ Compra recebida com sucesso com todas as associações!');
             return compraAtualizada;
         });
+
+        // ✅ CORREÇÃO CRÍTICA: Gerar contas a pagar após receber a compra
+        // (se ainda não existirem) usando as duplicatas/condições salvas em xmlData
+        await ComprasService.gerarContasPagarAoReceberCompra(id);
+
+        return resultado;
     }
 
     /**
-     * Cancela uma compra
+     * Cancela uma compra e suas contas a pagar vinculadas
      */
     static async cancelarCompra(id: string) {
         const compra = await prisma.compra.findUnique({
-            where: { id }
+            where: { id },
+            include: {
+                items: true
+            }
         });
 
         if (!compra) {
@@ -1010,12 +1066,46 @@ export class ComprasService {
             throw new Error('Não é possível cancelar uma compra já recebida. Faça uma devolução.');
         }
 
-        return await prisma.compra.update({
-            where: { id },
-            data: {
-                status: 'Cancelado',
-                updatedAt: new Date()
+        if (compra.status === 'Cancelado') {
+            throw new Error('Esta compra já está cancelada.');
+        }
+
+        // Usar transação para garantir consistência
+        return await prisma.$transaction(async (tx) => {
+            // Cancelar todas as contas a pagar vinculadas a esta compra
+            const contasPagar = await tx.contaPagar.findMany({
+                where: { compraId: id }
+            });
+
+            if (contasPagar.length > 0) {
+                console.log(`💰 Cancelando ${contasPagar.length} conta(s) a pagar vinculada(s) à compra ${id}`);
+                
+                for (const conta of contasPagar) {
+                    // Só cancelar se ainda não estiver paga
+                    if (conta.status !== 'Pago' && conta.status !== 'Cancelado') {
+                        await tx.contaPagar.update({
+                            where: { id: conta.id },
+                            data: {
+                                status: 'Cancelado',
+                                updatedAt: new Date()
+                            }
+                        });
+                        console.log(`✅ Conta a pagar ${conta.id} cancelada`);
+                    }
+                }
             }
+
+            // Atualizar status da compra
+            const compraCancelada = await tx.compra.update({
+                where: { id },
+                data: {
+                    status: 'Cancelado',
+                    updatedAt: new Date()
+                }
+            });
+
+            console.log(`✅ Compra #${compra.numeroSequencial} cancelada com sucesso`);
+            return compraCancelada;
         });
     }
 
