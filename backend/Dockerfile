@@ -76,6 +76,9 @@ COPY --from=builder /app/dist ./dist
 # Create uploads directories
 RUN mkdir -p /app/uploads/logos /app/uploads/pdf-customization /app/uploads/tarefas-obra /app/uploads/temp
 
+# Create data directories for certificates
+RUN mkdir -p /app/data/certificados
+
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nodejs
