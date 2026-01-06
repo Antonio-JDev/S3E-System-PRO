@@ -37,7 +37,7 @@ services:
 
   # Backend API - PRODUÇÃO
   backend:
-    image: odev10antonio/s3e-backend:1.0.6
+    image: odev10antonio/s3e-backend:1.0.9
     container_name: s3e-backend-prod
     restart: unless-stopped
     environment:
@@ -48,6 +48,7 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGIN: ${CORS_ORIGIN}
       FRONTEND_URL: ${FRONTEND_URL:-${CORS_ORIGIN}}
+      BACKEND_URL: ${BACKEND_URL:-http://app.s3eengenharia.com.br:3001}
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
       SMTP_HOST: ${SMTP_HOST:-smtps.uhserver.com}
@@ -59,8 +60,10 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - backend_uploads:/app/uploads  # Uploads persistentes
+      - backend_uploads:/app/uploads  # Uploads persistentes (logos, imagens, etc)
       - backend_logs:/app/logs        # Logs da aplicação
+      - backend_certificados:/app/data/certificados  # Certificados digitais NF-e
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro  # XSDs de validação NF-e (read-only)
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,11 +79,11 @@ services:
 
   # Frontend React App - PRODUÇÃO
   frontend:
-    image: odev10antonio/s3e-frontend:1.0.6
+    image: odev10antonio/s3e-frontend:1.0.9
     container_name: s3e-frontend-prod
     restart: unless-stopped
     ports:
-      - "80:80"  # HTTP padrão para produção
+      - "8080:80"  # Porta 8080 no host (TrueNAS) para porta 80 do container
     networks:
       - s3e-network-prod
     depends_on:
@@ -118,6 +121,9 @@ volumes:
     external: true
   backend_logs:
     name: apps_backend_logs
+    external: true
+  backend_certificados:
+    name: apps_backend_certificados
     external: true
   pgadmin_data:
     driver: local
