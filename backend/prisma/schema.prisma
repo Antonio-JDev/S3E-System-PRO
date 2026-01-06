@@ -534,26 +534,27 @@ model Pessoa {
 // ============================================
 
 model Compra {
-  id              String    @id @default(uuid())
-  fornecedorId    String
-  fornecedorNome  String
-  fornecedorCNPJ  String
-  fornecedorTel   String?
-  numeroNF        String
-  serieNF         String?   // Série da Nota Fiscal (ex: "1", "2", etc.)
-  dataEmissaoNF   DateTime
-  dataCompra      DateTime
-  dataRecebimento DateTime?
-  valorSubtotal   Float
-  valorFrete      Float     @default(0)
-  outrasDespesas  Float     @default(0)
-  valorTotal      Float
-  status          String    @default("Pendente") // Pendente, Recebido, Cancelado
-  xmlData         String? // JSON string com dados completos do XML
-  observacoes     String?
-  obraId          String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  numeroSequencial Int       @unique @default(autoincrement()) // Número sequencial automático
+  fornecedorId     String
+  fornecedorNome   String
+  fornecedorCNPJ   String
+  fornecedorTel    String?
+  numeroNF         String
+  serieNF          String?   // Série da Nota Fiscal (ex: "1", "2", etc.)
+  dataEmissaoNF    DateTime
+  dataCompra       DateTime
+  dataRecebimento  DateTime?
+  valorSubtotal    Float
+  valorFrete       Float     @default(0)
+  outrasDespesas   Float     @default(0)
+  valorTotal       Float
+  status           String    @default("Pendente") // Pendente, Recebido, Cancelado
+  xmlData          String? // JSON string com dados completos do XML
+  observacoes      String?
+  obraId           String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   fornecedor Fornecedor   @relation(fields: [fornecedorId], references: [id])
   obra       Obra?        @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
