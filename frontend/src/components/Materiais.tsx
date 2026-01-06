@@ -8,6 +8,7 @@ import { getUploadUrl } from '../config/api';
 import SupplierCombobox from './ui/SupplierCombobox';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { matchCrossSearch } from '../utils/searchUtils';
 import { AuthContext } from '../contexts/AuthContext';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -250,12 +251,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
         // Filtro por busca
         if (searchTerm) {
-
-            const searchLower = searchTerm.toLowerCase();
             filtered = filtered.filter(material =>
-                (material.name?.toLowerCase() || '').includes(searchLower) ||
-                (material.sku?.toLowerCase() || '').includes(searchLower) ||
-                (material.type?.toLowerCase() || '').includes(searchLower)
+                matchCrossSearch(searchTerm, material.name || '') ||
+                (material.sku?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                (material.type?.toLowerCase() || '').includes(searchTerm.toLowerCase())
             );
         }
 

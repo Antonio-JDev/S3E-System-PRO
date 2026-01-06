@@ -5,6 +5,7 @@ import { getUploadUrl } from '../config/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { matchCrossSearch } from '../utils/searchUtils';
 import KitPDFCustomizationModal from './PDFCustomization/KitPDFCustomizationModal';
 import { KitFerramentasPDFData } from '../types/pdfCustomization';
 
@@ -223,11 +224,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const kitsFiltrados = useMemo(() => {
         if (!pesquisaKit.trim()) return kits;
         
-        const termoBusca = pesquisaKit.toLowerCase();
         return kits.filter(k => 
-            k.nome.toLowerCase().includes(termoBusca) ||
-            k.eletricistaNome.toLowerCase().includes(termoBusca) ||
-            k.descricao?.toLowerCase().includes(termoBusca)
+            matchCrossSearch(pesquisaKit, k.nome) ||
+            k.eletricistaNome.toLowerCase().includes(pesquisaKit.toLowerCase()) ||
+            k.descricao?.toLowerCase().includes(pesquisaKit.toLowerCase())
         );
     }, [kits, pesquisaKit]);
 

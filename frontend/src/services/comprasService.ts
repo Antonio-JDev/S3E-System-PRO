@@ -80,6 +80,7 @@ class ComprasService {
   mapCompraToPurchaseOrder(compraDTO: any): PurchaseOrder {
     return {
       id: compraDTO.id,
+      numeroSequencial: compraDTO.numeroSequencial || compraDTO.numero || null, // ✅ Número sequencial da compra
       supplierId: compraDTO.fornecedorId || compraDTO.fornecedor?.id || '',
       supplierName: compraDTO.fornecedorNome || compraDTO.fornecedor?.nome || compraDTO.supplierName || 'Fornecedor',
       orderDate: compraDTO.dataCompra || compraDTO.orderDate,
@@ -230,6 +231,38 @@ class ComprasService {
    */
   async parseXML(xmlText: string) {
     return axiosApiService.post<any>('/api/compras/parse-xml', { xml: xmlText });
+  }
+
+  /**
+   * Cancelar compra
+   */
+  async cancelarCompra(id: string) {
+    try {
+      console.log(`🚫 Cancelando compra ${id}...`);
+      
+      const response = await axiosApiService.put<any>(`/api/compras/${id}/cancelar`, {});
+      
+      if (response.success) {
+        console.log('✅ Compra cancelada com sucesso');
+        return {
+          success: true,
+          message: response.message || 'Compra cancelada com sucesso',
+          data: response.data
+        };
+      } else {
+        console.warn('⚠️ Erro ao cancelar compra:', response);
+        return {
+          success: false,
+          error: response.error || 'Erro ao cancelar compra'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Erro ao cancelar compra:', error);
+      return {
+        success: false,
+        error: 'Erro de conexão ao cancelar compra'
+      };
+    }
   }
 }
 

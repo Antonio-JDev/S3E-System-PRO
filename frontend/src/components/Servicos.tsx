@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { type Service, ServiceType } from '../types';
 import { servicosService, type Servico } from '../services/servicosService';
 import { useSKey } from '../hooks/useSKey';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import ActionsDropdown from './ui/ActionsDropdown';
 import { 
     generateEmptyTemplate, 
@@ -258,6 +259,16 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         resetForm();
     };
 
+    // Fechar modais com ESC
+    useEscapeKey(isModalOpen, handleCloseModal);
+    useEscapeKey(!!serviceToView, () => setServiceToView(null));
+    useEscapeKey(!!serviceToDelete, () => setServiceToDelete(null));
+    useEscapeKey(showImportPreview, () => {
+        setShowImportPreview(false);
+        setImportPreviewData([]);
+    });
+    useEscapeKey(showImportModal, () => setShowImportModal(false));
+    
     // Fechar modal com tecla S
     useSKey(isModalOpen, handleCloseModal);
 

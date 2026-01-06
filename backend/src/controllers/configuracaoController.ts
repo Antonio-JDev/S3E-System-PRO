@@ -530,10 +530,26 @@ export class ConfiguracaoController {
       // Verificar se arquivo existe
       if (!fs.existsSync(logoPath)) {
         console.error('❌ Logo não encontrada:', logoPath);
+        
+        // Listar arquivos disponíveis no diretório para debug
+        let arquivosDisponiveis: string[] = [];
+        try {
+          if (fs.existsSync(logosDir)) {
+            arquivosDisponiveis = fs.readdirSync(logosDir);
+            console.log('📁 Arquivos disponíveis em', logosDir, ':', arquivosDisponiveis);
+          } else {
+            console.error('❌ Diretório de logos não existe:', logosDir);
+          }
+        } catch (err: any) {
+          console.error('❌ Erro ao listar arquivos:', err.message);
+        }
+        
         res.status(404).json({
           success: false,
           message: 'Logo não encontrada',
-          path: logoPath
+          path: logoPath,
+          logosDir,
+          arquivosDisponiveis: arquivosDisponiveis.slice(0, 10) // Limitar a 10 para não sobrecarregar
         });
         return;
       }

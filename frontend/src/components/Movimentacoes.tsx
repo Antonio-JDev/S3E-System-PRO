@@ -5,6 +5,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import { toast } from 'sonner';
 import { useSKey } from '../hooks/useSKey';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -332,6 +333,16 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
         }
     };
 
+    // Fechar modais com ESC
+    useEscapeKey(isEntradaModalOpen, () => {
+        setIsEntradaModalOpen(false);
+        resetForm();
+    });
+    useEscapeKey(isSaidaModalOpen, () => {
+        setIsSaidaModalOpen(false);
+        resetForm();
+    });
+    
     // Fechar modais com tecla S
     useSKey(isEntradaModalOpen, () => {
         setIsEntradaModalOpen(false);

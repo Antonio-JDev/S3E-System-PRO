@@ -13,7 +13,9 @@ import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { useSKey } from '../hooks/useSKey';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import ActionsDropdown from './ui/ActionsDropdown';
+import { matchCrossSearch } from '../utils/searchUtils';
 import { 
     generateEmptyTemplate, 
     generateExampleTemplate, 
@@ -200,6 +202,37 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [deleteBulkDialogOpen, setDeleteBulkDialogOpen] = useState(false);
+  
+  // Fechar modais com ESC
+  useEscapeKey(viewModalOpen, () => setViewModalOpen(false));
+  useEscapeKey(editModalOpen, () => setEditModalOpen(false));
+  useEscapeKey(importModalOpen, () => {
+    setImportModalOpen(false);
+    setSelectedFile(null);
+  });
+  useEscapeKey(previewModalOpen, () => {
+    setPreviewModalOpen(false);
+    setSelectedFile(null);
+    setCotacoesPreview([]);
+  });
+  useEscapeKey(createModalOpen, () => {
+    setCreateModalOpen(false);
+    setCreateFormData({
+      nome: '',
+      ncm: '',
+      valorUnitario: '',
+      valorVenda: '',
+      fornecedorId: '',
+      fornecedorNome: '',
+      observacoes: ''
+    });
+  });
+  useEscapeKey(resumoModalOpen, handleFecharResumo);
+  useEscapeKey(deleteDialogOpen, () => {
+    setDeleteDialogOpen(false);
+    setSelectedCotacao(null);
+  });
+  useEscapeKey(deleteBulkDialogOpen, () => setDeleteBulkDialogOpen(false));
   
   // Fechar modais com tecla S
   useSKey(viewModalOpen, () => setViewModalOpen(false));
@@ -663,7 +696,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
 
   // ==================== FILTERS ====================
   const cotacoesFiltradas = cotacoes.filter(cotacao =>
-    cotacao.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    matchCrossSearch(searchTerm, cotacao.nome) ||
     cotacao.fornecedorNome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     cotacao.ncm?.includes(searchTerm)
   );

@@ -3,7 +3,7 @@ import { configuracoesService, type ConfiguracaoSistema, type Usuario } from '..
 import { ThemeContext } from '../contexts/ThemeContext';
 import { AuthContext } from '../contexts/AuthContext';
 import { toast } from 'sonner';
-import { API_CONFIG, getUploadUrl } from '../config/api';
+import { API_CONFIG, getUploadUrl, getBackendUrl } from '../config/api';
 import {
   Dialog,
   DialogContent,
@@ -1401,8 +1401,10 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                             
                                                             // Tentar URL alternativa usando endpoint específico
                                                             const filename = logoPreview.split('/').pop() || logoPreview;
-                                                            const alternativeUrl = API_CONFIG.BASE_URL 
-                                                                ? `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`
+                                                            // ✅ CORREÇÃO: Garantir que sempre usa porta 3001 (backend)
+                                                            const baseUrl = getBackendUrl();
+                                                            const alternativeUrl = baseUrl 
+                                                                ? `${baseUrl}/api/configuracoes/logo/${filename}`
                                                                 : `/api/configuracoes/logo/${filename}`;
                                                             
                                                             if (!target.src.includes('/api/configuracoes/logo/')) {
@@ -1485,8 +1487,10 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                                     
                                                                     // Tentar endpoint específico
                                                                     const filename = logo.url.split('/').pop() || logo.filename;
-                                                                    const alternativeUrl = API_CONFIG.BASE_URL 
-                                                                        ? `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`
+                                                                    // ✅ CORREÇÃO: Garantir que sempre usa porta 3001 (backend)
+                                                                    const baseUrl = getBackendUrl();
+                                                                    const alternativeUrl = baseUrl 
+                                                                        ? `${baseUrl}/api/configuracoes/logo/${filename}`
                                                                         : `/api/configuracoes/logo/${filename}`;
                                                                     
                                                                     if (!target.src.includes('/api/configuracoes/logo/')) {
@@ -1624,7 +1628,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         onError={(e) => {
                                                             const target = e.target as HTMLImageElement;
                                                             const filename = logoLoginPreview.split('/').pop() || logoLoginPreview;
-                                                            const alternativeUrl = `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
+                                                            // ✅ CORREÇÃO: Garantir que sempre usa porta 3001 (backend)
+                                                            const baseUrl = getBackendUrl();
+                                                            const alternativeUrl = `${baseUrl}/api/configuracoes/logo/${filename}`;
                                                             if (target.src !== alternativeUrl) {
                                                                 target.src = alternativeUrl;
                                                             } else {
@@ -1679,7 +1685,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                                 onError={(e) => {
                                                                     const target = e.target as HTMLImageElement;
                                                                     const filename = logo.url.split('/').pop() || logo.url;
-                                                                    target.src = `${API_CONFIG.BASE_URL}/api/configuracoes/logo/${filename}`;
+                                                                    // ✅ CORREÇÃO: Garantir que sempre usa porta 3001 (backend)
+                                                                    const baseUrl = getBackendUrl();
+                                                                    target.src = `${baseUrl}/api/configuracoes/logo/${filename}`;
                                                                 }}
                                                             />
                                                             {logoLoginSelecionada === logo.url && (

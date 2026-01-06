@@ -5,6 +5,7 @@ import { axiosApiService } from '../services/axiosApi';
 import QuantityDialog from './ui/QuantityDialog';
 import AlertDialog from './ui/AlertDialog';
 import { identificarTipoMaterial, converterUnidade } from '../utils/unitConverter';
+import { matchCrossSearch } from '../utils/searchUtils';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -216,7 +217,7 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         return todosItens.filter(m => {
             const temEstoque = (m as any)._isCotacao || m.estoque > 0;
             return temEstoque &&
-                (m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (matchCrossSearch(searchTerm, m.nome) ||
                  m.id.toLowerCase().includes(searchTerm.toLowerCase()));
         });
     };

@@ -247,8 +247,8 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
                         responsavel: proj.responsavel ? {
                             id: proj.responsavel.id,
                             nome: proj.responsavel.nome,
-                            role: UserRole.Engenheiro
-                        } : { id: '', nome: 'Não informado', role: UserRole.Engenheiro },
+                            role: UserRole.ENGENHEIRO
+                        } : { id: '', nome: 'Não informado', role: UserRole.ENGENHEIRO },
                         equipe: [],
                         endereco: '',
                         observacoes: '',
@@ -437,6 +437,7 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
     // Fechar modais com ESC
     useEscapeKey(isModalOpen, handleCloseModal);
     useEscapeKey(isAlocacaoModalOpen, () => setIsAlocacaoModalOpen(false));
+    useEscapeKey(!!selectedProject, () => setSelectedProject(null));
     
     // Fechar modais com tecla S
     useSKey(isModalOpen, handleCloseModal);

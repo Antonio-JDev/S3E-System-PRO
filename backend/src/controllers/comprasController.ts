@@ -485,3 +485,49 @@ export const deleteCompra = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// Cancelar compra
+export const cancelarCompra = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'ID da compra é obrigatório'
+      });
+      return;
+    }
+
+    console.log(`🚫 Cancelando compra: ${id}`);
+    
+    const compraCancelada = await ComprasService.cancelarCompra(id);
+
+    res.json({
+      success: true,
+      message: `Compra #${compraCancelada.numeroSequencial} cancelada com sucesso`,
+      data: compraCancelada
+    });
+  } catch (error) {
+    console.error('Erro ao cancelar compra:', error);
+    
+    if (error instanceof Error) {
+      // Erros de validação retornam 400
+      if (error.message.includes('não encontrada') || 
+          error.message.includes('já recebida') ||
+          error.message.includes('já está cancelada')) {
+        res.status(400).json({
+          success: false,
+          error: error.message
+        });
+        return;
+      }
+    }
+
+    res.status(500).json({ 
+      success: false,
+      error: 'Erro ao cancelar compra',
+      message: error instanceof Error ? error.message : 'Erro desconhecido'
+    });
+  }
+};
+

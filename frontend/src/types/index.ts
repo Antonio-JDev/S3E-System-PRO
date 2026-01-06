@@ -283,6 +283,7 @@ export interface PurchaseOrder {
         status: string;
     };
     id: string;
+    numeroSequencial?: number | null; // ✅ Número sequencial da compra (Compra nº X)
     // Campos originais
     fornecedorId?: string;
     numero?: string;
@@ -346,9 +347,14 @@ export enum TipoServico {
 // Tipos para Projetos
 export enum ProjectStatus {
     PLANEJAMENTO = 'PLANEJAMENTO',
+    Planejamento = 'Planejamento',
     ANDAMENTO = 'ANDAMENTO',
+    EmExecucao = 'Em Execução',
+    ControleQualidade = 'Controle de Qualidade',
     CONCLUIDO = 'CONCLUIDO',
-    CANCELADO = 'CANCELADO'
+    Concluido = 'Concluído',
+    CANCELADO = 'CANCELADO',
+    Cancelado = 'Cancelado'
 }
 
 export interface Project {

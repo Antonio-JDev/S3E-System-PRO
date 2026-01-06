@@ -102,6 +102,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [purchaseToEdit, setPurchaseToEdit] = useState<PurchaseOrder | null>(null);
     const [purchaseToDelete, setPurchaseToDelete] = useState<PurchaseOrder | null>(null);
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [purchaseToCancel, setPurchaseToCancel] = useState<PurchaseOrder | null>(null);
+    const [showCancelDialog, setShowCancelDialog] = useState(false);
     
     // Estados para recebimento de remessa
     const [isReceivingModalOpen, setIsReceivingModalOpen] = useState(false);
@@ -632,7 +634,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         
         if (response.success) {
             toast.success('Compra excluída', {
-                description: `Compra #${purchaseToDelete.invoiceNumber || purchaseToDelete.id.slice(0, 8)} foi excluída permanentemente`
+                description: `Compra #${purchaseToDelete.numeroSequencial || purchaseToDelete.invoiceNumber || purchaseToDelete.id.slice(0, 8)} foi excluída permanentemente`
             });
             await loadPurchaseOrders();
         } else {
@@ -643,6 +645,27 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
 
         setShowDeleteDialog(false);
         setPurchaseToDelete(null);
+    };
+
+    // Cancelar compra
+    const handleCancelCompra = async () => {
+        if (!purchaseToCancel) return;
+
+        const response = await comprasService.cancelarCompra(purchaseToCancel.id);
+        
+        if (response.success) {
+            toast.success('Compra cancelada', {
+                description: `Compra #${purchaseToCancel.numeroSequencial || purchaseToCancel.invoiceNumber || purchaseToCancel.id.slice(0, 8)} foi cancelada com sucesso`
+            });
+            await loadPurchaseOrders();
+        } else {
+            toast.error('Erro ao cancelar', {
+                description: response.error || 'Não foi possível cancelar a compra'
+            });
+        }
+
+        setShowCancelDialog(false);
+        setPurchaseToCancel(null);
     };
 
     return (
@@ -764,6 +787,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded">
+                                            Compra #{purchase.numeroSequencial || 'N/A'}
+                                        </span>
+                                    </div>
                                     <h3 className="font-bold text-lg text-gray-900 mb-1">{purchase.supplierName}</h3>
                                 <div className="flex items-center gap-2 flex-wrap">
                                     <span className="px-3 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
@@ -835,18 +863,30 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     Ver Detalhes
                                 </button>
                                 {purchase.status === PurchaseStatus.Pendente && (
-                                    <button
-                                        onClick={() => {
-                                            setPurchaseToView(purchase);
-                                            handleOpenReceivingModal();
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        Receber
-                                    </button>
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                setPurchaseToView(purchase);
+                                                handleOpenReceivingModal();
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            Receber
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setPurchaseToCancel(purchase);
+                                                setShowCancelDialog(true);
+                                            }}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-sm font-semibold"
+                                        >
+                                            <XMarkIcon className="w-4 h-4" />
+                                            Cancelar
+                                        </button>
+                                    </>
                                 )}
                                 {canDelete(user) && (
                                     <button
@@ -871,6 +911,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                         <table className="w-full">
                             <thead className="bg-gray-50 border-b border-gray-200">
                                 <tr>
+                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Compra nº</th>
                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Fornecedor</th>
                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Nº NF</th>
                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Data</th>
@@ -883,6 +924,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {filteredPurchases.map((purchase) => (
                                     <tr key={purchase.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className="font-bold text-orange-700">
+                                                #{purchase.numeroSequencial || 'N/A'}
+                                            </span>
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="font-bold text-gray-900">{purchase.supplierName}</div>
                                         </td>
@@ -943,17 +989,30 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                     </button>
                                                 )}
                                                 {purchase.status === PurchaseStatus.Pendente && (
-                                                    <button
-                                                        onClick={() => {
-                                                            setPurchaseToView(purchase);
-                                                            handleOpenReceivingModal();
-                                                        }}
-                                                        className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
-                                                    >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                        </svg>
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            onClick={() => {
+                                                                setPurchaseToView(purchase);
+                                                                handleOpenReceivingModal();
+                                                            }}
+                                                            className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                                            title="Receber remessa"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                setPurchaseToCancel(purchase);
+                                                                setShowCancelDialog(true);
+                                                            }}
+                                                            className="px-3 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors text-sm font-semibold"
+                                                            title="Cancelar compra"
+                                                        >
+                                                            <XMarkIcon className="w-4 h-4" />
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         </td>
@@ -964,6 +1023,25 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             )}
+
+            {/* Dialog de Cancelamento */}
+            <AlertDialog
+                isOpen={showCancelDialog}
+                onClose={() => {
+                    setShowCancelDialog(false);
+                    setPurchaseToCancel(null);
+                }}
+                onConfirm={handleCancelCompra}
+                title="Cancelar Compra"
+                message={
+                    purchaseToCancel
+                        ? `Tem certeza que deseja cancelar a Compra #${purchaseToCancel.numeroSequencial || purchaseToCancel.invoiceNumber || 'N/A'}?\n\nEsta ação cancelará também todas as contas a pagar vinculadas a esta compra.`
+                        : 'Tem certeza que deseja cancelar esta compra?'
+                }
+                confirmText="Cancelar Compra"
+                cancelText="Manter Compra"
+                confirmButtonClass="bg-orange-600 hover:bg-orange-700"
+            />
 
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (

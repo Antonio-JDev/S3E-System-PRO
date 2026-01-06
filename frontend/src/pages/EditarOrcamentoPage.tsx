@@ -15,6 +15,7 @@ import HistoricoPrecosModal from '../components/HistoricoPrecosModal';
 import UnitSelector from '../components/UnitSelector';
 import UnitDisplay from '../components/UnitDisplay';
 import { identificarTipoMaterial } from '../utils/unitConverter';
+import { matchCrossSearch } from '../utils/searchUtils';
 import { getUploadUrl } from '../config/api';
 import ClienteCombobox from '../components/ui/ClienteCombobox';
 import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
@@ -604,11 +605,10 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const filteredMaterials = useMemo(() => {
 
         if (!itemSearchTerm.trim()) return (materiais || []).filter(m => m && m.ativo && (m.estoque ?? 0) > 0);
-        const termo = itemSearchTerm.toLowerCase();
         return (materiais || []).filter(m => 
             m && m.ativo && (m.estoque ?? 0) > 0 && (
-                (m.nome || '').toLowerCase().includes(termo) ||
-                (m.sku || '').toLowerCase().includes(termo)
+                matchCrossSearch(itemSearchTerm, m.nome || '') ||
+                (m.sku || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             )
         );
     }, [materiais, itemSearchTerm]);
@@ -617,12 +617,11 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const filteredServicos = useMemo(() => {
 
         if (!itemSearchTerm.trim()) return (servicos || []).filter(s => s && s.ativo);
-        const termo = itemSearchTerm.toLowerCase();
         return (servicos || []).filter(s => 
             s && s.ativo && (
-                (s.nome || '').toLowerCase().includes(termo) ||
-                (s.codigo || '').toLowerCase().includes(termo) ||
-                (s.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(itemSearchTerm, s.nome || '') ||
+                (s.codigo || '').toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                (s.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             )
         );
     }, [servicos, itemSearchTerm]);
@@ -631,11 +630,10 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const filteredQuadros = useMemo(() => {
 
         if (!itemSearchTerm.trim()) return (quadros || []).filter(q => q && q.ativo);
-        const termo = itemSearchTerm.toLowerCase();
         return (quadros || []).filter(q => 
             q && q.ativo && (
-                (q.nome || '').toLowerCase().includes(termo) ||
-                (q.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(itemSearchTerm, q.nome || '') ||
+                (q.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             )
         );
     }, [quadros, itemSearchTerm]);
@@ -644,11 +642,10 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const filteredKits = useMemo(() => {
 
         if (!itemSearchTerm.trim()) return (kits || []).filter(k => k && k.ativo);
-        const termo = itemSearchTerm.toLowerCase();
         return (kits || []).filter(k => 
             k && k.ativo && (
-                (k.nome || '').toLowerCase().includes(termo) ||
-                (k.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(itemSearchTerm, k.nome || '') ||
+                (k.descricao || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             )
         );
     }, [kits, itemSearchTerm]);
@@ -709,44 +706,41 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             return;
         }
 
-        const termo = buscaGlobal.toLowerCase();
-        
-
         const materiaisEncontrados = (materiais || [])
             .filter(m => m && m.ativo && (m.estoque ?? 0) > 0)
             .filter(m => 
-                (m.nome || '').toLowerCase().includes(termo) ||
-                (m.sku || '').toLowerCase().includes(termo)
+                matchCrossSearch(buscaGlobal, m.nome || '') ||
+                (m.sku || '').toLowerCase().includes(buscaGlobal.toLowerCase())
             );
 
         const servicosEncontrados = (servicos || [])
             .filter(s => s && s.ativo)
             .filter(s =>
-                (s.nome || '').toLowerCase().includes(termo) ||
-                (s.codigo || '').toLowerCase().includes(termo) ||
-                (s.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(buscaGlobal, s.nome || '') ||
+                (s.codigo || '').toLowerCase().includes(buscaGlobal.toLowerCase()) ||
+                (s.descricao || '').toLowerCase().includes(buscaGlobal.toLowerCase())
             );
 
         const kitsEncontrados = (kits || [])
             .filter(k => k && k.ativo)
             .filter(k =>
-                (k.nome || '').toLowerCase().includes(termo) ||
-                (k.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(buscaGlobal, k.nome || '') ||
+                (k.descricao || '').toLowerCase().includes(buscaGlobal.toLowerCase())
             );
 
         const quadrosEncontrados = (quadros || [])
             .filter(q => q && q.ativo)
             .filter(q =>
-                (q.nome || '').toLowerCase().includes(termo) ||
-                (q.descricao || '').toLowerCase().includes(termo)
+                matchCrossSearch(buscaGlobal, q.nome || '') ||
+                (q.descricao || '').toLowerCase().includes(buscaGlobal.toLowerCase())
             );
 
         const cotacoesEncontradas = (cotacoes || [])
             .filter(c => c && c.ativo !== false)
             .filter(c =>
-                (c.nome || '').toLowerCase().includes(termo) ||
-                (c.ncm || '').toLowerCase().includes(termo) ||
-                (c.fornecedorNome || '').toLowerCase().includes(termo)
+                matchCrossSearch(buscaGlobal, c.nome || '') ||
+                (c.ncm || '').toLowerCase().includes(buscaGlobal.toLowerCase()) ||
+                (c.fornecedorNome || '').toLowerCase().includes(buscaGlobal.toLowerCase())
             );
 
         setResultadosBuscaGlobal({

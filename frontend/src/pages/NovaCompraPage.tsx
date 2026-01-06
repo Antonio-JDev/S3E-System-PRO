@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { type PurchaseOrderItem, PurchaseStatus } from '../types';
 import { comprasService } from '../services/comprasService';
 import { readFileAsText } from '../utils/xmlParser';
+import { matchCrossSearch } from '../utils/searchUtils';
 import { axiosApiService } from '../services/axiosApi';
 
 // ==================== ICONS ====================
@@ -129,7 +130,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const materiaisFiltrados = useMemo(() => {
         if (!buscaMaterial) return [];
         return materiais.filter(m => 
-            m.nome.toLowerCase().includes(buscaMaterial.toLowerCase()) ||
+            matchCrossSearch(buscaMaterial, m.nome) ||
             m.sku.toLowerCase().includes(buscaMaterial.toLowerCase()) ||
             (m.descricao && m.descricao.toLowerCase().includes(buscaMaterial.toLowerCase()))
         ).slice(0, 10); // Limitar a 10 resultados

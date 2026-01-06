@@ -29,6 +29,7 @@ import NovoOrcamentoPage from '../pages/NovoOrcamentoPage';
 import PDFCustomizationModal from './PDFCustomization/PDFCustomizationModalWrapper';
 import { OrcamentoPDFData } from '../types/pdfCustomization';
 import { identificarTipoMaterial, TipoMaterial } from '../utils/unitConverter';
+import { matchCrossSearch } from '../utils/searchUtils';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -452,7 +453,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         return materiais
             .filter(material => material.ativo && material.estoque > 0)
             .filter(material =>
-                material.nome.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                matchCrossSearch(itemSearchTerm, material.nome) ||
                 material.sku.toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
     }, [materiais, itemSearchTerm]);
@@ -464,7 +465,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         return cotacoes
             .filter(cotacao => cotacao.ativo)
             .filter(cotacao =>
-                cotacao.nome.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                matchCrossSearch(itemSearchTerm, cotacao.nome) ||
                 cotacao.ncm?.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
                 cotacao.fornecedorNome?.toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
@@ -477,7 +478,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         return kits
             .filter(kit => kit.ativo)
             .filter(kit =>
-                kit.nome.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                matchCrossSearch(itemSearchTerm, kit.nome) ||
                 kit.descricao?.toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
     }, [kits, itemSearchTerm]);
@@ -489,7 +490,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         return servicos
             .filter(servico => servico.ativo)
             .filter(servico =>
-                servico.nome.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+                matchCrossSearch(itemSearchTerm, servico.nome) ||
                 servico.descricao?.toLowerCase().includes(itemSearchTerm.toLowerCase())
             );
     }, [servicos, itemSearchTerm]);
@@ -537,7 +538,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         if (!termoBusca) return cotacoesBancoFrio || [];
         return (cotacoesBancoFrio || []).filter(cotacao =>
             cotacao && (
-                (cotacao.nome || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
+                matchCrossSearch(termoBusca, cotacao.nome || '') ||
                 (cotacao.ncm || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
                 (cotacao.fornecedorNome || '').toLowerCase().includes(termoBusca.toLowerCase())
             )
