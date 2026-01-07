@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from 'react';
+import React, { useState, useEffect, useContext, useRef, useCallback } from 'react';
 import { axiosApiService } from '../services/axiosApi';
 import {
   AlertDialog,
@@ -203,6 +203,48 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
   const [selectAll, setSelectAll] = useState(false);
   const [deleteBulkDialogOpen, setDeleteBulkDialogOpen] = useState(false);
   
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // ==================== API CALLS ====================
+  const carregarCotacoes = async () => {
+    try {
+      setLoading(true);
+      const response = await axiosApiService.get('/api/cotacoes');
+      
+      if (response.success && response.data) {
+        setCotacoes(response.data as Cotacao[]);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar cotações:', error);
+      toast.error('Não foi possível carregar as cotações');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const carregarFornecedores = async () => {
+    try {
+      const response = await fornecedoresService.listar();
+      if (response.success && response.data) {
+        setFornecedores(response.data);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar fornecedores:', error);
+    }
+  };
+
+  // Handler para fechar resumo de importação
+  const handleFecharResumo = useCallback(() => {
+    setResumoModalOpen(false);
+    setImportModalOpen(false);
+    setSelectedFile(null);
+    setCotacoesPreview([]);
+    setEstatisticasImportacao(null);
+    carregarCotacoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Fechar modais com ESC
   useEscapeKey(viewModalOpen, () => setViewModalOpen(false));
   useEscapeKey(editModalOpen, () => setEditModalOpen(false));
@@ -262,42 +304,11 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     observacoes: ''
   });
   
-  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
   // ==================== EFFECTS ====================
   useEffect(() => {
     carregarCotacoes();
     carregarFornecedores();
   }, []);
-  
-  const carregarFornecedores = async () => {
-    try {
-      const response = await fornecedoresService.listar();
-      if (response.success && response.data) {
-        setFornecedores(response.data);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar fornecedores:', error);
-    }
-  };
-
-  // ==================== API CALLS ====================
-  const carregarCotacoes = async () => {
-    try {
-      setLoading(true);
-      const response = await axiosApiService.get('/api/cotacoes');
-      
-      if (response.success && response.data) {
-        setCotacoes(response.data as Cotacao[]);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar cotações:', error);
-      toast.error('Não foi possível carregar as cotações');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleDownloadTemplate = async () => {
     try {
@@ -456,15 +467,6 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFecharResumo = () => {
-    setResumoModalOpen(false);
-    setImportModalOpen(false);
-    setSelectedFile(null);
-    setCotacoesPreview([]);
-    setEstatisticasImportacao(null);
-    carregarCotacoes();
   };
 
   const handleAtualizarValorVenda = (index: number, valorVenda: number) => {

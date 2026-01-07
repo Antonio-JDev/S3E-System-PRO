@@ -80,7 +80,8 @@ services:
     networks:
       - s3e-network
     # ✅ Comando de desenvolvimento: tsx watch monitora mudanças e reinicia automaticamente
-    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run dev"
+    # Resolve migração falhada antes de aplicar novas migrações (migração agora é idempotente)
+    command: sh -c "npx prisma generate && (npx prisma migrate resolve --applied 20250115000000_add_audit_logs_hash_fields 2>/dev/null || true) && npx prisma migrate deploy && npm run dev"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s
