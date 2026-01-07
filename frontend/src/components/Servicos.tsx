@@ -42,11 +42,11 @@ const ListBulletIcon = (props: React.SVGProps<SVGSVGElement>) => <svg {...props}
 
 const getTypeClass = (type: ServiceType) => {
     switch (type) {
-        case ServiceType.Consultoria: return 'bg-green-100 text-green-800 ring-1 ring-green-200';
-        case ServiceType.Instalacao: return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200';
-        case ServiceType.Manutencao: return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
-        case ServiceType.LaudoTecnico: return 'bg-purple-100 text-purple-800 ring-1 ring-purple-200';
-        default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
+        case ServiceType.Consultoria: return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800';
+        case ServiceType.Instalacao: return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400 ring-1 ring-blue-200 dark:ring-blue-800';
+        case ServiceType.Manutencao: return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-800';
+        case ServiceType.LaudoTecnico: return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-400 ring-1 ring-purple-200 dark:ring-purple-800';
+        default: return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 ring-1 ring-gray-200 dark:ring-gray-700';
     }
 };
 
@@ -127,14 +127,19 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     // Gerar código automaticamente quando tipoServico mudar (apenas para novos serviços)
     useEffect(() => {
         if (!serviceToEdit && formState.tipoServico) {
-            const novoCodigo = gerarProximoCodigo(services, formState.tipoServico);
+            // Mapear services para o formato esperado pela função gerarProximoCodigo
+            const servicosFormatados = services.map(s => ({
+                codigo: s.codigo || s.internalCode || '',
+                tipoServico: (s as any).tipoServico
+            }));
+            const novoCodigo = gerarProximoCodigo(servicosFormatados, formState.tipoServico);
             setFormState(prev => ({
                 ...prev,
                 codigo: novoCodigo,
                 internalCode: novoCodigo
             }));
         }
-    }, [formState.tipoServico, serviceToEdit]);
+    }, [formState.tipoServico, serviceToEdit, services]);
 
     const loadServices = async () => {
         try {
@@ -277,15 +282,29 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         
         // Se mudou o tipoServico e não está editando, gerar código automaticamente
         if (name === 'tipoServico' && !serviceToEdit) {
-            const novoCodigo = gerarProximoCodigo(services, value as TipoServicoClassificacao);
+            // Mapear services para o formato esperado pela função gerarProximoCodigo
+            const servicosFormatados = services.map(s => ({
+                codigo: s.codigo || s.internalCode || '',
+                tipoServico: (s as any).tipoServico
+            }));
+            const tipoServicoValue = value as TipoServicoClassificacao;
+            const novoCodigo = gerarProximoCodigo(servicosFormatados, tipoServicoValue);
             setFormState(prev => ({ 
                 ...prev, 
-                [name]: value,
+                tipoServico: tipoServicoValue,
                 codigo: novoCodigo,
                 internalCode: novoCodigo
             }));
         } else {
-            setFormState(prev => ({ ...prev, [name]: value }));
+            // Para outros campos, usar o spread normal
+            if (name === 'tipoServico') {
+                setFormState(prev => ({ 
+                    ...prev, 
+                    tipoServico: value as TipoServicoClassificacao 
+                }));
+            } else {
+                setFormState(prev => ({ ...prev, [name]: value }));
+            }
         }
     };
 
@@ -908,11 +927,11 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredServices.map((service) => (
-                        <div key={service.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-200 hover:border-cyan-300">
+                        <div key={service.id} className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-200 hover:border-cyan-300 dark:hover:border-cyan-600">
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
-                                    <h3 className="font-bold text-lg text-gray-900 mb-2 line-clamp-2">{service.name || service.nome}</h3>
+                                    <h3 className="font-bold text-lg text-gray-900 dark:text-dark-text mb-2 line-clamp-2">{service.name || service.nome}</h3>
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
                                             {getTypeIcon(service.type || service.tipo || ServiceType.Instalacao)} {service.type || service.tipo}
@@ -927,41 +946,41 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         })()}
                                     </div>
                                 </div>
-                                <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-green-100 text-green-800 ring-1 ring-green-200">
+                                <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
                                     ✅ Ativo
                                 </span>
                             </div>
 
                             {/* Informações */}
                             <div className="space-y-2 mb-4">
-                                <div className="text-sm text-gray-600">
+                                <div className="text-sm text-gray-600 dark:text-dark-text-secondary">
                                     <p className="line-clamp-2">{service.description || service.descricao || 'Sem descrição'}</p>
                                 </div>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-text-secondary">
                                     <FolderIcon className="w-4 h-4" />
                                     <span className="truncate">{service.type || service.tipo}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-text-secondary">
                                     <ClockIcon className="w-4 h-4" />
                                     <span>Código: {service.internalCode || service.codigo}</span>
                                 </div>
                             </div>
 
                             {/* Preço */}
-                            <div className="bg-cyan-50 border border-cyan-200 p-3 rounded-xl mb-4">
+                            <div className="bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 p-3 rounded-xl mb-4">
                                 <div className="flex justify-between items-center">
-                                    <span className="text-sm font-medium text-cyan-800">Preço:</span>
+                                    <span className="text-sm font-medium text-cyan-800 dark:text-cyan-300">Preço:</span>
                                     <div className="text-right">
-                                        <span className="text-xl font-bold text-cyan-700">
+                                        <span className="text-xl font-bold text-cyan-700 dark:text-cyan-400">
                                             R$ {(service.price || service.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
-                                        <p className="text-xs text-cyan-600">/{service.unidade || 'un'}</p>
+                                        <p className="text-xs text-cyan-600 dark:text-cyan-400">/{service.unidade || 'un'}</p>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Botões de Ação */}
-                            <div className="flex gap-2 pt-4 border-t border-gray-100">
+                            <div className="flex gap-2 pt-4 border-t border-gray-100 dark:border-dark-border">
                                 <button
                                     onClick={() => setServiceToView(service)}
                                     className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
@@ -1072,7 +1091,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     <select
                                         name="tipoServico"
                                         value={formState.tipoServico}
-                                        onChange={(e) => setFormState({...formState, tipoServico: e.target.value as any})}
+                                        onChange={(e) => setFormState({...formState, tipoServico: e.target.value as TipoServicoClassificacao})}
                                         className="select-field"
                                         required
                                     >
@@ -1165,58 +1184,58 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             
             {/* MODAL DE VISUALIZAÇÃO */}
             {serviceToView && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-cyan-50">
+                <div className="fixed inset-0 bg-black/70 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-gray-50 to-cyan-50 dark:from-gray-800/50 dark:to-cyan-900/30">
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-900">Detalhes do Serviço</h2>
-                                <p className="text-sm text-gray-600 mt-1">Informações completas do serviço</p>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Detalhes do Serviço</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Informações completas do serviço</p>
                             </div>
-                            <button onClick={() => setServiceToView(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl">
+                            <button onClick={() => setServiceToView(null)} className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-dark-bg rounded-xl">
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
                         </div>
 
                         <div className="p-6 space-y-6">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Nome</h3>
-                                    <p className="text-gray-900 font-medium">{serviceToView.name || serviceToView.nome}</p>
+                                <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Nome</h3>
+                                    <p className="text-gray-900 dark:text-dark-text font-medium">{serviceToView.name || serviceToView.nome}</p>
                                 </div>
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Tipo</h3>
+                                <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Tipo</h3>
                                     <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getTypeClass(serviceToView.type || serviceToView.tipo || ServiceType.Instalacao)}`}>
                                         {getTypeIcon(serviceToView.type || serviceToView.tipo || ServiceType.Instalacao)} {serviceToView.type || serviceToView.tipo}
                                     </span>
                                 </div>
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Código</h3>
-                                    <p className="text-gray-900 font-medium">{serviceToView.internalCode || serviceToView.codigo}</p>
+                                <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Código</h3>
+                                    <p className="text-gray-900 dark:text-dark-text font-medium">{serviceToView.internalCode || serviceToView.codigo}</p>
                                 </div>
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Status</h3>
-                                    <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Status</h3>
+                                    <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
                                         ✅ Ativo
                                     </span>
                                 </div>
                             </div>
 
-                            <div className="bg-cyan-50 border border-cyan-200 p-4 rounded-xl">
-                                <h3 className="font-semibold text-gray-800 mb-2">Descrição</h3>
-                                <p className="text-gray-700">{serviceToView.description || serviceToView.descricao || 'Sem descrição'}</p>
+                            <div className="bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 p-4 rounded-xl">
+                                <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Descrição</h3>
+                                <p className="text-gray-700 dark:text-dark-text-secondary">{serviceToView.description || serviceToView.descricao || 'Sem descrição'}</p>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="bg-green-50 border border-green-200 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Preço</h3>
-                                    <p className="text-2xl font-bold text-green-700">
+                                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Preço</h3>
+                                    <p className="text-2xl font-bold text-green-700 dark:text-green-400">
                                         R$ {(serviceToView.price || serviceToView.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
-                                    <p className="text-sm text-green-600">/{serviceToView.unidade || 'un'}</p>
+                                    <p className="text-sm text-green-600 dark:text-green-400">/{serviceToView.unidade || 'un'}</p>
                                 </div>
-                                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                    <h3 className="font-semibold text-gray-800 mb-2">Unidade de Medida</h3>
-                                    <p className="text-2xl font-bold text-blue-700">{serviceToView.unidade || 'un'}</p>
+                                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                                    <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Unidade de Medida</h3>
+                                    <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{serviceToView.unidade || 'un'}</p>
                                 </div>
                             </div>
                         </div>
