@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { usePDFCustomization } from '../../hooks/usePDFCustomization';
 import { pdfCustomizationService } from '../../services/pdfCustomizationService';
 import { OrcamentoPDFData, CORNER_DESIGNS } from '../../types/pdfCustomization';
+import { getUploadUrl } from '../../config/api';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -52,6 +53,15 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
     const [templateName, setTemplateName] = useState('');
     const [previewHTML, setPreviewHTML] = useState<string>('');
     const [loadingPreview, setLoadingPreview] = useState(false);
+    const [folhasTimbradas, setFolhasTimbradas] = useState<Array<{
+        filename: string;
+        url: string;
+        size: number;
+        createdAt: string;
+        modifiedAt: string;
+    }>>([]);
+    const [loadingFolhas, setLoadingFolhas] = useState(false);
+    const [uploadingFolha, setUploadingFolha] = useState(false);
 
     // Gerar preview HTML
     const gerarPreviewHTML = React.useCallback(async () => {
@@ -85,12 +95,91 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
         }
     }, [orcamentoId, customization]);
 
+    // Carregar folhas timbradas quando o modal abrir
+    useEffect(() => {
+        if (isOpen) {
+            loadFolhasTimbradas();
+        }
+    }, [isOpen]);
+
+    // Função para carregar lista de folhas timbradas
+    const loadFolhasTimbradas = async () => {
+        setLoadingFolhas(true);
+        try {
+            const response = await pdfCustomizationService.listFolhasTimbradas();
+            if (response.success && response.data) {
+                setFolhasTimbradas(response.data);
+            } else {
+                // Se der erro 404 ou não houver folhas, apenas mostrar lista vazia
+                setFolhasTimbradas([]);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar folhas timbradas:', error);
+            // Não mostrar erro ao usuário, apenas lista vazia
+            setFolhasTimbradas([]);
+        } finally {
+            setLoadingFolhas(false);
+        }
+    };
+
     // Gerar preview automaticamente quando abrir o modal na aba de preview
     React.useEffect(() => {
         if (isOpen && activeTab === 'preview' && !previewHTML && customization) {
             gerarPreviewHTML();
         }
     }, [isOpen, activeTab, customization, previewHTML, gerarPreviewHTML]);
+
+    // Regenerar preview quando a folha timbrada mudar
+    React.useEffect(() => {
+        if (isOpen && activeTab === 'preview' && customization.design.corners.enabled && customization.design.corners.design === 'custom' && customization.design.corners.image) {
+            // Aguardar um pouco para garantir que a imagem foi carregada
+            const timer = setTimeout(() => {
+                gerarPreviewHTML();
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [customization.design.corners.image, isOpen, activeTab, gerarPreviewHTML]);
+
+    // Deletar folha timbrada
+    const handleDeleteFolha = async (filename: string) => {
+        if (!confirm('Tem certeza que deseja deletar esta folha timbrada?')) {
+            return;
+        }
+
+        try {
+            const response = await pdfCustomizationService.deleteFolhaTimbrada(filename);
+            if (response.success) {
+                toast.success('Folha timbrada deletada com sucesso!');
+                // Recarregar lista
+                await loadFolhasTimbradas();
+                // Se a folha deletada estava selecionada, limpar seleção
+                if (customization.design.corners.design === 'custom' && 
+                    customization.design.corners.image?.includes(filename)) {
+                    handleCornerDesignChange({
+                        enabled: false,
+                        design: 'none',
+                        image: undefined
+                    });
+                }
+            } else {
+                toast.error(response.error || 'Erro ao deletar folha timbrada');
+            }
+        } catch (error) {
+            console.error('Erro ao deletar folha timbrada:', error);
+            toast.error('Erro ao deletar folha timbrada');
+        }
+    };
+
+    // Selecionar folha timbrada da lista
+    const handleSelectFolha = (url: string) => {
+        const fullUrl = getUploadUrl(url);
+        handleCornerDesignChange({
+            enabled: true,
+            design: 'custom',
+            image: fullUrl
+        });
+        toast.success('Folha timbrada selecionada!');
+    };
 
     if (!isOpen) return null;
 
@@ -252,28 +341,145 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
                                         <input
                                             type="file"
                                             accept="image/png,image/jpeg,image/jpg"
+                                            disabled={uploadingFolha}
                                             onChange={async (e) => {
                                                 const file = e.target.files?.[0];
                                                 if (file) {
-                                                    const reader = new FileReader();
-                                                    reader.onload = () => {
-                                                        handleCornerDesignChange({ 
-                                                            enabled: true,
-                                                            design: 'custom',
-                                                            image: reader.result as string 
-                                                        });
-                                                        toast.success('Folha timbrada carregada!');
-                                                    };
-                                                    reader.readAsDataURL(file);
+                                                    setUploadingFolha(true);
+                                                    try {
+                                                        // Fazer upload para o servidor
+                                                        const uploadResponse = await pdfCustomizationService.uploadFolhaTimbrada(file);
+                                                        if (uploadResponse.success && uploadResponse.data) {
+                                                            const imageUrl = getUploadUrl(uploadResponse.data.url);
+                                                            handleCornerDesignChange({ 
+                                                                enabled: true,
+                                                                design: 'custom',
+                                                                image: imageUrl
+                                                            });
+                                                            toast.success('Folha timbrada carregada e salva!');
+                                                            // Recarregar lista
+                                                            await loadFolhasTimbradas();
+                                                        } else {
+                                                            toast.error(uploadResponse.error || 'Erro ao fazer upload');
+                                                        }
+                                                    } catch (error) {
+                                                        console.error('Erro ao fazer upload:', error);
+                                                        toast.error('Erro ao fazer upload da folha timbrada');
+                                                    } finally {
+                                                        setUploadingFolha(false);
+                                                        // Limpar input
+                                                        e.target.value = '';
+                                                    }
                                                 }
                                             }}
-                                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 disabled:opacity-50"
                                         />
+                                        {uploadingFolha && (
+                                            <div className="mt-2 p-2 bg-blue-50 text-blue-700 rounded flex items-center gap-2 text-xs">
+                                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
+                                                Enviando...
+                                            </div>
+                                        )}
                                         {customization.design.corners.enabled && customization.design.corners.design === 'custom' && customization.design.corners.image && (
-                                            <div className="mt-2 p-2 bg-green-50 text-green-700 rounded flex items-center gap-2">
+                                            <div className="mt-2 p-2 bg-green-50 text-green-700 rounded flex items-center gap-2 text-xs">
                                                 <span>✓</span> Folha timbrada carregada
                                             </div>
                                         )}
+
+                                        {/* Lista de Folhas Timbradas Já Importadas */}
+                                        <div className="mt-6">
+                                            <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">
+                                                📋 Folhas Timbradas Disponíveis:
+                                            </p>
+                                            {loadingFolhas ? (
+                                                <div className="flex items-center justify-center p-6">
+                                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+                                                    <span className="ml-2 text-sm text-gray-600 dark:text-gray-400">Carregando...</span>
+                                                </div>
+                                            ) : folhasTimbradas.length === 0 ? (
+                                                <div className="text-center p-6 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                    <svg className="w-12 h-12 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                    </svg>
+                                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                                        Nenhuma folha timbrada importada ainda
+                                                    </p>
+                                                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                                                        Faça upload de uma folha timbrada acima para começar
+                                                    </p>
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-3 md:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-1">
+                                                    {folhasTimbradas.map((folha) => {
+                                                        const isSelected = customization.design.corners.design === 'custom' && 
+                                                                          (customization.design.corners.image?.includes(folha.filename) || 
+                                                                           customization.design.corners.image?.includes(folha.url));
+                                                        return (
+                                                            <div
+                                                                key={folha.filename}
+                                                                className={`relative group border-2 rounded-xl overflow-hidden cursor-pointer transition-all shadow-sm hover:shadow-md ${
+                                                                    isSelected 
+                                                                        ? 'border-blue-600 ring-4 ring-blue-300 dark:ring-blue-800 scale-105' 
+                                                                        : 'border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-600'
+                                                                }`}
+                                                                onClick={() => {
+                                                                    handleSelectFolha(folha.url);
+                                                                    // Se estiver na aba de preview, regenerar automaticamente
+                                                                    if (activeTab === 'preview') {
+                                                                        setTimeout(() => {
+                                                                            gerarPreviewHTML();
+                                                                        }, 300);
+                                                                    }
+                                                                }}
+                                                                title={folha.filename}
+                                                            >
+                                                                <div className="aspect-[3/4] bg-gray-100 dark:bg-gray-900 relative">
+                                                                    <img
+                                                                        src={getUploadUrl(folha.url)}
+                                                                        alt={folha.filename}
+                                                                        className="w-full h-full object-cover"
+                                                                        onError={(e) => {
+                                                                            (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect fill="%23ddd" width="100" height="100"/%3E%3Ctext x="50" y="50" text-anchor="middle" dy=".3em" fill="%23999"%3EImagem%3C/text%3E%3C/svg%3E';
+                                                                        }}
+                                                                    />
+                                                                    {/* Overlay escuro quando hover */}
+                                                                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                                                                </div>
+                                                                
+                                                                {/* Botão de deletar (vermelho redondo no canto superior direito) */}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleDeleteFolha(folha.filename);
+                                                                    }}
+                                                                    className="absolute top-2 right-2 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg z-10"
+                                                                    title="Deletar folha timbrada"
+                                                                >
+                                                                    <XMarkIcon className="w-4 h-4" />
+                                                                </button>
+                                                                
+                                                                {/* Indicador de seleção */}
+                                                                {isSelected && (
+                                                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-blue-600 to-blue-500 text-white text-xs py-2 px-2 text-center font-semibold">
+                                                                        ✓ Selecionada
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* Badge de seleção no canto superior esquerdo */}
+                                                                {isSelected && (
+                                                                    <div className="absolute top-2 left-2 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center shadow-lg z-10">
+                                                                        <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                                        </svg>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>

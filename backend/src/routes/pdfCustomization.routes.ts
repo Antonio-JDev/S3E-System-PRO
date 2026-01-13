@@ -63,5 +63,28 @@ router.post('/upload-watermark', uploadWatermark, PDFCustomizationController.upl
  */
 router.post('/upload-corner-design', uploadCornerDesign, PDFCustomizationController.uploadCornerDesignImage);
 
+/**
+ * @route GET /api/pdf-customization/folhas-timbradas
+ * @desc Lista todas as folhas timbradas já importadas
+ * @access Authenticated
+ */
+router.get('/folhas-timbradas', (req, res, next) => {
+    console.log('🔍 [ROUTE] GET /api/pdf-customization/folhas-timbradas chamado');
+    console.log('🔍 [ROUTE] PDFCustomizationController.listFolhasTimbradas:', typeof PDFCustomizationController.listFolhasTimbradas);
+    if (typeof PDFCustomizationController.listFolhasTimbradas === 'function') {
+        return PDFCustomizationController.listFolhasTimbradas(req, res);
+    } else {
+        console.error('❌ [ROUTE] listFolhasTimbradas não é uma função!');
+        res.status(500).json({ success: false, error: 'Método não encontrado' });
+    }
+});
+
+/**
+ * @route DELETE /api/pdf-customization/folhas-timbradas/:filename
+ * @desc Deleta uma folha timbrada
+ * @access Authenticated
+ */
+router.delete('/folhas-timbradas/:filename', PDFCustomizationController.deleteFolhaTimbrada);
+
 export default router;
 

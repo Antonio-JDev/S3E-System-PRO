@@ -37,7 +37,7 @@ services:
 
   # Backend API - PRODUÇÃO
   backend:
-    image: odev10antonio/s3e-backend:1.0.9
+    image: odev10antonio/s3e-backend:1.1.2
     container_name: s3e-backend-prod
     restart: unless-stopped
     environment:
@@ -63,7 +63,7 @@ services:
       - backend_uploads:/app/uploads  # Uploads persistentes (logos, imagens, etc)
       - backend_logs:/app/logs        # Logs da aplicação
       - backend_certificados:/app/data/certificados  # Certificados digitais NF-e
-      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro  # XSDs de validação NF-e (read-only)
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro  # XSDs de validação NF-e (read-only) - NOTA: ajustar permissões no host
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,7 +79,7 @@ services:
 
   # Frontend React App - PRODUÇÃO
   frontend:
-    image: odev10antonio/s3e-frontend:1.0.9
+    image: odev10antonio/s3e-frontend:1.1.2
     container_name: s3e-frontend-prod
     restart: unless-stopped
     ports:

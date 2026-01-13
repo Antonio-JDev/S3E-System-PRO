@@ -16,6 +16,9 @@ export class NFeXMLValidatorService {
   private static getXsdPath(): string {
     const cwd = process.cwd();
     
+    console.log('🔍 [XSD] Debug: process.cwd() =', cwd);
+    console.log('🔍 [XSD] Debug: __dirname =', __dirname);
+    
     // 1. Tenta o caminho via bind mount direto (/app/PL_010b_NT2025_002_v1.30)
     const pathCwd = path.join(cwd, 'PL_010b_NT2025_002_v1.30');
     
@@ -25,30 +28,68 @@ export class NFeXMLValidatorService {
     // 3. Fallback: caminho relativo a partir de __dirname (desenvolvimento local)
     const pathRelative = path.join(__dirname, '../../..', 'PL_010b_NT2025_002_v1.30');
 
+    // Debug: Listar conteúdo do diretório /app para verificar montagens
+    try {
+      const appDirContents = fs.readdirSync(cwd);
+      console.log('🔍 [XSD] Debug: Conteúdo de', cwd, ':', appDirContents.slice(0, 10).join(', '), appDirContents.length > 10 ? '...' : '');
+    } catch (err) {
+      console.warn('⚠️  [XSD] Não foi possível listar conteúdo de', cwd, ':', (err as Error).message);
+    }
+
     // Verificar qual caminho existe
     if (fs.existsSync(pathCwd)) {
-      console.log('✅ [XSD] Usando caminho:', pathCwd);
-      return pathCwd;
+      try {
+        // Tentar ler o diretório para verificar permissões
+        const contents = fs.readdirSync(pathCwd);
+        console.log('✅ [XSD] Usando caminho:', pathCwd);
+        console.log('📁 [XSD] Arquivos encontrados:', contents.join(', '));
+        return pathCwd;
+      } catch (err) {
+        const error = err as Error;
+        console.error('❌ [XSD] Caminho existe mas não pode ser lido:', error.message);
+        console.error('❌ [XSD] Possível problema de permissões. Verifique se o diretório é acessível pelo usuário do processo.');
+        console.error('💡 [XSD] Solução: Execute no host: chmod -R 755 PL_010b_NT2025_002_v1.30');
+      }
+    } else {
+      console.log('❌ [XSD] Caminho não existe:', pathCwd);
     }
     
     if (fs.existsSync(pathData)) {
-      console.log('✅ [XSD] Usando caminho alternativo:', pathData);
-      return pathData;
+      try {
+        const contents = fs.readdirSync(pathData);
+        console.log('✅ [XSD] Usando caminho alternativo:', pathData);
+        console.log('📁 [XSD] Arquivos encontrados:', contents.join(', '));
+        return pathData;
+      } catch (err) {
+        console.warn('⚠️  [XSD] Caminho alternativo existe mas não pode ser lido:', (err as Error).message);
+      }
+    } else {
+      console.log('❌ [XSD] Caminho alternativo não existe:', pathData);
     }
     
     if (fs.existsSync(pathRelative)) {
-      console.log('✅ [XSD] Usando caminho relativo (dev):', pathRelative);
-      return pathRelative;
+      try {
+        const contents = fs.readdirSync(pathRelative);
+        console.log('✅ [XSD] Usando caminho relativo (dev):', pathRelative);
+        console.log('📁 [XSD] Arquivos encontrados:', contents.join(', '));
+        return pathRelative;
+      } catch (err) {
+        console.warn('⚠️  [XSD] Caminho relativo existe mas não pode ser lido:', (err as Error).message);
+      }
+    } else {
+      console.log('❌ [XSD] Caminho relativo não existe:', pathRelative);
     }
 
-    // Se nenhum caminho existir, logar erro mas retornar o caminho principal
-    // (para não quebrar o sistema, apenas avisar que validação XSD não estará disponível)
-    console.error('❌ [XSD] Nenhuma pasta de esquemas encontrada!');
+    // Se nenhum caminho existir ou for acessível, logar erro
+    console.error('❌ [XSD] Nenhuma pasta de esquemas encontrada ou acessível!');
     console.error('   Tentados:');
     console.error('   -', pathCwd);
     console.error('   -', pathData);
     console.error('   -', pathRelative);
     console.warn('⚠️  [XSD] Validação XSD completa não estará disponível. Continuando sem validação XSD...');
+    console.warn('💡 [XSD] Dica: Verifique se o volume está montado corretamente no docker-compose.prod.yml');
+    console.warn('💡 [XSD] Dica: Execute no host: chmod -R 755 PL_010b_NT2025_002_v1.30');
+    console.warn('💡 [XSD] Dica: Teste dentro do container: docker exec s3e-backend-prod ls -la /app/PL_010b_NT2025_002_v1.30');
     
     // Retornar o caminho principal como fallback (será tratado como não existente nas verificações)
     return pathCwd;

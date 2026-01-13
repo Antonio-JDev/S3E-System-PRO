@@ -345,7 +345,7 @@ export class PDFCustomizationController {
 
             res.json({
                 success: true,
-                data: { url },
+                data: { url, filename: req.file.filename },
                 message: 'Design carregado com sucesso'
             });
         } catch (error: any) {
@@ -353,6 +353,105 @@ export class PDFCustomizationController {
             res.status(500).json({
                 success: false,
                 message: 'Erro ao fazer upload do design',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * GET /api/pdf-customization/folhas-timbradas
+     * Lista todas as folhas timbradas já importadas
+     */
+    static async listFolhasTimbradas(req: Request, res: Response): Promise<void> {
+        try {
+            console.log('📋 [listFolhasTimbradas] Endpoint chamado');
+            const cwd = process.cwd();
+            const uploadDir = path.join(cwd, 'uploads', 'pdf-customization');
+            console.log('📁 [listFolhasTimbradas] Diretório:', uploadDir);
+            
+            if (!fs.existsSync(uploadDir)) {
+                res.json({
+                    success: true,
+                    data: []
+                });
+                return;
+            }
+
+            // Listar apenas arquivos de imagem (cornerDesign-*.png, cornerDesign-*.jpg, etc)
+            const files = fs.readdirSync(uploadDir)
+                .filter(file => {
+                    const ext = path.extname(file).toLowerCase();
+                    return ['.png', '.jpg', '.jpeg', '.svg', '.webp'].includes(ext) && 
+                           file.startsWith('cornerDesign-');
+                })
+                .map(file => {
+                    const filePath = path.join(uploadDir, file);
+                    const stats = fs.statSync(filePath);
+                    return {
+                        filename: file,
+                        url: `/uploads/pdf-customization/${file}`,
+                        size: stats.size,
+                        createdAt: stats.birthtime,
+                        modifiedAt: stats.mtime
+                    };
+                })
+                .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // Mais recentes primeiro
+
+            res.json({
+                success: true,
+                data: files
+            });
+        } catch (error: any) {
+            console.error('Erro ao listar folhas timbradas:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Erro ao listar folhas timbradas',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * DELETE /api/pdf-customization/folhas-timbradas/:filename
+     * Deleta uma folha timbrada
+     */
+    static async deleteFolhaTimbrada(req: Request, res: Response): Promise<void> {
+        try {
+            const { filename } = req.params;
+            
+            // Validar nome do arquivo para evitar path traversal
+            if (!filename || filename.includes('..') || !filename.startsWith('cornerDesign-')) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Nome de arquivo inválido'
+                });
+                return;
+            }
+
+            const cwd = process.cwd();
+            const uploadDir = path.join(cwd, 'uploads', 'pdf-customization');
+            const filePath = path.join(uploadDir, filename);
+
+            if (!fs.existsSync(filePath)) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Arquivo não encontrado'
+                });
+                return;
+            }
+
+            // Deletar arquivo
+            fs.unlinkSync(filePath);
+
+            res.json({
+                success: true,
+                message: 'Folha timbrada deletada com sucesso'
+            });
+        } catch (error: any) {
+            console.error('Erro ao deletar folha timbrada:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Erro ao deletar folha timbrada',
                 error: error.message
             });
         }

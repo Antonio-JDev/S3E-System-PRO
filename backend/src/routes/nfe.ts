@@ -15,6 +15,13 @@ router.use(authenticate);
 router.get('/', NFeController.listarNotasFiscais);
 
 /**
+ * @route GET /api/nfe/notas
+ * @desc Lista todas as notas fiscais (alias para compatibilidade)
+ * @access Admin/Gerente
+ */
+router.get('/notas', authorize('admin', 'gerente'), NFeController.listarNotasFiscais);
+
+/**
  * @route GET /api/nfe/notas/:id/danfe
  * @desc Gerar DANFE em PDF a partir da nota fiscal salva
  * @access Admin/Gerente

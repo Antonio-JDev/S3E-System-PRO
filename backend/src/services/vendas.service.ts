@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { VendaStatus } from '../types/index';
+import { ContaStatus, VendaStatus } from '../types/index';
 import { EstoqueService } from './estoque.service';
 
 const prisma = new PrismaClient();
@@ -14,6 +14,26 @@ export interface VendaPayload {
     valorEntrada?: number;
     observacoes?: string;
 }
+
+interface PagarContaPayload {
+    dataPagamento?: string;
+    valorRecebido?: number;
+    observacoes?: string;
+}
+
+// Validações específicas por forma de pagamento
+const validarFormaPagamento = (formaPagamento: string, parcelas: number) => {
+    switch (formaPagamento) {
+        case 'À vista':
+            if (parcelas !== 1) {
+                throw new Error('Vendas à vista devem ter exatamente 1 parcela');
+            }
+            break;
+        // Demais regras podem ser evoluídas depois, mantemos comportamento atual
+        default:
+            break;
+    }
+};
 
 export class VendasService {
     /**
@@ -34,6 +54,9 @@ export class VendasService {
         if (valorEntrada >= valorTotal) {
             throw new Error('Valor de entrada deve ser menor que o valor total');
         }
+
+        // Validação de forma de pagamento x parcelas
+        validarFormaPagamento(formaPagamento, parcelas);
 
         // Calcular valor das parcelas
         const valorRestante = valorTotal - valorEntrada;
@@ -124,13 +147,33 @@ export class VendasService {
                     parcelas,
                     valorEntrada,
                     observacoes,
-                    status: VendaStatus.Concluida // Venda concluída imediatamente
+                    // A venda começa como Pendente e será marcada como Concluida
+                    // quando TODAS as parcelas (contas a receber) forem pagas
+                    status: VendaStatus.Pendente
                 }
             });
 
-            // 3. Gerar contas a receber (parcelas)
-            const contasReceber = [];
+            // 3. Gerar contas a receber (entrada separada + parcelas)
+            const contasReceber: any[] = [];
 
+            // Se houver entrada, criar uma conta a receber separada para a entrada
+            if (valorEntrada > 0) {
+                const contaEntrada = await tx.contaReceber.create({
+                    data: {
+                        vendaId: venda.id,
+                        descricao: `Entrada - Venda ${numeroVenda}`,
+                        valorParcela: valorEntrada,
+                        dataVencimento: new Date(), // Entrada vence na data da venda
+                        numeroParcela: 0, // Número especial para entrada
+                        totalParcelas: parcelas,
+                        status: ContaStatus.Pendente // Inicialmente pendente, pode ser marcada como paga
+                    }
+                });
+
+                contasReceber.push(contaEntrada);
+            }
+
+            // Criar as parcelas do valor financiado (sem incluir entrada)
             for (let i = 1; i <= parcelas; i++) {
                 // Calcular data de vencimento (30 dias após a venda para cada parcela)
                 const dataVencimento = new Date();
@@ -140,11 +183,11 @@ export class VendasService {
                     data: {
                         vendaId: venda.id,
                         descricao: `Parcela ${i}/${parcelas} - Venda ${numeroVenda}`,
-                        valorParcela: i === 1 ? valorEntrada + valorParcela : valorParcela,
+                        valorParcela: valorParcela, // Apenas o valor da parcela (sem entrada)
                         dataVencimento,
                         numeroParcela: i,
                         totalParcelas: parcelas,
-                        status: i === 1 ? 'Pendente' : 'Pendente' // Primeira parcela vence primeiro
+                        status: ContaStatus.Pendente
                     }
                 });
 
@@ -152,7 +195,7 @@ export class VendasService {
             }
 
             // 4. Processar baixa de estoque baseado no orçamento
-            let baixaEstoque = null;
+            let baixaEstoque: any = null;
             try {
                 baixaEstoque = await EstoqueService.processarBaixaOrcamento(
                     orcamentoId,
@@ -354,9 +397,10 @@ export class VendasService {
     }
 
     /**
-     * Marca uma conta a receber como paga
+     * Marca uma conta a receber como paga e atualiza o status da venda
+     * - Quando todas as parcelas forem pagas, a venda é marcada como "Concluida"
      */
-    static async pagarConta(id: string) {
+    static async pagarConta(id: string, payload?: PagarContaPayload) {
         const conta = await prisma.contaReceber.findUnique({
             where: { id }
         });
@@ -365,13 +409,43 @@ export class VendasService {
             throw new Error('Conta a receber não encontrada');
         }
 
-        return await prisma.contaReceber.update({
+        if (conta.status === ContaStatus.Pago) {
+            throw new Error('Esta parcela já está marcada como paga');
+        }
+
+        const dataPagamento = payload?.dataPagamento
+            ? new Date(payload.dataPagamento)
+            : new Date();
+
+        // Atualizar a conta como paga
+        const contaAtualizada = await prisma.contaReceber.update({
             where: { id },
             data: {
-                status: 'Pago',
-                dataPagamento: new Date(),
+                status: ContaStatus.Pago,
+                dataPagamento,
+                observacoes: payload?.observacoes ?? conta.observacoes,
                 updatedAt: new Date()
             }
         });
+
+        // Verificar todas as parcelas da mesma venda
+        const contasDaVenda = await prisma.contaReceber.findMany({
+            where: { vendaId: conta.vendaId }
+        });
+
+        const todasPagas = contasDaVenda.every(c => c.status === ContaStatus.Pago);
+
+        if (todasPagas) {
+            // Atualizar status da venda para Concluida
+            await prisma.venda.update({
+                where: { id: conta.vendaId },
+                data: {
+                    status: VendaStatus.Concluida,
+                    updatedAt: new Date()
+                }
+            });
+        }
+
+        return contaAtualizada;
     }
 }

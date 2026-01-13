@@ -227,6 +227,24 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        // Verificar se há kits sem NCM antes de emitir
+        if (vendaAtual?.orcamento?.items) {
+            const kitsSemNCM = vendaAtual.orcamento.items.filter((item: any) => {
+                const isKit = item.tipo === 'KIT';
+                const temNCM = item.ncm || item.material?.ncm || item.cotacao?.ncm;
+                return isKit && !temNCM;
+            });
+
+            if (kitsSemNCM.length > 0) {
+                const nomesKits = kitsSemNCM.map((kit: any) => kit.nome || kit.descricao || 'Kit').join(', ');
+                toast.warning('⚠️ Atenção: Kit(s) sem NCM', {
+                    description: `Este pedido contém ${kitsSemNCM.length} kit(s) sem NCM informado: ${nomesKits}. É necessário adicionar o NCM antes de emitir a nota fiscal.`,
+                    duration: 12000
+                });
+                // Não bloquear a emissão, apenas avisar
+            }
+        }
+
         try {
             setEmitindo(true);
             console.log('📤 Iniciando emissão de NF-e...');
@@ -1275,14 +1293,27 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                                                         0;
                                                     const subtotal =
                                                         item.subtotal || precoUnit * quantidade;
+                                                    const isKit = item.tipo === 'KIT';
+                                                    const ncm = item.ncm || item.material?.ncm || item.cotacao?.ncm || null;
+                                                    const kitSemNCM = isKit && !ncm;
 
                                                     return (
                                                         <tr
                                                             key={item.id || index}
-                                                            className="border-b border-gray-100 dark:border-dark-border/60"
+                                                            className={`border-b border-gray-100 dark:border-dark-border/60 ${kitSemNCM ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}
                                                         >
                                                             <td className="px-2 py-2 align-top text-gray-800 dark:text-dark-text text-xs md:text-sm">
                                                                 {nomeItem}
+                                                                {isKit && (
+                                                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+                                                                        📦 Kit
+                                                                    </span>
+                                                                )}
+                                                                {kitSemNCM && (
+                                                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                                                                        ⚠️ Sem NCM
+                                                                    </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-2 py-2 align-top text-gray-600 dark:text-dark-text-secondary text-xs md:text-sm">
                                                                 {item.descricao || '-'}

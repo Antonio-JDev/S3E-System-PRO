@@ -167,6 +167,11 @@ export class ProjetosService {
 
       // Verificar estoque de todos os items do orçamento
       for (const item of projeto.orcamento.items) {
+        // Pular itens do tipo SERVIÇO, QUADRO_PRONTO e CUSTO_EXTRA - não precisam de estoque
+        if (item.tipo === 'SERVICO' || item.tipo === 'QUADRO_PRONTO' || item.tipo === 'CUSTO_EXTRA') {
+          continue;
+        }
+        
         // Verificar materiais diretos
         if (item.tipo === 'MATERIAL' && item.materialId) {
           const material = await prisma.material.findUnique({

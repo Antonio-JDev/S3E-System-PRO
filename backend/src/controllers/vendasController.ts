@@ -180,6 +180,10 @@ export class VendasController {
 
     /**
      * Marca uma conta a receber como paga
+     * Body pode conter:
+     * - dataPagamento (string ISO)
+     * - valorRecebido (number)  ← usado para validações futuras
+     * - observacoes (string)
      */
     static async pagarConta(req: Request, res: Response) {
         try {
@@ -191,7 +195,7 @@ export class VendasController {
                 });
             }
 
-            const conta = await VendasService.pagarConta(id);
+            const conta = await VendasService.pagarConta(id, req.body);
 
             res.json({
                 success: true,
