@@ -28,6 +28,7 @@ export interface Projeto {
     id: string;
     titulo: string;
     precoVenda: number;
+    numeroSequencial?: number;
   };
 }
 

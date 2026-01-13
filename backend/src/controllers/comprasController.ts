@@ -531,3 +531,49 @@ export const cancelarCompra = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// Atualizar fracionamento de um item específico da compra
+export const atualizarFracionamentoItem = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { compraId, itemId } = req.params;
+    const { quantidadeFracionada, tipoEmbalagem, unidadeEmbalagem } = req.body;
+
+    const compraItem = await prisma.compraItem.findUnique({
+      where: { id: itemId },
+      include: { compra: true }
+    });
+
+    if (!compraItem) {
+      res.status(404).json({ success: false, error: 'Item da compra não encontrado' });
+      return;
+    }
+
+    if (compraItem.compraId !== compraId) {
+      res.status(400).json({ success: false, error: 'Item não pertence a esta compra' });
+      return;
+    }
+
+    // Atualizar fracionamento e resetar flag de aplicado
+    const itemAtualizado = await prisma.compraItem.update({
+      where: { id: itemId },
+      data: {
+        quantidadeFracionada: quantidadeFracionada || null,
+        tipoEmbalagem: tipoEmbalagem || null,
+        unidadeEmbalagem: unidadeEmbalagem || null,
+        fracionamentoAplicado: false // Resetar para permitir reprocessamento
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Fracionamento atualizado com sucesso',
+      data: itemAtualizado
+    });
+  } catch (error: any) {
+    console.error('Erro ao atualizar fracionamento:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Erro ao atualizar fracionamento'
+    });
+  }
+};
+

@@ -264,6 +264,22 @@ class ComprasService {
       };
     }
   }
+
+  /**
+   * Buscar compras com fracionamento pendente
+   */
+  async buscarComprasComFracionamentoPendente() {
+    const response = await axiosApiService.get('/api/compras/fracionamento/pendentes');
+    return response.data || response;
+  }
+
+  /**
+   * Processar atualizações de fracionamento
+   */
+  async processarAtualizacoesFracionamento() {
+    const response = await axiosApiService.post('/api/compras/fracionamento/processar');
+    return response.data || response;
+  }
 }
 
 export const comprasService = new ComprasService();

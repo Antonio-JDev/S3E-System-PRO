@@ -124,7 +124,12 @@ class FinanceiroService {
         
         vendas.forEach((venda: any) => {
           if (venda.contasReceber && Array.isArray(venda.contasReceber)) {
-            contas.push(...venda.contasReceber);
+            // Adicionar referência da venda a cada conta
+            const contasComVenda = venda.contasReceber.map((conta: any) => ({
+              ...conta,
+              venda: venda // Incluir objeto venda completo com orcamento
+            }));
+            contas.push(...contasComVenda);
           }
         });
         

@@ -237,8 +237,21 @@ class PDFCustomizationService {
             // Se tiver folha timbrada (corners), adicionar
             if (customization.design.corners.enabled && customization.design.corners.image) {
                 try {
-                    if (customization.design.corners.image.startsWith('data:')) {
-                        const response = await fetch(customization.design.corners.image);
+                    let imageUrl = customization.design.corners.image;
+                    
+                    // Se for URL HTTP, buscar a imagem
+                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
+                        // Se for URL relativa, construir URL completa
+                        if (imageUrl.startsWith('/uploads/')) {
+                            const baseUrl = window.location.origin.replace(':8080', ':3001');
+                            imageUrl = `${baseUrl}${imageUrl}`;
+                        }
+                        const response = await fetch(imageUrl);
+                        const blob = await response.blob();
+                        formData.append('folhaTimbrada', blob, 'folha.png');
+                    } else if (imageUrl.startsWith('data:')) {
+                        // Se for base64, converter para blob
+                        const response = await fetch(imageUrl);
                         const blob = await response.blob();
                         formData.append('folhaTimbrada', blob, 'folha.png');
                     }
@@ -263,6 +276,71 @@ class PDFCustomizationService {
             return {
                 success: false,
                 error: error.response?.data?.message || 'Erro ao gerar preview'
+            };
+        }
+    }
+
+    /**
+     * Lista todas as folhas timbradas já importadas
+     */
+    async listFolhasTimbradas() {
+        try {
+            const response = await axiosApiService.get<Array<{
+                filename: string;
+                url: string;
+                size: number;
+                createdAt: string;
+                modifiedAt: string;
+            }>>('/api/pdf-customization/folhas-timbradas');
+            return response;
+        } catch (error: any) {
+            console.error('Erro ao listar folhas timbradas:', error);
+            return {
+                success: false,
+                error: error.response?.data?.message || 'Erro ao carregar folhas timbradas',
+                data: []
+            };
+        }
+    }
+
+    /**
+     * Deleta uma folha timbrada
+     */
+    async deleteFolhaTimbrada(filename: string) {
+        try {
+            const response = await axiosApiService.delete(`/api/pdf-customization/folhas-timbradas/${filename}`);
+            return response;
+        } catch (error: any) {
+            console.error('Erro ao deletar folha timbrada:', error);
+            return {
+                success: false,
+                error: error.response?.data?.message || 'Erro ao deletar folha timbrada'
+            };
+        }
+    }
+
+    /**
+     * Upload de folha timbrada
+     */
+    async uploadFolhaTimbrada(file: File) {
+        try {
+            const formData = new FormData();
+            formData.append('cornerDesign', file);
+            
+            const response = await axiosApiService.post<{ url: string; filename: string }>(
+                '/api/pdf-customization/upload-corner-design',
+                formData,
+                {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                }
+            );
+            return response;
+        } catch (error: any) {
+            console.error('Erro ao fazer upload da folha timbrada:', error);
+            return {
+                success: false,
+                error: error.response?.data?.message || 'Erro ao fazer upload da folha timbrada',
+                data: null
             };
         }
     }
@@ -293,8 +371,21 @@ class PDFCustomizationService {
             // Se tiver folha timbrada (corners), adicionar
             if (customization.design.corners.enabled && customization.design.corners.image) {
                 try {
-                    if (customization.design.corners.image.startsWith('data:')) {
-                        const response = await fetch(customization.design.corners.image);
+                    let imageUrl = customization.design.corners.image;
+                    
+                    // Se for URL HTTP, buscar a imagem
+                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
+                        // Se for URL relativa, construir URL completa
+                        if (imageUrl.startsWith('/uploads/')) {
+                            const baseUrl = window.location.origin.replace(':8080', ':3001');
+                            imageUrl = `${baseUrl}${imageUrl}`;
+                        }
+                        const response = await fetch(imageUrl);
+                        const blob = await response.blob();
+                        formData.append('folhaTimbrada', blob, 'folha.png');
+                    } else if (imageUrl.startsWith('data:')) {
+                        // Se for base64, converter para blob
+                        const response = await fetch(imageUrl);
                         const blob = await response.blob();
                         formData.append('folhaTimbrada', blob, 'folha.png');
                     }

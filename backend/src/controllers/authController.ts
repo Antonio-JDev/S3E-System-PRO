@@ -334,6 +334,13 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Validar se a senha contém pelo menos 1 caractere especial
+    const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
+    if (!specialCharRegex.test(password)) {
+      res.status(400).json({ error: 'A senha deve conter pelo menos 1 caractere especial' });
+      return;
+    }
+
     // Redefinir senha
     await authService.resetPasswordWithToken(token, password);
 

@@ -204,9 +204,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     });
 
     const [items, setItems] = useState<OrcamentoItem[]>([]);
+    
+    // Estado para controlar valores em edição (para melhorar UX ao digitar)
+    const [valorEditando, setValorEditando] = useState<{ [index: number]: string }>({});
+    const [itensSelecionados, setItensSelecionados] = useState<Set<number>>(new Set()); // Índices dos itens selecionados
     const [showItemModal, setShowItemModal] = useState(false);
     const [itemSearchTerm, setItemSearchTerm] = useState('');
     const [modalExpandido, setModalExpandido] = useState(false); // Novo: controla se o modal está expandido
+    const [showCriarKitModal, setShowCriarKitModal] = useState(false);
+    const [nomeKit, setNomeKit] = useState('');
     
     // Estados para comparação estoque vs banco frio
     const [materiaisComEstoque, setMateriaisComEstoque] = useState<Material[]>([]);
@@ -360,14 +366,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             if (orcamentoCopiaStr) {
                 const orcamentoCopia = JSON.parse(orcamentoCopiaStr);
                 
-                // Preencher formState (exceto clienteId)
+                // Preencher formState (exceto clienteId e validade - sempre usar nova data de 30 dias)
                 setFormState(prev => ({
                     ...prev,
                     empresaCNPJ: orcamentoCopia.empresaCNPJ || prev.empresaCNPJ,
                     titulo: orcamentoCopia.titulo || '',
                     descricao: orcamentoCopia.descricao || '',
                     descricaoProjeto: orcamentoCopia.descricaoProjeto || '',
-                    validade: orcamentoCopia.validade || prev.validade,
+                    validade: calcularDataValidadePadrao(), // Sempre usar nova validade de 30 dias para novo orçamento
                     endereco: orcamentoCopia.endereco || '',
                     bairro: orcamentoCopia.bairro || '',
                     cidade: orcamentoCopia.cidade || '',
@@ -418,7 +424,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             const [clientesRes, materiaisRes, servicosRes, quadrosRes, kitsRes, cotacoesRes, empresasRes] = await Promise.all([
                 clientesService.listar(),
                 axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
-                servicosService.listar({ ativo: true }),
+                servicosService.listar(), // Carregar todos os serviços (filtrar apenas ativos no frontend)
                 quadrosService.listar(),
                 axiosApiService.get(ENDPOINTS.KITS), // Carregar kits
                 axiosApiService.get('/api/cotacoes'), // Carregar cotações
@@ -491,9 +497,26 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         );
     }, [materiais, itemSearchTerm]);
 
-    // Filtrar serviços para seleção
-    const filteredServicos = useMemo(() => {
+    // Recarregar serviços quando a aba de serviços é selecionada
+    useEffect(() => {
+        if (modoAdicao === 'servicos') {
+            const recarregarServicos = async () => {
+                try {
+                    const servicosRes = await servicosService.listar();
+                    if (servicosRes.success && servicosRes.data) {
+                        setServicos(Array.isArray(servicosRes.data) ? servicosRes.data : []);
+                        console.log('✅ Serviços recarregados:', servicosRes.data.length);
+                    }
+                } catch (error) {
+                    console.error('Erro ao recarregar serviços:', error);
+                }
+            };
+            recarregarServicos();
+        }
+    }, [modoAdicao]);
 
+    // Filtrar serviços para seleção (apenas ativos)
+    const filteredServicos = useMemo(() => {
         if (!itemSearchTerm.trim()) return (servicos || []).filter(s => s && s.ativo);
         return (servicos || []).filter(s => 
             s && s.ativo && (
@@ -987,6 +1010,173 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     // Remover item
     const handleRemoveItem = (index: number) => {
         setItems(prev => prev.filter((_, i) => i !== index));
+        // Remover da seleção se estiver selecionado
+        setItensSelecionados(prev => {
+            const novo = new Set(prev);
+            novo.delete(index);
+            // Ajustar índices após remoção
+            const ajustado = new Set<number>();
+            novo.forEach(idx => {
+                if (idx > index) {
+                    ajustado.add(idx - 1);
+                } else {
+                    ajustado.add(idx);
+                }
+            });
+            return ajustado;
+        });
+    };
+
+    // Toggle seleção de item
+    const toggleItemSelecionado = (index: number) => {
+        setItensSelecionados(prev => {
+            const novo = new Set(prev);
+            if (novo.has(index)) {
+                novo.delete(index);
+            } else {
+                novo.add(index);
+            }
+            return novo;
+        });
+    };
+
+    // Selecionar todos os itens
+    const selecionarTodosItens = () => {
+        setItensSelecionados(new Set(items.map((_, index) => index)));
+    };
+
+    // Deselecionar todos os itens
+    const deselecionarTodosItens = () => {
+        setItensSelecionados(new Set());
+    };
+
+    // Criar kit a partir dos itens selecionados
+    const handleCriarKit = () => {
+        if (itensSelecionados.size === 0) {
+            toast.error('Nenhum item selecionado', {
+                description: 'Selecione pelo menos um item para criar um kit'
+            });
+            return;
+        }
+
+        if (!nomeKit.trim()) {
+            toast.error('Nome do kit obrigatório', {
+                description: 'Digite um nome para o kit'
+            });
+            return;
+        }
+
+        // Calcular valores totais dos itens selecionados
+        const itensParaKit = Array.from(itensSelecionados)
+            .sort((a, b) => a - b) // Ordenar índices
+            .map(index => items[index])
+            .filter(Boolean);
+
+        if (itensParaKit.length === 0) {
+            toast.error('Erro ao criar kit', {
+                description: 'Nenhum item válido encontrado'
+            });
+            return;
+        }
+
+        const custoTotal = itensParaKit.reduce((sum, item) => sum + (item.custoUnit * item.quantidade), 0);
+        const subtotalTotal = itensParaKit.reduce((sum, item) => sum + item.subtotal, 0);
+        const precoUnit = subtotalTotal; // Preço unitário do kit é o subtotal total
+        
+        // Calcular precoBase do kit (valor sem BDI)
+        // Se todos os itens têm precoBase, usar a soma dos precoBase
+        // Caso contrário, calcular removendo o BDI do subtotal total
+        const precoBaseTotal = itensParaKit.reduce((sum, item) => {
+            if (item.precoBase !== undefined) {
+                return sum + (item.precoBase * item.quantidade);
+            } else {
+                // Se não tem precoBase, calcular removendo o BDI
+                const bdi = formState.bdi || 0;
+                return sum + ((item.precoUnit / (1 + bdi / 100)) * item.quantidade);
+            }
+        }, 0);
+
+        // Preparar array de itens do kit para salvar (com nome, código e valor de venda atualizado)
+        const itensDoKitParaSalvar = itensParaKit.map(item => {
+            // Buscar material completo para obter código (sku) e valorVenda original (apenas para referência)
+            let codigo = '';
+            let valorVendaOriginal = 0;
+            
+            if (item.materialId) {
+                const materialCompleto = materiais.find(m => m.id === item.materialId);
+                if (materialCompleto) {
+                    codigo = materialCompleto.sku || '';
+                    valorVendaOriginal = materialCompleto.valorVenda || materialCompleto.preco || 0;
+                }
+            } else if (item.cotacaoId) {
+                const cotacaoCompleta = cotacoes.find(c => c.id === item.cotacaoId);
+                if (cotacaoCompleta) {
+                    codigo = cotacaoCompleta.ncm || '';
+                    valorVendaOriginal = cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario || 0;
+                }
+            }
+
+            // IMPORTANTE: Sempre usar o precoUnit atual do item no orçamento
+            // Este valor já inclui:
+            // - BDI aplicado
+            // - Edições manuais do usuário (se houver)
+            // - Qualquer ajuste feito no contexto deste orçamento específico
+            // O valorVendaOriginal é usado apenas para referência (mostrar valor original riscado)
+            const valorVendaAtualizado = item.precoUnit || 0;
+
+            return {
+                nome: item.nome,
+                codigo: codigo,
+                valorVenda: valorVendaAtualizado, // Sempre usar o precoUnit atual (com BDI e edições manuais)
+                valorVendaOriginal: valorVendaOriginal, // Valor de venda original do cadastro (para referência)
+                quantidade: item.quantidade,
+                unidadeMedida: item.unidadeMedida,
+                materialId: item.materialId || null,
+                cotacaoId: item.cotacaoId || null,
+                tipo: item.tipo,
+                subtotal: item.subtotal // Usar o subtotal atual do item
+            };
+        });
+
+        // Criar novo item do tipo KIT
+        const novoKit: OrcamentoItem & { itensDoKit?: any } = {
+            tipo: 'KIT',
+            nome: nomeKit.trim(),
+            // ✅ Para kits customizados, usar o nome do usuário como descricao (será salvo no backend)
+            // A descrição detalhada dos itens está em itensDoKit
+            descricao: nomeKit.trim(),
+            unidadeMedida: 'UN',
+            quantidade: 1,
+            custoUnit: custoTotal,
+            precoBase: precoBaseTotal, // Base sem BDI (soma dos precoBase dos itens ou calculado)
+            precoUnit: precoUnit, // Preço com BDI (soma dos subtotais dos itens)
+            subtotal: precoUnit,
+            // Marcar como kit customizado
+            kitId: undefined, // Será undefined para kits customizados
+            // Salvar itens do kit para exibição posterior
+            itensDoKit: itensDoKitParaSalvar
+        };
+
+        // Remover itens selecionados e adicionar o kit
+        const indicesParaRemover = Array.from(itensSelecionados).sort((a, b) => b - a); // Ordenar decrescente para remover do final
+        let novosItems = [...items];
+        
+        // Remover itens do final para o início para não afetar os índices
+        indicesParaRemover.forEach(index => {
+            novosItems.splice(index, 1);
+        });
+
+        // Adicionar o kit
+        novosItems.push(novoKit);
+
+        setItems(novosItems);
+        setItensSelecionados(new Set());
+        setNomeKit('');
+        setShowCriarKitModal(false);
+
+        toast.success('Kit criado com sucesso!', {
+            description: `${nomeKit.trim()} - R$ ${precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        });
     };
 
     // Atualizar quantidade do item
@@ -1003,6 +1193,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }));
     };
 
+    // Função para converter valor digitado para número (aceita vírgula e ponto)
+    const parsearValorBRL = (valor: string): number => {
+        if (!valor || valor.trim() === '') return 0;
+        // Remove pontos (separadores de milhar) e substitui vírgula por ponto
+        const valorLimpo = valor.replace(/\./g, '').replace(',', '.');
+        const numero = parseFloat(valorLimpo);
+        return isNaN(numero) ? 0 : numero;
+    };
+
+    // Função para formatar número para exibição BRL
+    const formatarValorBRL = (valor: number): string => {
+        return valor.toFixed(2).replace('.', ',');
+    };
+
     // Atualizar preço unitário do item (valor de venda editável)
     const handleUpdateItemPrice = (index: number, novoPrecoUnit: number) => {
         if (novoPrecoUnit < 0) {
@@ -1014,6 +1218,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
         setItems(prev => prev.map((item, i) => {
             if (i === index) {
+                // Limpar o valor em edição após salvar
+                const novosValoresEditando = { ...valorEditando };
+                delete novosValoresEditando[index];
+                setValorEditando(novosValoresEditando);
+                
                 return {
                     ...item,
                     precoUnit: novoPrecoUnit,
@@ -1035,7 +1244,29 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 return item;
             }
             
-            // Usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
+            // Se for kit, recalcular precoBase dinamicamente
+            if (item.tipo === 'KIT' && item.kitId) {
+                const kitCompleto = kits.find((k: any) => k.id === item.kitId);
+                if (kitCompleto && kitCompleto.items) {
+                    // Recalcular preço de venda total do kit baseado nos materiais
+                    const precoVendaTotalKit = kitCompleto.items.reduce((sum: number, kitItem: any) => {
+                        const precoVenda = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
+                        return sum + (precoVenda * kitItem.quantidade);
+                    }, 0);
+                    
+                    const precoBase = precoVendaTotalKit;
+                    const precoUnit = precoBase * (1 + newBdi / 100);
+                    
+                    return {
+                        ...item,
+                        precoBase,
+                        precoUnit,
+                        subtotal: precoUnit * item.quantidade
+                    };
+                }
+            }
+            
+            // Para outros itens, usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
             const basePreco = item.precoBase !== undefined ? item.precoBase : item.custoUnit;
             const precoUnit = basePreco * (1 + newBdi / 100);
             return {
@@ -1140,6 +1371,19 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
     };
 
+    // Prevenir submit acidental ao pressionar Enter
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        // Se Enter for pressionado e não for em um textarea ou botão de submit
+        if (e.key === 'Enter' && e.target instanceof HTMLElement) {
+            const isTextarea = e.target.tagName === 'TEXTAREA';
+            const isSubmitButton = e.target.type === 'submit' || (e.target as HTMLElement).closest('button[type="submit"]');
+            
+            if (!isTextarea && !isSubmitButton) {
+                e.preventDefault();
+            }
+        }
+    };
+
     // Salvar orçamento
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1170,7 +1414,6 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 descricaoProjeto: formState.descricaoProjeto,
                 validade: formState.validade,
                 bdi: formState.bdi,
-                classificacao: formState.classificacao, // ✅ NOVO: Classificação do orçamento
                 observacoes: formState.observacoes,
                 empresaCNPJ: formState.empresaCNPJ,
                 enderecoObra: formState.enderecoObra,
@@ -1189,14 +1432,18 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                     kitId: item.kitId,
                     cotacaoId: item.cotacaoId,
                     servicoNome: item.servicoNome,
-                    descricao: item.descricao || item.nome,
+                    // ✅ Para kits customizados (sem kitId), priorizar item.nome que contém o nome do usuário
+                    // Para outros itens, usar descricao || nome
+                    descricao: (item.tipo === 'KIT' && !item.kitId && item.nome) ? item.nome : (item.descricao || item.nome),
                     ncm: item.ncm, // ✅ NCM para faturamento NF-e/NFS-e
                     quantidade: item.quantidade,
                     custoUnit: item.custoUnit,
                     precoUnitario: item.precoUnit,
                     subtotal: item.subtotal,
                     unidadeVenda: item.unidadeVenda,
-                    tipoMaterial: item.tipoMaterial
+                    tipoMaterial: item.tipoMaterial,
+                    // ✅ Campo para armazenar itens de kits customizados
+                    itensDoKit: (item as any).itensDoKit || null
                 }))
             };
 
@@ -1206,6 +1453,24 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 loading: 'Criando orçamento...',
                 success: (response) => {
                     if (response.success) {
+                        // Verificar se há kits no orçamento
+                        const temKit = items.some(item => item.tipo === 'KIT');
+                        
+                        if (temKit && formState.empresaCNPJ) {
+                            // Buscar nome da empresa pelo CNPJ
+                            const empresaSelecionada = empresas.find(emp => emp.cnpj === formState.empresaCNPJ);
+                            const nomeEmpresa = empresaSelecionada 
+                                ? (empresaSelecionada.nomeFantasia || empresaSelecionada.razaoSocial)
+                                : formState.empresaCNPJ;
+                            
+                            // Notificação especial para orçamento com kit
+                            setTimeout(() => {
+                                toast.warning('Atenção: Orçamento criado com Kit', {
+                                    description: `Orçamento criado para o CNPJ: ${nomeEmpresa}. Este orçamento contém item(s) do tipo Kit. O NCM deverá ser informado no momento da emissão da nota fiscal.`,
+                                    duration: 10000
+                                });
+                            }, 500);
+                        }
 
                         // Limpar rascunho após salvar com sucesso
                         limparRascunho();
@@ -1352,7 +1617,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 )}
             </header>
 
-            <form onSubmit={handleSubmit} className="max-w-6xl mx-auto space-y-6">
+            <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="max-w-6xl mx-auto space-y-6">
                 {/* SEÇÃO 1: Informações Básicas */}
                 <div className="card-primary">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-6 flex items-center gap-2">
@@ -1616,6 +1881,46 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         </div>
                     ) : (
                         <div className="space-y-4">
+                            {/* Botões de seleção e criar kit */}
+                            {items.length > 0 && (
+                                <div className="flex items-center justify-between p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={selecionarTodosItens}
+                                            className="px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
+                                        >
+                                            Selecionar Todos
+                                        </button>
+                                        {itensSelecionados.size > 0 && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={deselecionarTodosItens}
+                                                    className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                                >
+                                                    Desmarcar Todos
+                                                </button>
+                                                <span className="text-sm text-indigo-700 dark:text-indigo-300 font-medium">
+                                                    {itensSelecionados.size} item(ns) selecionado(s)
+                                                </span>
+                                            </>
+                                        )}
+                                    </div>
+                                    {itensSelecionados.size > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowCriarKitModal(true)}
+                                            className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                            </svg>
+                                            Criar Kit
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                             {items.map((item, index) => {
                                 // Buscar foto do material se for do tipo MATERIAL
                                 const materialComFoto = item.tipo === 'MATERIAL' && item.materialId 
@@ -1624,8 +1929,17 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 const fotoUrl = materialComFoto?.imagemUrl;
 
                                 return (
-                                    <div key={index} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden hover:shadow-md transition-all">
+                                    <div key={index} className={`bg-white dark:bg-slate-800 border rounded-xl overflow-hidden hover:shadow-md transition-all ${itensSelecionados.has(index) ? 'border-indigo-500 dark:border-indigo-400 bg-indigo-50/30 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-dark-border'}`}>
                                         <div className="flex items-center gap-4 p-4">
+                                            {/* Checkbox de seleção */}
+                                            <div className="flex-shrink-0">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={itensSelecionados.has(index)}
+                                                    onChange={() => toggleItemSelecionado(index)}
+                                                    className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                                                />
+                                            </div>
                                             {/* Coluna de Foto - Compacta */}
                                             <div className="flex-shrink-0">
                                                 {fotoUrl ? (
@@ -1714,22 +2028,35 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     {item.precoEditadoManual && <span className="ml-1 text-blue-600 dark:text-blue-400" title="Editado">✏️</span>}
                                                 </label>
                                                 <input
-                                                    type="number"
-                                                    value={item.precoUnit.toFixed(2)}
+                                                    type="text"
+                                                    value={valorEditando[index] !== undefined ? valorEditando[index] : formatarValorBRL(item.precoUnit)}
                                                     onChange={(e) => {
-                                                        const novoValor = parseFloat(e.target.value) || 0;
-                                                        handleUpdateItemPrice(index, novoValor);
-                                                    }}
-                                                    onBlur={(e) => {
-                                                        const valor = parseFloat(e.target.value) || 0;
-                                                        if (valor !== item.precoUnit) {
-                                                            handleUpdateItemPrice(index, valor);
+                                                        const valorDigitado = e.target.value;
+                                                        // Permitir apenas números, vírgula e ponto
+                                                        if (valorDigitado === '' || /^[\d.,]+$/.test(valorDigitado) || valorDigitado === ',') {
+                                                            setValorEditando(prev => ({ ...prev, [index]: valorDigitado }));
                                                         }
                                                     }}
-                                                    min="0"
-                                                    step="0.01"
+                                                    onBlur={(e) => {
+                                                        const valorDigitado = e.target.value;
+                                                        const valorNumerico = parsearValorBRL(valorDigitado);
+                                                        if (valorNumerico !== item.precoUnit) {
+                                                            handleUpdateItemPrice(index, valorNumerico);
+                                                        } else {
+                                                            // Limpar valor em edição se não mudou
+                                                            const novosValoresEditando = { ...valorEditando };
+                                                            delete novosValoresEditando[index];
+                                                            setValorEditando(novosValoresEditando);
+                                                        }
+                                                    }}
+                                                    onFocus={(e) => {
+                                                        // Ao focar, mostrar valor sem formatação para facilitar edição
+                                                        if (valorEditando[index] === undefined) {
+                                                            setValorEditando(prev => ({ ...prev, [index]: item.precoUnit.toString().replace('.', ',') }));
+                                                        }
+                                                    }}
                                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
-                                                    placeholder="0.00"
+                                                    placeholder="0,00"
                                                 />
                                             </div>
 
@@ -1772,7 +2099,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <div className="flex justify-between items-center">
                                 <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal (com BDI {formState.bdi}%)</span>
                                 <span className="text-xl font-bold text-blue-900 dark:text-blue-200">
-                                    R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
                         </div>
@@ -1838,7 +2165,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                     </p>
                                 </div>
                                 <span className="text-4xl font-bold text-purple-700 dark:text-purple-300">
-                                    R$ {calculosOrcamento.valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {calculosOrcamento.valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
                         </div>
@@ -3261,6 +3588,87 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             onSubmit={handleCreateClienteRapido}
             loading={criandoClienteRapido}
         />
+
+        {/* Modal de Criar Kit */}
+        <AlertDialog open={showCriarKitModal} onOpenChange={setShowCriarKitModal}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>
+                        <div className="flex items-center gap-2">
+                            <span className="text-2xl">📦</span>
+                            Criar Kit
+                        </div>
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Transforme {itensSelecionados.size} item(ns) selecionado(s) em um único item Kit.
+                        O valor do kit será a soma de todos os itens selecionados.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4 py-4">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                            Nome do Kit *
+                        </label>
+                        <input
+                            type="text"
+                            value={nomeKit}
+                            onChange={(e) => setNomeKit(e.target.value)}
+                            className="input-field"
+                            placeholder="Ex: Kit Instalação Completa, Kit Automação Residencial..."
+                            autoFocus
+                        />
+                    </div>
+                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
+                        <p className="text-sm text-blue-800 dark:text-blue-300 font-semibold mb-2">
+                            Itens que serão agrupados:
+                        </p>
+                        <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 max-h-32 overflow-y-auto">
+                            {Array.from(itensSelecionados)
+                                .sort((a, b) => a - b)
+                                .map(index => {
+                                    const item = items[index];
+                                    if (!item) return null;
+                                    return (
+                                        <li key={index} className="flex items-center justify-between">
+                                            <span>• {item.nome}</span>
+                                            <span className="font-semibold">R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        </li>
+                                    );
+                                })}
+                        </ul>
+                        <div className="mt-3 pt-3 border-t border-blue-300 dark:border-blue-700 flex justify-between items-center">
+                            <span className="text-sm font-semibold text-blue-900 dark:text-blue-200">Valor Total do Kit:</span>
+                            <span className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                                R$ {Array.from(itensSelecionados)
+                                    .map(index => items[index]?.subtotal || 0)
+                                    .reduce((sum, val) => sum + val, 0)
+                                    .toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-300">
+                            ⚠️ <strong>Atenção:</strong> O NCM do kit deverá ser informado no momento da emissão da nota fiscal.
+                        </p>
+                    </div>
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => {
+                        setNomeKit('');
+                        setShowCriarKitModal(false);
+                    }}>
+                        Cancelar
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                        onClick={handleCriarKit}
+                        disabled={!nomeKit.trim()}
+                        className="bg-green-600 hover:bg-green-700"
+                    >
+                        Criar Kit
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
 
         </>
     );

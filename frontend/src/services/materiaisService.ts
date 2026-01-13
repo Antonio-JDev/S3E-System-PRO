@@ -206,18 +206,20 @@ class MateriaisService {
         ? `${ENDPOINTS.MATERIAIS}/${id}?permanent=true`
         : `${ENDPOINTS.MATERIAIS}/${id}`;
       
-      const response = await axiosApiService.delete<void>(url);
+      const response = await axiosApiService.delete<any>(url);
       
       if (response.success) {
         console.log('✅ Material deletado com sucesso');
         return {
           success: true,
-          message: 'Material deletado com sucesso'
+          message: response.message || 'Material deletado com sucesso',
+          movimentacoesExcluidas: response.movimentacoesExcluidas || 0
         };
       } else {
         console.warn('⚠️ Erro ao deletar material:', response);
         return {
           success: false,
+          error: response.error || 'Erro ao deletar material',
           message: 'Erro ao deletar material'
         };
       }

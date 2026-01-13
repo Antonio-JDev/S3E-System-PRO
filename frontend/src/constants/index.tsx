@@ -336,8 +336,8 @@ export const navLinks: NavLink[] = [
     { name: 'Catálogo', icon: CatalogIcon, requiredPermission: 'view_catalogo' },
     { name: 'Atualização de Preços', icon: CompareIcon, requiredPermission: 'view_comparacao_precos' },
     
-    // ========== OPERACIONAL / PROJETOS ==========
-    { name: 'Projetos', icon: BlueprintIcon, requiredPermission: 'view_projetos' },
+    // ========== OPERACIONAL / ORDEM DE SERVIÇOS ==========
+    { name: 'Ordem De Serviços', icon: BlueprintIcon, requiredPermission: 'view_projetos' },
     { name: 'Obras', icon: ConstructionIcon, requiredPermission: 'view_obras' },
     { name: 'Tarefas da Obra', icon: TaskListIcon, requiredPermission: 'view_tarefas_obra' },
     { name: 'Ferramentas', icon: ToolsIcon, requiredPermission: 'view_gestao_obras' },

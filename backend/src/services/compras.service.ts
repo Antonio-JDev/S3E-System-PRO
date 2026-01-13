@@ -10,8 +10,12 @@ export interface CompraItemPayload {
     materialId?: string;
     nomeProduto: string;
     ncm?: string;
-    quantidade: number;
-    valorUnit: number;
+    quantidade: number; // Quantidade de embalagens
+    valorUnit: number; // Preço por embalagem
+    // Campos de fracionamento
+    quantidadeFracionada?: number; // Quantidade de unidades por embalagem
+    tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
+    unidadeEmbalagem?: string; // "cx", "pct", etc.
 }
 
 export interface CompraPayload {
@@ -158,10 +162,27 @@ export class ComprasService {
                 quantidade: number;
                 valorUnit: number;
                 valorTotal: number;
+                quantidadeFracionada?: number;
+                tipoEmbalagem?: string;
+                unidadeEmbalagem?: string;
             }> = [];
             
             for (const item of items) {
                 let materialId = item.materialId;
+                
+                // ✅ PROCESSAR FRACIONAMENTO
+                const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                let quantidadeTotalUnidades = item.quantidade; // Quantidade de embalagens por padrão
+                let precoUnitarioCalculado: number | null = null;
+                let precoEmbalagem: number | null = null;
+                
+                if (temFracionamento) {
+                    quantidadeTotalUnidades = item.quantidade * item.quantidadeFracionada;
+                    precoEmbalagem = item.valorUnit;
+                    precoUnitarioCalculado = item.valorUnit / item.quantidadeFracionada;
+                    console.log(`📦 Item fracionado: ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} × ${item.quantidadeFracionada} un = ${quantidadeTotalUnidades} unidades`);
+                    console.log(`💰 Preço embalagem: R$ ${precoEmbalagem.toFixed(2)} | Preço unitário: R$ ${precoUnitarioCalculado.toFixed(4)}`);
+                }
                 
                 // Se não tem materialId, criar ou buscar Material
                 if (!materialId) {
@@ -200,22 +221,33 @@ export class ComprasService {
                         // Classificar categoria automaticamente baseado no nome do produto
                         const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
                         
+                        // Preparar dados do material com fracionamento
+                        const materialData: any = {
+                            nome: item.nomeProduto, // ✅ Nome real do produto do XML
+                            sku: skuGerado, // ✅ SKU único e aleatório gerado (NCM usado apenas como referência no SKU)
+                            tipo: 'Material Elétrico', // ✅ Tipo padrão
+                            categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
+                            descricao: item.nomeProduto, // ✅ Usar nome do produto ao invés de texto genérico
+                            ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML preservado integralmente (NÃO alterado, apenas salvo)
+                            unidadeMedida: 'un',
+                            preco: temFracionamento ? precoUnitarioCalculado : item.valorUnit, // ✅ Se fracionado, usar preço unitário
+                            estoque: 0, // Será atualizado depois se status = Recebido
+                            estoqueMinimo: 5,
+                            localizacao: 'Almoxarifado', // ✅ Localização padrão
+                            fornecedorId: fornecedor.id,
+                            ativo: true
+                        };
+                        
+                        // ✅ Adicionar campos de fracionamento se houver
+                        if (temFracionamento) {
+                            materialData.quantidadePorEmbalagem = item.quantidadeFracionada;
+                            materialData.tipoEmbalagem = item.tipoEmbalagem || 'CAIXA';
+                            materialData.precoEmbalagem = precoEmbalagem;
+                            materialData.precoUnitario = precoUnitarioCalculado;
+                        }
+                        
                         material = await tx.material.create({
-                            data: {
-                                nome: item.nomeProduto, // ✅ Nome real do produto do XML
-                                sku: skuGerado, // ✅ SKU único e aleatório gerado (NCM usado apenas como referência no SKU)
-                                tipo: 'Material Elétrico', // ✅ Tipo padrão
-                                categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
-                                descricao: item.nomeProduto, // ✅ Usar nome do produto ao invés de texto genérico
-                                ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML preservado integralmente (NÃO alterado, apenas salvo)
-                                unidadeMedida: 'un',
-                                preco: item.valorUnit,
-                                estoque: 0, // Será atualizado depois se status = Recebido
-                                estoqueMinimo: 5,
-                                localizacao: 'Almoxarifado', // ✅ Localização padrão
-                                fornecedorId: fornecedor.id,
-                                ativo: true
-                            }
+                            data: materialData
                         });
                         console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
                     } else {
@@ -225,17 +257,28 @@ export class ComprasService {
                         const updateData: any = {};
                         let needsUpdate = false;
                         
+                        // ✅ Atualizar informações de fracionamento se houver
+                        if (temFracionamento) {
+                            updateData.quantidadePorEmbalagem = item.quantidadeFracionada;
+                            updateData.tipoEmbalagem = item.tipoEmbalagem || 'CAIXA';
+                            updateData.precoEmbalagem = precoEmbalagem;
+                            updateData.precoUnitario = precoUnitarioCalculado;
+                            needsUpdate = true;
+                            console.log(`📦 Fracionamento atualizado: ${item.quantidadeFracionada} un/${item.tipoEmbalagem || 'CAIXA'}`);
+                        }
+                        
                         // Atualizar preço se necessário
-                        if (material.preco !== null && material.preco !== item.valorUnit) {
-                            updateData.preco = item.valorUnit;
+                        const precoParaUsar = temFracionamento ? precoUnitarioCalculado : item.valorUnit;
+                        if (material.preco !== null && material.preco !== precoParaUsar) {
+                            updateData.preco = precoParaUsar;
                             updateData.fornecedorId = fornecedor.id;
                             needsUpdate = true;
-                            console.log(`💰 Preço atualizado: R$ ${material.preco} → R$ ${item.valorUnit}`);
+                            console.log(`💰 Preço atualizado: R$ ${material.preco} → R$ ${precoParaUsar}`);
                         } else if (material.preco === null) {
-                            updateData.preco = item.valorUnit;
+                            updateData.preco = precoParaUsar;
                             updateData.fornecedorId = fornecedor.id;
                             needsUpdate = true;
-                            console.log(`💰 Preço definido: R$ ${item.valorUnit}`);
+                            console.log(`💰 Preço definido: R$ ${precoParaUsar}`);
                         }
                         
                         // Atualizar NCM se o material não tem NCM e o item tem
@@ -268,9 +311,13 @@ export class ComprasService {
                         materialId,
                         nomeProduto: item.nomeProduto,
                         ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado)
-                        quantidade: item.quantidade,
-                        valorUnit: item.valorUnit,
-                        valorTotal: item.quantidade * item.valorUnit
+                        quantidade: item.quantidade, // Quantidade de embalagens
+                        valorUnit: item.valorUnit, // Preço por embalagem
+                        valorTotal: item.quantidade * item.valorUnit,
+                        // ✅ Campos de fracionamento
+                        quantidadeFracionada: item.quantidadeFracionada,
+                        tipoEmbalagem: item.tipoEmbalagem,
+                        unidadeEmbalagem: item.unidadeEmbalagem
                     });
                 }
             }
@@ -313,7 +360,18 @@ export class ComprasService {
                     xmlData: JSON.stringify(xmlMeta),
                     obraId: obraId || null, // ✅ NOVO: Vincular obra se fornecida
                     items: {
-                        create: itemsComMaterialId
+                        create: itemsComMaterialId.map(item => ({
+                            materialId: item.materialId,
+                            nomeProduto: item.nomeProduto,
+                            ncm: item.ncm,
+                            quantidade: item.quantidade,
+                            valorUnit: item.valorUnit,
+                            valorTotal: item.valorTotal,
+                            // ✅ Campos de fracionamento
+                            quantidadeFracionada: item.quantidadeFracionada || null,
+                            tipoEmbalagem: item.tipoEmbalagem || null,
+                            unidadeEmbalagem: item.unidadeEmbalagem || null
+                        }))
                     }
                 },
                 include: {
@@ -674,15 +732,50 @@ export class ComprasService {
                         });
                     }
                     
-                    // Dar entrada no estoque
+                    // ✅ Dar entrada no estoque (considerando fracionamento)
                     if (materialIdFinal) {
-                        await EstoqueService.incrementarEstoque(
-                            materialIdFinal,
-                            item.quantidade,
-                            'COMPRA',
-                            id,
-                            `Compra NF: ${compra.numeroNF} - Recebimento confirmado`
-                        );
+                        // ✅ PROCESSAR FRACIONAMENTO
+                        const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                        const quantidadeParaEstoque = temFracionamento 
+                            ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                            : item.quantidade; // Quantidade normal
+                        
+                        const observacoesEstoque = temFracionamento
+                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento confirmado`
+                            : `Compra NF: ${compra.numeroNF} - Recebimento confirmado`;
+                        
+                        // Incrementar estoque diretamente na transação
+                        await tx.material.update({
+                            where: { id: materialIdFinal },
+                            data: {
+                                estoque: {
+                                    increment: quantidadeParaEstoque
+                                }
+                            }
+                        });
+                        
+                        // Registrar movimentação
+                        await tx.movimentacaoEstoque.create({
+                            data: {
+                                materialId: materialIdFinal,
+                                tipo: 'ENTRADA',
+                                quantidade: quantidadeParaEstoque,
+                                motivo: 'COMPRA',
+                                referencia: id,
+                                observacoes: observacoesEstoque
+                            }
+                        });
+                        
+                        // ✅ Marcar fracionamento como aplicado se houver
+                        if (temFracionamento) {
+                            await tx.compraItem.update({
+                                where: { id: item.id },
+                                data: {
+                                    fracionamentoAplicado: true
+                                }
+                            });
+                            console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
+                        }
                     }
                 }
                 
@@ -830,6 +923,12 @@ export class ComprasService {
                     
                     // ✅ CORREÇÃO: Dar entrada no estoque usando a transação existente
                     if (materialIdFinal) {
+                        // ✅ PROCESSAR FRACIONAMENTO
+                        const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                        const quantidadeParaEstoque = temFracionamento 
+                            ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                            : item.quantidade; // Quantidade normal
+                        
                         // Buscar material atual para verificar estoque antes
                         const materialAtual = await tx.material.findUnique({
                             where: { id: materialIdFinal },
@@ -838,32 +937,51 @@ export class ComprasService {
                         
                         const estoqueAnterior = materialAtual?.estoque || 0;
                         console.log(`📦 Material: ${materialAtual?.nome || materialIdFinal}`);
-                        console.log(`📦 Estoque anterior: ${estoqueAnterior}, Quantidade a adicionar: ${item.quantidade}`);
+                        if (temFracionamento) {
+                            console.log(`📦 Fracionado: ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} × ${item.quantidadeFracionada} un = ${quantidadeParaEstoque} unidades`);
+                        } else {
+                            console.log(`📦 Estoque anterior: ${estoqueAnterior}, Quantidade a adicionar: ${quantidadeParaEstoque}`);
+                        }
                         
-                        // Incrementar estoque diretamente na transação
+                        // Incrementar estoque diretamente na transação (em unidades individuais)
                         const materialAtualizado = await tx.material.update({
                             where: { id: materialIdFinal },
                             data: {
                                 estoque: {
-                                    increment: item.quantidade
+                                    increment: quantidadeParaEstoque
                                 }
                             },
                             select: { estoque: true, nome: true }
                         });
                         
-                        console.log(`✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado.estoque} (adicionado ${item.quantidade})`);
+                        console.log(`✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado.estoque} (adicionado ${quantidadeParaEstoque} unidades)`);
                         
                         // Registrar movimentação
+                        const observacoesMovimentacao = temFracionamento
+                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento parcial confirmado`
+                            : `Compra NF: ${compra.numeroNF} - Recebimento parcial confirmado`;
+                        
                         await tx.movimentacaoEstoque.create({
                             data: {
                                 materialId: materialIdFinal,
                                 tipo: 'ENTRADA',
-                                quantidade: item.quantidade,
+                                quantidade: quantidadeParaEstoque, // Quantidade em unidades individuais
                                 motivo: 'COMPRA',
                                 referencia: id,
-                                observacoes: `Compra NF: ${compra.numeroNF} - Recebimento parcial confirmado`
+                                observacoes: observacoesMovimentacao
                             }
                         });
+                        
+                        // ✅ Marcar fracionamento como aplicado se houver
+                        if (temFracionamento) {
+                            await tx.compraItem.update({
+                                where: { id: item.id },
+                                data: {
+                                    fracionamentoAplicado: true
+                                }
+                            });
+                            console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
+                        }
                         
                         console.log(`✅ Movimentação registrada para material ${materialIdFinal}`);
                     } else {
@@ -1013,16 +1131,56 @@ export class ComprasService {
                     });
                 }
 
-                // Dar entrada no estoque
+                // ✅ Dar entrada no estoque (considerando fracionamento) - dentro da transação
                 if (materialIdFinal) {
-                    await EstoqueService.incrementarEstoque(
-                        materialIdFinal,
-                        item.quantidade,
-                        'COMPRA',
-                        id,
-                        `Compra NF: ${compra.numeroNF} - ${item.nomeProduto}`
-                    );
-                    console.log(`✅ Entrada no estoque: ${item.nomeProduto} - Qtd: ${item.quantidade}`);
+                    // ✅ PROCESSAR FRACIONAMENTO
+                    const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                    const quantidadeParaEstoque = temFracionamento 
+                        ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                        : item.quantidade; // Quantidade normal
+                    
+                    const observacoesEstoque = temFracionamento
+                        ? `Compra NF: ${compra.numeroNF} - ${item.nomeProduto} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades)`
+                        : `Compra NF: ${compra.numeroNF} - ${item.nomeProduto}`;
+                    
+                    // Incrementar estoque diretamente na transação
+                    await tx.material.update({
+                        where: { id: materialIdFinal },
+                        data: {
+                            estoque: {
+                                increment: quantidadeParaEstoque
+                            }
+                        }
+                    });
+                    
+                    // Registrar movimentação
+                    await tx.movimentacaoEstoque.create({
+                        data: {
+                            materialId: materialIdFinal,
+                            tipo: 'ENTRADA',
+                            quantidade: quantidadeParaEstoque,
+                            motivo: 'COMPRA',
+                            referencia: id,
+                            observacoes: observacoesEstoque
+                        }
+                    });
+                    
+                    // ✅ Marcar fracionamento como aplicado se houver
+                    if (temFracionamento) {
+                        await tx.compraItem.update({
+                            where: { id: item.id },
+                            data: {
+                                fracionamentoAplicado: true
+                            }
+                        });
+                        console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
+                    }
+                    
+                    if (temFracionamento) {
+                        console.log(`✅ Entrada no estoque: ${item.nomeProduto} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} = ${quantidadeParaEstoque} unidades`);
+                    } else {
+                        console.log(`✅ Entrada no estoque: ${item.nomeProduto} - Qtd: ${quantidadeParaEstoque}`);
+                    }
                 }
             }
 

@@ -11,7 +11,7 @@ export interface Orcamento {
   validade?: string;
   bdi: number;
   observacoes?: string;
-  status: 'Rascunho' | 'Enviado' | 'Aprovado' | 'Recusado' | 'Cancelado';
+  status: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado';
   valorTotal: number;
   items?: OrcamentoItem[];
   cliente?: any;
@@ -69,15 +69,21 @@ export interface UpdateOrcamentoData extends Partial<CreateOrcamentoData> {
 class OrcamentosService {
   /**
    * Lista todos os orçamentos
+   * @param filters - Filtros opcionais (status, clienteId, etc.)
    */
-  async listar() {
+  async listar(filters?: { status?: string; clienteId?: string }) {
     try {
-      console.log('📋 Carregando lista de orçamentos...');
-      const response = await axiosApiService.get<Orcamento[]>(ENDPOINTS.ORCAMENTOS);
+      console.log('📋 Carregando lista de orçamentos...', filters);
+      const params = filters ? new URLSearchParams() : undefined;
+      if (filters?.status) params?.set('status', filters.status);
+      if (filters?.clienteId) params?.set('clienteId', filters.clienteId);
+      
+      const url = params ? `${ENDPOINTS.ORCAMENTOS}?${params.toString()}` : ENDPOINTS.ORCAMENTOS;
+      const response = await axiosApiService.get<Orcamento[]>(url);
       
       if (response.success && response.data) {
         const orcamentosData = Array.isArray(response.data) ? response.data : (response.data as any).data || [];
-        console.log(`✅ ${orcamentosData.length} orçamentos carregados`);
+        console.log(`✅ ${orcamentosData.length} orçamentos carregados${filters?.status ? ` (filtro: ${filters.status})` : ''}`);
         return {
           success: true,
           data: orcamentosData,

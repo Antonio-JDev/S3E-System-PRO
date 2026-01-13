@@ -264,6 +264,11 @@ export class EstoqueService {
         const verificacoes = [];
 
         for (const item of orcamento.items) {
+            // Pular itens do tipo SERVIÇO, QUADRO_PRONTO e CUSTO_EXTRA - não precisam de estoque
+            if (item.tipo === 'SERVICO' || item.tipo === 'QUADRO_PRONTO' || item.tipo === 'CUSTO_EXTRA') {
+                continue;
+            }
+            
             // ITENS DO TIPO COTACAO (Banco Frio)
             if (item.tipo === 'COTACAO' && item.cotacaoId) {
                 const cotacao = item.cotacao;
@@ -415,7 +420,6 @@ export class EstoqueService {
                     });
                 }
             }
-            // ITENS DO TIPO SERVICO, QUADRO_PRONTO, CUSTO_EXTRA não precisam de estoque
         }
 
         const temEstoqueSuficiente = verificacoes.every(v => v.suficiente);

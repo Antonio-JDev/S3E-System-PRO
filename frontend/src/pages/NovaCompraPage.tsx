@@ -6,6 +6,7 @@ import { comprasService } from '../services/comprasService';
 import { readFileAsText } from '../utils/xmlParser';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { axiosApiService } from '../services/axiosApi';
+import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 
 // ==================== ICONS ====================
 const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -39,7 +40,15 @@ const DocumentArrowUpIcon = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 // Types
-type ExtendedItem = PurchaseOrderItem & { ncm?: string; sku?: string; unidadeMedida?: string };
+type ExtendedItem = PurchaseOrderItem & { 
+    ncm?: string; 
+    sku?: string; 
+    unidadeMedida?: string;
+    // Campos de fracionamento
+    quantidadeFracionada?: number; // Quantidade de unidades por embalagem
+    tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
+    unidadeEmbalagem?: string; // "cx", "pct", etc.
+};
 
 interface NovaCompraPageProps {
     toggleSidebar: () => void;
@@ -98,6 +107,22 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const [showMaterialSearch, setShowMaterialSearch] = useState(false);
     const [materialSelecionado, setMaterialSelecionado] = useState<any | null>(null);
     const [isItemNovo, setIsItemNovo] = useState(false);
+    
+    // Estados de fracionamento
+    const [fracionamentoAtivo, setFracionamentoAtivo] = useState(false);
+    const [quantidadeFracionada, setQuantidadeFracionada] = useState<string>('');
+    const [tipoEmbalagem, setTipoEmbalagem] = useState<string>('CAIXA');
+    const [unidadeEmbalagem, setUnidadeEmbalagem] = useState<string>('cx');
+    
+    // Estados para editar fracionamento de itens
+    const [fracionamentoModalOpen, setFracionamentoModalOpen] = useState(false);
+    const [itemFracionamentoEditando, setItemFracionamentoEditando] = useState<{
+        productName: string;
+        quantity: number;
+        quantidadeFracionada?: number;
+        tipoEmbalagem?: string;
+        unidadeEmbalagem?: string;
+    } | null>(null);
 
     // Carregar materiais do estoque
     useEffect(() => {
@@ -136,6 +161,36 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         ).slice(0, 10); // Limitar a 10 resultados
     }, [buscaMaterial, materiais]);
 
+    // Função para detectar fracionamento automaticamente pela descrição
+    const detectarFracionamento = (nomeProduto: string) => {
+        // Padrões: "PACOTE COM X UNIDADES", "CAIXA COM X UN", "X UNIDADES", etc.
+        const padrao = /(?:PACOTE|CAIXA|FARDO|EMBALAGEM).*?(\d+)\s*(?:UNIDADES?|UN\.?|PCS?|PEÇAS?)/i;
+        const match = nomeProduto.match(padrao);
+        
+        if (match && match[1]) {
+            const quantidade = parseInt(match[1]);
+            if (quantidade > 1) {
+                setFracionamentoAtivo(true);
+                setQuantidadeFracionada(String(quantidade));
+                
+                // Detectar tipo de embalagem
+                if (nomeProduto.toUpperCase().includes('PACOTE')) {
+                    setTipoEmbalagem('PACOTE');
+                    setUnidadeEmbalagem('pct');
+                } else if (nomeProduto.toUpperCase().includes('FARDO')) {
+                    setTipoEmbalagem('FARDO');
+                    setUnidadeEmbalagem('fardo');
+                } else {
+                    setTipoEmbalagem('CAIXA');
+                    setUnidadeEmbalagem('cx');
+                }
+                
+                return true;
+            }
+        }
+        return false;
+    };
+    
     // Handlers
     const handleMarcarComoItemNovo = () => {
         setIsItemNovo(true);
@@ -144,16 +199,36 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         setShowMaterialSearch(false);
         toast.info('💡 Item marcado como NOVO - será criado do zero no estoque');
     };
+    
+    // Handler para quando o nome do produto muda (detecção automática)
+    const handleNomeProdutoChange = (nome: string) => {
+        setProductToAdd(prev => ({ ...prev, name: nome }));
+        // Tentar detectar fracionamento automaticamente
+        if (nome && !fracionamentoAtivo) {
+            detectarFracionamento(nome);
+        }
+    };
 
     const handleAddProduct = () => {
         if (!productToAdd.name || !productToAdd.quantity || !productToAdd.cost) {
             toast.error('Preencha todos os campos do produto');
             return;
         }
+        
+        // Validar fracionamento se ativo
+        if (fracionamentoAtivo && (!quantidadeFracionada || parseFloat(quantidadeFracionada) <= 0)) {
+            toast.error('Informe a quantidade de unidades por embalagem');
+            return;
+        }
 
         const quantity = parseFloat(productToAdd.quantity);
         const unitCost = parseFloat(productToAdd.cost);
         const totalCost = quantity * unitCost;
+        
+        // Calcular quantidade total de unidades se fracionado
+        const quantidadeTotalUnidades = fracionamentoAtivo && quantidadeFracionada
+            ? quantity * parseFloat(quantidadeFracionada)
+            : quantity;
 
         const newItem: ExtendedItem = {
             productId: materialSelecionado ? materialSelecionado.id : '',
@@ -163,22 +238,40 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             totalCost,
             ncm: productToAdd.ncm,
             sku: productToAdd.sku,
-            unidadeMedida: productToAdd.unidadeMedida || (materialSelecionado?.unidadeMedida) || 'un'
+            unidadeMedida: productToAdd.unidadeMedida || (materialSelecionado?.unidadeMedida) || 'un',
+            // Campos de fracionamento
+            quantidadeFracionada: fracionamentoAtivo && quantidadeFracionada ? parseFloat(quantidadeFracionada) : undefined,
+            tipoEmbalagem: fracionamentoAtivo ? tipoEmbalagem : undefined,
+            unidadeEmbalagem: fracionamentoAtivo ? unidadeEmbalagem : undefined
         };
 
         setPurchaseItems(prev => [...prev, newItem]);
+        
+        // Limpar campos
         setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
         setMaterialSelecionado(null);
         setBuscaMaterial('');
         setIsItemNovo(false);
+        setFracionamentoAtivo(false);
+        setQuantidadeFracionada('');
+        setTipoEmbalagem('CAIXA');
+        setUnidadeEmbalagem('cx');
         
+        // Mensagem de sucesso com informações de fracionamento
+        let mensagem = '';
         if (materialSelecionado) {
-            toast.success(`✅ ${materialSelecionado.nome} adicionado e vinculado ao estoque`);
+            mensagem = `✅ ${materialSelecionado.nome} adicionado e vinculado ao estoque`;
         } else if (isItemNovo) {
-            toast.success(`✅ Item NOVO adicionado - será criado do zero no estoque após o recebimento`);
+            mensagem = `✅ Item NOVO adicionado - será criado do zero no estoque após o recebimento`;
         } else {
-            toast.success(`✅ Produto adicionado (será criado um novo item no estoque)`);
+            mensagem = `✅ Produto adicionado (será criado um novo item no estoque)`;
         }
+        
+        if (fracionamentoAtivo && quantidadeFracionada) {
+            mensagem += `\n📦 ${quantity} ${tipoEmbalagem.toLowerCase()} = ${quantidadeTotalUnidades} unidades`;
+        }
+        
+        toast.success(mensagem);
     };
 
     const handleRemoveProduct = (index: number) => {
@@ -302,7 +395,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     valorUnit: it.unitCost,
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
-                    unidadeMedida: it.unidadeMedida || 'un'
+                    unidadeMedida: it.unidadeMedida || 'un',
+                    // Campos de fracionamento
+                    quantidadeFracionada: it.quantidadeFracionada,
+                    tipoEmbalagem: it.tipoEmbalagem,
+                    unidadeEmbalagem: it.unidadeEmbalagem
                 })),
                 observacoes: '',
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
@@ -596,7 +693,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     {/* Adicionar Produto */}
                     <div className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl mb-4">
                         <h4 className="font-medium text-gray-800 dark:text-white mb-3">Adicionar Item</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
                             <div className="relative md:col-span-2">
                                 <div className="flex gap-2">
                                     <div className="flex-1 relative">
@@ -608,7 +706,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                 setMaterialSelecionado(null);
                                                 setIsItemNovo(false);
                                                 setShowMaterialSearch(true);
-                                                setProductToAdd({ ...productToAdd, name: e.target.value });
+                                                handleNomeProdutoChange(e.target.value);
                                             }}
                                             onFocus={() => {
                                                 if (!isItemNovo) {
@@ -623,7 +721,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                             }`}
                                         />
                                         {showMaterialSearch && materiaisFiltrados.length > 0 && !isItemNovo && (
-                                            <div className="absolute z-10 w-full mt-1 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                            <div className="absolute z-50 left-0 mt-1 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg shadow-xl max-h-80 overflow-y-auto min-w-[600px] w-max max-w-[800px]">
                                                 {materiaisFiltrados.map((material) => (
                                                     <button
                                                         key={material.id}
@@ -641,18 +739,23 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                             });
                                                             setShowMaterialSearch(false);
                                                         }}
-                                                        className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-dark-hover transition-colors border-b border-gray-100 dark:border-dark-border last:border-b-0"
+                                                        className="w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-dark-hover transition-colors border-b border-gray-100 dark:border-dark-border last:border-b-0"
                                                     >
-                                                        <div className="font-semibold text-gray-900 dark:text-white text-sm">
+                                                        <div className="font-semibold text-gray-900 dark:text-white text-base mb-1.5 break-words">
                                                             {material.nome}
                                                         </div>
-                                                        <div className="text-xs text-gray-600 dark:text-gray-400 flex gap-3">
-                                                            <span>SKU: {material.sku}</span>
-                                                            <span>Estoque: {material.estoque}</span>
-                                                            <span className="text-green-600 dark:text-green-400 font-semibold">
+                                                        <div className="text-sm text-gray-600 dark:text-gray-400 flex flex-wrap gap-4 items-center">
+                                                            <span className="font-medium">SKU: <span className="font-normal">{material.sku}</span></span>
+                                                            <span className="font-medium">Estoque: <span className="font-normal">{material.estoque} {material.unidadeMedida || 'un'}</span></span>
+                                                            <span className="text-green-600 dark:text-green-400 font-semibold text-base ml-auto">
                                                                 R$ {(material.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                             </span>
                                                         </div>
+                                                        {material.descricao && (
+                                                            <div className="text-xs text-gray-500 dark:text-gray-500 mt-1.5 line-clamp-2">
+                                                                {material.descricao}
+                                                            </div>
+                                                        )}
                                                     </button>
                                                 ))}
                                             </div>
@@ -753,6 +856,94 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 </button>
                             </div>
                         </div>
+                        
+                        {/* Campos de Fracionamento */}
+                        <div className="border-t border-gray-200 dark:border-dark-border pt-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <input
+                                    type="checkbox"
+                                    id="fracionamentoCheckbox"
+                                    checked={fracionamentoAtivo}
+                                    onChange={(e) => {
+                                        setFracionamentoAtivo(e.target.checked);
+                                        if (!e.target.checked) {
+                                            setQuantidadeFracionada('');
+                                            setTipoEmbalagem('CAIXA');
+                                            setUnidadeEmbalagem('cx');
+                                        }
+                                    }}
+                                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                />
+                                <label htmlFor="fracionamentoCheckbox" className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                                    Este item vem em caixa/pacote
+                                </label>
+                            </div>
+                            
+                            {fracionamentoAtivo && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                            Quantidade por embalagem *
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={quantidadeFracionada}
+                                            onChange={(e) => setQuantidadeFracionada(e.target.value)}
+                                            placeholder="Ex: 100"
+                                            min="1"
+                                            step="1"
+                                            required={fracionamentoAtivo}
+                                            className="w-full px-3 py-2 border border-blue-300 dark:border-blue-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                            Tipo de embalagem
+                                        </label>
+                                        <select
+                                            value={tipoEmbalagem}
+                                            onChange={(e) => {
+                                                setTipoEmbalagem(e.target.value);
+                                                // Atualizar unidade automaticamente
+                                                const unidades: { [key: string]: string } = {
+                                                    'CAIXA': 'cx',
+                                                    'PACOTE': 'pct',
+                                                    'FARDO': 'fardo',
+                                                    'OUTRO': 'un'
+                                                };
+                                                setUnidadeEmbalagem(unidades[e.target.value] || 'un');
+                                            }}
+                                            className="w-full px-3 py-2 border border-blue-300 dark:border-blue-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white text-sm"
+                                        >
+                                            <option value="CAIXA">Caixa</option>
+                                            <option value="PACOTE">Pacote</option>
+                                            <option value="FARDO">Fardo</option>
+                                            <option value="OUTRO">Outro</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                            Unidade da embalagem
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={unidadeEmbalagem}
+                                            onChange={(e) => setUnidadeEmbalagem(e.target.value)}
+                                            placeholder="Ex: cx, pct"
+                                            className="w-full px-3 py-2 border border-blue-300 dark:border-blue-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white text-sm"
+                                        />
+                                    </div>
+                                    {fracionamentoAtivo && quantidadeFracionada && productToAdd.quantity && (
+                                        <div className="md:col-span-3 mt-2">
+                                            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+                                                📦 {productToAdd.quantity} {tipoEmbalagem.toLowerCase()}(s) × {quantidadeFracionada} un = {parseFloat(productToAdd.quantity) * parseFloat(quantidadeFracionada)} unidades no estoque
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        </div>
                     </div>
 
                     {/* Lista de Itens */}
@@ -773,6 +964,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                             <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
                                             <p className="text-sm text-gray-600 dark:text-gray-400">
                                                 {item.quantity} {item.unidadeMedida || 'un'} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                {item.quantidadeFracionada && (
+                                                    <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                                                        ({item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades)
+                                                    </span>
+                                                )}
                                             </p>
                                             <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                                 {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
@@ -784,6 +980,24 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                             <p className="font-bold text-orange-700 dark:text-orange-400">
                                                 R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setItemFracionamentoEditando({
+                                                        productName: item.productName,
+                                                        quantity: item.quantity,
+                                                        quantidadeFracionada: item.quantidadeFracionada,
+                                                        tipoEmbalagem: item.tipoEmbalagem,
+                                                        unidadeEmbalagem: item.unidadeEmbalagem
+                                                        // Nota: compraId não disponível em NovaCompraPage (compra ainda não foi criada)
+                                                    });
+                                                    setFracionamentoModalOpen(true);
+                                                }}
+                                                className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-semibold"
+                                                title="Editar fracionamento"
+                                            >
+                                                📦 Editar
+                                            </button>
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemoveProduct(index)}
@@ -1010,6 +1224,33 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     </button>
                 </div>
             </form>
+            {/* Modal de Editar Fracionamento */}
+            <EditarFracionamentoModal
+                isOpen={fracionamentoModalOpen}
+                onClose={() => {
+                    setFracionamentoModalOpen(false);
+                    setItemFracionamentoEditando(null);
+                }}
+                item={itemFracionamentoEditando}
+                onSave={(fracionamento) => {
+                    if (itemFracionamentoEditando) {
+                        const updatedItems = purchaseItems.map((item: any) => {
+                            if (item.productName === itemFracionamentoEditando.productName && 
+                                item.quantity === itemFracionamentoEditando.quantity) {
+                                return {
+                                    ...item,
+                                    quantidadeFracionada: fracionamento.quantidadeFracionada,
+                                    tipoEmbalagem: fracionamento.tipoEmbalagem,
+                                    unidadeEmbalagem: fracionamento.unidadeEmbalagem
+                                };
+                            }
+                            return item;
+                        });
+                        setPurchaseItems(updatedItems);
+                        toast.success('Fracionamento atualizado!');
+                    }
+                }}
+            />
         </div>
     );
 };

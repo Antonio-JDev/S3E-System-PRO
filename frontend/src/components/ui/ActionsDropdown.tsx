@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 interface ActionItem {
@@ -24,22 +24,99 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, right: 0 });
+  const [dropdownPosition, setDropdownPosition] = useState({ 
+    top: 0, 
+    left: 0, 
+    openUpward: false 
+  });
 
   // Filtrar ações visíveis
   const visibleActions = actions.filter(action => action.show !== false);
 
-  // Calcular posição do dropdown quando abrir
+  // Função para calcular posição do dropdown usando useCallback
+  const calculatePosition = useCallback(() => {
+    if (!buttonRef.current) return;
+
+    const rect = buttonRef.current.getBoundingClientRect();
+    const dropdownHeight = visibleActions.length * 44 + 8; // altura aproximada por item + padding
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    
+    // Verificar se deve abrir para cima
+    const openUpward = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+    
+    // Calcular posição vertical
+    const top = openUpward 
+      ? rect.top - dropdownHeight - 8 
+      : rect.bottom + 8;
+    
+    // Calcular posição horizontal (alinhar à direita do botão)
+    let left = rect.right - 192; // 192px = w-48 (width do dropdown)
+    
+    // Ajustar se estiver muito à esquerda
+    if (left < 8) {
+      left = 8;
+    }
+    
+    // Ajustar se estiver muito à direita
+    if (left + 192 > window.innerWidth - 8) {
+      left = window.innerWidth - 192 - 8;
+    }
+
+    setDropdownPosition({ top, left, openUpward });
+  }, [visibleActions.length]);
+
+  // Calcular posição do dropdown quando abrir ou quando scroll/resize
   useEffect(() => {
     if (isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownPosition({
-        top: rect.bottom + window.scrollY + 8,
-        left: rect.left + window.scrollX,
-        right: window.innerWidth - rect.right
-      });
+      calculatePosition();
+
+      // Função otimizada para recalcular posição
+      let rafId: number | null = null;
+      const handleUpdatePosition = () => {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+        }
+        rafId = requestAnimationFrame(() => {
+          if (isOpen && buttonRef.current) {
+            calculatePosition();
+          }
+        });
+      };
+
+      // Adicionar listeners - usar capture phase para pegar todos os scrolls
+      window.addEventListener('scroll', handleUpdatePosition, true);
+      window.addEventListener('resize', handleUpdatePosition);
+      document.addEventListener('scroll', handleUpdatePosition, true);
+      
+      // Encontrar e adicionar listener no container scrollável pai mais próximo
+      const scrollableParents: HTMLElement[] = [];
+      let parent: HTMLElement | null = buttonRef.current.parentElement;
+      while (parent && parent !== document.body) {
+        const style = window.getComputedStyle(parent);
+        if (style.overflow === 'auto' || style.overflow === 'scroll' || 
+            style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          scrollableParents.push(parent);
+          parent.addEventListener('scroll', handleUpdatePosition, true);
+        }
+        parent = parent.parentElement;
+      }
+      
+      return () => {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+        }
+        window.removeEventListener('scroll', handleUpdatePosition, true);
+        window.removeEventListener('resize', handleUpdatePosition);
+        document.removeEventListener('scroll', handleUpdatePosition, true);
+        
+        // Remover listeners dos parents scrolláveis
+        scrollableParents.forEach(el => {
+          el.removeEventListener('scroll', handleUpdatePosition, true);
+        });
+      };
     }
-  }, [isOpen]);
+  }, [isOpen, calculatePosition]);
 
   // Fechar dropdown ao clicar fora
   useEffect(() => {
@@ -103,11 +180,11 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
   const dropdownContent = isOpen ? (
     <div 
       ref={dropdownRef}
-      className="fixed w-48 bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 z-[9999] py-1 transition-all duration-200 ease-in-out"
+      className="fixed w-48 bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 z-[9999] py-1 transition-all duration-200 ease-in-out max-h-[80vh] overflow-y-auto"
       style={{
         top: `${dropdownPosition.top}px`,
-        right: `${dropdownPosition.right}px`,
-        left: 'auto'
+        left: `${dropdownPosition.left}px`,
+        transform: dropdownPosition.openUpward ? 'none' : 'none'
       }}
     >
       {visibleActions.map((action, index) => (

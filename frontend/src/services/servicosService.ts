@@ -9,6 +9,7 @@ export interface Servico {
   tipo: string;
   tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
   preco: number;
+  custo?: number | null; // ✅ NOVO: Custo do serviço
   unidade: string;
   ativo: boolean;
   createdAt: string;
@@ -25,6 +26,7 @@ export interface CreateServicoData {
   tipo: string;
   tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
   preco: number;
+  custo?: number | null; // ✅ NOVO: Custo do serviço
   unidade?: string;
 }
 
@@ -64,6 +66,10 @@ class ServicosService {
 
   async desativar(id: string) {
     return axiosApiService.delete<{ message: string }>(`${ENDPOINTS.SERVICOS}/${id}`);
+  }
+
+  async reativar(id: string) {
+    return axiosApiService.put<Servico>(`${ENDPOINTS.SERVICOS}/${id}/reativar`);
   }
 
   /**

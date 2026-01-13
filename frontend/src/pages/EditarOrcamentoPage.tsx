@@ -178,6 +178,22 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     
     const [orcamentoCarregado, setOrcamentoCarregado] = useState<Orcamento | null>(null);
     
+    // Estado para modal de visualização de itens do kit
+    const [showModalItensKit, setShowModalItensKit] = useState(false);
+    const [itensKitParaVisualizar, setItensKitParaVisualizar] = useState<any[]>([]);
+    const [nomeKitParaVisualizar, setNomeKitParaVisualizar] = useState<string>('');
+    
+    // Estado para modal de edição de itens do kit
+    const [showModalEditarKit, setShowModalEditarKit] = useState(false);
+    const [kitIndexParaEditar, setKitIndexParaEditar] = useState<number | null>(null);
+    const [itensKitEditando, setItensKitEditando] = useState<any[]>([]);
+    const [nomeKitEditando, setNomeKitEditando] = useState<string>('');
+    const [itensDisponiveisParaAdicionar, setItensDisponiveisParaAdicionar] = useState<any[]>([]);
+    
+    // Estado para AlertDialog de remover kit vazio
+    const [showDialogRemoverKit, setShowDialogRemoverKit] = useState(false);
+    const [acaoRemoverKit, setAcaoRemoverKit] = useState<'expandir' | 'excluir' | null>(null);
+    
     // Função para calcular data padrão de validade (30 dias a partir de hoje)
     const calcularDataValidadePadrao = (): string => {
         const hoje = new Date();
@@ -201,6 +217,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const [cotacoes, setCotacoes] = useState<any[]>([]); // Novo: cotações do banco frio
     const [loading, setLoading] = useState(true);
     const [salvando, setSalvando] = useState(false);
+    const [atualizandoPrecos, setAtualizandoPrecos] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     
@@ -236,6 +253,14 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     const [items, setItems] = useState<OrcamentoItem[]>([]);
     const [showItemModal, setShowItemModal] = useState(false);
     const [itemSearchTerm, setItemSearchTerm] = useState('');
+    
+    // Estado para seleção múltipla de itens (para criar kit)
+    const [itensSelecionados, setItensSelecionados] = useState<Set<number>>(new Set()); // Índices dos itens selecionados
+    const [showCriarKitModal, setShowCriarKitModal] = useState(false);
+    const [nomeKit, setNomeKit] = useState('');
+    
+    // Estado para controlar valores em edição (para melhorar UX ao digitar)
+    const [valorEditando, setValorEditando] = useState<{ [index: number]: string }>({});
     const [modalExpandido, setModalExpandido] = useState(false); // Novo: controla se o modal está expandido
     
     // Estados para comparação estoque vs banco frio
@@ -427,8 +452,23 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
         if (tipo === 'MATERIAL' && (item.material?.nome || item.materialNome)) {
             return item.material?.nome || item.materialNome;
         }
-        if (tipo === 'KIT' && item.kit?.nome) {
-            return item.kit.nome;
+        // ✅ Para kits: priorizar item.descricao (nome customizado salvo) se for kit customizado, senão usar item.kit?.nome (kit cadastrado)
+        if (tipo === 'KIT') {
+            // Se for kit customizado (sem kitId), usar item.descricao que contém o nome do usuário
+            if (!item.kitId && item.descricao) {
+                return item.descricao;
+            }
+            // Se for kit cadastrado, usar item.kit?.nome
+            if (item.kit?.nome) {
+                return item.kit.nome;
+            }
+            // Fallback: usar item.descricao ou item.nome se existir
+            if (item.descricao) {
+                return item.descricao;
+            }
+            if (item.nome) {
+                return item.nome;
+            }
         }
         if (tipo === 'SERVICO') {
             return item.servicoNome || item.descricao || 'Serviço';
@@ -445,7 +485,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             });
         } else {
             toast.error('ID do orçamento não fornecido');
-            navigate('/');
+            navigate('/orcamentos');
         }
     }, [id]);
 
@@ -503,7 +543,9 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 quadroId: item.quadroId,
                 servicoId: item.servicoId,
                 cotacaoId: item.cotacaoId,
-                nome: getItemNome(item),
+                // ✅ Para kits customizados, usar descricao (que contém o nome do usuário salvo)
+                // Para outros tipos, usar getItemNome
+                nome: (item.tipo === 'KIT' && !item.kitId && item.descricao) ? item.descricao : getItemNome(item),
                 descricao: item.descricao || '',
                 unidadeMedida: item.unidadeMedida || item.material?.unidadeMedida || 'UN',
                 quantidade: item.quantidade || 1,
@@ -511,7 +553,9 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 precoBase: precoBase,
                 precoUnit: precoUnitFinal,
                 subtotal: item.subtotal || subtotalCalculado,
-                dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || item.cotacao?.dataAtualizacao || null
+                dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || item.cotacao?.dataAtualizacao || null,
+                // ✅ Preservar itensDoKit se existir (para kits customizados)
+                itensDoKit: item.itensDoKit || null
             };
         });
         
@@ -540,7 +584,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             const [clientesRes, materiaisRes, servicosRes, quadrosRes, kitsRes, cotacoesRes, empresasRes] = await Promise.all([
                 clientesService.listar(),
                 axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
-                servicosService.listar({ ativo: true }),
+                servicosService.listar(), // Carregar todos os serviços (filtrar apenas ativos no frontend)
                 quadrosService.listar(),
                 axiosApiService.get(ENDPOINTS.KITS), // Carregar kits
                 axiosApiService.get('/api/cotacoes'), // Carregar cotações
@@ -613,9 +657,26 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
         );
     }, [materiais, itemSearchTerm]);
 
-    // Filtrar serviços para seleção
-    const filteredServicos = useMemo(() => {
+    // Recarregar serviços quando a aba de serviços é selecionada
+    useEffect(() => {
+        if (modoAdicao === 'servicos') {
+            const recarregarServicos = async () => {
+                try {
+                    const servicosRes = await servicosService.listar();
+                    if (servicosRes.success && servicosRes.data) {
+                        setServicos(Array.isArray(servicosRes.data) ? servicosRes.data : []);
+                        console.log('✅ Serviços recarregados:', servicosRes.data.length);
+                    }
+                } catch (error) {
+                    console.error('Erro ao recarregar serviços:', error);
+                }
+            };
+            recarregarServicos();
+        }
+    }, [modoAdicao]);
 
+    // Filtrar serviços para seleção (apenas ativos)
+    const filteredServicos = useMemo(() => {
         if (!itemSearchTerm.trim()) return (servicos || []).filter(s => s && s.ativo);
         return (servicos || []).filter(s => 
             s && s.ativo && (
@@ -1115,6 +1176,21 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
     // Remover item
     const handleRemoveItem = (index: number) => {
         setItems(prev => prev.filter((_, i) => i !== index));
+        // Remover da seleção se estiver selecionado e ajustar índices
+        setItensSelecionados(prev => {
+            const novo = new Set(prev);
+            novo.delete(index);
+            // Ajustar índices após remoção
+            const ajustado = new Set<number>();
+            novo.forEach(idx => {
+                if (idx > index) {
+                    ajustado.add(idx - 1);
+                } else {
+                    ajustado.add(idx);
+                }
+            });
+            return ajustado;
+        });
     };
 
     // Atualizar quantidade do item
@@ -1131,6 +1207,20 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
         }));
     };
 
+    // Função para converter valor digitado para número (aceita vírgula e ponto)
+    const parsearValorBRL = (valor: string): number => {
+        if (!valor || valor.trim() === '') return 0;
+        // Remove pontos (separadores de milhar) e substitui vírgula por ponto
+        const valorLimpo = valor.replace(/\./g, '').replace(',', '.');
+        const numero = parseFloat(valorLimpo);
+        return isNaN(numero) ? 0 : numero;
+    };
+
+    // Função para formatar número para exibição BRL
+    const formatarValorBRL = (valor: number): string => {
+        return valor.toFixed(2).replace('.', ',');
+    };
+
     // Atualizar preço unitário do item (valor de venda editável)
     const handleUpdateItemPrice = (index: number, novoPrecoUnit: number) => {
         if (novoPrecoUnit < 0) {
@@ -1142,6 +1232,11 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
 
         setItems(prev => prev.map((item, i) => {
             if (i === index) {
+                // Limpar o valor em edição após salvar
+                const novosValoresEditando = { ...valorEditando };
+                delete novosValoresEditando[index];
+                setValorEditando(novosValoresEditando);
+                
                 return {
                     ...item,
                     precoUnit: novoPrecoUnit,
@@ -1151,6 +1246,57 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             }
             return item;
         }));
+    };
+
+    // Função auxiliar para formatar o tipo do item
+    const formatarTipoItem = (tipo: string): string => {
+        const tipos: { [key: string]: string } = {
+            'MATERIAL': 'Material',
+            'SERVICO': 'Serviço',
+            'COTACAO': 'Banco Frio',
+            'QUADRO_PRONTO': 'Quadro',
+            'CUSTO_EXTRA': 'Custo Extra',
+            'KIT': 'Kit'
+        };
+        return tipos[tipo] || tipo;
+    };
+
+    // Função auxiliar para aplicar BDI aos itens do kit
+    const aplicarBdiAosItensKit = (itensKit: any[], bdi: number, bdiAnterior?: number): any[] => {
+        return itensKit.map(itemKit => {
+            // Se houver valorVendaOriginal, usar como base (valor sem BDI)
+            if (itemKit.valorVendaOriginal) {
+                const valorVendaComBdi = itemKit.valorVendaOriginal * (1 + bdi / 100);
+                return {
+                    ...itemKit,
+                    valorVenda: valorVendaComBdi,
+                    valorVendaOriginal: itemKit.valorVendaOriginal
+                };
+            }
+            
+            // Se não houver valorVendaOriginal, tentar calcular a partir do valorVenda atual
+            // e do BDI anterior (se fornecido) ou do BDI atual do formulário
+            const bdiUsado = bdiAnterior !== undefined ? bdiAnterior : (formState.bdi || 0);
+            let valorBase = 0;
+            
+            if (itemKit.valorVenda && bdiUsado > 0) {
+                // Calcular valor base removendo o BDI anterior
+                valorBase = itemKit.valorVenda / (1 + bdiUsado / 100);
+            } else {
+                // Se não conseguir calcular, usar o valorVenda atual como base
+                valorBase = itemKit.valorVenda || 0;
+            }
+            
+            // Aplicar o novo BDI ao valor base
+            const valorVendaComBdi = valorBase * (1 + bdi / 100);
+            
+            return {
+                ...itemKit,
+                valorVenda: valorVendaComBdi,
+                // Salvar o valor base como valorVendaOriginal para referência futura
+                valorVendaOriginal: itemKit.valorVendaOriginal || valorBase
+            };
+        });
     };
 
     // Atualizar BDI e recalcular preços (apenas para itens não editados manualmente)
@@ -1163,7 +1309,72 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 return item;
             }
             
-            // Usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
+            // Se for kit, recalcular precoBase dinamicamente
+            if (item.tipo === 'KIT') {
+                // Para kits customizados (sem kitId), usar itensDoKit
+                if (!item.kitId && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                    // Aplicar BDI apenas aos itens que não foram editados manualmente
+                    // Itens editados manualmente mantêm seu valorVenda atual
+                    const itensAtualizados = (item as any).itensDoKit.map((kitItem: any) => {
+                        // Se o item foi editado manualmente (valorVenda diferente do valorVendaOriginal),
+                        // manter o valorVenda atual sem recalcular
+                        if (kitItem.valorVendaOriginal && 
+                            Math.abs(kitItem.valorVenda - kitItem.valorVendaOriginal) > 0.01) {
+                            // Item foi editado manualmente - manter valor atual
+                            return kitItem;
+                        }
+                        
+                        // Item não foi editado - aplicar novo BDI
+                        const valorBase = kitItem.valorVendaOriginal || 
+                            (kitItem.valorVenda ? kitItem.valorVenda / (1 + (formState.bdi || 0) / 100) : 0);
+                        const novoValorVenda = valorBase * (1 + newBdi / 100);
+                        
+                        return {
+                            ...kitItem,
+                            valorVenda: novoValorVenda
+                        };
+                    });
+                    
+                    // Recalcular total do kit
+                    const novoPrecoUnit = itensAtualizados.reduce((sum: number, it: any) => {
+                        return sum + ((it.valorVenda || 0) * (it.quantidade || 1));
+                    }, 0);
+                    
+                    const novoPrecoBase = novoPrecoUnit / (1 + newBdi / 100);
+                    
+                    return {
+                        ...item,
+                        precoBase: novoPrecoBase,
+                        precoUnit: novoPrecoUnit,
+                        subtotal: novoPrecoUnit * item.quantidade,
+                        itensDoKit: itensAtualizados
+                    };
+                }
+                
+                // Para kits do banco de dados (com kitId)
+                if (item.kitId) {
+                    const kitCompleto = kits.find((k: any) => k.id === item.kitId);
+                    if (kitCompleto && kitCompleto.items) {
+                        // Recalcular preço de venda total do kit baseado nos materiais
+                        const precoVendaTotalKit = kitCompleto.items.reduce((sum: number, kitItem: any) => {
+                            const precoVenda = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
+                            return sum + (precoVenda * kitItem.quantidade);
+                        }, 0);
+                        
+                        const precoBase = precoVendaTotalKit;
+                        const precoUnit = precoBase * (1 + newBdi / 100);
+                        
+                        return {
+                            ...item,
+                            precoBase,
+                            precoUnit,
+                            subtotal: precoUnit * item.quantidade
+                        };
+                    }
+                }
+            }
+            
+            // Para outros itens, usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
             const basePreco = item.precoBase !== undefined ? item.precoBase : item.custoUnit;
             const precoUnit = basePreco * (1 + newBdi / 100);
             return {
@@ -1172,6 +1383,403 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 subtotal: precoUnit * item.quantidade
             };
         }));
+
+        // Atualizar itens do kit nos modais se estiverem abertos
+        // Mas preservar valores editados manualmente
+        if (showModalItensKit && itensKitParaVisualizar.length > 0) {
+            const itensAtualizados = itensKitParaVisualizar.map((kitItem: any) => {
+                // Se o item foi editado manualmente, manter valor atual
+                if (kitItem.valorVendaOriginal && 
+                    Math.abs(kitItem.valorVenda - kitItem.valorVendaOriginal) > 0.01) {
+                    return kitItem;
+                }
+                // Aplicar novo BDI apenas se não foi editado manualmente
+                return aplicarBdiAosItensKit([kitItem], newBdi)[0];
+            });
+            setItensKitParaVisualizar(itensAtualizados);
+        }
+        
+        if (showModalEditarKit && itensKitEditando.length > 0) {
+            const itensAtualizados = itensKitEditando.map((kitItem: any) => {
+                // Se o item foi editado manualmente, manter valor atual
+                if (kitItem.valorVendaOriginal && 
+                    Math.abs(kitItem.valorVenda - kitItem.valorVendaOriginal) > 0.01) {
+                    return kitItem;
+                }
+                // Aplicar novo BDI apenas se não foi editado manualmente
+                return aplicarBdiAosItensKit([kitItem], newBdi)[0];
+            });
+            setItensKitEditando(itensAtualizados);
+        }
+    };
+
+    // Recalcular itens disponíveis sempre que items mudar e o modal estiver aberto
+    useEffect(() => {
+        if (!showModalEditarKit || kitIndexParaEditar === null) {
+            return;
+        }
+
+        // Criar um Set com os IDs dos materiais/cotações que já estão no kit sendo editado
+        // Usar uma combinação de nome + tipo + materialId/cotacaoId para identificar itens únicos
+        const itensNoKit = new Set(itensKitEditando.map((it: any) => {
+            // Criar uma chave única para cada item no kit
+            // Se tem materialId ou cotacaoId, usar isso (mais preciso)
+            // Caso contrário, usar nome + tipo (para serviços, etc.)
+            if (it.materialId) return `material_${it.materialId}`;
+            if (it.cotacaoId) return `cotacao_${it.cotacaoId}`;
+            return `nome_${it.nome}_${it.tipo}`;
+        }));
+        
+        // Filtrar itens disponíveis:
+        // 1. Excluir o próprio kit que está sendo editado
+        // 2. Excluir outros kits
+        // 3. Excluir itens que já estão no kit (verificando por materialId/cotacaoId ou nome+tipo)
+        const disponiveis = items
+            .filter((it, idx) => {
+                // Excluir o próprio kit que está sendo editado
+                if (idx === kitIndexParaEditar) return false;
+                // Excluir outros kits
+                if (it.tipo === 'KIT') return false;
+                
+                // Verificar se o item já está no kit
+                let chaveItem = '';
+                if (it.materialId) {
+                    chaveItem = `material_${it.materialId}`;
+                } else if (it.cotacaoId) {
+                    chaveItem = `cotacao_${it.cotacaoId}`;
+                } else {
+                    // Para itens sem materialId/cotacaoId (serviços, etc.), usar nome + tipo
+                    chaveItem = `nome_${it.nome}_${it.tipo}`;
+                }
+                
+                if (itensNoKit.has(chaveItem)) return false;
+                
+                // Incluir todos os outros itens (materiais, serviços, cotações, etc.)
+                return true;
+            })
+            .map((it, idx) => ({
+                index: idx,
+                nome: it.nome,
+                tipo: it.tipo,
+                materialId: it.materialId,
+                cotacaoId: it.cotacaoId,
+                precoUnit: it.precoUnit,
+                quantidade: it.quantidade,
+                unidadeMedida: it.unidadeMedida || 'UN'
+            }));
+        
+        setItensDisponiveisParaAdicionar(disponiveis);
+    }, [items, showModalEditarKit, kitIndexParaEditar, itensKitEditando]);
+
+    // Funções para seleção múltipla de itens
+    const toggleItemSelecionado = (index: number) => {
+        setItensSelecionados(prev => {
+            const novo = new Set(prev);
+            if (novo.has(index)) {
+                novo.delete(index);
+            } else {
+                novo.add(index);
+            }
+            return novo;
+        });
+    };
+
+    // Selecionar todos os itens
+    const selecionarTodosItens = () => {
+        setItensSelecionados(new Set(items.map((_, index) => index)));
+    };
+
+    // Deselecionar todos os itens
+    const deselecionarTodosItens = () => {
+        setItensSelecionados(new Set());
+    };
+
+    // Criar kit a partir dos itens selecionados
+    const handleCriarKit = () => {
+        if (itensSelecionados.size === 0) {
+            toast.error('Nenhum item selecionado', {
+                description: 'Selecione pelo menos um item para criar um kit'
+            });
+            return;
+        }
+
+        if (!nomeKit.trim()) {
+            toast.error('Nome do kit obrigatório', {
+                description: 'Digite um nome para o kit'
+            });
+            return;
+        }
+
+        // Calcular valores totais dos itens selecionados
+        const itensParaKit = Array.from(itensSelecionados)
+            .sort((a, b) => a - b) // Ordenar índices
+            .map(index => items[index])
+            .filter(Boolean);
+
+        if (itensParaKit.length === 0) {
+            toast.error('Erro ao criar kit', {
+                description: 'Nenhum item válido encontrado'
+            });
+            return;
+        }
+
+        // Calcular custo total (soma dos custos unitários)
+        const custoTotal = itensParaKit.reduce((sum, item) => sum + (item.custoUnit * item.quantidade), 0);
+        
+        // Calcular subtotal total (soma dos subtotais dos itens - já inclui BDI e edições manuais)
+        const subtotalTotal = itensParaKit.reduce((sum, item) => sum + item.subtotal, 0);
+        
+        // Preço unitário do kit é o subtotal total (já inclui BDI e edições manuais)
+        const precoUnit = subtotalTotal;
+        
+        // Calcular precoBase do kit (valor sem BDI)
+        // Se todos os itens têm precoBase, usar a soma dos precoBase
+        // Caso contrário, calcular removendo o BDI do subtotal total
+        const precoBaseTotal = itensParaKit.reduce((sum, item) => {
+            if (item.precoBase !== undefined) {
+                return sum + (item.precoBase * item.quantidade);
+            } else {
+                // Se não tem precoBase, calcular removendo o BDI
+                const bdi = formState.bdi || 0;
+                return sum + ((item.precoUnit / (1 + bdi / 100)) * item.quantidade);
+            }
+        }, 0);
+
+        // Preparar array de itens do kit para salvar (com nome, código e valor de venda atualizado)
+        const itensDoKitParaSalvar = itensParaKit.map(item => {
+            // Buscar material completo para obter código (sku) e valorVenda original (apenas para referência)
+            let codigo = '';
+            let valorVendaOriginal = 0;
+            
+            if (item.materialId) {
+                const materialCompleto = materiais.find(m => m.id === item.materialId);
+                if (materialCompleto) {
+                    codigo = materialCompleto.sku || '';
+                    valorVendaOriginal = materialCompleto.valorVenda || materialCompleto.preco || 0;
+                }
+            } else if (item.cotacaoId) {
+                const cotacaoCompleta = cotacoes.find(c => c.id === item.cotacaoId);
+                if (cotacaoCompleta) {
+                    codigo = cotacaoCompleta.ncm || '';
+                    valorVendaOriginal = cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario || 0;
+                }
+            }
+
+            // IMPORTANTE: Sempre usar o precoUnit atual do item no orçamento
+            // Este valor já inclui:
+            // - BDI aplicado
+            // - Edições manuais do usuário (se houver)
+            // - Qualquer ajuste feito no contexto deste orçamento específico
+            // O valorVendaOriginal é usado apenas para referência (mostrar valor original riscado)
+            const valorVendaAtualizado = item.precoUnit || 0;
+
+            return {
+                nome: item.nome,
+                codigo: codigo,
+                valorVenda: valorVendaAtualizado, // Sempre usar o precoUnit atual (com BDI e edições manuais)
+                valorVendaOriginal: valorVendaOriginal, // Valor de venda original do cadastro (para referência)
+                quantidade: item.quantidade,
+                unidadeMedida: item.unidadeMedida,
+                materialId: item.materialId || null,
+                cotacaoId: item.cotacaoId || null,
+                tipo: item.tipo,
+                subtotal: item.subtotal // Usar o subtotal atual do item
+            };
+        });
+
+        // Criar novo item do tipo KIT
+        const novoKit: OrcamentoItem & { itensDoKit?: any } = {
+            tipo: 'KIT',
+            nome: nomeKit.trim(),
+            // ✅ Para kits customizados, usar o nome do usuário como descricao (será salvo no backend)
+            // A descrição detalhada dos itens está em itensDoKit
+            descricao: nomeKit.trim(),
+            unidadeMedida: 'UN',
+            quantidade: 1,
+            custoUnit: custoTotal,
+            precoBase: precoBaseTotal, // Base sem BDI (soma dos precoBase dos itens ou calculado)
+            precoUnit: precoUnit, // Preço com BDI (soma dos subtotais dos itens)
+            subtotal: precoUnit,
+            // Marcar como kit customizado
+            kitId: undefined, // Será undefined para kits customizados
+            // Salvar itens do kit para exibição posterior
+            itensDoKit: itensDoKitParaSalvar
+        };
+
+        // Remover itens selecionados e adicionar o kit
+        const indicesParaRemover = Array.from(itensSelecionados).sort((a, b) => b - a); // Ordenar decrescente para remover do final
+        let novosItems = [...items];
+        
+        // Remover itens do final para o início para não afetar os índices
+        indicesParaRemover.forEach(index => {
+            novosItems.splice(index, 1);
+        });
+
+        // Adicionar o kit
+        novosItems.push(novoKit);
+
+        setItems(novosItems);
+        setItensSelecionados(new Set());
+        setNomeKit('');
+        setShowCriarKitModal(false);
+
+        toast.success('Kit criado com sucesso!', {
+            description: `${nomeKit.trim()} - R$ ${precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        });
+    };
+
+    // Atualizar preços de materiais, cotações e serviços
+    const handleAtualizarPrecos = async () => {
+        if (items.length === 0) {
+            toast.error('Nenhum item no orçamento', {
+                description: 'Adicione itens ao orçamento antes de atualizar preços'
+            });
+            return;
+        }
+
+        try {
+            setAtualizandoPrecos(true);
+
+            // Buscar dados atualizados do backend
+            const [materiaisRes, cotacoesRes, servicosRes] = await Promise.all([
+                axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
+                axiosApiService.get('/api/cotacoes'),
+                servicosService.listar({ ativo: true })
+            ]);
+
+            // Criar mapas para busca rápida
+            const materiaisMap = new Map<string, Material>();
+            if (materiaisRes.success && materiaisRes.data && Array.isArray(materiaisRes.data)) {
+                materiaisRes.data.forEach((m: Material) => {
+                    if (m.id) materiaisMap.set(m.id, m);
+                });
+            }
+
+            const cotacoesMap = new Map<string, any>();
+            if (cotacoesRes.success && cotacoesRes.data && Array.isArray(cotacoesRes.data)) {
+                cotacoesRes.data.forEach((c: any) => {
+                    if (c.id) cotacoesMap.set(c.id, c);
+                });
+            }
+
+            const servicosMap = new Map<string, Servico>();
+            if (servicosRes.success && servicosRes.data && Array.isArray(servicosRes.data)) {
+                servicosRes.data.forEach((s: Servico) => {
+                    if (s.id) servicosMap.set(s.id, s);
+                });
+            }
+
+            // Atualizar itens do orçamento
+            let itensAtualizados = 0;
+            const novosItems = items.map(item => {
+                // Se o preço foi editado manualmente, não atualizar
+                if (item.precoEditadoManual) {
+                    return item;
+                }
+
+                let novoPrecoBase: number | undefined = undefined;
+                let novoCustoUnit: number | undefined = undefined;
+
+                // Atualizar preço baseado no tipo do item
+                if (item.tipo === 'MATERIAL' && item.materialId) {
+                    const materialAtualizado = materiaisMap.get(item.materialId);
+                    if (materialAtualizado) {
+                        novoPrecoBase = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                        novoCustoUnit = materialAtualizado.preco || 0;
+                        itensAtualizados++;
+                    }
+                } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+                    const cotacaoAtualizada = cotacoesMap.get(item.cotacaoId);
+                    if (cotacaoAtualizada) {
+                        novoPrecoBase = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                        novoCustoUnit = cotacaoAtualizada.valorUnitario || 0;
+                        itensAtualizados++;
+                    }
+                } else if (item.tipo === 'SERVICO' && item.servicoNome) {
+                    // Para serviços, buscar pelo nome (já que não temos servicoId no OrcamentoItem)
+                    const servicoAtualizado = Array.from(servicosMap.values()).find(
+                        s => s.nome === item.servicoNome
+                    );
+                    if (servicoAtualizado) {
+                        novoPrecoBase = servicoAtualizado.preco || 0;
+                        novoCustoUnit = servicoAtualizado.preco || 0;
+                        itensAtualizados++;
+                    }
+                }
+
+                // Se encontrou preço atualizado, aplicar BDI
+                if (novoPrecoBase !== undefined) {
+                    const precoUnit = novoPrecoBase * (1 + (formState.bdi || 0) / 100);
+                    return {
+                        ...item,
+                        precoBase: novoPrecoBase,
+                        precoUnit: precoUnit,
+                        custoUnit: novoCustoUnit !== undefined ? novoCustoUnit : item.custoUnit,
+                        subtotal: precoUnit * item.quantidade
+                    };
+                }
+
+                return item;
+            });
+
+            setItems(novosItems);
+
+            // Atualizar também os itens dentro dos kits
+            const novosItemsComKits = novosItems.map(item => {
+                if (item.tipo === 'KIT' && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                    const itensDoKitAtualizados = (item as any).itensDoKit.map((kitItem: any) => {
+                        let novoValorVenda = kitItem.valorVenda;
+
+                        if (kitItem.materialId) {
+                            const materialAtualizado = materiaisMap.get(kitItem.materialId);
+                            if (materialAtualizado) {
+                                novoValorVenda = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                                // Aplicar BDI
+                                novoValorVenda = novoValorVenda * (1 + (formState.bdi || 0) / 100);
+                            }
+                        } else if (kitItem.cotacaoId) {
+                            const cotacaoAtualizada = cotacoesMap.get(kitItem.cotacaoId);
+                            if (cotacaoAtualizada) {
+                                novoValorVenda = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                                // Aplicar BDI
+                                novoValorVenda = novoValorVenda * (1 + (formState.bdi || 0) / 100);
+                            }
+                        }
+
+                        return {
+                            ...kitItem,
+                            valorVenda: novoValorVenda
+                        };
+                    });
+
+                    // Recalcular total do kit
+                    const novoPrecoUnit = itensDoKitAtualizados.reduce((sum: number, it: any) => {
+                        return sum + ((it.valorVenda || 0) * (it.quantidade || 1));
+                    }, 0);
+
+                    return {
+                        ...item,
+                        itensDoKit: itensDoKitAtualizados,
+                        precoUnit: novoPrecoUnit,
+                        subtotal: novoPrecoUnit * item.quantidade
+                    };
+                }
+                return item;
+            });
+
+            setItems(novosItemsComKits);
+
+            toast.success('Preços atualizados!', {
+                description: `${itensAtualizados} item(ns) tiveram seus preços atualizados com os valores mais recentes do estoque e banco frio`
+            });
+        } catch (error: any) {
+            console.error('Erro ao atualizar preços:', error);
+            toast.error('Erro ao atualizar preços', {
+                description: error.message || 'Não foi possível atualizar os preços. Tente novamente.'
+            });
+        } finally {
+            setAtualizandoPrecos(false);
+        }
     };
 
     // Selecionar endereço do cliente
@@ -1230,6 +1838,19 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
         });
     };
 
+    // Prevenir submit acidental ao pressionar Enter
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        // Se Enter for pressionado e não for em um textarea ou botão de submit
+        if (e.key === 'Enter' && e.target instanceof HTMLElement) {
+            const isTextarea = e.target.tagName === 'TEXTAREA';
+            const isSubmitButton = e.target.type === 'submit' || (e.target as HTMLElement).closest('button[type="submit"]');
+            
+            if (!isTextarea && !isSubmitButton) {
+                e.preventDefault();
+            }
+        }
+    };
+
     // Salvar orçamento
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1278,11 +1899,15 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                     kitId: item.kitId,
                     cotacaoId: item.cotacaoId, // ✅ Preservar cotacaoId para manter a relação com a cotação
                     servicoNome: item.servicoNome,
-                    descricao: item.descricao || item.nome,
+                    // ✅ Para kits customizados (sem kitId), priorizar item.nome que contém o nome do usuário
+                    // Para outros itens, usar descricao || nome
+                    descricao: (item.tipo === 'KIT' && !item.kitId && item.nome) ? item.nome : (item.descricao || item.nome),
                     quantidade: item.quantidade,
                     custoUnit: item.custoUnit,
                     precoUnitario: item.precoUnit,
-                    subtotal: item.subtotal
+                    subtotal: item.subtotal,
+                    // ✅ Campo para armazenar itens de kits customizados
+                    itensDoKit: (item as any).itensDoKit || null
                 }))
             };
 
@@ -1299,7 +1924,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                     if (response.success) {
                         // Limpar rascunho após salvar com sucesso
                         limparRascunho();
-                        setTimeout(() => navigate('/'), 500);
+                        setTimeout(() => navigate('/orcamentos'), 500);
                         return 'Orçamento atualizado com sucesso!';
                     }
                     throw new Error(response.error || 'Erro ao atualizar orçamento');
@@ -1597,7 +2222,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 )}
             </header>
 
-            <form onSubmit={handleSubmit} className="max-w-6xl mx-auto space-y-6">
+            <form onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="max-w-6xl mx-auto space-y-6">
                 {/* SEÇÃO 1: Informações Básicas */}
                 <div className="card-primary">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-6 flex items-center gap-2">
@@ -1840,14 +2465,81 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                 <div className="card-primary">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text">Itens do Orçamento</h3>
-                        <button
-                            type="button"
-                            onClick={() => setShowItemModal(true)}
-                            className="btn-info flex items-center gap-2"
-                        >
-                            <PlusIcon className="w-4 h-4" />
-                            Adicionar Item
-                        </button>
+                        <div className="flex items-center gap-3">
+                            {items.length > 0 && (
+                                <>
+                                    {itensSelecionados.size === 0 ? (
+                                        <button
+                                            type="button"
+                                            onClick={selecionarTodosItens}
+                                            className="px-3 py-1.5 text-sm font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors flex items-center gap-2"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            Selecionar Todos
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={deselecionarTodosItens}
+                                                className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                            >
+                                                Desmarcar Todos
+                                            </button>
+                                            <span className="text-sm text-indigo-700 dark:text-indigo-300 font-medium">
+                                                {itensSelecionados.size} item(ns) selecionado(s)
+                                            </span>
+                                        </>
+                                    )}
+                                </>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleAtualizarPrecos}
+                                disabled={atualizandoPrecos || items.length === 0}
+                                className="px-4 py-2 text-sm font-semibold text-white bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
+                                title="Atualizar preços de materiais, cotações e serviços com os valores mais recentes"
+                            >
+                                {atualizandoPrecos ? (
+                                    <>
+                                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Atualizando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Atualizar Preços
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowItemModal(true)}
+                                className="btn-info flex items-center gap-2"
+                            >
+                                <PlusIcon className="w-4 h-4" />
+                                Adicionar Item
+                            </button>
+                            {itensSelecionados.size > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCriarKitModal(true)}
+                                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    Criar Kit
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {items.length === 0 ? (
@@ -1868,8 +2560,17 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                                 const fotoUrl = materialComFoto?.imagemUrl;
 
                                 return (
-                                    <div key={index} className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden hover:shadow-md transition-all">
+                                    <div key={index} className={`bg-white dark:bg-slate-800 border rounded-xl overflow-hidden hover:shadow-md transition-all ${itensSelecionados.has(index) ? 'border-indigo-500 dark:border-indigo-400 bg-indigo-50/30 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-dark-border'}`}>
                                         <div className="flex items-center gap-4 p-4">
+                                            {/* Checkbox de seleção */}
+                                            <div className="flex-shrink-0">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={itensSelecionados.has(index)}
+                                                    onChange={() => toggleItemSelecionado(index)}
+                                                    className="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                                                />
+                                            </div>
                                             {/* Coluna de Foto - Compacta */}
                                             <div className="flex-shrink-0">
                                                 {fotoUrl ? (
@@ -1898,7 +2599,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                                             {/* Nome e Badges - Expandido */}
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-semibold text-gray-900 dark:text-dark-text truncate">{item.nome}</p>
-                                                <div className="flex items-center gap-2 mt-1">
+                                                <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                     <span className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.unidadeMedida}</span>
                                                     {/* Badge de Banco Frio */}
                                                     {(item.tipo === 'COTACAO' || (item as any).cotacao || (item as any).cotacaoId) && (
@@ -1918,6 +2619,51 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                                                                 return null;
                                                             })()}
                                                         </span>
+                                                    )}
+                                                    {/* Botões para kit customizado */}
+                                                    {item.tipo === 'KIT' && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit) && (item as any).itensDoKit.length > 0 && (
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    // Aplicar BDI atual aos itens do kit antes de exibir
+                                                                    const itensComBdi = aplicarBdiAosItensKit((item as any).itensDoKit || [], formState.bdi || 0);
+                                                                    setItensKitParaVisualizar(itensComBdi);
+                                                                    setNomeKitParaVisualizar(item.nome);
+                                                                    setShowModalItensKit(true);
+                                                                }}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50 rounded-md transition-colors"
+                                                            >
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                </svg>
+                                                                Ver itens ({((item as any).itensDoKit as any[]).length})
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    // Preparar itens para edição (criar cópia e aplicar BDI atual)
+                                                                    const itensDoKit = (item as any).itensDoKit || [];
+                                                                    const itensComBdi = aplicarBdiAosItensKit(itensDoKit.map((it: any) => ({ ...it })), formState.bdi || 0);
+                                                                    setItensKitEditando(itensComBdi);
+                                                                    setNomeKitEditando(item.nome);
+                                                                    setKitIndexParaEditar(index);
+                                                                    // A lista de itens disponíveis será calculada pelo useEffect
+                                                                    setShowModalEditarKit(true);
+                                                                }}
+                                                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 rounded-md transition-colors"
+                                                            >
+                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                                Editar kit
+                                                            </button>
+                                                        </div>
                                                     )}
                                                 </div>
                                             </div>
@@ -1942,22 +2688,35 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                                                     {item.precoEditadoManual && <span className="ml-1 text-blue-600 dark:text-blue-400" title="Editado">✏️</span>}
                                                 </label>
                                                 <input
-                                                    type="number"
-                                                    value={item.precoUnit.toFixed(2)}
+                                                    type="text"
+                                                    value={valorEditando[index] !== undefined ? valorEditando[index] : formatarValorBRL(item.precoUnit)}
                                                     onChange={(e) => {
-                                                        const novoValor = parseFloat(e.target.value) || 0;
-                                                        handleUpdateItemPrice(index, novoValor);
-                                                    }}
-                                                    onBlur={(e) => {
-                                                        const valor = parseFloat(e.target.value) || 0;
-                                                        if (valor !== item.precoUnit) {
-                                                            handleUpdateItemPrice(index, valor);
+                                                        const valorDigitado = e.target.value;
+                                                        // Permitir apenas números, vírgula e ponto
+                                                        if (valorDigitado === '' || /^[\d.,]+$/.test(valorDigitado) || valorDigitado === ',') {
+                                                            setValorEditando(prev => ({ ...prev, [index]: valorDigitado }));
                                                         }
                                                     }}
-                                                    min="0"
-                                                    step="0.01"
+                                                    onBlur={(e) => {
+                                                        const valorDigitado = e.target.value;
+                                                        const valorNumerico = parsearValorBRL(valorDigitado);
+                                                        if (valorNumerico !== item.precoUnit) {
+                                                            handleUpdateItemPrice(index, valorNumerico);
+                                                        } else {
+                                                            // Limpar valor em edição se não mudou
+                                                            const novosValoresEditando = { ...valorEditando };
+                                                            delete novosValoresEditando[index];
+                                                            setValorEditando(novosValoresEditando);
+                                                        }
+                                                    }}
+                                                    onFocus={(e) => {
+                                                        // Ao focar, mostrar valor sem formatação para facilitar edição
+                                                        if (valorEditando[index] === undefined) {
+                                                            setValorEditando(prev => ({ ...prev, [index]: item.precoUnit.toString().replace('.', ',') }));
+                                                        }
+                                                    }}
                                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
-                                                    placeholder="0.00"
+                                                    placeholder="0,00"
                                                 />
                                             </div>
 
@@ -2000,7 +2759,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                             <div className="flex justify-between items-center">
                                 <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal (com BDI {formState.bdi}%)</span>
                                 <span className="text-xl font-bold text-blue-900 dark:text-blue-200">
-                                    R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
                         </div>
@@ -2066,7 +2825,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                                     </p>
                                 </div>
                                 <span className="text-4xl font-bold text-purple-700 dark:text-purple-300">
-                                    R$ {calculosOrcamento.valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    R$ {calculosOrcamento.valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                             </div>
                         </div>
@@ -3479,6 +4238,146 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
 
         </div>
 
+        {/* Modal de Visualização de Itens do Kit */}
+        {showModalItensKit && (
+            <div 
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+                onClick={(e) => {
+                    // Fechar modal ao clicar no backdrop
+                    if (e.target === e.currentTarget) {
+                        setShowModalItensKit(false);
+                        setItensKitParaVisualizar([]);
+                        setNomeKitParaVisualizar('');
+                    }
+                }}
+            >
+                <div 
+                    className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-2xl font-bold text-white">Itens do Kit: {nomeKitParaVisualizar}</h2>
+                            <p className="text-blue-100 text-sm mt-1">
+                                {itensKitParaVisualizar.length} {itensKitParaVisualizar.length === 1 ? 'item' : 'itens'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowModalItensKit(false);
+                                setItensKitParaVisualizar([]);
+                                setNomeKitParaVisualizar('');
+                            }}
+                            className="p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    {/* Body */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-gray-50 dark:bg-gray-900">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                    {itensKitParaVisualizar.map((itemKit: any, index: number) => {
+                                        const valorVenda = itemKit.valorVenda || 0;
+                                        const quantidade = itemKit.quantidade || 1;
+                                        const subtotal = valorVenda * quantidade;
+                                        const tipoItem = itemKit.tipo || 'MATERIAL';
+                                        
+                                        return (
+                                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <p className="font-medium text-gray-900 dark:text-white">{itemKit.nome || 'Item sem nome'}</p>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <p className="text-sm text-gray-600 dark:text-gray-300">{itemKit.codigo || '-'}</p>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                                        {formatarTipoItem(tipoItem)}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                        {quantidade} {itemKit.unidadeMedida || 'UN'}
+                                                    </p>
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                        R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </p>
+                                                    {itemKit.valorVendaOriginal && itemKit.valorVendaOriginal !== valorVenda && (
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400 line-through">
+                                                            R$ {itemKit.valorVendaOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <p className="text-sm font-bold text-purple-700 dark:text-purple-400">
+                                                        R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </p>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot className="bg-gray-50 dark:bg-gray-900">
+                                    <tr>
+                                        <td colSpan={5} className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-white">
+                                            Total do Kit:
+                                        </td>
+                                        <td className="px-4 py-3 text-right">
+                                            <p className="text-lg font-bold text-purple-700 dark:text-purple-400">
+                                                R$ {itensKitParaVisualizar.reduce((sum: number, item: any) => {
+                                                    const valorVenda = item.valorVenda || 0;
+                                                    const quantidade = item.quantidade || 1;
+                                                    return sum + (valorVenda * quantidade);
+                                                }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 p-4 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowModalItensKit(false);
+                                setItensKitParaVisualizar([]);
+                                setNomeKitParaVisualizar('');
+                            }}
+                            className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                        >
+                            Fechar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* Modal de Criar Cliente Rápido */}
         <CriarClienteRapidoModal
             isOpen={showClienteRapidoModal}
@@ -3486,6 +4385,526 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             onSubmit={handleCreateClienteRapido}
             loading={criandoClienteRapido}
         />
+
+        {/* Modal de Criar Kit */}
+        <AlertDialog open={showCriarKitModal} onOpenChange={setShowCriarKitModal}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>
+                        <div className="flex items-center gap-2">
+                            <span className="text-2xl">📦</span>
+                            Criar Kit
+                        </div>
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Transforme {itensSelecionados.size} item(ns) selecionado(s) em um único item Kit.
+                        O valor do kit será a soma de todos os itens selecionados.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-4 py-4">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                            Nome do Kit *
+                        </label>
+                        <input
+                            type="text"
+                            value={nomeKit}
+                            onChange={(e) => setNomeKit(e.target.value)}
+                            className="input-field"
+                            placeholder="Ex: Kit Instalação Completa, Kit Automação Residencial..."
+                            autoFocus
+                        />
+                    </div>
+                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
+                        <p className="text-sm text-blue-800 dark:text-blue-300 font-semibold mb-2">
+                            Itens que serão agrupados:
+                        </p>
+                        <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 max-h-32 overflow-y-auto">
+                            {Array.from(itensSelecionados)
+                                .sort((a, b) => a - b)
+                                .map(index => {
+                                    const item = items[index];
+                                    if (!item) return null;
+                                    return (
+                                        <li key={index} className="flex items-center justify-between">
+                                            <span>• {item.nome}</span>
+                                            <span className="font-semibold">R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                        </li>
+                                    );
+                                })}
+                        </ul>
+                        <div className="mt-3 pt-3 border-t border-blue-300 dark:border-blue-700 flex justify-between items-center">
+                            <span className="text-sm font-semibold text-blue-900 dark:text-blue-200">Valor Total do Kit:</span>
+                            <span className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                                R$ {Array.from(itensSelecionados)
+                                    .map(index => items[index]?.subtotal || 0)
+                                    .reduce((sum, val) => sum + val, 0)
+                                    .toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-300">
+                            ⚠️ <strong>Atenção:</strong> O NCM do kit deverá ser informado no momento da emissão da nota fiscal.
+                        </p>
+                    </div>
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => {
+                        setNomeKit('');
+                        setShowCriarKitModal(false);
+                    }}>
+                        Cancelar
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                        onClick={handleCriarKit}
+                        disabled={!nomeKit.trim()}
+                        className="bg-green-600 hover:bg-green-700"
+                    >
+                        Criar Kit
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Modal de Edição de Itens do Kit */}
+        {showModalEditarKit && kitIndexParaEditar !== null && (
+            <div 
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        setShowModalEditarKit(false);
+                        setKitIndexParaEditar(null);
+                        setItensKitEditando([]);
+                        setNomeKitEditando('');
+                    }
+                }}
+            >
+                <div 
+                    className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-5xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 flex items-center justify-between">
+                        <div>
+                            <h2 className="text-2xl font-bold text-white">Editar Kit: {nomeKitEditando}</h2>
+                            <p className="text-blue-100 text-sm mt-1">
+                                {itensKitEditando.length} {itensKitEditando.length === 1 ? 'item' : 'itens'} na composição
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowModalEditarKit(false);
+                                setKitIndexParaEditar(null);
+                                setItensKitEditando([]);
+                                setNomeKitEditando('');
+                            }}
+                            className="p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    {/* Body */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        {/* Lista de Itens do Kit */}
+                        <div className="mb-6">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Itens do Kit</h3>
+                            <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                    <thead className="bg-gray-50 dark:bg-gray-900">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
+                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
+                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
+                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
+                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                        {itensKitEditando.map((itemKit: any, index: number) => {
+                                            const valorVenda = itemKit.valorVenda || 0;
+                                            const quantidade = itemKit.quantidade || 1;
+                                            const subtotal = valorVenda * quantidade;
+                                            const tipoItem = itemKit.tipo || 'MATERIAL';
+                                            
+                                            return (
+                                                <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                                    <td className="px-4 py-3">
+                                                        <p className="font-medium text-gray-900 dark:text-white">{itemKit.nome || 'Item sem nome'}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <p className="text-sm text-gray-600 dark:text-gray-300">{itemKit.codigo || '-'}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                                            {formatarTipoItem(tipoItem)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <input
+                                                            type="number"
+                                                            min="0.01"
+                                                            step="0.01"
+                                                            value={quantidade}
+                                                            onChange={(e) => {
+                                                                const newQty = parseFloat(e.target.value) || 0;
+                                                                const updated = [...itensKitEditando];
+                                                                updated[index] = { ...updated[index], quantidade: newQty };
+                                                                setItensKitEditando(updated);
+                                                            }}
+                                                            className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-center"
+                                                        />
+                                                        <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{itemKit.unidadeMedida || 'UN'}</span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <input
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.01"
+                                                            value={valorVenda}
+                                                            onChange={(e) => {
+                                                                const newValor = parseFloat(e.target.value) || 0;
+                                                                const updated = [...itensKitEditando];
+                                                                updated[index] = { ...updated[index], valorVenda: newValor };
+                                                                setItensKitEditando(updated);
+                                                            }}
+                                                            className="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-right"
+                                                        />
+                                                        {itemKit.valorVendaOriginal && itemKit.valorVendaOriginal !== valorVenda && (
+                                                            <p className="text-xs text-gray-500 dark:text-gray-400 line-through mt-1">
+                                                                R$ {itemKit.valorVendaOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </p>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <p className="text-sm font-bold text-purple-700 dark:text-purple-400">
+                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                // Verificar se após remover este item, o kit ficará vazio
+                                                                const updated = itensKitEditando.filter((_, i) => i !== index);
+                                                                
+                                                                if (updated.length === 0 && itensKitEditando.length === 1) {
+                                                                    // Último item sendo removido - mostrar dialog
+                                                                    setAcaoRemoverKit(null);
+                                                                    setShowDialogRemoverKit(true);
+                                                                } else {
+                                                                    // Ainda há itens no kit - remover normalmente
+                                                                    setItensKitEditando(updated);
+                                                                }
+                                                            }}
+                                                            className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
+                                                            title="Remover item"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                            </svg>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot className="bg-gray-50 dark:bg-gray-900">
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-3 text-right font-semibold text-gray-900 dark:text-white">
+                                                Total do Kit:
+                                            </td>
+                                            <td className="px-4 py-3 text-right" colSpan={2}>
+                                                <p className="text-lg font-bold text-purple-700 dark:text-purple-400">
+                                                    R$ {itensKitEditando.reduce((sum: number, item: any) => {
+                                                        const valorVenda = item.valorVenda || 0;
+                                                        const quantidade = item.quantidade || 1;
+                                                        return sum + (valorVenda * quantidade);
+                                                    }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Adicionar Itens ao Kit */}
+                        {itensDisponiveisParaAdicionar.length > 0 && (
+                            <div className="mb-6">
+                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Adicionar Itens ao Kit</h3>
+                                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                        <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0">
+                                            <tr>
+                                                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                                                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor Unit.</th>
+                                                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Ação</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                            {itensDisponiveisParaAdicionar.map((itemDisponivel: any, index: number) => {
+                                                // Buscar informações completas do item
+                                                const itemCompleto = items[itemDisponivel.index];
+                                                if (!itemCompleto) return null;
+
+                                                let codigo = '';
+                                                let valorVendaOriginal = 0;
+
+                                                if (itemCompleto.materialId) {
+                                                    const materialCompleto = materiais.find(m => m.id === itemCompleto.materialId);
+                                                    if (materialCompleto) {
+                                                        codigo = materialCompleto.sku || '';
+                                                        valorVendaOriginal = materialCompleto.valorVenda || materialCompleto.preco || 0;
+                                                    }
+                                                } else if (itemCompleto.cotacaoId) {
+                                                    const cotacaoCompleta = cotacoes.find(c => c.id === itemCompleto.cotacaoId);
+                                                    if (cotacaoCompleta) {
+                                                        codigo = cotacaoCompleta.ncm || '';
+                                                        valorVendaOriginal = cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario || 0;
+                                                    }
+                                                }
+
+                                                const novoItemKit = {
+                                                    nome: itemCompleto.nome,
+                                                    codigo: codigo,
+                                                    quantidade: itemCompleto.quantidade || 1,
+                                                    unidadeMedida: itemCompleto.unidadeMedida || 'UN',
+                                                    valorVenda: itemCompleto.precoUnit || valorVendaOriginal,
+                                                    valorVendaOriginal: valorVendaOriginal,
+                                                    materialId: itemCompleto.materialId,
+                                                    cotacaoId: itemCompleto.cotacaoId,
+                                                    tipo: itemCompleto.tipo
+                                                };
+
+                                                return (
+                                                    <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                                        <td className="px-4 py-3">
+                                                            <p className="font-medium text-gray-900 dark:text-white">{itemCompleto.nome}</p>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            <p className="text-sm text-gray-600 dark:text-gray-300">
+                                                                R$ {(itemCompleto.precoUnit || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </p>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setItensKitEditando([...itensKitEditando, novoItemKit]);
+                                                                    // Remover da lista de disponíveis
+                                                                    setItensDisponiveisParaAdicionar(itensDisponiveisParaAdicionar.filter((_, i) => i !== index));
+                                                                }}
+                                                                className="px-3 py-1 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50 rounded-md transition-colors"
+                                                            >
+                                                                <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                                </svg>
+                                                                Adicionar
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 p-4 flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowModalEditarKit(false);
+                                setKitIndexParaEditar(null);
+                                setItensKitEditando([]);
+                                setNomeKitEditando('');
+                            }}
+                            className="px-6 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                
+                                if (itensKitEditando.length === 0) {
+                                    // Se o kit está vazio, mostrar dialog
+                                    setShowDialogRemoverKit(true);
+                                    return;
+                                }
+
+                                if (kitIndexParaEditar === null) return;
+
+                                // Recalcular custo e preço do kit
+                                const custoTotal = itensKitEditando.reduce((sum: number, item: any) => {
+                                    const valorVenda = item.valorVenda || 0;
+                                    const quantidade = item.quantidade || 1;
+                                    return sum + (valorVenda * quantidade);
+                                }, 0);
+
+                                const precoUnit = custoTotal; // Preço do kit é a soma dos itens
+
+                                // Atualizar o item do kit na lista principal
+                                setItems(prev => prev.map((item, idx) => {
+                                    if (idx === kitIndexParaEditar) {
+                                        return {
+                                            ...item,
+                                            itensDoKit: itensKitEditando,
+                                            custoUnit: custoTotal,
+                                            precoUnit: precoUnit,
+                                            subtotal: precoUnit * (item.quantidade || 1)
+                                        };
+                                    }
+                                    return item;
+                                }));
+
+                                toast.success('Kit atualizado com sucesso!', {
+                                    description: `${itensKitEditando.length} ${itensKitEditando.length === 1 ? 'item' : 'itens'} na composição`
+                                });
+
+                                setShowModalEditarKit(false);
+                                setKitIndexParaEditar(null);
+                                setItensKitEditando([]);
+                                setNomeKitEditando('');
+                            }}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                        >
+                            Salvar Alterações
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* AlertDialog para remover kit vazio */}
+        <AlertDialog open={showDialogRemoverKit} onOpenChange={setShowDialogRemoverKit}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>
+                        <div className="flex items-center gap-2">
+                            <span className="text-2xl">⚠️</span>
+                            Kit Vazio
+                        </div>
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                        O kit "{nomeKitEditando}" ficará vazio. O que deseja fazer?
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="space-y-3 py-4">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (kitIndexParaEditar === null) {
+                                setShowDialogRemoverKit(false);
+                                return;
+                            }
+
+                            // Opção 1: Expandir itens do kit de volta para o orçamento
+                            const kitItem = items[kitIndexParaEditar];
+                            const itensDoKit = (kitItem as any).itensDoKit || [];
+
+                            // Adicionar itens do kit de volta ao orçamento
+                            const novosItens = [...items];
+                            
+                            // Remover o kit
+                            novosItens.splice(kitIndexParaEditar, 1);
+
+                            // Adicionar itens do kit de volta como itens individuais
+                            itensDoKit.forEach((itemKit: any) => {
+                                const novoItem: OrcamentoItem = {
+                                    tipo: itemKit.tipo || 'MATERIAL',
+                                    nome: itemKit.nome,
+                                    descricao: itemKit.nome,
+                                    unidadeMedida: itemKit.unidadeMedida || 'UN',
+                                    quantidade: itemKit.quantidade || 1,
+                                    custoUnit: itemKit.valorVendaOriginal || itemKit.valorVenda || 0,
+                                    precoBase: itemKit.valorVendaOriginal || itemKit.valorVenda || 0,
+                                    precoUnit: itemKit.valorVenda || 0,
+                                    subtotal: (itemKit.valorVenda || 0) * (itemKit.quantidade || 1),
+                                    materialId: itemKit.materialId,
+                                    cotacaoId: itemKit.cotacaoId
+                                };
+                                novosItens.push(novoItem);
+                            });
+
+                            setItems(novosItens);
+                            setShowModalEditarKit(false);
+                            setKitIndexParaEditar(null);
+                            setItensKitEditando([]);
+                            setNomeKitEditando('');
+                            setShowDialogRemoverKit(false);
+
+                            toast.success('Kit removido e itens adicionados ao orçamento', {
+                                description: `${itensDoKit.length} ${itensDoKit.length === 1 ? 'item foi' : 'itens foram'} adicionado(s) ao orçamento`
+                            });
+                        }}
+                        className="w-full px-4 py-3 text-left bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                    >
+                        <div className="font-semibold text-blue-900 dark:text-blue-200 mb-1">
+                            1. Remover itens do kit e mantê-los no orçamento
+                        </div>
+                        <div className="text-sm text-blue-700 dark:text-blue-300">
+                            Os itens do kit serão adicionados individualmente ao orçamento e o kit será removido.
+                        </div>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (kitIndexParaEditar === null) {
+                                setShowDialogRemoverKit(false);
+                                return;
+                            }
+
+                            // Opção 2: Excluir o kit e toda sua composição
+                            const novosItens = items.filter((_, idx) => idx !== kitIndexParaEditar);
+                            setItems(novosItens);
+                            setShowModalEditarKit(false);
+                            setKitIndexParaEditar(null);
+                            setItensKitEditando([]);
+                            setNomeKitEditando('');
+                            setShowDialogRemoverKit(false);
+
+                            toast.success('Kit removido do orçamento', {
+                                description: 'O kit e todos os seus itens foram removidos'
+                            });
+                        }}
+                        className="w-full px-4 py-3 text-left bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                    >
+                        <div className="font-semibold text-red-900 dark:text-red-200 mb-1">
+                            2. Excluir o kit e toda sua composição
+                        </div>
+                        <div className="text-sm text-red-700 dark:text-red-300">
+                            O kit e todos os seus itens serão removidos permanentemente do orçamento.
+                        </div>
+                    </button>
+                </div>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => {
+                        setShowDialogRemoverKit(false);
+                        setAcaoRemoverKit(null);
+                    }}>
+                        Cancelar
+                    </AlertDialogCancel>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
 
     </>
     );

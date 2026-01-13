@@ -9,6 +9,7 @@ export interface ServicoTemplate {
     tipo: string;
     tipoServico?: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO';
     preco: number;
+    custo?: number | null; // ✅ NOVO: Custo do serviço (aceita vazio, 0 ou valor)
     unidade: string;
     ativo?: boolean;
 }
@@ -47,6 +48,7 @@ export function generateEmptyTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MAO_DE_OBRA',
                 preco: 50.00,
+                custo: 25.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -57,6 +59,7 @@ export function generateEmptyTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MONTAGEM',
                 preco: 500.00,
+                custo: 300.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -67,6 +70,7 @@ export function generateEmptyTemplate(): ServicosImportData {
                 tipo: 'Projeto',
                 tipoServico: 'PROJETOS',
                 preco: 1500.00,
+                custo: null, // ✅ Campo opcional: pode ser null, 0 ou valor
                 unidade: 'un',
                 ativo: true
             },
@@ -77,6 +81,7 @@ export function generateEmptyTemplate(): ServicosImportData {
                 tipo: 'Outro',
                 tipoServico: 'ADMINISTRATIVO',
                 preco: 100.00,
+                custo: 0, // ✅ Campo opcional: pode ser 0
                 unidade: 'hora',
                 ativo: true
             }
@@ -100,6 +105,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MAO_DE_OBRA',
                 preco: 50.00,
+                custo: 25.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -110,6 +116,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MAO_DE_OBRA',
                 preco: 40.00,
+                custo: 20.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -120,6 +127,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MAO_DE_OBRA',
                 preco: 15.00,
+                custo: 8.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'm',
                 ativo: true
             },
@@ -131,6 +139,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MONTAGEM',
                 preco: 500.00,
+                custo: 300.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -141,6 +150,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Instalação',
                 tipoServico: 'MONTAGEM',
                 preco: 800.00,
+                custo: 500.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -152,6 +162,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Projeto',
                 tipoServico: 'PROJETOS',
                 preco: 1500.00,
+                custo: null, // ✅ Campo opcional: pode ser null (sem custo definido)
                 unidade: 'un',
                 ativo: true
             },
@@ -162,6 +173,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Projeto',
                 tipoServico: 'PROJETOS',
                 preco: 3000.00,
+                custo: 2000.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'un',
                 ativo: true
             },
@@ -172,6 +184,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'LaudoTecnico',
                 tipoServico: 'ENGENHARIA',
                 preco: 800.00,
+                custo: 0, // ✅ Campo opcional: pode ser 0 (custo zero)
                 unidade: 'un',
                 ativo: true
             },
@@ -183,6 +196,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Outro',
                 tipoServico: 'ADMINISTRATIVO',
                 preco: 100.00,
+                custo: 50.00, // ✅ Campo opcional: custo do serviço
                 unidade: 'hora',
                 ativo: true
             },
@@ -193,6 +207,7 @@ export function generateExampleTemplate(): ServicosImportData {
                 tipo: 'Consultoria',
                 tipoServico: 'ADMINISTRATIVO',
                 preco: 150.00,
+                custo: null, // ✅ Campo opcional: pode ser null, 0 ou valor
                 unidade: 'hora',
                 ativo: true
             }
@@ -214,6 +229,7 @@ export function exportToJSON(servicos: ServicoTemplate[]): ServicosImportData {
             tipo: s.tipo,
             tipoServico: s.tipoServico,
             preco: s.preco,
+            custo: s.custo !== undefined ? s.custo : null, // ✅ NOVO: Custo
             unidade: s.unidade || 'un',
             ativo: s.ativo !== false
         }))
@@ -263,8 +279,20 @@ export function validateImportData(data: any): { valid: boolean; errors: string[
 
         if (servico.preco === undefined || servico.preco === null) {
             errors.push(`Linha ${linha}: Campo "preco" é obrigatório`);
-        } else if (typeof servico.preco !== 'number' || servico.preco < 0) {
-            errors.push(`Linha ${linha}: Campo "preco" deve ser um número positivo`);
+        } else {
+            // Aceita número ou string que pode ser convertida para número
+            const precoNum = typeof servico.preco === 'number' ? servico.preco : parseFloat(servico.preco);
+            if (isNaN(precoNum) || precoNum < 0) {
+                errors.push(`Linha ${linha}: Campo "preco" deve ser um número positivo`);
+            }
+        }
+
+        // Validar custo (opcional - aceita vazio, 0 ou valor positivo)
+        if (servico.custo !== undefined && servico.custo !== null && servico.custo !== '') {
+            const custoNum = typeof servico.custo === 'number' ? servico.custo : parseFloat(servico.custo);
+            if (isNaN(custoNum) || custoNum < 0) {
+                errors.push(`Linha ${linha}: Campo "custo" deve ser um número positivo ou vazio`);
+            }
         }
 
         if (!servico.unidade) {
