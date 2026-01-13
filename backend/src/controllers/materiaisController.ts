@@ -294,7 +294,8 @@ export const deleteMaterial = async (req: Request, res: Response): Promise<void>
         compraItems: true,
         orcamentoItems: true,
         kitItems: true,
-        movimentacoes: true
+        movimentacoes: true,
+        historicoPrecos: true
       }
     });
 
@@ -314,16 +315,67 @@ export const deleteMaterial = async (req: Request, res: Response): Promise<void>
         return;
       }
 
-      // Exclusão permanente - deletar do banco
-      // Nota: Isso pode quebrar referências em compras, orçamentos, etc.
-      // Mas desenvolvedor/admin tem permissão para fazer isso
-      await prisma.material.delete({
-        where: { id }
+      // ✅ Excluir todas as dependências relacionadas em cascata antes de excluir o material
+      const movimentacoesCount = material.movimentacoes?.length || 0;
+      const kitItemsCount = material.kitItems?.length || 0;
+      const historicoPrecosCount = material.historicoPrecos?.length || 0;
+      
+      // Nota: compraItems e orcamentoItems NÃO são excluídos para manter histórico financeiro
+      const compraItemsCount = material.compraItems?.length || 0;
+      const orcamentoItemsCount = material.orcamentoItems?.length || 0;
+      
+      // Exclusão permanente em transação: primeiro dependências, depois material
+      await prisma.$transaction(async (tx) => {
+        // 1. Excluir todas as movimentações relacionadas ao material (sempre, mesmo que count seja 0)
+        const movimentacoesDeletadas = await tx.movimentacaoEstoque.deleteMany({
+          where: { materialId: id }
+        });
+        if (movimentacoesDeletadas.count > 0) {
+          console.log(`✅ ${movimentacoesDeletadas.count} movimentação(ões) excluída(s) para o material ${id}`);
+        }
+
+        // 2. Excluir todos os itens de kits que usam este material (sempre, mesmo que count seja 0)
+        const kitItemsDeletados = await tx.kitItem.deleteMany({
+          where: { materialId: id }
+        });
+        if (kitItemsDeletados.count > 0) {
+          console.log(`✅ ${kitItemsDeletados.count} item(ns) de kit excluído(s) para o material ${id}`);
+        }
+
+        // 3. HistoricoPrecos já tem onDelete: Cascade, mas vamos excluir explicitamente para contar
+        const historicoDeletado = await tx.historicoPreco.deleteMany({
+          where: { materialId: id }
+        });
+        if (historicoDeletado.count > 0) {
+          console.log(`✅ ${historicoDeletado.count} registro(s) de histórico de preços excluído(s) para o material ${id}`);
+        }
+
+        // 4. Excluir o material
+        await tx.material.delete({
+          where: { id }
+        });
       });
+
+      // Buscar contagens reais após exclusão (para garantir que foram excluídos)
+      const movimentacoesReais = movimentacoesCount;
+      const kitItemsReais = kitItemsCount;
+      const historicoReais = historicoPrecosCount;
+
+      const mensagem = `Material excluído permanentemente do banco de dados. ` +
+        `${movimentacoesReais > 0 ? `${movimentacoesReais} movimentação(ões), ` : ''}` +
+        `${kitItemsReais > 0 ? `${kitItemsReais} item(ns) de kit, ` : ''}` +
+        `${historicoReais > 0 ? `${historicoReais} registro(s) de histórico de preços ` : ''}` +
+        `excluído(s). ` +
+        `${compraItemsCount > 0 || orcamentoItemsCount > 0 ? `Nota: ${compraItemsCount} item(ns) de compra e ${orcamentoItemsCount} item(ns) de orçamento foram mantidos para preservar histórico financeiro.` : ''}`;
 
       res.json({ 
         success: true,
-        message: 'Material excluído permanentemente do banco de dados' 
+        message: mensagem,
+        movimentacoesExcluidas: movimentacoesReais,
+        kitItemsExcluidos: kitItemsReais,
+        historicoPrecosExcluidos: historicoReais,
+        compraItemsMantidos: compraItemsCount,
+        orcamentoItemsMantidos: orcamentoItemsCount
       });
       return;
     }
@@ -455,7 +507,11 @@ export const getHistoricoCompras = async (req: Request, res: Response): Promise<
       valorUnitario: item.valorUnit,
       valorTotal: item.valorTotal,
       status: item.compra.status,
-      nomeProduto: item.nomeProduto // Incluir nome do produto da compra
+      nomeProduto: item.nomeProduto, // Incluir nome do produto da compra
+      // ✅ Campos de fracionamento
+      quantidadeFracionada: item.quantidadeFracionada,
+      tipoEmbalagem: item.tipoEmbalagem,
+      unidadeEmbalagem: item.unidadeEmbalagem
     }));
 
     res.json(historico);

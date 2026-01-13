@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useContext } from 'react';
 import { type StockMovement, MovementType, type MaterialItem } from '../types';
 import { movimentacoesService, type Movimentacao } from '../services/movimentacoesService';
 import { axiosApiService } from '../services/axiosApi';
@@ -6,6 +6,7 @@ import { ENDPOINTS } from '../config/api';
 import { toast } from 'sonner';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { AuthContext } from '../contexts/AuthContext';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -41,6 +42,11 @@ const ClockIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const UserIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+    </svg>
+);
+const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.124-2.038-2.124H9.038c-1.128 0-2.038.944-2.038 2.124v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
     </svg>
 );
 
@@ -86,6 +92,10 @@ interface MovimentacoesProps {
 }
 
 const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
+    const authContext = useContext(AuthContext);
+    const userRole = authContext?.user?.role?.toLowerCase() || '';
+    const isAdminOrDeveloper = userRole === 'admin' || userRole === 'desenvolvedor';
+    
     const [movements, setMovements] = useState<StockMovement[]>([]);
     const [materials, setMaterials] = useState<MaterialItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -96,6 +106,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
     
     const [isEntradaModalOpen, setIsEntradaModalOpen] = useState(false);
     const [isSaidaModalOpen, setIsSaidaModalOpen] = useState(false);
+    const [movimentacaoToDelete, setMovimentacaoToDelete] = useState<StockMovement | null>(null);
     
     // Form state
     const [selectedMaterial, setSelectedMaterial] = useState<MaterialItem | null>(null);
@@ -282,6 +293,27 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
         setDataMovimentacao(new Date().toISOString().split('T')[0]);
         setObraVinculada('');
         setIsMaterialListOpen(false);
+    };
+
+    const handleDeleteMovimentacao = async () => {
+        if (!movimentacaoToDelete) return;
+
+        try {
+            const response = await movimentacoesService.deletar(movimentacaoToDelete.id);
+            
+            if (response.success) {
+                toast.success('✅ Movimentação excluída com sucesso!', {
+                    description: 'O estoque foi revertido automaticamente'
+                });
+                setMovimentacaoToDelete(null);
+                await loadData(); // Recarregar lista
+            } else {
+                toast.error(`❌ Erro ao excluir movimentação: ${response.error || 'Erro desconhecido'}`);
+            }
+        } catch (error: any) {
+            console.error('Erro ao excluir movimentação:', error);
+            toast.error('❌ Erro ao excluir movimentação. Verifique o console para mais detalhes.');
+        }
     };
 
     const handleSubmitMovement = async (type: MovementType) => {
@@ -574,18 +606,78 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                         </div>
                                     )}
                                 </div>
-                                <div className="text-right">
-                                    <p className="text-lg font-bold text-indigo-700">
-                                        {new Date(movement.date).toLocaleDateString('pt-BR')}
-                                    </p>
-                                    <p className="text-sm text-gray-600">
-                                        {new Date(movement.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
+                                <div className="flex flex-col items-end gap-2">
+                                    <div className="text-right">
+                                        <p className="text-lg font-bold text-indigo-700">
+                                            {new Date(movement.date).toLocaleDateString('pt-BR')}
+                                        </p>
+                                        <p className="text-sm text-gray-600">
+                                            {new Date(movement.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    </div>
+                                    {isAdminOrDeveloper && (
+                                        <button
+                                            onClick={() => setMovimentacaoToDelete(movement)}
+                                            className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold flex items-center gap-2"
+                                            title="Excluir movimentação (hard delete)"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
+                                            Excluir
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     );
                 })}
+                </div>
+            )}
+
+            {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
+            {movimentacaoToDelete && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                        <h3 className="text-xl font-bold text-gray-900 mb-4">Excluir Movimentação</h3>
+                        <p className="text-gray-600 mb-2">
+                            Tem certeza que deseja excluir permanentemente esta movimentação?
+                        </p>
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                            <p className="text-sm text-gray-800">
+                                <strong>Material:</strong> {movimentacaoToDelete.materialName}
+                            </p>
+                            <p className="text-sm text-gray-800">
+                                <strong>Tipo:</strong> {movimentacaoToDelete.type === MovementType.Entrada ? 'Entrada' : 'Saída'}
+                            </p>
+                            <p className="text-sm text-gray-800">
+                                <strong>Quantidade:</strong> {movimentacaoToDelete.quantity}
+                            </p>
+                            <p className="text-sm text-gray-800">
+                                <strong>Data:</strong> {new Date(movimentacaoToDelete.date).toLocaleDateString('pt-BR')}
+                            </p>
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-yellow-800 font-semibold">
+                                ⚠️ ATENÇÃO: Esta ação é irreversível!
+                            </p>
+                            <p className="text-xs text-yellow-700 mt-1">
+                                O estoque será revertido automaticamente (hard delete).
+                            </p>
+                        </div>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setMovimentacaoToDelete(null)}
+                                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 font-semibold"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleDeleteMovimentacao}
+                                className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold"
+                            >
+                                Excluir Permanentemente
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 

@@ -8,6 +8,7 @@ import { obrasService, type Obra } from '../services/obrasService';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { AuthContext } from '../contexts/AuthContext';
+import EditarFracionamentoModal from './EditarFracionamentoModal';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -124,7 +125,15 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [invoiceNumber, setInvoiceNumber] = useState('');
     const [serieNF, setSerieNF] = useState<string>('1'); // Série da NF (padrão "1")
     const [status, setStatus] = useState<PurchaseStatus>(PurchaseStatus.Pendente);
-    type ExtendedItem = PurchaseOrderItem & { ncm?: string; sku?: string };
+    type ExtendedItem = PurchaseOrderItem & { 
+        ncm?: string; 
+        sku?: string;
+        unidadeMedida?: string;
+        // Campos de fracionamento
+        quantidadeFracionada?: number; // Quantidade de unidades por embalagem
+        tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
+        unidadeEmbalagem?: string; // "cx", "pct", etc.
+    };
     const [purchaseItems, setPurchaseItems] = useState<ExtendedItem[]>([]);
     const [productToAdd, setProductToAdd] = useState<{id: string, quantity: string, cost: string, ncm?: string, sku?: string}>({id: '', quantity: '1', cost: ''});
     
@@ -157,6 +166,17 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     // Duplicatas/Parcelas
     const [duplicatas, setDuplicatas] = useState<Array<{numero: string, dataVencimento: string, valor: number}>>([]);
     const [parcelas, setParcelas] = useState<Array<{ numero: string; dataVencimento: string; valor: number }>>([]);
+    
+    // Estados para editar fracionamento
+    const [fracionamentoModalOpen, setFracionamentoModalOpen] = useState(false);
+    const [itemFracionamentoEditando, setItemFracionamentoEditando] = useState<{
+        id?: string;
+        productName: string;
+        quantity: number;
+        quantidadeFracionada?: number;
+        tipoEmbalagem?: string;
+        unidadeEmbalagem?: string;
+    } | null>(null);
 
     const totalProdutosCalculado = useMemo(() => {
         return purchaseItems.reduce((total, item) => total + (item.totalCost ?? 0), 0);
@@ -1376,9 +1396,21 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                         <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                             <td className="px-6 py-4">
                                                                 <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                                {(item as any).quantidadeFracionada && (
+                                                                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                                        📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
+                                                                    </p>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
-                                                                <span className="text-gray-700 dark:text-dark-text font-medium">{item.quantity}</span>
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
+                                                                    {item.quantity}
+                                                                    {(item as any).quantidadeFracionada && (
+                                                                        <span className="text-blue-600 dark:text-blue-400 ml-1">
+                                                                            ({(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'})
+                                                                        </span>
+                                                                    )}
+                                                                </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-right">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">
@@ -1401,14 +1433,35 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                 </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => handleRemoveProduct(index)}
-                                                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                                                    title="Remover item"
-                                                                >
-                                                                    <TrashIcon className="w-4 h-4" />
-                                                                </button>
+                                                                <div className="flex items-center justify-center gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setItemFracionamentoEditando({
+                                                                                id: (item as any).id,
+                                                                                compraId: purchaseToEdit?.id,
+                                                                                productName: item.productName,
+                                                                                quantity: item.quantity,
+                                                                                quantidadeFracionada: (item as any).quantidadeFracionada,
+                                                                                tipoEmbalagem: (item as any).tipoEmbalagem,
+                                                                                unidadeEmbalagem: (item as any).unidadeEmbalagem
+                                                                            });
+                                                                            setFracionamentoModalOpen(true);
+                                                                        }}
+                                                                        className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-semibold"
+                                                                        title="Editar fracionamento"
+                                                                    >
+                                                                        📦
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleRemoveProduct(index)}
+                                                                        className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                                        title="Remover item"
+                                                                    >
+                                                                        <TrashIcon className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -1865,6 +1918,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">NCM</th>
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
                                                         <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                                        <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Ações</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
@@ -1872,9 +1926,21 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                         <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                             <td className="px-6 py-4">
                                                                 <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                                {(item as any).quantidadeFracionada && (
+                                                                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                                        📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
+                                                                    </p>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
-                                                                <span className="text-gray-700 dark:text-dark-text font-medium">{item.quantity}</span>
+                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
+                                                                    {item.quantity}
+                                                                    {(item as any).quantidadeFracionada && (
+                                                                        <span className="text-blue-600 dark:text-blue-400 ml-1">
+                                                                            ({(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'})
+                                                                        </span>
+                                                                    )}
+                                                                </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-600 dark:text-gray-400 font-medium text-sm">
@@ -1900,6 +1966,26 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                 <span className="font-bold text-orange-700 dark:text-orange-400 text-base">
                                                                     R$ {(item.totalCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </span>
+                                                            </td>
+                                                            <td className="px-4 py-4 text-center">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setItemFracionamentoEditando({
+                                                                            id: (item as any).id,
+                                                                            compraId: purchaseToView.id,
+                                                                            productName: item.productName,
+                                                                            quantity: item.quantity,
+                                                                            quantidadeFracionada: (item as any).quantidadeFracionada,
+                                                                            tipoEmbalagem: (item as any).tipoEmbalagem,
+                                                                            unidadeEmbalagem: (item as any).unidadeEmbalagem
+                                                                        });
+                                                                        setFracionamentoModalOpen(true);
+                                                                    }}
+                                                                    className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-semibold"
+                                                                    title="Editar fracionamento"
+                                                                >
+                                                                    📦 Editar
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -2399,6 +2485,53 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 confirmText="Excluir Permanentemente"
                 cancelText="Cancelar"
                 variant="danger"
+            />
+
+            {/* Modal de Editar Fracionamento */}
+            <EditarFracionamentoModal
+                isOpen={fracionamentoModalOpen}
+                onClose={() => {
+                    setFracionamentoModalOpen(false);
+                    setItemFracionamentoEditando(null);
+                }}
+                item={itemFracionamentoEditando}
+                onSave={(fracionamento) => {
+                    if (itemFracionamentoEditando && purchaseToView) {
+                        // Atualizar o item na lista de itens da compra visualizada
+                        const updatedItems = purchaseToView.items.map((item: any) => {
+                            if (item.id === itemFracionamentoEditando.id || 
+                                (item.productName === itemFracionamentoEditando.productName && 
+                                 item.quantity === itemFracionamentoEditando.quantity)) {
+                                return {
+                                    ...item,
+                                    quantidadeFracionada: fracionamento.quantidadeFracionada,
+                                    tipoEmbalagem: fracionamento.tipoEmbalagem,
+                                    unidadeEmbalagem: fracionamento.unidadeEmbalagem
+                                };
+                            }
+                            return item;
+                        });
+                        setPurchaseToView({ ...purchaseToView, items: updatedItems });
+                        toast.success('Fracionamento atualizado!');
+                    } else if (itemFracionamentoEditando) {
+                        // Atualizar item na lista de itens da compra sendo editada
+                        const updatedItems = purchaseItems.map((item: any) => {
+                            if (item.id === itemFracionamentoEditando.id || 
+                                (item.productName === itemFracionamentoEditando.productName && 
+                                 item.quantity === itemFracionamentoEditando.quantity)) {
+                                return {
+                                    ...item,
+                                    quantidadeFracionada: fracionamento.quantidadeFracionada,
+                                    tipoEmbalagem: fracionamento.tipoEmbalagem,
+                                    unidadeEmbalagem: fracionamento.unidadeEmbalagem
+                                };
+                            }
+                            return item;
+                        });
+                        setPurchaseItems(updatedItems);
+                        toast.success('Fracionamento atualizado!');
+                    }
+                }}
             />
         </div>
     );

@@ -1,5 +1,5 @@
-import React, { Suspense, lazy, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import React, { Suspense, lazy, useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -53,6 +53,7 @@ const Cotacoes = lazy(() => import('./components/Cotacoes'));
 const GerenciamentoFerramentas = lazy(() => import('./components/GerenciamentoFerramentas'));
 
 const MainApp: React.FC = () => {
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeView, setActiveView] = useState('Dashboard');
   // const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false); // DESCONTINUADO
@@ -60,6 +61,33 @@ const MainApp: React.FC = () => {
   const [initialProjectId, setInitialProjectId] = useState<string | null>(null);
   const [initialObraId, setInitialObraId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+
+  // Detectar URL e setar activeView automaticamente
+  useEffect(() => {
+    const pathname = location.pathname;
+    
+    // Mapear rotas para views
+    if (pathname === '/orcamentos' || pathname.startsWith('/orcamentos/')) {
+      setActiveView('Orçamentos');
+    } else if (pathname === '/compras' || pathname.startsWith('/compras/')) {
+      setActiveView('Compras');
+    } else if (pathname === '/vendas' || pathname.startsWith('/vendas/')) {
+      setActiveView('Vendas');
+    } else if (pathname === '/projetos' || pathname.startsWith('/projetos/')) {
+      setActiveView('Ordem De Serviços');
+    } else if (pathname === '/clientes' || pathname.startsWith('/clientes/')) {
+      setActiveView('Clientes');
+    } else if (pathname === '/materiais' || pathname.startsWith('/materiais/')) {
+      setActiveView('Materiais');
+    } else if (pathname === '/fornecedores' || pathname.startsWith('/fornecedores/')) {
+      setActiveView('Fornecedores');
+    } else if (pathname === '/obras' || pathname.startsWith('/obras/')) {
+      setActiveView('Obras');
+    } else if (pathname === '/' || pathname === '') {
+      setActiveView('Dashboard');
+    }
+    // Se não corresponder a nenhuma rota específica, manter o activeView atual
+  }, [location.pathname]);
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);
@@ -83,7 +111,7 @@ const MainApp: React.FC = () => {
   
   const handleViewProject = (projectId: string) => {
     setInitialProjectId(projectId);
-    handleNavigate('Projetos');
+    handleNavigate('Ordem De Serviços');
   };
 
   const handleViewObra = (obraId: string) => {
@@ -128,7 +156,7 @@ const MainApp: React.FC = () => {
         return <FornecedoresModerno toggleSidebar={toggleSidebar} />;
       case 'Clientes':
         return <ClientesModerno toggleSidebar={toggleSidebar} />;
-      case 'Projetos':
+      case 'Ordem De Serviços':
         return <ProjetosModerno 
                  toggleSidebar={toggleSidebar} 
                  onNavigate={handleNavigate}
@@ -228,7 +256,7 @@ const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: 
       'Atualização de Preços': '/',
       'Fornecedores': '/',
       'Clientes': '/',
-      'Projetos': '/',
+      'Ordem De Serviços': '/',
       'Obras': '/',
       'Tarefas da Obra': '/',
       'Ferramentas': '/',

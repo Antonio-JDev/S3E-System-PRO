@@ -5,6 +5,7 @@ import { vendasService, type Venda } from '../services/vendasService';
 import { orcamentosService } from '../services/orcamentosService';
 import { AuthContext } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -66,6 +67,9 @@ interface ContaReceber {
     vendaId: string;
     numeroParcela: number;
     numeroDuplicata: string;
+    numeroVenda?: string; // Número da venda (ex: VND-1234567890)
+    numeroSequencialVenda?: number | null; // Número sequencial da venda (1, 2, 3...)
+    numeroOS?: number | null; // Número sequencial da OS
     clienteNome: string;
     projetoTitulo: string;
     dataVencimento: string;
@@ -161,36 +165,71 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
     // Carregar dados
     useEffect(() => {
-        loadContasReceber();
-        loadVendas();
+        // Carregar vendas primeiro para calcular número sequencial
+        loadVendas().then(() => {
+            loadContasReceber();
+        });
     }, []);
 
     const loadContasReceber = async () => {
         setLoading(true);
         try {
             console.log('📥 Carregando contas a receber do backend...');
+            
+            // Garantir que as vendas estão carregadas
+            let vendasParaCalcular = vendas;
+            if (vendas.length === 0) {
+                vendasParaCalcular = await loadVendas();
+            }
+            
             const response = await financeiroService.listarContasReceber();
             
             if (response.success && response.data) {
+                // Ordenar vendas por data de criação para calcular número sequencial
+                const vendasOrdenadas = [...vendasParaCalcular].sort((a, b) => {
+                    const dataA = new Date(a.dataVenda || a.createdAt || 0).getTime();
+                    const dataB = new Date(b.dataVenda || b.createdAt || 0).getTime();
+                    return dataA - dataB; // Mais antiga primeiro
+                });
+
                 // Processar e enriquecer dados
                 const contasProcessadas = response.data.map((conta: any) => {
                     // Detectar atraso
                     const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
                     
+                    // Extrair informações da venda e orçamento
+                    const venda = conta.venda || {};
+                    const orcamento = venda.orcamento || {};
+                    const cliente = conta.cliente || venda.cliente || orcamento.cliente || {};
+                    
+                    // Calcular número sequencial da venda
+                    const vendaId = conta.vendaId || venda.id;
+                    const indiceVenda = vendasOrdenadas.findIndex(v => v.id === vendaId);
+                    const numeroSequencialVenda = indiceVenda >= 0 ? indiceVenda + 1 : null;
+                    
+                    // Identificar se é entrada (numeroParcela = 0) ou parcela normal
+                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
+                    const numeroParcela = conta.numeroParcela || 1;
+                    
                     return {
                         id: conta.id,
-                        vendaId: conta.vendaId || conta.venda?.id || 'N/A',
-                        numeroParcela: conta.numeroParcela || 1,
-                        numeroDuplicata: `DUP-${(conta.numeroParcela || 1).toString().padStart(3, '0')}`,
-                        clienteNome: conta.cliente?.nome || conta.venda?.cliente?.nome || conta.venda?.orcamento?.cliente?.nome || 'Cliente não informado',
-                        projetoTitulo: conta.descricao || conta.venda?.orcamento?.titulo || 'Projeto',
+                        vendaId: vendaId || 'N/A',
+                        numeroParcela: numeroParcela,
+                        isEntrada: isEntrada, // Flag para identificar entrada
+                        numeroDuplicata: isEntrada ? 'ENTRADA' : `DUP-${numeroParcela.toString().padStart(3, '0')}`,
+                        numeroVenda: venda.numeroVenda || 'N/A', // Número da venda (VND-xxx) - mantido para referência
+                        numeroSequencialVenda: numeroSequencialVenda, // Número sequencial (1, 2, 3...)
+                        numeroOS: orcamento.numeroSequencial || null, // Número sequencial da OS
+                        clienteNome: cliente.nome || 'Cliente não informado',
+                        projetoTitulo: conta.descricao || orcamento.titulo || 'Projeto',
                         dataVencimento: conta.dataVencimento,
                         valor: conta.valorParcela || conta.valor || 0,
                         valorRecebido: conta.valorRecebido,
                         dataPagamento: conta.dataPagamento,
                         status: isAtrasada ? 'Atrasado' : (conta.status === 'Pago' ? 'Recebido' : conta.status),
                         observacoes: conta.observacoes,
-                        venda: conta.venda // Salvar objeto venda para usar depois
+                        venda: conta.venda, // Salvar objeto venda para usar depois
+                        totalParcelas: conta.totalParcelas || venda.parcelas || 1 // Total de parcelas para exibição
                     };
                 });
                 
@@ -208,14 +247,18 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         }
     };
 
-    const loadVendas = async () => {
+    const loadVendas = async (): Promise<Venda[]> => {
         try {
             const response = await vendasService.listarVendas({ limit: 1000 });
             if (response.success && response.data) {
-                setVendas(response.data.vendas || []);
+                const vendasList = response.data.vendas || [];
+                setVendas(vendasList);
+                return vendasList; // Retornar para uso imediato
             }
+            return [];
         } catch (error) {
             console.error('Erro ao carregar vendas:', error);
+            return [];
         }
     };
 
@@ -394,6 +437,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setVendaParaVisualizar(null);
         setDetalhesVenda(null);
     };
+
+    // Fechar modais com ESC
+    useEscapeKey(isBaixaModalOpen, handleCloseBaixaModal);
+    useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
+    useEscapeKey(isConfirmDialogOpen, () => setIsConfirmDialogOpen(false));
 
     const getStatusObraDisplay = (statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null) => {
         if (!statusObra) {
@@ -795,10 +843,10 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                    Duplicata
+                                    Parcela / Venda
                                 </th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                    Cliente / Projeto
+                                    Cliente / OS
                                 </th>
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                     Vencimento
@@ -835,9 +883,28 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     <tr key={conta.id} className="hover:bg-gray-50 transition-colors">
                                         <td className="px-6 py-4">
                                             <div>
-                                                <p className="font-semibold text-gray-900">{conta.numeroDuplicata}</p>
-                                                <p className="text-xs text-gray-500">Parcela {conta.numeroParcela}</p>
-                                                <p className="text-xs text-blue-600 mt-1">Venda: {conta.vendaId}</p>
+                                                <p className="font-semibold text-gray-900">
+                                                    {conta.isEntrada ? (
+                                                        <span className="flex items-center gap-1">
+                                                            <span className="text-blue-600">💰</span>
+                                                            <span>ENTRADA</span>
+                                                        </span>
+                                                    ) : (
+                                                        conta.numeroDuplicata
+                                                    )}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                    {conta.isEntrada 
+                                                        ? 'Entrada da venda' 
+                                                        : `Parcela ${conta.numeroParcela}${conta.totalParcelas ? `/${conta.totalParcelas}` : ''}`}
+                                                </p>
+                                                <p className="text-xs text-blue-600 mt-1 font-medium">
+                                                    {conta.numeroSequencialVenda 
+                                                        ? `Venda #${conta.numeroSequencialVenda}` 
+                                                        : conta.numeroVenda && conta.numeroVenda !== 'N/A' 
+                                                            ? conta.numeroVenda 
+                                                            : `Venda: ${conta.vendaId}`}
+                                                </p>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
@@ -845,11 +912,12 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 <p className="font-medium text-gray-900">
                                                     {conta.clienteNome}
                                                 </p>
-                                                <p className="text-sm text-gray-600">{conta.projetoTitulo}</p>
-                                                {conta.vendaId && conta.vendaId !== 'N/A' && (
-                                                    <p className="text-xs text-blue-600 mt-1">
-                                                        Venda #{(vendas.findIndex(v => v.id === conta.vendaId) >= 0 ? vendas.findIndex(v => v.id === conta.vendaId) + 1 : contasFiltradas.findIndex(c => c.id === conta.id) + 1)}
+                                                {conta.numeroOS ? (
+                                                    <p className="text-sm text-blue-600 font-semibold mt-1">
+                                                        OS-{conta.numeroOS}
                                                     </p>
+                                                ) : (
+                                                    <p className="text-sm text-gray-600">{conta.projetoTitulo}</p>
                                                 )}
                                             </div>
                                         </td>
@@ -999,7 +1067,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 Número Sequencial da Venda
                                             </h4>
                                             <p className="text-lg text-gray-900 dark:text-white font-semibold">
-                                                #{vendas.findIndex(v => v.id === detalhesVenda.id) + 1 || 1}
+                                                N{([...vendas]
+                                                    .sort((a, b) => new Date(b.dataVenda || b.createdAt).getTime() - new Date(a.dataVenda || a.createdAt).getTime())
+                                                ).findIndex(v => v.id === detalhesVenda.id) + 1}
                                             </p>
                                         </div>
                                     </div>
@@ -1031,6 +1101,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                                 Material/Serviço
                                                             </th>
                                                             <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
+                                                                NCM
+                                                            </th>
+                                                            <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
                                                                 Quantidade
                                                             </th>
                                                             <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
@@ -1044,12 +1117,19 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                     <tbody>
                                                         {detalhesVenda.orcamento.items.map((item: any, index: number) => {
                                                             const quantidade = item.quantidade || 0;
-                                                            const precoUnit = item.precoUnit || item.precoUnitario || (item.subtotal / (item.quantidade || 1)) || 0;
+                                                            // Usar valorVenda do material se disponível, senão usar precoUnit do orçamento
+                                                            const valorVenda = item.material?.valorVenda;
+                                                            const precoUnit = valorVenda || item.precoUnit || item.precoUnitario || (item.subtotal / (item.quantidade || 1)) || 0;
                                                             const valorTotal = item.subtotal || (quantidade * precoUnit);
+                                                            // Obter NCM: prioridade para cotação, depois material
+                                                            const ncm = item.cotacao?.ncm || item.material?.ncm || '-';
                                                             return (
                                                                 <tr key={item.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                                                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                                                                         {item.material?.nome || item.servico?.nome || item.kit?.nome || item.descricao || 'Item sem nome'}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
+                                                                        {ncm}
                                                                     </td>
                                                                     <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                                                                         {quantidade} {item.unidadeMedida || 'UN'}
@@ -1099,34 +1179,194 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         </div>
                                     </div>
 
-                                    {/* Condições de Pagamento */}
-                                    <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
-                                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                                            <span>💳</span>
-                                            Condições de Pagamento
+                                    {/* Condições de Pagamento - ATUALIZADO */}
+                                    <div className="bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-6">
+                                        <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                            <span className="text-2xl">💳</span>
+                                            Condições de Pagamento Registradas
                                         </h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <p className="text-sm text-gray-600 dark:text-gray-400">Forma de Pagamento:</p>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {detalhesVenda.formaPagamento}
+                                        
+                                        {/* Resumo Financeiro */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Forma de Pagamento</p>
+                                                <p className="text-base font-bold text-gray-900 dark:text-white">
+                                                    {detalhesVenda.formaPagamento || 'N/A'}
                                                 </p>
                                             </div>
-                                            <div>
-                                                <p className="text-sm text-gray-600 dark:text-gray-400">Número de Parcelas:</p>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {detalhesVenda.numeroParcelas || 1} parcela(s)
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor Total</p>
+                                                <p className="text-base font-bold text-green-600 dark:text-green-400">
+                                                    R$ {detalhesVenda.valorTotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
                                                 </p>
                                             </div>
-                                            {detalhesVenda.orcamento?.condicoesEspeciaisPagamento && (
-                                                <div className="md:col-span-2">
-                                                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Condições Especiais:</p>
-                                                    <p className="text-gray-900 dark:text-white whitespace-pre-wrap">
-                                                        {detalhesVenda.orcamento.condicoesEspeciaisPagamento}
-                                                    </p>
-                                                </div>
-                                            )}
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor de Entrada</p>
+                                                <p className="text-base font-bold text-blue-600 dark:text-blue-400">
+                                                    R$ {(detalhesVenda.valorEntrada || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor Financiado</p>
+                                                <p className="text-base font-bold text-purple-600 dark:text-purple-400">
+                                                    R$ {((detalhesVenda.valorTotal || 0) - (detalhesVenda.valorEntrada || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
                                         </div>
+
+                                        {/* Informações de Parcelamento */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Número de Parcelas</p>
+                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                                                    {detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 1}x
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor por Parcela</p>
+                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                                                    R$ {(((detalhesVenda.valorTotal || 0) - (detalhesVenda.valorEntrada || 0)) / (detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Status da Venda</p>
+                                                {(() => {
+                                                    const contas = detalhesVenda.contasReceber || [];
+                                                    const totalContas = contas.length;
+                                                    // Considerar tanto 'Pago' quanto 'Recebido' como status pago
+                                                    const qtdPagas = contas.filter((c: any) => c.status === 'Pago' || c.status === 'Recebido').length;
+                                                    let statusExibicao = 'Pendente';
+                                                    let statusClass = 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+                                                    
+                                                    if (totalContas > 0) {
+                                                        if (qtdPagas === totalContas) {
+                                                            statusExibicao = 'Concluída';
+                                                            statusClass = 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+                                                        } else if (qtdPagas > 0) {
+                                                            statusExibicao = 'Pago Parcial';
+                                                            statusClass = 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+                                                        }
+                                                    }
+                                                    
+                                                    return (
+                                                        <span className={`inline-block px-3 py-1 rounded-lg text-sm font-bold ${statusClass}`}>
+                                                            {statusExibicao === 'Concluída' && '✅ '}
+                                                            {statusExibicao === 'Pago Parcial' && '💳 '}
+                                                            {statusExibicao === 'Pendente' && '⏳ '}
+                                                            {statusExibicao}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
+
+                                        {/* Tabela de Entrada e Parcelas (Contas a Receber) */}
+                                        {detalhesVenda.contasReceber && detalhesVenda.contasReceber.length > 0 && (
+                                            <div className="mt-4">
+                                                <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                                                    📋 Detalhamento da Entrada e Parcelas
+                                                </h5>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full border-collapse bg-white dark:bg-gray-800 rounded-lg">
+                                                        <thead>
+                                                            <tr className="bg-purple-100 dark:bg-purple-900/50">
+                                                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Parcela
+                                                                </th>
+                                                                <th className="px-4 py-2 text-right text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Valor
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Vencimento
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Status
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Data Pagamento
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {detalhesVenda.contasReceber
+                                                                .sort((a: any, b: any) => {
+                                                                    // Ordenar: entrada (numeroParcela = 0) primeiro, depois parcelas normais
+                                                                    const parcelaA = a.numeroParcela || 0;
+                                                                    const parcelaB = b.numeroParcela || 0;
+                                                                    return parcelaA - parcelaB;
+                                                                })
+                                                                .map((conta: any, index: number) => {
+                                                                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
+                                                                    const isPago = conta.status === 'Pago' || conta.status === 'Recebido';
+                                                                    const isAtrasado = !isPago && new Date(conta.dataVencimento) < new Date();
+                                                                    const statusClass = isPago
+                                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                                        : isAtrasado
+                                                                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+                                                                    const statusText = isPago ? 'Pago' : isAtrasado ? 'Atrasado' : 'Pendente';
+                                                                    const totalParcelas = detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 
+                                                                        detalhesVenda.contasReceber.filter((c: any) => (c.numeroParcela || 0) > 0).length;
+                                                                    
+                                                                    return (
+                                                                        <tr key={conta.id || index} className={`hover:bg-purple-50 dark:hover:bg-purple-900/20 ${isEntrada ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
+                                                                            <td className="px-4 py-2 text-sm font-semibold text-gray-900 dark:text-white border border-purple-200 dark:border-purple-700">
+                                                                                {isEntrada ? (
+                                                                                    <span className="flex items-center gap-1">
+                                                                                        <span className="text-blue-600 dark:text-blue-400">💰</span>
+                                                                                        <span>Entrada</span>
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    `Parcela ${conta.numeroParcela || index + 1}${totalParcelas ? `/${totalParcelas}` : ''}`
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm font-bold text-gray-900 dark:text-white text-right border border-purple-200 dark:border-purple-700">
+                                                                                R$ {(conta.valorParcela || conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
+                                                                                {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-center border border-purple-200 dark:border-purple-700">
+                                                                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${statusClass}`}>
+                                                                                    {isPago && '✅ '}
+                                                                                    {isAtrasado && '⚠️ '}
+                                                                                    {!isPago && !isAtrasado && '⏳ '}
+                                                                                    {statusText}
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
+                                                                                {conta.dataPagamento 
+                                                                                    ? new Date(conta.dataPagamento).toLocaleDateString('pt-BR')
+                                                                                    : '-'}
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Condições Especiais (se houver) */}
+                                        {detalhesVenda.orcamento?.condicoesEspeciaisPagamento && (
+                                            <div className="mt-4 pt-4 border-t border-purple-300 dark:border-purple-700">
+                                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">📝 Condições Especiais de Pagamento:</p>
+                                                <p className="text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700 whitespace-pre-wrap">
+                                                    {detalhesVenda.orcamento.condicoesEspeciaisPagamento}
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {/* Observações da Venda (se houver) */}
+                                        {detalhesVenda.observacoes && (
+                                            <div className="mt-4 pt-4 border-t border-purple-300 dark:border-purple-700">
+                                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">📌 Observações da Venda:</p>
+                                                <p className="text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700 whitespace-pre-wrap">
+                                                    {detalhesVenda.observacoes}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Observações */}
@@ -1167,14 +1407,14 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                         {/* Header */}
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-green-50 to-emerald-50">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100" style={{ backgroundColor: '#0a1a2f' }}>
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-900">Dar Baixa no Recebimento</h2>
-                                <p className="text-sm text-gray-600 mt-1">Registrar o recebimento da parcela</p>
+                                <h2 className="text-2xl font-bold text-white">Dar Baixa no Recebimento</h2>
+                                <p className="text-sm text-gray-200 mt-1">Registrar o recebimento da parcela</p>
                             </div>
                             <button
                                 onClick={handleCloseBaixaModal}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                className="p-2 text-gray-300 hover:text-white hover:bg-white/20 rounded-xl"
                             >
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
@@ -1187,12 +1427,12 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                 <h3 className="font-semibold text-blue-900 mb-3">Informações da Conta</h3>
                                 <div className="grid grid-cols-2 gap-4 text-sm">
                                     <div>
-                                        <span className="text-blue-700 font-medium">Duplicata:</span>
+                                        <span className="text-blue-700 font-medium">Parcela:</span>
                                         <p className="text-blue-900 font-semibold">{contaSelecionada.numeroDuplicata}</p>
                                     </div>
                                     <div>
                                         <span className="text-blue-700 font-medium">Cliente:</span>
-                                        <p className="text-blue-900">{contaSelecionada.clienteNome}</p>
+                                        <p className="text-blue-900 font-semibold">{contaSelecionada.clienteNome}</p>
                                     </div>
                                     <div>
                                         <span className="text-blue-700 font-medium">Vencimento:</span>

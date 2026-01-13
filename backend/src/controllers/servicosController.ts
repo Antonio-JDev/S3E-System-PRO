@@ -3,6 +3,72 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+/**
+ * Normaliza o tipoServico para o formato do enum
+ */
+function normalizarTipoServico(tipoServico: string | undefined): 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO' {
+  if (!tipoServico) return 'MAO_DE_OBRA';
+  
+  // Primeiro remove acentos e normaliza
+  const semAcentos = tipoServico
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .toUpperCase()
+    .trim();
+  
+  // Substitui espaços por underscore
+  const normalizado = semAcentos.replace(/\s+/g, '_');
+  
+  // Mapeamento de variações comuns
+  const mapeamento: Record<string, 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'> = {
+    'MAO_DE_OBRA': 'MAO_DE_OBRA',
+    'MONTAGEM': 'MONTAGEM',
+    'ENGENHARIA': 'ENGENHARIA',
+    'PROJETOS': 'PROJETOS',
+    'PROJETO': 'PROJETOS',
+    'ADMINISTRATIVO': 'ADMINISTRATIVO',
+    'ADM': 'ADMINISTRATIVO',
+  };
+  
+  // Se já está no formato correto, retorna direto
+  if (mapeamento[normalizado]) {
+    return mapeamento[normalizado];
+  }
+  
+  // Verifica se contém palavras-chave
+  if (semAcentos.includes('MAO') && semAcentos.includes('OBRA')) {
+    return 'MAO_DE_OBRA';
+  }
+  if (semAcentos.includes('MONTAGEM')) {
+    return 'MONTAGEM';
+  }
+  if (semAcentos.includes('ENGENHARIA')) {
+    return 'ENGENHARIA';
+  }
+  if (semAcentos.includes('PROJETO')) {
+    return 'PROJETOS';
+  }
+  if (semAcentos.includes('ADMINISTRATIVO') || semAcentos.includes('ADM')) {
+    return 'ADMINISTRATIVO';
+  }
+  
+  // Fallback
+  return 'MAO_DE_OBRA';
+}
+
+/**
+ * Normaliza o tipo de serviço (capitaliza primeira letra)
+ */
+function normalizarTipo(tipo: string): string {
+  if (!tipo) return 'Outro';
+  
+  return tipo
+    .toLowerCase()
+    .split(' ')
+    .map(palavra => palavra.charAt(0).toUpperCase() + palavra.slice(1))
+    .join(' ');
+}
+
 export class ServicosController {
   static async listarServicos(req: Request, res: Response): Promise<void> {
     try {
@@ -53,7 +119,7 @@ export class ServicosController {
 
   static async criarServico(req: Request, res: Response): Promise<void> {
     try {
-      const { nome, codigo, descricao, tipo, tipoServico, preco, unidade } = req.body;
+      const { nome, codigo, descricao, tipo, tipoServico, preco, custo, unidade } = req.body;
 
       // Validação básica
       if (!nome || !codigo || !tipo || preco === undefined) {
@@ -85,6 +151,7 @@ export class ServicosController {
           tipo,
           tipoServico: tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
           preco,
+          custo: custo !== undefined && custo !== null && custo !== '' ? parseFloat(custo) : null, // ✅ NOVO: Custo (aceita vazio, 0 ou valor)
           unidade: unidade || 'un'
         }
       });
@@ -99,7 +166,7 @@ export class ServicosController {
   static async atualizarServico(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { nome, codigo, descricao, tipo, tipoServico, preco, unidade, ativo } = req.body;
+      const { nome, codigo, descricao, tipo, tipoServico, preco, custo, unidade, ativo } = req.body;
 
       // Verificar se serviço existe
       const servicoExistente = await prisma.servico.findUnique({
@@ -135,6 +202,7 @@ export class ServicosController {
           tipo,
           tipoServico: tipoServico !== undefined ? tipoServico : servicoExistente.tipoServico, // ✅ NOVO: Tipo de serviço
           preco,
+          custo: custo !== undefined ? (custo !== null && custo !== '' ? parseFloat(custo) : null) : servicoExistente.custo, // ✅ NOVO: Custo
           unidade,
           ativo
         }
@@ -161,6 +229,39 @@ export class ServicosController {
       res.status(500).json({ success: false, message: 'Erro ao desativar serviço', error: error.message });
     }
   }
+
+  static async reativarServico(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+
+      // Verificar se serviço existe
+      const servicoExistente = await prisma.servico.findUnique({
+        where: { id }
+      });
+
+      if (!servicoExistente) {
+        res.status(404).json({ success: false, message: 'Serviço não encontrado' });
+        return;
+      }
+
+      if (servicoExistente.ativo) {
+        res.status(400).json({ success: false, message: 'Serviço já está ativo' });
+        return;
+      }
+
+      // Reativar serviço
+      const servicoReativado = await prisma.servico.update({
+        where: { id },
+        data: { ativo: true }
+      });
+
+      res.status(200).json({ success: true, data: servicoReativado });
+    } catch (error: any) {
+      console.error('Erro ao reativar serviço:', error);
+      res.status(500).json({ success: false, message: 'Erro ao reativar serviço', error: error.message });
+    }
+  }
+
 
   /**
    * Importa serviços em lote via JSON
@@ -197,7 +298,7 @@ export class ServicosController {
 
         try {
           // Validação
-          if (!servico.codigo || !servico.nome || !servico.tipo || servico.preco === undefined) {
+          if (!servico.codigo || !servico.nome || !servico.tipo || (servico.preco === undefined && servico.preco !== 0)) {
             resultados.erros++;
             resultados.detalhes.push({
               linha,
@@ -208,6 +309,37 @@ export class ServicosController {
             });
             continue;
           }
+
+          // Processar preco (aceita número ou string)
+          let precoValue: number;
+          if (typeof servico.preco === 'number') {
+            precoValue = servico.preco;
+          } else {
+            const precoParsed = parseFloat(servico.preco);
+            if (isNaN(precoParsed) || precoParsed < 0) {
+              throw new Error('Preço inválido');
+            }
+            precoValue = precoParsed;
+          }
+
+          // Processar custo (aceita vazio, 0 ou valor)
+          let custoValue: number | null = null;
+          if (servico.custo !== undefined && servico.custo !== null && servico.custo !== '') {
+            if (typeof servico.custo === 'number') {
+              custoValue = servico.custo >= 0 ? servico.custo : null;
+            } else {
+              const custoParsed = parseFloat(servico.custo);
+              if (!isNaN(custoParsed) && custoParsed >= 0) {
+                custoValue = custoParsed;
+              }
+            }
+          }
+
+          // Normalizar tipoServico
+          const tipoServicoNormalizado = normalizarTipoServico(servico.tipoServico);
+          
+          // Normalizar tipo
+          const tipoNormalizado = normalizarTipo(servico.tipo);
 
           // Verificar se já existe
           const servicoExistente = await prisma.servico.findUnique({
@@ -221,9 +353,10 @@ export class ServicosController {
               data: {
                 nome: servico.nome,
                 descricao: servico.descricao || null,
-                tipo: servico.tipo,
-                tipoServico: servico.tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
-                preco: servico.preco,
+                tipo: tipoNormalizado,
+                tipoServico: tipoServicoNormalizado,
+                preco: precoValue,
+                custo: custoValue,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
               }
@@ -244,9 +377,10 @@ export class ServicosController {
                 nome: servico.nome,
                 codigo: servico.codigo,
                 descricao: servico.descricao || null,
-                tipo: servico.tipo,
-                tipoServico: servico.tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
-                preco: servico.preco,
+                tipo: tipoNormalizado,
+                tipoServico: tipoServicoNormalizado,
+                preco: precoValue,
+                custo: custoValue,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
               }
@@ -315,6 +449,7 @@ export class ServicosController {
           tipo: s.tipo,
           tipoServico: s.tipoServico, // ✅ NOVO: Tipo de serviço
           preco: s.preco,
+          custo: s.custo !== null && s.custo !== undefined ? s.custo : null, // ✅ NOVO: Custo
           unidade: s.unidade,
           ativo: s.ativo
         }))

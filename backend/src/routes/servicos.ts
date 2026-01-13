@@ -44,6 +44,13 @@ router.put('/:id', checkPermission('update_servico'), ServicosController.atualiz
 router.delete('/:id', checkDeletePermission('servico'), ServicosController.desativarServico);
 
 /**
+ * @route PUT /api/servicos/:id/reativar
+ * @desc Reativa um serviço desativado
+ * @access RBAC: update_servico (admin, gerente, engenheiro, comprador)
+ */
+router.put('/:id/reativar', checkPermission('update_servico'), ServicosController.reativarServico);
+
+/**
  * @route POST /api/servicos/import/json
  * @desc Importa serviços em lote via JSON
  * @access RBAC: create_servico (admin, gerente, engenheiro, comprador)

@@ -192,7 +192,8 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
           }
         }
         
-        // Se for kit, calcular custo baseado nos materiais
+        // Se for kit cadastrado (com kitId), calcular custo baseado nos materiais
+        // Kits customizados (sem kitId) usam os valores já calculados no frontend (custoUnit e precoUnitario)
         if (item.tipo === 'KIT' && item.kitId) {
           try {
             const kit = await prisma.kit.findUnique({
@@ -324,7 +325,9 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         ncm: ncm ? String(ncm) : null, // ✅ NCM para faturamento NF-e/NFS-e
         // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
         unidadeVenda: item.unidadeVenda || null,
-        tipoMaterial: item.tipoMaterial || null
+        tipoMaterial: item.tipoMaterial || null,
+        // ✅ Campo para armazenar itens de kits customizados
+        itensDoKit: item.itensDoKit || null
       });
     }
 
@@ -527,13 +530,27 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
     const { id } = req.params;
     const { status } = req.body;
 
+    console.log(`🔄 Atualizando status do orçamento ${id} para ${status}...`);
+
+    if (!status) {
+      res.status(400).json({
+        success: false,
+        error: 'Status é obrigatório'
+      });
+      return;
+    }
+
     const orcamento = await prisma.orcamento.findUnique({
       where: { id },
       include: { cliente: true }
     });
 
     if (!orcamento) {
-      res.status(404).json({ error: 'Orçamento não encontrado' });
+      console.log(`❌ Orçamento ${id} não encontrado`);
+      res.status(404).json({
+        success: false,
+        error: 'Orçamento não encontrado'
+      });
       return;
     }
 
@@ -569,11 +586,27 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
       }
     }
 
+    // Se declinado e estava aprovado, cancelar projeto se existir
+    if (status === 'Declinado' && orcamento.status === 'Aprovado') {
+      const projetoExistente = await prisma.projeto.findUnique({
+        where: { orcamentoId: id }
+      });
+
+      if (projetoExistente) {
+        console.log(`❌ Orçamento aprovado foi declinado. Cancelando projeto ${projetoExistente.id}`);
+        await prisma.projeto.update({
+          where: { id: projetoExistente.id },
+          data: { status: 'CANCELADO' }
+        });
+      }
+    }
+
     const orcamentoAtualizado = await prisma.orcamento.update({
       where: { id },
       data: {
         status,
-        aprovedAt: status === 'Aprovado' ? new Date() : orcamento.aprovedAt
+        aprovedAt: status === 'Aprovado' ? new Date() : orcamento.aprovedAt,
+        recusadoAt: status === 'Declinado' || status === 'Recusado' ? new Date() : orcamento.recusadoAt
       },
       include: {
         cliente: true,
@@ -582,10 +615,19 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
       }
     });
 
-    res.json({ orcamento: orcamentoAtualizado, projeto });
+    // Retornar no formato esperado pelo frontend
+    res.json({
+      success: true,
+      data: orcamentoAtualizado,
+      projeto: projeto,
+      message: `Status alterado para ${status} com sucesso`
+    });
   } catch (error) {
-    console.error('Erro ao atualizar orçamento:', error);
-    res.status(500).json({ error: 'Erro ao atualizar orçamento' });
+    console.error('Erro ao atualizar status do orçamento:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao atualizar status do orçamento'
+    });
   }
 };
 
@@ -944,6 +986,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
           tipo: item.tipo,
           materialId: item.materialId,
           kitId: item.kitId,
+          itensDoKit: item.itensDoKit || null, // ✅ Campo para armazenar itens de kits customizados
           cotacaoId: item.cotacaoId, // ✅ Incluir cotacaoId para itens do banco frio
           servicoNome: item.servicoNome,
           descricao: item.descricao,

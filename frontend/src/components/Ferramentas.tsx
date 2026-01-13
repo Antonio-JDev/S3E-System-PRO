@@ -5,6 +5,7 @@ import { getUploadUrl } from '../config/api';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import AlertDialog from './ui/AlertDialog';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -118,12 +119,19 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     
     // Pesquisa e visualização
     const [pesquisa, setPesquisa] = useState('');
+    const [pesquisaKit, setPesquisaKit] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Ferramentas'));
+    const [viewModeKit, setViewModeKit] = useState<'grid' | 'list'>(loadViewMode('Kits'));
     
     // Salvar viewMode no localStorage quando mudar
     const handleViewModeChange = (mode: 'grid' | 'list') => {
         setViewMode(mode);
         saveViewMode('Ferramentas', mode);
+    };
+
+    const handleViewModeKitChange = (mode: 'grid' | 'list') => {
+        setViewModeKit(mode);
+        saveViewMode('Kits', mode);
     };
 
     // Modais
@@ -135,9 +143,17 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [ferramentaVisualizando, setFerramentaVisualizando] = useState<Ferramenta | null>(null);
     const [modalVisualizarKit, setModalVisualizarKit] = useState(false);
     const [kitVisualizando, setKitVisualizando] = useState<KitFerramenta | null>(null);
+    const [modalEditarKit, setModalEditarKit] = useState(false);
+    const [kitEditando, setKitEditando] = useState<KitFerramenta | null>(null);
     const [assinaturaEletricista, setAssinaturaEletricista] = useState<string>('');
     const [fotoKitEntregue, setFotoKitEntregue] = useState<File | null>(null);
     const [fotoKitPreview, setFotoKitPreview] = useState<string>('');
+
+    // Estados para diálogos de confirmação
+    const [showDeleteKitDialog, setShowDeleteKitDialog] = useState(false);
+    const [kitToDelete, setKitToDelete] = useState<KitFerramenta | null>(null);
+    const [showDeleteFerramentaDialog, setShowDeleteFerramentaDialog] = useState(false);
+    const [ferramentaToDelete, setFerramentaToDelete] = useState<string | null>(null);
 
     // Form estados
     const [formFerramenta, setFormFerramenta] = useState({
@@ -180,6 +196,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setModalVisualizarKit(false);
         setKitVisualizando(null);
     });
+    useEscapeKey(modalEditarKit, () => {
+        setModalEditarKit(false);
+        setKitEditando(null);
+    });
 
     useEffect(() => {
         loadData();
@@ -199,6 +219,19 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     };
 
     // Filtrar ferramentas por pesquisa
+    // Filtrar kits por pesquisa
+    const kitsFiltrados = useMemo(() => {
+        if (!pesquisaKit) return kits.filter(k => k.ativo);
+        
+        const termo = pesquisaKit.toLowerCase();
+        return kits.filter(k => k.ativo && (
+            k.nome.toLowerCase().includes(termo) ||
+            k.eletricistaNome.toLowerCase().includes(termo) ||
+            k.descricao?.toLowerCase().includes(termo) ||
+            k.itens.some(item => item.ferramenta.nome.toLowerCase().includes(termo))
+        ));
+    }, [kits, pesquisaKit]);
+
     const ferramentasFiltradas = useMemo(() => {
         if (!pesquisa.trim()) return ferramentas;
         
@@ -324,6 +357,20 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const handleSalvarKit = async (e: React.FormEvent) => {
         e.preventDefault();
         
+        // Validar que não há itens duplicados usando o código da ferramenta
+        const codigosFerramentas = formKit.itens.map(item => {
+            const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+            return ferramenta?.codigo;
+        }).filter(Boolean);
+        const codigosUnicos = new Set(codigosFerramentas);
+        if (codigosFerramentas.length !== codigosUnicos.size) {
+            const codigosDuplicados = codigosFerramentas.filter((codigo, index) => codigosFerramentas.indexOf(codigo) !== index);
+            toast.error('❌ Erro: Existem ferramentas com códigos duplicados no kit. Remova duplicatas antes de salvar.', {
+                description: `Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+            });
+            return;
+        }
+
         if (formKit.itens.length === 0) {
             toast.error('❌ Adicione pelo menos uma ferramenta ao kit!');
             return;
@@ -335,10 +382,14 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         }
 
         try {
-            // Preparar dados do kit
+            // Preparar dados do kit - garantir itens únicos
             const kitData: any = {
                 ...formKit,
-                assinatura: assinaturaEletricista
+                assinatura: assinaturaEletricista,
+                // Garantir que itens não estão duplicados
+                itens: formKit.itens.filter((item, index, self) => 
+                    index === self.findIndex(i => i.ferramentaId === item.ferramentaId)
+                )
             };
 
             // Se tiver foto, fazer upload primeiro
@@ -385,7 +436,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     };
 
     const handleAdicionarFerramentaAoKit = (ferramentaId: string) => {
-        if (ferramentasSelecionadas.includes(ferramentaId)) {
+        // Verificar se já existe no array de itens (evitar duplicação)
+        const itemExistente = formKit.itens.find(item => item.ferramentaId === ferramentaId);
+        
+        if (itemExistente || ferramentasSelecionadas.includes(ferramentaId)) {
             // Remover
             setFerramentasSelecionadas(ferramentasSelecionadas.filter(id => id !== ferramentaId));
             setFormKit({
@@ -393,20 +447,78 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
             });
         } else {
-            // Adicionar
-            setFerramentasSelecionadas([...ferramentasSelecionadas, ferramentaId]);
-            setFormKit({
-                ...formKit,
-                itens: [
-                    ...formKit.itens,
-                    {
-                        ferramentaId,
-                        quantidade: 1,
-                        estadoEntrega: 'Novo',
-                        observacoes: ''
-                    }
-                ]
+            // Verificar se já existe uma ferramenta com o mesmo código no kit
+            const ferramenta = ferramentas.find(f => f.id === ferramentaId);
+            if (!ferramenta) {
+                toast.error('❌ Ferramenta não encontrada!');
+                return;
+            }
+
+            const codigoFerramenta = ferramenta.codigo;
+            const ferramentaComMesmoCodigo = formKit.itens.find(item => {
+                const f = ferramentas.find(ferr => ferr.id === item.ferramentaId);
+                return f?.codigo === codigoFerramenta;
             });
+
+            if (ferramentaComMesmoCodigo) {
+                const ferramentaExistente = ferramentas.find(f => f.id === ferramentaComMesmoCodigo.ferramentaId);
+                toast.error('❌ Já existe uma ferramenta com este código no kit!', {
+                    description: `Código "${codigoFerramenta}" já está sendo usado por "${ferramentaExistente?.nome || 'outra ferramenta'}"`
+                });
+                return;
+            }
+
+            // Adicionar - garantir que não está duplicado
+            if (!formKit.itens.some(item => item.ferramentaId === ferramentaId)) {
+                setFerramentasSelecionadas([...ferramentasSelecionadas, ferramentaId]);
+                setFormKit({
+                    ...formKit,
+                    itens: [
+                        ...formKit.itens,
+                        {
+                            ferramentaId,
+                            quantidade: 1,
+                            estadoEntrega: 'Novo',
+                            observacoes: ''
+                        }
+                    ]
+                });
+            }
+        }
+    };
+
+    const handleRemoverItemDoKit = (ferramentaId: string) => {
+        setFerramentasSelecionadas(ferramentasSelecionadas.filter(id => id !== ferramentaId));
+        setFormKit({
+            ...formKit,
+            itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
+        });
+        toast.success('Item removido do kit');
+    };
+
+    const handleExcluirKit = (kit: KitFerramenta) => {
+        setKitToDelete(kit);
+        setShowDeleteKitDialog(true);
+    };
+
+    const confirmDeleteKit = async () => {
+        if (!kitToDelete) return;
+
+        try {
+            const response = await axiosApiService.delete(`/api/kits-ferramenta/${kitToDelete.id}`);
+            if (response.success) {
+                toast.success('✅ Kit excluído com sucesso!');
+                loadKits();
+                loadFerramentas(); // Recarregar ferramentas para atualizar estoque
+            } else {
+                toast.error('❌ Erro ao excluir kit: ' + (response.error || 'Erro desconhecido'));
+            }
+        } catch (error: any) {
+            console.error('Erro ao excluir kit:', error);
+            toast.error('❌ Erro ao excluir kit: ' + (error?.response?.data?.error || error?.message));
+        } finally {
+            setShowDeleteKitDialog(false);
+            setKitToDelete(null);
         }
     };
 
@@ -477,6 +589,107 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setModalVisualizarKit(true);
     };
 
+    const handleEditarKit = (kit: KitFerramenta) => {
+        setKitEditando(kit);
+        setFerramentasSelecionadas(kit.itens.map(item => item.ferramentaId));
+        setFormKit({
+            nome: kit.nome,
+            descricao: kit.descricao || '',
+            eletricistaId: kit.eletricistaId,
+            eletricistaNome: kit.eletricistaNome,
+            dataEntrega: new Date(kit.dataEntrega).toISOString().split('T')[0],
+            observacoes: kit.observacoes || '',
+            itens: kit.itens.map(item => ({
+                ferramentaId: item.ferramentaId,
+                quantidade: item.quantidade,
+                estadoEntrega: item.estadoEntrega,
+                observacoes: item.observacoes || ''
+            }))
+        });
+        setFotoKitPreview(kit.imagemUrl || '');
+        setAssinaturaEletricista(kit.assinatura || '');
+        setModalEditarKit(true);
+    };
+
+    const handleSalvarEdicaoKit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        
+        if (!kitEditando) return;
+
+        // Validar que não há itens duplicados usando o código da ferramenta
+        const codigosFerramentas = formKit.itens.map(item => {
+            const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+            return ferramenta?.codigo;
+        }).filter(Boolean);
+        const codigosUnicos = new Set(codigosFerramentas);
+        if (codigosFerramentas.length !== codigosUnicos.size) {
+            const codigosDuplicados = codigosFerramentas.filter((codigo, index) => codigosFerramentas.indexOf(codigo) !== index);
+            toast.error('❌ Erro: Existem ferramentas com códigos duplicados no kit. Remova duplicatas antes de salvar.', {
+                description: `Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+            });
+            return;
+        }
+
+        if (formKit.itens.length === 0) {
+            toast.error('❌ Adicione pelo menos uma ferramenta ao kit!');
+            return;
+        }
+
+        try {
+            // Preparar dados do kit - garantir itens únicos
+            const kitData: any = {
+                ...formKit,
+                assinatura: assinaturaEletricista,
+                itens: formKit.itens.filter((item, index, self) => 
+                    index === self.findIndex(i => i.ferramentaId === item.ferramentaId)
+                )
+            };
+
+            // Se tiver nova foto, fazer upload primeiro
+            let imagemUrl = kitEditando.imagemUrl || '';
+            if (fotoKitEntregue) {
+                const formData = new FormData();
+                formData.append('imagem', fotoKitEntregue);
+                
+                const uploadResponse = await axiosApiService.post('/api/kits-ferramenta/upload-foto', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                
+                if (uploadResponse.success && (uploadResponse.data as any)?.url) {
+                    imagemUrl = (uploadResponse.data as any).url;
+                    kitData.imagemUrl = imagemUrl;
+                }
+            }
+
+            const response = await axiosApiService.put(`/api/kits-ferramenta/${kitEditando.id}`, kitData);
+            if (response.success) {
+                toast.success('✅ Kit atualizado com sucesso!');
+                setModalEditarKit(false);
+                setKitEditando(null);
+                loadKits();
+                loadFerramentas();
+                
+                // Limpar form
+                setFormKit({
+                    nome: '',
+                    descricao: '',
+                    eletricistaId: '',
+                    eletricistaNome: '',
+                    dataEntrega: new Date().toISOString().split('T')[0],
+                    observacoes: '',
+                    itens: []
+                });
+                setFerramentasSelecionadas([]);
+                setAssinaturaEletricista('');
+                setFotoKitEntregue(null);
+                setFotoKitPreview('');
+            }
+        } catch (error: any) {
+            console.error('Erro ao atualizar kit:', error);
+            toast.error('❌ Erro ao atualizar kit: ' + (error?.response?.data?.error || error?.message));
+        }
+    };
+
     const handleEletricistaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const eletricistaId = e.target.value;
         const eletricista = eletricistas.find(e => e.id === eletricistaId);
@@ -504,18 +717,26 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setModalEditarFerramenta(true);
     };
 
-    const handleDeletarFerramenta = async (id: string) => {
-        if (window.confirm('Tem certeza que deseja desativar esta ferramenta?')) {
-            try {
-                const response = await axiosApiService.delete(`/api/ferramentas/${id}`);
-                if (response.success) {
-                    toast.success('✅ Ferramenta desativada com sucesso!');
-                    loadFerramentas();
-                }
-            } catch (error) {
-                console.error('Erro ao deletar ferramenta:', error);
-                toast.error('❌ Erro ao desativar ferramenta');
+    const handleDeletarFerramenta = (id: string) => {
+        setFerramentaToDelete(id);
+        setShowDeleteFerramentaDialog(true);
+    };
+
+    const confirmDeleteFerramenta = async () => {
+        if (!ferramentaToDelete) return;
+
+        try {
+            const response = await axiosApiService.delete(`/api/ferramentas/${ferramentaToDelete}`);
+            if (response.success) {
+                toast.success('✅ Ferramenta desativada com sucesso!');
+                loadFerramentas();
             }
+        } catch (error) {
+            console.error('Erro ao deletar ferramenta:', error);
+            toast.error('❌ Erro ao desativar ferramenta');
+        } finally {
+            setShowDeleteFerramentaDialog(false);
+            setFerramentaToDelete(null);
         }
     };
 
@@ -847,7 +1068,28 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
             {activeTab === 'kits' && (
                 <>
-                    {kits.filter(k => k.ativo).length === 0 ? (
+                    {/* Filtros para Kits */}
+                    <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-6 mb-6">
+                        <div className="relative">
+                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar por nome do kit, eletricista, descrição..."
+                                value={pesquisaKit}
+                                onChange={(e) => setPesquisaKit(e.target.value)}
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                            />
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+                            <p className="text-sm text-gray-600">
+                                Exibindo <span className="font-bold text-gray-900">{kitsFiltrados.length}</span> de <span className="font-bold text-gray-900">{kits.filter(k => k.ativo).length}</span> kits
+                            </p>
+                            <ViewToggle view={viewModeKit} onViewChange={handleViewModeKitChange} />
+                        </div>
+                    </div>
+
+                    {kitsFiltrados.length === 0 ? (
                         <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
                             <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <BriefcaseIcon className="w-10 h-10 text-gray-400" />
@@ -862,9 +1104,9 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                 Montar Primeiro Kit
                             </button>
                         </div>
-                    ) : (
+                    ) : viewModeKit === 'grid' ? (
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">{
-                            kits.filter(k => k.ativo).map((kit) => (
+                            kitsFiltrados.map((kit) => (
                                 <div key={kit.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-green-300 transition-all duration-200">
                                     {/* Header do Card */}
                                     <div className="flex justify-between items-start mb-4">
@@ -934,18 +1176,110 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             Ver Detalhes
                                         </button>
                                         <button
+                                            onClick={() => handleEditarKit(kit)}
+                                            className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors text-sm font-semibold"
+                                            title="Editar kit"
+                                        >
+                                            <PencilIcon className="w-4 h-4" />
+                                        </button>
+                                        <button
                                             onClick={() => handleGerarRecibo(kit)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                            className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                            title="Gerar PDF"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                             </svg>
-                                            PDF
+                                        </button>
+                                        <button
+                                            onClick={() => handleExcluirKit(kit)}
+                                            className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                            title="Excluir kit"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
                                         </button>
                                     </div>
                                 </div>
                             ))
                         }
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden animate-fade-in">
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                        <tr>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">KIT</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">ELETRICISTA</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">DATA ENTREGA</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">FERRAMENTAS</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">VALOR TOTAL</th>
+                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">AÇÕES</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                        {kitsFiltrados.map((kit) => (
+                                            <tr key={kit.id} className="hover:bg-gray-50 transition-colors">
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="font-bold text-gray-900">{kit.nome}</div>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="font-semibold text-gray-900">{kit.eletricistaNome}</span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="text-sm text-gray-600">
+                                                        {new Date(kit.dataEntrega).toLocaleDateString('pt-BR')}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                                        {kit.itens.length} itens
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <span className="font-bold text-green-700">
+                                                        R$ {calcularPrecoTotalKit(kit).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => handleVisualizarKit(kit)}
+                                                            className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                            title="Ver detalhes"
+                                                        >
+                                                            <EyeIcon className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleEditarKit(kit)}
+                                                            className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors text-sm font-semibold"
+                                                            title="Editar kit"
+                                                        >
+                                                            <PencilIcon className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleGerarRecibo(kit)}
+                                                            className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                                            title="Gerar PDF"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleExcluirKit(kit)}
+                                                            className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                            title="Excluir kit"
+                                                        >
+                                                            <TrashIcon className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     )}
                 </>
@@ -1371,32 +1705,45 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                 </div>
 
                                                 {isSelected && itemKit && (
-                                                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">Quantidade</label>
-                                                            <input
-                                                                type="number"
-                                                                min="1"
-                                                                value={itemKit.quantidade}
-                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'quantidade', parseInt(e.target.value))}
-                                                                className="input-field text-sm"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
+                                                    <div className="pt-3 border-t border-gray-200">
+                                                        <div className="grid grid-cols-2 gap-2 mb-2">
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Quantidade</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    value={itemKit.quantidade}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'quantidade', parseInt(e.target.value))}
+                                                                    className="input-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Estado</label>
+                                                                <select
+                                                                    value={itemKit.estadoEntrega}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
+                                                                    className="select-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <option value="Novo">Novo</option>
+                                                                    <option value="Bom">Bom</option>
+                                                                    <option value="Regular">Regular</option>
+                                                                    <option value="Desgastado">Desgastado</option>
+                                                                </select>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">Estado</label>
-                                                            <select
-                                                                value={itemKit.estadoEntrega}
-                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
-                                                                className="select-field text-sm"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            >
-                                                                <option value="Novo">Novo</option>
-                                                                <option value="Bom">Bom</option>
-                                                                <option value="Regular">Regular</option>
-                                                                <option value="Desgastado">Desgastado</option>
-                                                            </select>
-                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoverItemDoKit(ferramenta.id);
+                                                            }}
+                                                            className="w-full mt-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" />
+                                                            Remover do Kit
+                                                        </button>
                                                     </div>
                                                 )}
                                             </div>
@@ -1516,10 +1863,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalVisualizarFerramenta && ferramentaVisualizando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500">
+                        <div className="modal-header bg-gradient-to-r from-blue-600 to-blue-500">
                             <div>
                                 <h2 className="text-2xl font-bold text-white">🔧 Detalhes da Ferramenta</h2>
-                                <p className="text-purple-100 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
+                                <p className="text-blue-100 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
                             </div>
                             <button
                                 onClick={() => {
@@ -1554,19 +1901,19 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     <p className="text-xs text-blue-600 font-semibold mb-1">Código</p>
                                     <p className="font-bold text-gray-900">{ferramentaVisualizando.codigo}</p>
                                 </div>
-                                <div className="bg-purple-50 p-4 rounded-xl">
-                                    <p className="text-xs text-purple-600 font-semibold mb-1">Categoria</p>
+                                <div className="bg-blue-50 p-4 rounded-xl">
+                                    <p className="text-xs text-blue-600 font-semibold mb-1">Categoria</p>
                                     <p className="font-bold text-gray-900">{ferramentaVisualizando.categoria}</p>
                                 </div>
                                 {ferramentaVisualizando.marca && (
-                                    <div className="bg-purple-50 p-4 rounded-xl">
-                                        <p className="text-xs text-purple-600 font-semibold mb-1">Marca</p>
+                                    <div className="bg-blue-50 p-4 rounded-xl">
+                                        <p className="text-xs text-blue-600 font-semibold mb-1">Marca</p>
                                         <p className="font-bold text-gray-900">{ferramentaVisualizando.marca}</p>
                                     </div>
                                 )}
                                 {ferramentaVisualizando.modelo && (
-                                    <div className="bg-purple-50 p-4 rounded-xl">
-                                        <p className="text-xs text-purple-600 font-semibold mb-1">Modelo</p>
+                                    <div className="bg-blue-50 p-4 rounded-xl">
+                                        <p className="text-xs text-blue-600 font-semibold mb-1">Modelo</p>
                                         <p className="font-bold text-gray-900">{ferramentaVisualizando.modelo}</p>
                                     </div>
                                 )}
@@ -1795,6 +2142,346 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             )}
+
+            {/* Modal Editar Kit */}
+            {modalEditarKit && kitEditando && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="modal-header bg-gradient-to-r from-amber-600 to-amber-500">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">✏️ Editar Kit de Ferramentas</h2>
+                                <p className="text-amber-100 text-sm mt-1">Atualize informações e gerencie ferramentas do kit</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setModalEditarKit(false);
+                                    setKitEditando(null);
+                                    setFotoKitEntregue(null);
+                                    setFotoKitPreview('');
+                                }}
+                                className="text-white/80 hover:text-white transition-colors"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSalvarEdicaoKit} className="p-6 space-y-6">
+                            {/* Informações do Kit */}
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                                <h3 className="font-bold text-blue-900 mb-4">📋 Informações do Kit</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Nome do Kit *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.nome}
+                                            onChange={(e) => setFormKit({...formKit, nome: e.target.value})}
+                                            required
+                                            className="input-field"
+                                            placeholder="Ex: Kit Eletricista Completo"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Eletricista *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.eletricistaNome}
+                                            disabled
+                                            className="input-field bg-gray-100 cursor-not-allowed"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Eletricista não pode ser alterado</p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4 mt-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Data de Entrega *
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={formKit.dataEntrega}
+                                            disabled
+                                            className="input-field bg-gray-100 cursor-not-allowed"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">Data de entrega não pode ser alterada</p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Descrição
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formKit.descricao}
+                                            onChange={(e) => setFormKit({...formKit, descricao: e.target.value})}
+                                            className="input-field"
+                                            placeholder="Opcional"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Ferramentas Atuais */}
+                            <div>
+                                <h3 className="font-bold text-gray-900 mb-4">🔧 Ferramentas Atuais ({formKit.itens.length})</h3>
+                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3 max-h-64 overflow-y-auto">
+                                    {formKit.itens.length === 0 ? (
+                                        <p className="text-sm text-gray-500 text-center py-4">Nenhuma ferramenta no kit</p>
+                                    ) : (
+                                        formKit.itens.map((item, index) => {
+                                            const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+                                            if (!ferramenta) return null;
+                                            return (
+                                                <div key={item.ferramentaId || index} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+                                                    <div className="flex-1">
+                                                        <p className="font-semibold text-gray-900">{ferramenta.nome}</p>
+                                                        <p className="text-xs text-gray-500">{ferramenta.codigo} - Qtd: {item.quantidade}</p>
+                                                        <span className="inline-block mt-1 px-2 py-0.5 text-xs font-semibold rounded bg-blue-100 text-blue-800">
+                                                            {item.estadoEntrega}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoverItemDoKit(item.ferramentaId)}
+                                                            className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center gap-1"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" />
+                                                            Remover
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Adicionar Novas Ferramentas */}
+                            <div>
+                                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                    <PlusIcon className="w-5 h-5" />
+                                    Adicionar Novas Ferramentas
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200">
+                                    {ferramentas.filter(f => f.ativo && !formKit.itens.some(item => item.ferramentaId === f.id)).map((ferramenta) => {
+                                        const isSelected = ferramentasSelecionadas.includes(ferramenta.id) && !formKit.itens.some(item => item.ferramentaId === ferramenta.id);
+                                        const itemKit = formKit.itens.find(i => i.ferramentaId === ferramenta.id);
+
+                                        return (
+                                            <div key={ferramenta.id} className="bg-white border-2 rounded-xl p-4">
+                                                <div
+                                                    className={`flex items-start gap-3 cursor-pointer ${isSelected ? 'mb-3' : ''}`}
+                                                    onClick={() => handleAdicionarFerramentaAoKit(ferramenta.id)}
+                                                >
+                                                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                                                        isSelected ? 'bg-green-600 border-green-600' : 'border-gray-300 bg-white'
+                                                    }`}>
+                                                        {isSelected && (
+                                                            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <p className="font-semibold text-gray-900">{ferramenta.nome}</p>
+                                                        <p className="text-xs text-gray-500">{ferramenta.codigo} - {ferramenta.categoria}</p>
+                                                    </div>
+                                                </div>
+
+                                                {isSelected && itemKit && (
+                                                    <div className="pt-3 border-t border-gray-200">
+                                                        <div className="grid grid-cols-2 gap-2 mb-2">
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Quantidade</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    value={itemKit.quantidade}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'quantidade', parseInt(e.target.value))}
+                                                                    className="input-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Estado</label>
+                                                                <select
+                                                                    value={itemKit.estadoEntrega}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
+                                                                    className="select-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <option value="Novo">Novo</option>
+                                                                    <option value="Bom">Bom</option>
+                                                                    <option value="Regular">Regular</option>
+                                                                    <option value="Desgastado">Desgastado</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoverItemDoKit(ferramenta.id);
+                                                            }}
+                                                            className="w-full mt-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" />
+                                                            Remover do Kit
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Observações de Atualização */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Observações de Atualização
+                                </label>
+                                <textarea
+                                    value={formKit.observacoes}
+                                    onChange={(e) => setFormKit({...formKit, observacoes: e.target.value})}
+                                    className="input-field"
+                                    rows={3}
+                                    placeholder="Observações sobre as alterações no kit..."
+                                />
+                            </div>
+
+                            {/* Upload de Nova Foto do Kit */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    📷 Nova Foto do Kit
+                                </label>
+                                <div className="flex items-center gap-4">
+                                    <label className="flex-1 cursor-pointer">
+                                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-amber-500 hover:bg-amber-50 transition-all">
+                                            <div className="flex items-center justify-center gap-2">
+                                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                </svg>
+                                                <span className="text-sm text-gray-600">
+                                                    {fotoKitEntregue ? fotoKitEntregue.name : 'Clique para selecionar nova foto'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleFotoKitChange}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
+                                {fotoKitPreview && (
+                                    <div className="mt-3">
+                                        <img 
+                                            src={fotoKitPreview} 
+                                            alt="Preview do kit" 
+                                            className="w-full max-h-48 object-contain rounded-lg border border-gray-200"
+                                        />
+                                    </div>
+                                )}
+                                {kitEditando.imagemUrl && !fotoKitEntregue && (
+                                    <div className="mt-3">
+                                        <p className="text-xs text-gray-500 mb-2">Foto atual:</p>
+                                        <img 
+                                            src={getUploadUrl(kitEditando.imagemUrl)} 
+                                            alt="Foto atual do kit" 
+                                            className="w-full max-h-48 object-contain rounded-lg border border-gray-200"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Resumo */}
+                            {formKit.itens.length > 0 && (
+                                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                                    <h4 className="font-bold text-green-900 mb-2">✅ Resumo do Kit</h4>
+                                    <p className="text-sm text-green-800">
+                                        {formKit.itens.length} ferramenta(s) no kit para <strong>{formKit.eletricistaNome}</strong>
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="modal-footer">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setModalEditarKit(false);
+                                        setKitEditando(null);
+                                        setFotoKitEntregue(null);
+                                        setFotoKitPreview('');
+                                    }}
+                                    className="btn-secondary"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="btn-primary bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600"
+                                >
+                                    Salvar Alterações
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* AlertDialog de Confirmação de Exclusão de Kit */}
+            <AlertDialog
+                isOpen={showDeleteKitDialog}
+                onClose={() => {
+                    setShowDeleteKitDialog(false);
+                    setKitToDelete(null);
+                }}
+                onConfirm={confirmDeleteKit}
+                title={`Excluir permanentemente o kit "${kitToDelete?.nome}"?`}
+                message=""
+                confirmText="Excluir Permanentemente"
+                cancelText="Cancelar"
+                variant="danger"
+            >
+                <div className="space-y-3">
+                    <p className="text-gray-700 dark:text-gray-300">
+                        Tem certeza que deseja excluir permanentemente o kit <strong>"{kitToDelete?.nome}"</strong>?
+                    </p>
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-800 dark:text-red-200">
+                        <p className="font-semibold mb-2">⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL e irá:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                            <li>Excluir permanentemente o kit</li>
+                            <li>Devolver todas as ferramentas ao estoque</li>
+                            <li>Remover todas as informações relacionadas do banco de dados</li>
+                        </ul>
+                        <p className="mt-2 font-semibold">Esta ação não pode ser desfeita!</p>
+                    </div>
+                </div>
+            </AlertDialog>
+
+            {/* AlertDialog de Confirmação de Desativação de Ferramenta */}
+            <AlertDialog
+                isOpen={showDeleteFerramentaDialog}
+                onClose={() => {
+                    setShowDeleteFerramentaDialog(false);
+                    setFerramentaToDelete(null);
+                }}
+                onConfirm={confirmDeleteFerramenta}
+                title="Desativar Ferramenta"
+                message="Tem certeza que deseja desativar esta ferramenta? Ela não aparecerá mais nas listagens, mas os dados serão preservados."
+                confirmText="Desativar"
+                cancelText="Cancelar"
+                variant="warning"
+            />
         </div>
     );
 };

@@ -9,6 +9,16 @@ import { clientesService } from '../services/clientesService';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
 import { canDelete } from '../utils/permissions';
+import {
+    AlertDialog as AlertDialogShadcn,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from './ui/alert-dialog';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -160,6 +170,12 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
     const [buscaOrcamento, setBuscaOrcamento] = useState('');
     const [filtroCliente, setFiltroCliente] = useState('');
 
+    // Estados para criação de kit na página de vendas
+    const [itensSelecionadosVenda, setItensSelecionadosVenda] = useState<Set<number>>(new Set());
+    const [showCriarKitModalVenda, setShowCriarKitModalVenda] = useState(false);
+    const [nomeKitVenda, setNomeKitVenda] = useState('');
+    const [itensOrcamentoModificados, setItensOrcamentoModificados] = useState<any[] | null>(null);
+
     // Estados para exclusão
     const [vendaToDelete, setVendaToDelete] = useState<Venda | null>(null);
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -193,8 +209,20 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
 
             // Tratar orçamentos aprovados
             if (orcamentosRes.success && orcamentosRes.data) {
-                setOrcamentosAprovados(orcamentosRes.data);
-                console.log(`✅ ${orcamentosRes.data.length} orçamentos aprovados carregados`);
+                // Validação adicional: garantir que apenas orçamentos com status "Aprovado" sejam exibidos
+                const orcamentosFiltrados = Array.isArray(orcamentosRes.data) 
+                    ? orcamentosRes.data.filter((orc: any) => {
+                        const status = orc.status?.toString() || '';
+                        return status === 'Aprovado' || 
+                               status === 'APROVADO' ||
+                               status.toLowerCase() === 'aprovado';
+                      })
+                    : [];
+                setOrcamentosAprovados(orcamentosFiltrados);
+                if (orcamentosFiltrados.length < (Array.isArray(orcamentosRes.data) ? orcamentosRes.data.length : 0)) {
+                    console.warn(`⚠️ Filtrados ${(Array.isArray(orcamentosRes.data) ? orcamentosRes.data.length : 0) - orcamentosFiltrados.length} orçamentos sem status "Aprovado"`);
+                }
+                console.log(`✅ ${orcamentosFiltrados.length} orçamentos aprovados carregados`);
             } else {
                 console.warn('⚠️ Erro ao carregar orçamentos:', orcamentosRes.error);
                 setOrcamentosAprovados([]);
@@ -293,9 +321,178 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         return orcamentosAprovados.find(orc => orc.id === vendaForm.orcamentoId) || null;
     }, [vendaForm.orcamentoId, orcamentosAprovados]);
 
+    // Verificar se orçamento selecionado tem kit e notificar
+    useEffect(() => {
+        if (orcamentoSelecionado && orcamentoSelecionado.items) {
+            const temKit = orcamentoSelecionado.items.some((item: any) => item.tipo === 'KIT');
+            if (temKit) {
+                // Verificar se o usuário é administrador, gerente ou desenvolvedor
+                const isAdmin = user?.role?.toLowerCase() === 'admin' || 
+                               user?.role?.toLowerCase() === 'gerente' || 
+                               user?.role?.toLowerCase() === 'desenvolvedor';
+                
+                if (isAdmin) {
+                    toast.warning('Atenção: Pedido de Venda contém Kit', {
+                        description: 'Este orçamento contém item(s) do tipo Kit. O NCM deverá ser informado no momento da emissão da nota fiscal.',
+                        duration: 10000
+                    });
+                }
+            }
+        }
+        // Resetar seleção quando mudar orçamento
+        setItensSelecionadosVenda(new Set());
+        setItensOrcamentoModificados(null);
+    }, [orcamentoSelecionado, user]);
+
+    // Funções para gerenciar seleção e criação de kit
+    const toggleItemSelecionadoVenda = (index: number) => {
+        setItensSelecionadosVenda(prev => {
+            const novo = new Set(prev);
+            if (novo.has(index)) {
+                novo.delete(index);
+            } else {
+                novo.add(index);
+            }
+            return novo;
+        });
+    };
+
+    const selecionarTodosItensVenda = () => {
+        if (!orcamentoSelecionado?.items) return;
+        setItensSelecionadosVenda(new Set(orcamentoSelecionado.items.map((_: any, index: number) => index)));
+    };
+
+    const deselecionarTodosItensVenda = () => {
+        setItensSelecionadosVenda(new Set());
+    };
+
+    // Criar kit a partir dos itens selecionados
+    const handleCriarKitVenda = () => {
+        if (!orcamentoSelecionado?.items) return;
+
+        if (itensSelecionadosVenda.size === 0) {
+            toast.error('Nenhum item selecionado', {
+                description: 'Selecione pelo menos um item para criar um kit'
+            });
+            return;
+        }
+
+        if (!nomeKitVenda.trim()) {
+            toast.error('Nome do kit obrigatório', {
+                description: 'Digite um nome para o kit'
+            });
+            return;
+        }
+
+        // Usar itens modificados se existirem, senão usar itens originais
+        const itensAtuais = itensOrcamentoModificados || orcamentoSelecionado.items;
+
+        // Calcular valores totais dos itens selecionados
+        const itensParaKit = Array.from(itensSelecionadosVenda)
+            .sort((a, b) => a - b)
+            .map(index => itensAtuais[index])
+            .filter(Boolean);
+
+        if (itensParaKit.length === 0) {
+            toast.error('Erro ao criar kit', {
+                description: 'Nenhum item válido encontrado'
+            });
+            return;
+        }
+
+        const custoTotal = itensParaKit.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+        const subtotalTotal = itensParaKit.reduce((sum, item) => {
+            const precoUnit = item.material?.valorVenda || item.precoUnit || item.precoUnitario || item.valorUnitario || 0;
+            const quantidade = item.quantidade || 1;
+            return sum + (item.subtotal || (precoUnit * quantidade));
+        }, 0);
+        const precoUnit = subtotalTotal;
+
+        // Preparar array de itens do kit para salvar (com nome, código e valor de venda atualizado)
+        const itensDoKitParaSalvar = itensParaKit.map((item: any) => {
+            // Obter código (sku ou ncm) e valor de venda original
+            let codigo = '';
+            let valorVendaOriginal = 0;
+            
+            if (item.materialId && item.material) {
+                codigo = item.material.sku || '';
+                valorVendaOriginal = item.material.valorVenda || item.material.preco || 0;
+            } else if (item.cotacaoId && item.cotacao) {
+                codigo = item.cotacao.ncm || '';
+                valorVendaOriginal = item.cotacao.valorVenda || item.cotacao.valorUnitario || 0;
+            } else if (item.material) {
+                codigo = item.material.sku || '';
+                valorVendaOriginal = item.material.valorVenda || item.material.preco || 0;
+            } else if (item.cotacao) {
+                codigo = item.cotacao.ncm || '';
+                valorVendaOriginal = item.cotacao.valorVenda || item.cotacao.valorUnitario || 0;
+            }
+
+            // O valor de venda atualizado é o precoUnit do item (que pode ter sido editado manualmente)
+            const valorVendaAtualizado = item.precoUnit || item.precoUnitario || item.valorUnitario || valorVendaOriginal;
+
+            return {
+                nome: item.nome || item.descricao || item.material?.nome || item.cotacao?.nome || 'Item',
+                codigo: codigo,
+                valorVenda: valorVendaAtualizado, // Valor de venda atualizado (pode ter sido editado)
+                valorVendaOriginal: valorVendaOriginal, // Valor de venda original do cadastro
+                quantidade: item.quantidade || 1,
+                unidadeMedida: item.unidadeMedida || 'UN',
+                materialId: item.materialId || null,
+                cotacaoId: item.cotacaoId || null,
+                tipo: item.tipo || 'MATERIAL',
+                subtotal: item.subtotal || (valorVendaAtualizado * (item.quantidade || 1))
+            };
+        });
+
+        // Criar novo item do tipo KIT
+        const novoKit: any = {
+            tipo: 'KIT',
+            nome: nomeKitVenda.trim(),
+            // ✅ Para kits customizados, usar o nome do usuário como descricao (será salvo no backend)
+            // A descrição detalhada dos itens está em itensDoKit
+            descricao: nomeKitVenda.trim(),
+            unidadeMedida: 'UN',
+            quantidade: 1,
+            custoUnit: custoTotal,
+            precoUnit: precoUnit,
+            precoUnitario: precoUnit,
+            subtotal: precoUnit,
+            kitId: undefined,
+            ncm: undefined, // NCM será informado na emissão da NF-e
+            // Salvar itens do kit para exibição posterior
+            itensDoKit: itensDoKitParaSalvar
+        };
+
+        // Remover itens selecionados e adicionar o kit
+        const indicesParaRemover = Array.from(itensSelecionadosVenda).sort((a, b) => b - a);
+        let novosItems = [...itensAtuais];
+        
+        indicesParaRemover.forEach(index => {
+            novosItems.splice(index, 1);
+        });
+
+        novosItems.push(novoKit);
+
+        setItensOrcamentoModificados(novosItems);
+        setItensSelecionadosVenda(new Set());
+        setNomeKitVenda('');
+        setShowCriarKitModalVenda(false);
+
+        toast.success('Kit criado com sucesso!', {
+            description: `${nomeKitVenda.trim()} - R$ ${precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        });
+    };
+
     // Orçamentos filtrados para exibição
     const orcamentosFiltrados = useMemo(() => {
-        let filtrados = orcamentosAprovados;
+        // Validação adicional: garantir que apenas orçamentos aprovados sejam considerados
+        let filtrados = orcamentosAprovados.filter((orc: any) => {
+            const status = orc.status?.toString() || '';
+            return status === 'Aprovado' || 
+                   status === 'APROVADO' ||
+                   status.toLowerCase() === 'aprovado';
+        });
 
         // Filtro por busca (título, cliente, número)
         if (buscaOrcamento.trim()) {
@@ -401,11 +598,39 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         return null;
     };
 
+    // Garantir regras básicas de forma de pagamento x parcelas no frontend
+    useEffect(() => {
+        if (vendaForm.formaPagamento === 'À vista' && vendaForm.parcelas !== 1) {
+            setVendaForm(prev => ({
+                ...prev,
+                parcelas: 1
+            }));
+        }
+    }, [vendaForm.formaPagamento]);
+
     const handleSubmitVenda = async (e?: React.FormEvent) => {
         if (e) {
             e.preventDefault();
         }
-        if (!orcamentoSelecionado) return;
+        if (!orcamentoSelecionado) {
+            toast.error('Selecione um orçamento para realizar a venda');
+            return;
+        }
+
+        // Validação: garantir que o orçamento está aprovado
+        const statusOrcamento = orcamentoSelecionado.status?.toString() || '';
+        const isAprovado = statusOrcamento === 'Aprovado' || 
+                          statusOrcamento === 'APROVADO' ||
+                          statusOrcamento.toLowerCase() === 'aprovado';
+        
+        if (!isAprovado) {
+            toast.error('Apenas orçamentos com status "Aprovado" podem ser convertidos em vendas');
+            console.warn('⚠️ Tentativa de criar venda com orçamento não aprovado:', {
+                orcamentoId: orcamentoSelecionado.id,
+                status: orcamentoSelecionado.status
+            });
+            return;
+        }
 
         setIsSubmitting(true);
         setError(null);
@@ -413,18 +638,37 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
         try {
             console.log('💰 Realizando nova venda...', vendaForm);
 
+            // Validação adicional: À vista sempre 1 parcela
+            if (vendaForm.formaPagamento === 'À vista' && vendaForm.parcelas !== 1) {
+                toast.error('Vendas à vista devem ter apenas 1 parcela');
+                return;
+            }
+
+            // Calcular valor total baseado nos itens modificados (se houver kit criado)
+            let valorTotalVenda = orcamentoSelecionado.precoVenda;
+            if (itensOrcamentoModificados && itensOrcamentoModificados.length > 0) {
+                // Recalcular valor total baseado nos itens modificados
+                valorTotalVenda = itensOrcamentoModificados.reduce((sum, item) => {
+                    const precoUnit = item.material?.valorVenda || item.precoUnit || item.precoUnitario || item.valorUnitario || 0;
+                    const quantidade = item.quantidade || 1;
+                    return sum + (item.subtotal || (precoUnit * quantidade));
+                }, 0);
+            }
+
             const vendaData = {
                 orcamentoId: vendaForm.orcamentoId,
                 clienteId: orcamentoSelecionado.clienteId,
-                valorTotal: orcamentoSelecionado.precoVenda, // ✅ Campo obrigatório
+                valorTotal: valorTotalVenda, // ✅ Usar valor recalculado se houver itens modificados
                 formaPagamento: vendaForm.formaPagamento,
                 numeroParcelas: vendaForm.parcelas,
                 valorEntrada: vendaForm.valorEntrada,
-                valorFinanciado: calculosFinanceiros.valorFinanciado,
+                valorFinanciado: Math.max(0, valorTotalVenda - (vendaForm.valorEntrada || 0)),
                 dataVencimentoPrimeiraParcela: vendaForm.dataPrimeiraParcela,
                 observacoes: vendaForm.observacoes,
                 observacoesComerciais: vendaForm.observacoesComerciais,
-                condicoesEspeciaisPagamento: vendaForm.condicoesEspeciaisPagamento
+                condicoesEspeciaisPagamento: vendaForm.condicoesEspeciaisPagamento,
+                // ✅ Incluir flag indicando que os itens foram modificados
+                itensModificados: itensOrcamentoModificados ? true : false
             };
 
             console.log('📤 Enviando dados da venda:', vendaData);
@@ -1128,14 +1372,46 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                             {/* Lista de Itens/Serviços (Read-Only) */}
                             {orcamentoSelecionado?.items && orcamentoSelecionado.items.length > 0 && (
                                 <div>
-                                    <h4 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                                        <span className="text-green-600">📦</span>
-                                        Itens/Serviços do Orçamento ({orcamentoSelecionado.items.length})
-                                    </h4>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                                            <span className="text-green-600">📦</span>
+                                            Itens/Serviços do Orçamento ({(itensOrcamentoModificados || orcamentoSelecionado.items).length})
+                                        </h4>
+                                        {/* Botões de seleção e criar kit */}
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={selecionarTodosItensVenda}
+                                                className="px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-100 rounded-lg hover:bg-indigo-200 transition-colors"
+                                            >
+                                                Selecionar Todos
+                                            </button>
+                                            {itensSelecionadosVenda.size > 0 && (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={deselecionarTodosItensVenda}
+                                                        className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                                    >
+                                                        Desmarcar
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowCriarKitModalVenda(true)}
+                                                        className="px-3 py-1.5 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-1"
+                                                    >
+                                                        <span>📦</span>
+                                                        Criar Kit ({itensSelecionadosVenda.size})
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
                                     <div className="border border-gray-200 rounded-xl overflow-hidden">
                                         {/* Header da Tabela */}
                                         <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 px-6 py-3 grid grid-cols-12 gap-4 text-xs font-semibold text-gray-700 uppercase">
-                                            <div className="col-span-4">Item/Serviço</div>
+                                            <div className="col-span-1"></div>
+                                            <div className="col-span-3">Item/Serviço</div>
                                             <div className="col-span-1 text-center">NCM</div>
                                             <div className="col-span-2 text-center">Quantidade</div>
                                             <div className="col-span-2 text-right">Valor Unit.</div>
@@ -1144,15 +1420,24 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         
                                         {/* Linhas de Itens */}
                                         <div className="divide-y divide-gray-200">
-                                            {orcamentoSelecionado.items.map((item: any, index: number) => {
+                                            {(itensOrcamentoModificados || orcamentoSelecionado.items).map((item: any, index: number) => {
                                                 const nomeItem = getItemNomeVenda(item);
                                                 const dataFrio = getItemDataBancoFrioVenda(item);
                                                 const isBancoFrio = getItemTipoVenda(item) === 'COTACAO' || getItemTipoVenda(item) === 'BANCO_FRIO' || item.cotacaoId || item.cotacao;
                                                 // Obter NCM: prioridade para cotação, depois material
                                                 const ncm = item.cotacao?.ncm || item.material?.ncm || '-';
                                                 return (
-                                                <div key={index} className="px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 transition-colors">
-                                                    <div className="col-span-4">
+                                                <div key={index} className={`px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 transition-colors ${itensSelecionadosVenda.has(index) ? 'bg-indigo-50 border-l-4 border-indigo-500' : ''}`}>
+                                                    {/* Checkbox de seleção */}
+                                                    <div className="col-span-1">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={itensSelecionadosVenda.has(index)}
+                                                            onChange={() => toggleItemSelecionadoVenda(index)}
+                                                            className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                                                        />
+                                                    </div>
+                                                    <div className="col-span-3">
                                                         <p className="font-semibold text-gray-900">{nomeItem}</p>
                                                         {item.descricao && item.descricao !== nomeItem && (
                                                             <p className="text-xs text-gray-500 mt-1">{item.descricao}</p>
@@ -1218,7 +1503,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         {/* Footer com Total */}
                                         <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-t-2 border-green-300 px-6 py-4">
                                             <div className="flex justify-between items-center">
-                                                <span className="text-sm font-semibold text-gray-700">TOTAL DOS ITENS:</span>
+                                                <span className="text-sm font-semibold text-gray-700">
+                                                    TOTAL DOS ITENS: {(itensOrcamentoModificados ? '(Modificado)' : '')}
+                                                </span>
                                                 <span className="text-2xl font-bold text-green-700">
                                                     R$ {calculosFinanceiros.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </span>
@@ -1479,13 +1766,45 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-4">
-                    {vendas.map((venda, index) => (
+                    {([...vendas]
+                        .sort((a, b) => new Date(b.dataVenda || b.createdAt).getTime() - new Date(a.dataVenda || a.createdAt).getTime())
+                    ).map((venda, index) => {
+                        // Status derivado pelas parcelas:
+                        // - Concluida: todas as parcelas pagas
+                        // - Pago Parcial: pelo menos 1 paga e ainda existem pendentes
+                        // - Pendente: nenhuma parcela paga
+                        const contas = (venda as any).contasReceber || [];
+                        const totalParcelas = contas.length;
+                        // Considerar tanto 'Pago' quanto 'Recebido' como status pago
+                        const qtdPagas = contas.filter((c: any) => c.status === 'Pago' || c.status === 'Recebido').length;
+
+                        let statusExibicao = venda.status || 'Pendente';
+                        if (totalParcelas > 0) {
+                            if (qtdPagas === totalParcelas) {
+                                statusExibicao = 'Concluida';
+                            } else if (qtdPagas > 0) {
+                                statusExibicao = 'Pago Parcial';
+                            } else {
+                                statusExibicao = 'Pendente';
+                            }
+                        }
+
+                        const statusClasse =
+                            statusExibicao === 'Concluida'
+                                ? 'bg-green-100 text-green-800 ring-1 ring-green-200'
+                                : statusExibicao === 'Pago Parcial'
+                                    ? 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200'
+                                    : statusExibicao === 'Pendente'
+                                        ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                                        : 'bg-red-100 text-red-800 ring-1 ring-red-200';
+
+                        return (
                         <div key={venda.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-green-300 transition-all">
                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
                                 <div>
                                     <h4 className="font-semibold text-gray-900">{venda.cliente?.nome || 'Cliente'}</h4>
                                     <p className="text-sm text-gray-600">{venda.orcamento?.titulo || 'Projeto'}</p>
-                                    <p className="text-xs text-gray-500 mt-1">Nº {index + 1}</p>
+                                    <p className="text-xs text-gray-500 mt-1">N{index + 1}</p>
                                 </div>
                                 <div>
                                     <p className="text-sm font-medium text-gray-600">Valor Total</p>
@@ -1502,17 +1821,12 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                     <p className="text-xs text-gray-500">{venda.formaPagamento}</p>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${
-                                        venda.status === 'Finalizada' 
-                                            ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
-                                            : venda.status === 'Ativa'
-                                            ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
-                                            : 'bg-red-100 text-red-800 ring-1 ring-red-200'
-                                    }`}>
-                                        {venda.status === 'Finalizada' && '✅ '}
-                                        {venda.status === 'Ativa' && '⏳ '}
-                                        {venda.status === 'Cancelada' && '❌ '}
-                                        {venda.status}
+                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${statusClasse}`}>
+                                        {statusExibicao === 'Concluida' && '✅ '}
+                                        {statusExibicao === 'Pago Parcial' && '💳 '}
+                                        {statusExibicao === 'Pendente' && '⏳ '}
+                                        {statusExibicao === 'Cancelada' && '❌ '}
+                                        {statusExibicao}
                                     </span>
                                 </div>
                                 <div className="flex justify-end gap-2">
@@ -1540,7 +1854,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                 </div>
                             </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -1649,9 +1964,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                     <div className="flex items-start gap-3">
                         <span className="text-yellow-600 text-xl">⚠️</span>
                         <div>
-                            <p className="font-semibold text-yellow-900">Apenas Administradores e Gerentes</p>
+                            <p className="font-semibold text-yellow-900">Apenas Administradores, Gerentes e Desenvolvedores</p>
                             <p className="text-sm text-yellow-800 mt-1">
-                                Somente usuários com perfil de Administrador ou Gerente podem alterar as metas mensais.
+                                Somente usuários com perfil de Administrador, Gerente ou Desenvolvedor podem alterar as metas mensais.
                             </p>
                         </div>
                     </div>
@@ -1767,7 +2082,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                         </p>
                         <div className="card-secondary p-4 rounded-lg border border-orange-200 dark:border-orange-800">
                             <p className="text-gray-700 dark:text-dark-text">
-                                A meta é configurada manualmente por Administradores ou Gerentes na aba <strong className="dark:text-orange-300">"⚙️ Configurações"</strong>.
+                                A meta é configurada manualmente por Administradores, Gerentes ou Desenvolvedores na aba <strong className="dark:text-orange-300">"⚙️ Configurações"</strong>.
                                 O valor padrão é R$ 100.000,00, mas pode ser ajustado conforme a estratégia da empresa.
                             </p>
                         </div>
@@ -1925,7 +2240,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                 >
                     📋 Lista de Vendas
                 </button>
-                {(user?.role === 'admin' || user?.role === 'gerente') && (
+                {(user?.role?.toLowerCase() === 'admin' || 
+                  user?.role?.toLowerCase() === 'gerente' || 
+                  user?.role?.toLowerCase() === 'desenvolvedor') && (
                     <button
                         onClick={() => setActiveTab('config')}
                         className={`px-6 py-3 rounded-xl font-semibold transition-all ${
@@ -2040,7 +2357,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                                 Número Sequencial da Venda
                                             </h4>
                                             <p className="text-lg text-gray-900 dark:text-white font-semibold">
-                                                #{vendas.findIndex(v => v.id === detalhesVenda.id) + 1}
+                                                N{([...vendas]
+                                                    .sort((a, b) => new Date(b.dataVenda || b.createdAt).getTime() - new Date(a.dataVenda || a.createdAt).getTime())
+                                                ).findIndex(v => v.id === detalhesVenda.id) + 1}
                                             </p>
                                         </div>
                                     </div>
@@ -2150,34 +2469,194 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                                         </div>
                                     </div>
 
-                                    {/* Condições de Pagamento */}
-                                    <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
-                                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                                            <span>💳</span>
-                                            Condições de Pagamento
+                                    {/* Condições de Pagamento - ATUALIZADO */}
+                                    <div className="bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-6">
+                                        <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                            <span className="text-2xl">💳</span>
+                                            Condições de Pagamento Registradas
                                         </h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <p className="text-sm text-gray-600 dark:text-gray-400">Forma de Pagamento:</p>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {detalhesVenda.formaPagamento}
+                                        
+                                        {/* Resumo Financeiro */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Forma de Pagamento</p>
+                                                <p className="text-base font-bold text-gray-900 dark:text-white">
+                                                    {detalhesVenda.formaPagamento || 'N/A'}
                                                 </p>
                                             </div>
-                                            <div>
-                                                <p className="text-sm text-gray-600 dark:text-gray-400">Número de Parcelas:</p>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                                                    {detalhesVenda.numeroParcelas || 1} parcela(s)
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor Total</p>
+                                                <p className="text-base font-bold text-green-600 dark:text-green-400">
+                                                    R$ {detalhesVenda.valorTotal?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
                                                 </p>
                                             </div>
-                                            {detalhesVenda.orcamento?.condicoesEspeciaisPagamento && (
-                                                <div className="md:col-span-2">
-                                                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Condições Especiais:</p>
-                                                    <p className="text-gray-900 dark:text-white whitespace-pre-wrap">
-                                                        {detalhesVenda.orcamento.condicoesEspeciaisPagamento}
-                                                    </p>
-                                                </div>
-                                            )}
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor de Entrada</p>
+                                                <p className="text-base font-bold text-blue-600 dark:text-blue-400">
+                                                    R$ {(detalhesVenda.valorEntrada || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor Financiado</p>
+                                                <p className="text-base font-bold text-purple-600 dark:text-purple-400">
+                                                    R$ {((detalhesVenda.valorTotal || 0) - (detalhesVenda.valorEntrada || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
                                         </div>
+
+                                        {/* Informações de Parcelamento */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Número de Parcelas</p>
+                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                                                    {detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 1}x
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor por Parcela</p>
+                                                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                                                    R$ {(((detalhesVenda.valorTotal || 0) - (detalhesVenda.valorEntrada || 0)) / (detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </div>
+                                            <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Status da Venda</p>
+                                                {(() => {
+                                                    const contas = detalhesVenda.contasReceber || [];
+                                                    const totalContas = contas.length;
+                                                    // Considerar tanto 'Pago' quanto 'Recebido' como status pago
+                                                    const qtdPagas = contas.filter((c: any) => c.status === 'Pago' || c.status === 'Recebido').length;
+                                                    let statusExibicao = 'Pendente';
+                                                    let statusClass = 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+                                                    
+                                                    if (totalContas > 0) {
+                                                        if (qtdPagas === totalContas) {
+                                                            statusExibicao = 'Concluída';
+                                                            statusClass = 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+                                                        } else if (qtdPagas > 0) {
+                                                            statusExibicao = 'Pago Parcial';
+                                                            statusClass = 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+                                                        }
+                                                    }
+                                                    
+                                                    return (
+                                                        <span className={`inline-block px-3 py-1 rounded-lg text-sm font-bold ${statusClass}`}>
+                                                            {statusExibicao === 'Concluída' && '✅ '}
+                                                            {statusExibicao === 'Pago Parcial' && '💳 '}
+                                                            {statusExibicao === 'Pendente' && '⏳ '}
+                                                            {statusExibicao}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </div>
+
+                                        {/* Tabela de Entrada e Parcelas (Contas a Receber) */}
+                                        {detalhesVenda.contasReceber && detalhesVenda.contasReceber.length > 0 && (
+                                            <div className="mt-4">
+                                                <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                                                    📋 Detalhamento da Entrada e Parcelas
+                                                </h5>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full border-collapse bg-white dark:bg-gray-800 rounded-lg">
+                                                        <thead>
+                                                            <tr className="bg-purple-100 dark:bg-purple-900/50">
+                                                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Parcela
+                                                                </th>
+                                                                <th className="px-4 py-2 text-right text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Valor
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Vencimento
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Status
+                                                                </th>
+                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
+                                                                    Data Pagamento
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {detalhesVenda.contasReceber
+                                                                .sort((a: any, b: any) => {
+                                                                    // Ordenar: entrada (numeroParcela = 0) primeiro, depois parcelas normais
+                                                                    const parcelaA = a.numeroParcela || 0;
+                                                                    const parcelaB = b.numeroParcela || 0;
+                                                                    return parcelaA - parcelaB;
+                                                                })
+                                                                .map((conta: any, index: number) => {
+                                                                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
+                                                                    const isPago = conta.status === 'Pago' || conta.status === 'Recebido';
+                                                                    const isAtrasado = !isPago && new Date(conta.dataVencimento) < new Date();
+                                                                    const statusClass = isPago
+                                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                                        : isAtrasado
+                                                                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
+                                                                    const statusText = isPago ? 'Pago' : isAtrasado ? 'Atrasado' : 'Pendente';
+                                                                    const totalParcelas = detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 
+                                                                        detalhesVenda.contasReceber.filter((c: any) => (c.numeroParcela || 0) > 0).length;
+                                                                    
+                                                                    return (
+                                                                        <tr key={conta.id || index} className={`hover:bg-purple-50 dark:hover:bg-purple-900/20 ${isEntrada ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
+                                                                            <td className="px-4 py-2 text-sm font-semibold text-gray-900 dark:text-white border border-purple-200 dark:border-purple-700">
+                                                                                {isEntrada ? (
+                                                                                    <span className="flex items-center gap-1">
+                                                                                        <span className="text-blue-600 dark:text-blue-400">💰</span>
+                                                                                        <span>Entrada</span>
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    `${conta.numeroParcela || index + 1}/${totalParcelas}`
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm font-bold text-gray-900 dark:text-white text-right border border-purple-200 dark:border-purple-700">
+                                                                                R$ {(conta.valorParcela || conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
+                                                                                {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-center border border-purple-200 dark:border-purple-700">
+                                                                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${statusClass}`}>
+                                                                                    {isPago && '✅ '}
+                                                                                    {isAtrasado && '⚠️ '}
+                                                                                    {!isPago && !isAtrasado && '⏳ '}
+                                                                                    {statusText}
+                                                                                </span>
+                                                                            </td>
+                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
+                                                                                {conta.dataPagamento 
+                                                                                    ? new Date(conta.dataPagamento).toLocaleDateString('pt-BR')
+                                                                                    : '-'}
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Condições Especiais (se houver) */}
+                                        {detalhesVenda.orcamento?.condicoesEspeciaisPagamento && (
+                                            <div className="mt-4 pt-4 border-t border-purple-300 dark:border-purple-700">
+                                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">📝 Condições Especiais de Pagamento:</p>
+                                                <p className="text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700 whitespace-pre-wrap">
+                                                    {detalhesVenda.orcamento.condicoesEspeciaisPagamento}
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {/* Observações da Venda (se houver) */}
+                                        {detalhesVenda.observacoes && (
+                                            <div className="mt-4 pt-4 border-t border-purple-300 dark:border-purple-700">
+                                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">📌 Observações da Venda:</p>
+                                                <p className="text-sm text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700 whitespace-pre-wrap">
+                                                    {detalhesVenda.observacoes}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Observações */}
@@ -2405,6 +2884,92 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar }) => {
                 cancelText="Cancelar"
                 variant="info"
             />
+
+            {/* Modal de Criar Kit na Página de Vendas */}
+            <AlertDialogShadcn open={showCriarKitModalVenda} onOpenChange={setShowCriarKitModalVenda}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            <div className="flex items-center gap-2">
+                                <span className="text-2xl">📦</span>
+                                Criar Kit
+                            </div>
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Transforme {itensSelecionadosVenda.size} item(ns) selecionado(s) em um único item Kit.
+                            O valor do kit será a soma de todos os itens selecionados.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                Nome do Kit *
+                            </label>
+                            <input
+                                type="text"
+                                value={nomeKitVenda}
+                                onChange={(e) => setNomeKitVenda(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                placeholder="Ex: Kit Instalação Completa, Kit Automação Residencial..."
+                                autoFocus
+                            />
+                        </div>
+                        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
+                            <p className="text-sm text-blue-800 dark:text-blue-300 font-semibold mb-2">
+                                Itens que serão agrupados:
+                            </p>
+                            <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1 max-h-32 overflow-y-auto">
+                                {orcamentoSelecionado && Array.from(itensSelecionadosVenda)
+                                    .sort((a, b) => a - b)
+                                    .map(index => {
+                                        const item = (itensOrcamentoModificados || orcamentoSelecionado.items)[index];
+                                        if (!item) return null;
+                                        const subtotal = item.subtotal || ((item.material?.valorVenda || item.precoUnit || item.precoUnitario || 0) * (item.quantidade || 1));
+                                        return (
+                                            <li key={index} className="flex items-center justify-between">
+                                                <span>• {item.nome || item.descricao || item.material?.nome || 'Item'}</span>
+                                                <span className="font-semibold">R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                            </li>
+                                        );
+                                    })}
+                            </ul>
+                            <div className="mt-3 pt-3 border-t border-blue-300 dark:border-blue-700 flex justify-between items-center">
+                                <span className="text-sm font-semibold text-blue-900 dark:text-blue-200">Valor Total do Kit:</span>
+                                <span className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                                    R$ {orcamentoSelecionado && Array.from(itensSelecionadosVenda)
+                                        .map(index => {
+                                            const item = (itensOrcamentoModificados || orcamentoSelecionado.items)[index];
+                                            if (!item) return 0;
+                                            return item.subtotal || ((item.material?.valorVenda || item.precoUnit || item.precoUnitario || 0) * (item.quantidade || 1));
+                                        })
+                                        .reduce((sum, val) => sum + val, 0)
+                                        .toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
+                            <p className="text-xs text-yellow-800 dark:text-yellow-300">
+                                ⚠️ <strong>Atenção:</strong> O NCM do kit deverá ser informado no momento da emissão da nota fiscal.
+                            </p>
+                        </div>
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => {
+                            setNomeKitVenda('');
+                            setShowCriarKitModalVenda(false);
+                        }}>
+                            Cancelar
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleCriarKitVenda}
+                            disabled={!nomeKitVenda.trim()}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            Criar Kit
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialogShadcn>
 
             {/* AlertDialog de Confirmação de Exclusão */}
             <AlertDialog

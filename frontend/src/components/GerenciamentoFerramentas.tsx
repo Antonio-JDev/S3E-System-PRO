@@ -8,6 +8,7 @@ import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { matchCrossSearch } from '../utils/searchUtils';
 import KitPDFCustomizationModal from './PDFCustomization/KitPDFCustomizationModal';
 import { KitFerramentasPDFData } from '../types/pdfCustomization';
+import AlertDialog from './ui/AlertDialog';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -155,6 +156,15 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [fotoKitEntregue, setFotoKitEntregue] = useState<File | null>(null);
     const [fotoKitPreview, setFotoKitPreview] = useState<string>('');
 
+    // Estados para diálogos de confirmação
+    const [showDeleteKitDialog, setShowDeleteKitDialog] = useState(false);
+    const [kitToDelete, setKitToDelete] = useState<KitFerramenta | null>(null);
+    const [showDeleteFerramentaDialog, setShowDeleteFerramentaDialog] = useState(false);
+    const [ferramentaToDelete, setFerramentaToDelete] = useState<string | null>(null);
+
+    // Estado para rastrear itens já salvos que devem ser removidos do kit
+    const [itensParaRemover, setItensParaRemover] = useState<string[]>([]);
+
     // Form estados
     const [formFerramenta, setFormFerramenta] = useState({
         nome: '',
@@ -201,6 +211,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setKitEditando(null);
         setFotoKitEntregue(null);
         setFotoKitPreview('');
+        setItensParaRemover([]);
+        setFerramentasSelecionadas([]);
     });
 
     useEffect(() => {
@@ -354,6 +366,20 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const handleSalvarKit = async (e: React.FormEvent) => {
         e.preventDefault();
         
+        // Validar que não há itens duplicados usando o código da ferramenta
+        const codigosFerramentas = formKit.itens.map(item => {
+            const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+            return ferramenta?.codigo;
+        }).filter(Boolean);
+        const codigosUnicos = new Set(codigosFerramentas);
+        if (codigosFerramentas.length !== codigosUnicos.size) {
+            const codigosDuplicados = codigosFerramentas.filter((codigo, index) => codigosFerramentas.indexOf(codigo) !== index);
+            toast.error('❌ Erro: Existem ferramentas com códigos duplicados no kit. Remova duplicatas antes de salvar.', {
+                description: `Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+            });
+            return;
+        }
+
         if (formKit.itens.length === 0) {
             toast.error('❌ Adicione pelo menos uma ferramenta ao kit!');
             return;
@@ -382,10 +408,14 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         }
 
         try {
-            // Preparar dados do kit
+            // Preparar dados do kit - garantir itens únicos
             const kitData: any = {
                 ...formKit,
-                assinatura: assinaturaEletricista
+                assinatura: assinaturaEletricista,
+                // Garantir que itens não estão duplicados
+                itens: formKit.itens.filter((item, index, self) => 
+                    index === self.findIndex(i => i.ferramentaId === item.ferramentaId)
+                )
             };
 
             // Se tiver foto, fazer upload primeiro
@@ -433,37 +463,82 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
     const handleAdicionarFerramentaAoKit = (ferramentaId: string) => {
         if (ferramentasSelecionadas.includes(ferramentaId)) {
-            // Remover
+            // Remover da seleção temporária (item que ainda não foi salvo)
             setFerramentasSelecionadas(ferramentasSelecionadas.filter(id => id !== ferramentaId));
             setFormKit({
                 ...formKit,
                 itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
             });
+            // Se estava marcado para remover, desmarcar
+            if (itensParaRemover.includes(ferramentaId)) {
+                setItensParaRemover(itensParaRemover.filter(id => id !== ferramentaId));
+            }
         } else {
             // Verificar se há estoque disponível antes de adicionar
             const ferramenta = ferramentas.find(f => f.id === ferramentaId);
-            if (ferramenta) {
-                const estoqueDisponivel = ferramenta.quantidade || 0;
-                if (estoqueDisponivel <= 0) {
-                    toast.error(`❌ ${ferramenta.nome} não possui estoque disponível!`);
-                    return;
-                }
+            if (!ferramenta) {
+                toast.error('❌ Ferramenta não encontrada!');
+                return;
+            }
+
+            // Verificar se já existe uma ferramenta com o mesmo código no kit
+            const codigoFerramenta = ferramenta.codigo;
+            const ferramentaComMesmoCodigo = formKit.itens.find(item => {
+                const f = ferramentas.find(ferr => ferr.id === item.ferramentaId);
+                return f?.codigo === codigoFerramenta;
+            });
+
+            if (ferramentaComMesmoCodigo) {
+                const ferramentaExistente = ferramentas.find(f => f.id === ferramentaComMesmoCodigo.ferramentaId);
+                toast.error('❌ Já existe uma ferramenta com este código no kit!', {
+                    description: `Código "${codigoFerramenta}" já está sendo usado por "${ferramentaExistente?.nome || 'outra ferramenta'}"`
+                });
+                return;
+            }
+
+            const estoqueDisponivel = ferramenta.quantidade || 0;
+            if (estoqueDisponivel <= 0) {
+                toast.error(`❌ ${ferramenta.nome} não possui estoque disponível!`);
+                return;
             }
             
-            // Adicionar
+            // Adicionar à seleção temporária (só será salvo ao clicar em Salvar Alterações)
             setFerramentasSelecionadas([...ferramentasSelecionadas, ferramentaId]);
-            setFormKit({
-                ...formKit,
-                itens: [
-                    ...formKit.itens,
-                    {
-                        ferramentaId,
-                        quantidade: 1,
-                        estadoEntrega: 'Novo',
-                        observacoes: ''
-                    }
-                ]
-            });
+            
+            // Se é um item que estava marcado para remover, restaurar dados originais do kit
+            if (kitEditando && itensParaRemover.includes(ferramentaId)) {
+                const itemOriginal = kitEditando.itens.find(i => i.ferramentaId === ferramentaId);
+                if (itemOriginal) {
+                    setFormKit({
+                        ...formKit,
+                        itens: [
+                            ...formKit.itens.filter(item => item.ferramentaId !== ferramentaId),
+                            {
+                                ferramentaId,
+                                quantidade: itemOriginal.quantidade,
+                                estadoEntrega: itemOriginal.estadoEntrega,
+                                observacoes: itemOriginal.observacoes || ''
+                            }
+                        ]
+                    });
+                    // Remover da lista de itens para remover
+                    setItensParaRemover(itensParaRemover.filter(id => id !== ferramentaId));
+                }
+            } else {
+                // Novo item - adicionar normalmente
+                setFormKit({
+                    ...formKit,
+                    itens: [
+                        ...formKit.itens,
+                        {
+                            ferramentaId,
+                            quantidade: 1,
+                            estadoEntrega: 'Novo',
+                            observacoes: ''
+                        }
+                    ]
+                });
+            }
         }
     };
 
@@ -476,6 +551,67 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     : item
             )
         });
+    };
+
+    // Remover item que está apenas selecionado (não foi salvo ainda)
+    const handleRemoverItemDoKit = (ferramentaId: string) => {
+        // Verificar se é um item já salvo no kit ou apenas selecionado
+        if (kitEditando && kitEditando.itens.some(i => i.ferramentaId === ferramentaId)) {
+            // É um item já salvo - marcar para remoção (será removido ao salvar)
+            handleRemoverItemExistenteDoKit(ferramentaId);
+        } else {
+            // É apenas um item selecionado temporariamente - remover da seleção sem afetar estoque
+            setFerramentasSelecionadas(ferramentasSelecionadas.filter(id => id !== ferramentaId));
+            setFormKit({
+                ...formKit,
+                itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
+            });
+            toast.success('Item removido da seleção');
+        }
+    };
+
+    // Remover item já salvo no kit (marcar para remoção ao salvar)
+    const handleRemoverItemExistenteDoKit = (ferramentaId: string) => {
+        if (!kitEditando) return;
+
+        // Adicionar à lista de itens para remover
+        if (!itensParaRemover.includes(ferramentaId)) {
+            setItensParaRemover([...itensParaRemover, ferramentaId]);
+        }
+
+        // Remover da lista de itens do formKit (para que não seja enviado ao salvar)
+        setFormKit({
+            ...formKit,
+            itens: formKit.itens.filter(item => item.ferramentaId !== ferramentaId)
+        });
+
+        toast.success('Item será removido ao salvar as alterações');
+    };
+
+    const handleExcluirKit = (kit: KitFerramenta) => {
+        setKitToDelete(kit);
+        setShowDeleteKitDialog(true);
+    };
+
+    const confirmDeleteKit = async () => {
+        if (!kitToDelete) return;
+
+        try {
+            const response = await axiosApiService.delete(`/api/kits-ferramenta/${kitToDelete.id}`);
+            if (response.success) {
+                toast.success('✅ Kit excluído com sucesso!');
+                loadKits();
+                loadFerramentas(); // Recarregar ferramentas para atualizar estoque
+            } else {
+                toast.error('❌ Erro ao excluir kit: ' + (response.error || 'Erro desconhecido'));
+            }
+        } catch (error: any) {
+            console.error('Erro ao excluir kit:', error);
+            toast.error('❌ Erro ao excluir kit: ' + (error?.response?.data?.error || error?.message));
+        } finally {
+            setShowDeleteKitDialog(false);
+            setKitToDelete(null);
+        }
     };
 
     const handleFotoKitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -544,6 +680,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
     const handleEditarKit = (kit: KitFerramenta) => {
         setKitEditando(kit);
+        // Inicializar formKit com itens existentes
         setFormKit({
             nome: kit.nome,
             descricao: kit.descricao || '',
@@ -558,6 +695,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 observacoes: item.observacoes || ''
             }))
         });
+        // Inicializar selecionadas com os IDs dos itens existentes
+        setFerramentasSelecionadas(kit.itens.map(item => item.ferramentaId));
+        // Limpar lista de itens para remover
+        setItensParaRemover([]);
         setFotoKitPreview(kit.imagemUrl || '');
         setModalEditarKit(true);
     };
@@ -577,21 +718,60 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     headers: { 'Content-Type': 'multipart/form-data' }
                 });
                 
-                if (uploadResponse.success && uploadResponse.data?.url) {
-                    imagemUrl = uploadResponse.data.url;
+                if (uploadResponse.success && (uploadResponse.data as any)?.url) {
+                    imagemUrl = (uploadResponse.data as any).url;
                 }
             }
 
-            // Preparar novos itens (apenas os que não existem no kit original)
-            const itensExistentes = new Set(kitEditando.itens.map(i => i.ferramentaId));
-            const novosItens = formKit.itens.filter(item => !itensExistentes.has(item.ferramentaId));
+            // Preparar TODOS os itens que devem permanecer no kit:
+            // - Itens existentes que NÃO foram marcados para remoção (restaurar do kit original se necessário)
+            // - Novos itens que foram selecionados
+            const itensExistentesIds = new Set(kitEditando.itens.map(i => i.ferramentaId));
+            
+            // Primeiro, incluir itens existentes que NÃO foram marcados para remoção
+            const itensExistentesNaoRemovidos = kitEditando.itens
+                .filter(item => !itensParaRemover.includes(item.ferramentaId))
+                .map(item => ({
+                    ferramentaId: item.ferramentaId,
+                    quantidade: item.quantidade,
+                    estadoEntrega: item.estadoEntrega,
+                    observacoes: item.observacoes || ''
+                }));
+            
+            // Depois, incluir novos itens (que não existem no kit original)
+            const novosItens = formKit.itens.filter(item => !itensExistentesIds.has(item.ferramentaId));
+            
+            // Combinar ambos e garantir que não há duplicados
+            const itensFinais = [...itensExistentesNaoRemovidos, ...novosItens].filter((item, index, self) => 
+                index === self.findIndex(i => i.ferramentaId === item.ferramentaId)
+            );
+
+            // Validar que não há itens duplicados usando o código da ferramenta
+            const codigosFerramentas = itensFinais.map(item => {
+                const ferramenta = ferramentas.find(f => f.id === item.ferramentaId);
+                return ferramenta?.codigo;
+            }).filter(Boolean);
+            const codigosUnicos = new Set(codigosFerramentas);
+            if (codigosFerramentas.length !== codigosUnicos.size) {
+                const codigosDuplicados = codigosFerramentas.filter((codigo, index) => codigosFerramentas.indexOf(codigo) !== index);
+                toast.error('❌ Erro: Existem ferramentas com códigos duplicados no kit. Remova duplicatas antes de salvar.', {
+                    description: `Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+                });
+                return;
+            }
+
+            // Validar que há pelo menos um item
+            if (itensFinais.length === 0) {
+                toast.error('❌ Adicione pelo menos uma ferramenta ao kit!');
+                return;
+            }
 
             const response = await axiosApiService.put(`/api/kits-ferramenta/${kitEditando.id}`, {
                 nome: formKit.nome,
                 descricao: formKit.descricao,
                 imagemUrl,
                 observacoes: formKit.observacoes,
-                itens: novosItens
+                itens: itensFinais // Enviar TODOS os itens que devem permanecer (backend remove os que não estão na lista)
             });
 
             if (response.success) {
@@ -600,7 +780,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                 setKitEditando(null);
                 setFotoKitEntregue(null);
                 setFotoKitPreview('');
+                setItensParaRemover([]);
+                setFerramentasSelecionadas([]);
                 loadKits();
+                loadFerramentas(); // Recarregar ferramentas para atualizar estoque
                 loadEstatisticas();
             } else {
                 toast.error('❌ Erro ao atualizar kit: ' + (response.error || 'Erro desconhecido'));
@@ -638,18 +821,26 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         setModalEditarFerramenta(true);
     };
 
-    const handleDeletarFerramenta = async (id: string) => {
-        if (window.confirm('Tem certeza que deseja desativar esta ferramenta?')) {
-            try {
-                const response = await axiosApiService.delete(`/api/ferramentas/${id}`);
-                if (response.success) {
-                    toast.success('✅ Ferramenta desativada com sucesso!');
-                    loadFerramentas();
-                }
-            } catch (error) {
-                console.error('Erro ao deletar ferramenta:', error);
-                toast.error('❌ Erro ao desativar ferramenta');
+    const handleDeletarFerramenta = (id: string) => {
+        setFerramentaToDelete(id);
+        setShowDeleteFerramentaDialog(true);
+    };
+
+    const confirmDeleteFerramenta = async () => {
+        if (!ferramentaToDelete) return;
+
+        try {
+            const response = await axiosApiService.delete(`/api/ferramentas/${ferramentaToDelete}`);
+            if (response.success) {
+                toast.success('✅ Ferramenta desativada com sucesso!');
+                loadFerramentas();
             }
+        } catch (error) {
+            console.error('Erro ao deletar ferramenta:', error);
+            toast.error('❌ Erro ao desativar ferramenta');
+        } finally {
+            setShowDeleteFerramentaDialog(false);
+            setFerramentaToDelete(null);
         }
     };
 
@@ -1138,6 +1329,14 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                             </svg>
                                             PDF
                                         </button>
+                                        <button
+                                            onClick={() => handleExcluirKit(kit)}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                            title="Excluir kit"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
+                                            Excluir
+                                        </button>
                                     </div>
                                 </div>
                             ))
@@ -1202,6 +1401,13 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                                             </svg>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleExcluirKit(kit)}
+                                                            className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                            title="Excluir kit"
+                                                        >
+                                                            <TrashIcon className="w-4 h-4" />
                                                         </button>
                                                     </div>
                                                 </td>
@@ -1381,25 +1587,25 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalEditarFerramenta && ferramentaEditando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header">
-                            <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">✏️ Editar Ferramenta</h2>
-                            <button
-                                onClick={() => {
-                                    setModalEditarFerramenta(false);
-                                    setFerramentaEditando(null);
-                                }}
-                                className="text-gray-400 hover:text-gray-600 transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
+                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500 dark:from-purple-700 dark:to-purple-600">
+                            <div className="flex justify-between items-center w-full">
+                                <h2 className="text-2xl font-bold text-white">✏️ Editar Ferramenta</h2>
+                                <button
+                                    onClick={() => {
+                                        setModalEditarFerramenta(false);
+                                        setFerramentaEditando(null);
+                                    }}
+                                    className="text-white/80 hover:text-white transition-colors"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
+                            </div>
                         </div>
 
-                        <form onSubmit={handleSalvarFerramenta} className="p-6 space-y-4">
+                        <form onSubmit={handleSalvarFerramenta} className="modal-body space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Nome *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Nome *</label>
                                     <input
                                         type="text"
                                         value={formFerramenta.nome}
@@ -1409,7 +1615,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Código *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Código *</label>
                                     <input
                                         type="text"
                                         value={formFerramenta.codigo}
@@ -1422,7 +1628,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Categoria *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Categoria *</label>
                                     <select
                                         value={formFerramenta.categoria}
                                         onChange={(e) => setFormFerramenta({...formFerramenta, categoria: e.target.value})}
@@ -1441,7 +1647,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Valor de Compra</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Valor de Compra</label>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -1451,7 +1657,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Quantidade em Estoque *</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Quantidade em Estoque *</label>
                                     <input
                                         type="number"
                                         min="0"
@@ -1460,13 +1666,13 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         required
                                         className="input-field"
                                     />
-                                    <p className="text-xs text-gray-500 mt-1">Quantidade disponível no estoque</p>
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Quantidade disponível no estoque</p>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Marca</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Marca</label>
                                     <input
                                         type="text"
                                         value={formFerramenta.marca}
@@ -1475,7 +1681,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Modelo</label>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Modelo</label>
                                     <input
                                         type="text"
                                         value={formFerramenta.modelo}
@@ -1486,7 +1692,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">Descrição</label>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Descrição</label>
                                 <textarea
                                     value={formFerramenta.descricao}
                                     onChange={(e) => setFormFerramenta({...formFerramenta, descricao: e.target.value})}
@@ -1640,58 +1846,71 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                 </div>
 
                                                 {isSelected && itemKit && (
-                                                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">
-                                                                Quantidade
+                                                    <>
+                                                        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">
+                                                                    Quantidade
+                                                                    {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                        <span className="text-red-600 ml-1">⚠️</span>
+                                                                    )}
+                                                                </label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    max={ferramenta.quantidade || 0}
+                                                                    value={itemKit.quantidade}
+                                                                    onChange={(e) => {
+                                                                        const qty = parseInt(e.target.value) || 1;
+                                                                        const maxQty = ferramenta.quantidade || 0;
+                                                                        const finalQty = Math.max(1, Math.min(qty, maxQty));
+                                                                        handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
+                                                                    }}
+                                                                    className={`input-field text-sm ${
+                                                                        (ferramenta.quantidade || 0) < itemKit.quantidade 
+                                                                            ? 'border-red-500 bg-red-50' 
+                                                                            : ''
+                                                                    }`}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                />
                                                                 {(ferramenta.quantidade || 0) < itemKit.quantidade && (
-                                                                    <span className="text-red-600 ml-1">⚠️</span>
+                                                                    <p className="text-xs text-red-600 mt-1">
+                                                                        Máximo disponível: {ferramenta.quantidade || 0}
+                                                                    </p>
                                                                 )}
-                                                            </label>
-                                                            <input
-                                                                type="number"
-                                                                min="1"
-                                                                max={ferramenta.quantidade || 0}
-                                                                value={itemKit.quantidade}
-                                                                onChange={(e) => {
-                                                                    const qty = parseInt(e.target.value) || 1;
-                                                                    const maxQty = ferramenta.quantidade || 0;
-                                                                    const finalQty = Math.max(1, Math.min(qty, maxQty));
-                                                                    handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
-                                                                }}
-                                                                className={`input-field text-sm ${
-                                                                    (ferramenta.quantidade || 0) < itemKit.quantidade 
-                                                                        ? 'border-red-500 bg-red-50' 
-                                                                        : ''
-                                                                }`}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            {(ferramenta.quantidade || 0) < itemKit.quantidade && (
-                                                                <p className="text-xs text-red-600 mt-1">
-                                                                    Máximo disponível: {ferramenta.quantidade || 0}
-                                                                </p>
-                                                            )}
-                                                            {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
-                                                                <p className="text-xs text-green-600 mt-1">
-                                                                    Disponível: {ferramenta.quantidade || 0}
-                                                                </p>
-                                                            )}
+                                                                {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
+                                                                    <p className="text-xs text-green-600 mt-1">
+                                                                        Disponível: {ferramenta.quantidade || 0}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Estado</label>
+                                                                <select
+                                                                    value={itemKit.estadoEntrega}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
+                                                                    className="select-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <option value="Novo">Novo</option>
+                                                                    <option value="Bom">Bom</option>
+                                                                    <option value="Regular">Regular</option>
+                                                                    <option value="Desgastado">Desgastado</option>
+                                                                </select>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">Estado</label>
-                                                            <select
-                                                                value={itemKit.estadoEntrega}
-                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
-                                                                className="select-field text-sm"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            >
-                                                                <option value="Novo">Novo</option>
-                                                                <option value="Bom">Bom</option>
-                                                                <option value="Regular">Regular</option>
-                                                                <option value="Desgastado">Desgastado</option>
-                                                            </select>
-                                                        </div>
-                                                    </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoverItemDoKit(ferramenta.id);
+                                                            }}
+                                                            className="w-full mt-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" />
+                                                            Remover do Kit
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         );
@@ -1810,76 +2029,76 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalVisualizarFerramenta && ferramentaVisualizando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500">
-                            <div>
-                                <h2 className="text-2xl font-bold text-white">🔧 Detalhes da Ferramenta</h2>
-                                <p className="text-purple-100 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
+                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500 dark:from-purple-700 dark:to-purple-600">
+                            <div className="flex justify-between items-center w-full">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-white">🔧 Detalhes da Ferramenta</h2>
+                                    <p className="text-purple-100 dark:text-purple-200 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setModalVisualizarFerramenta(false);
+                                        setFerramentaVisualizando(null);
+                                    }}
+                                    className="text-white/80 hover:text-white transition-colors"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setModalVisualizarFerramenta(false);
-                                    setFerramentaVisualizando(null);
-                                }}
-                                className="text-white/80 hover:text-white transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="modal-body space-y-6">
                             {ferramentaVisualizando.imagemUrl && (
                                 <div className="text-center">
                                     <img 
                                         src={getUploadUrl(ferramentaVisualizando.imagemUrl)} 
                                         alt={ferramentaVisualizando.nome}
-                                        className="max-w-full max-h-96 object-contain mx-auto rounded-xl border border-gray-200 shadow-md"
+                                        className="max-w-full max-h-96 object-contain mx-auto rounded-xl border border-gray-200 dark:border-dark-border shadow-md"
                                     />
                                 </div>
                             )}
 
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">Nome</p>
-                                    <p className="font-bold text-gray-900">{ferramentaVisualizando.nome}</p>
+                                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-1">Nome</p>
+                                    <p className="font-bold text-gray-900 dark:text-dark-text">{ferramentaVisualizando.nome}</p>
                                 </div>
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">Código</p>
-                                    <p className="font-bold text-gray-900">{ferramentaVisualizando.codigo}</p>
+                                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-1">Código</p>
+                                    <p className="font-bold text-gray-900 dark:text-dark-text">{ferramentaVisualizando.codigo}</p>
                                 </div>
-                                <div className="bg-purple-50 p-4 rounded-xl">
-                                    <p className="text-xs text-purple-600 font-semibold mb-1">Categoria</p>
-                                    <p className="font-bold text-gray-900">{ferramentaVisualizando.categoria}</p>
+                                <div className="bg-purple-50 dark:bg-purple-900/30 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
+                                    <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold mb-1">Categoria</p>
+                                    <p className="font-bold text-gray-900 dark:text-dark-text">{ferramentaVisualizando.categoria}</p>
                                 </div>
                                 {ferramentaVisualizando.marca && (
-                                    <div className="bg-purple-50 p-4 rounded-xl">
-                                        <p className="text-xs text-purple-600 font-semibold mb-1">Marca</p>
-                                        <p className="font-bold text-gray-900">{ferramentaVisualizando.marca}</p>
+                                    <div className="bg-purple-50 dark:bg-purple-900/30 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
+                                        <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold mb-1">Marca</p>
+                                        <p className="font-bold text-gray-900 dark:text-dark-text">{ferramentaVisualizando.marca}</p>
                                     </div>
                                 )}
                                 {ferramentaVisualizando.modelo && (
-                                    <div className="bg-purple-50 p-4 rounded-xl">
-                                        <p className="text-xs text-purple-600 font-semibold mb-1">Modelo</p>
-                                        <p className="font-bold text-gray-900">{ferramentaVisualizando.modelo}</p>
+                                    <div className="bg-purple-50 dark:bg-purple-900/30 p-4 rounded-xl border border-purple-200 dark:border-purple-800">
+                                        <p className="text-xs text-purple-600 dark:text-purple-400 font-semibold mb-1">Modelo</p>
+                                        <p className="font-bold text-gray-900 dark:text-dark-text">{ferramentaVisualizando.modelo}</p>
                                     </div>
                                 )}
                                 {ferramentaVisualizando.valorCompra && (
-                                    <div className="bg-green-50 p-4 rounded-xl">
-                                        <p className="text-xs text-green-600 font-semibold mb-1">Valor de Compra</p>
-                                        <p className="font-bold text-green-700 text-xl">R$ {ferramentaVisualizando.valorCompra.toFixed(2)}</p>
+                                    <div className="bg-green-50 dark:bg-green-900/30 p-4 rounded-xl border border-green-200 dark:border-green-800">
+                                        <p className="text-xs text-green-600 dark:text-green-400 font-semibold mb-1">Valor de Compra</p>
+                                        <p className="font-bold text-green-700 dark:text-green-300 text-xl">R$ {ferramentaVisualizando.valorCompra.toFixed(2)}</p>
                                     </div>
                                 )}
                             </div>
 
                             {ferramentaVisualizando.descricao && (
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <p className="text-xs text-gray-600 font-semibold mb-2">📝 Descrição</p>
-                                    <p className="text-sm text-gray-700">{ferramentaVisualizando.descricao}</p>
+                                <div className="bg-gray-50 dark:bg-dark-card p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary font-semibold mb-2">📝 Descrição</p>
+                                    <p className="text-sm text-gray-700 dark:text-dark-text">{ferramentaVisualizando.descricao}</p>
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-2 gap-4 text-xs text-gray-500">
+                            <div className="grid grid-cols-2 gap-4 text-xs text-gray-500 dark:text-dark-text-secondary">
                                 <div>
                                     <p className="font-semibold mb-1">Criado em:</p>
                                     <p>{new Date(ferramentaVisualizando.createdAt).toLocaleString('pt-BR')}</p>
@@ -1919,80 +2138,80 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalVisualizarKit && kitVisualizando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-green-600 to-green-500">
-                            <div>
-                                <h2 className="text-2xl font-bold text-white">📦 Detalhes do Kit</h2>
-                                <p className="text-green-100 text-sm mt-1">{kitVisualizando.nome}</p>
+                        <div className="modal-header bg-gradient-to-r from-green-600 to-green-500 dark:from-green-700 dark:to-green-600">
+                            <div className="flex justify-between items-center w-full">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-white">📦 Detalhes do Kit</h2>
+                                    <p className="text-green-100 dark:text-green-200 text-sm mt-1">{kitVisualizando.nome}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setModalVisualizarKit(false);
+                                        setKitVisualizando(null);
+                                    }}
+                                    className="text-white/80 hover:text-white transition-colors"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setModalVisualizarKit(false);
-                                    setKitVisualizando(null);
-                                }}
-                                className="text-white/80 hover:text-white transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="modal-body space-y-6">
                             {/* Informações do Kit */}
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">👤 Eletricista</p>
-                                    <p className="font-bold text-gray-900 text-lg">{kitVisualizando.eletricistaNome}</p>
+                                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-1">👤 Eletricista</p>
+                                    <p className="font-bold text-gray-900 dark:text-dark-text text-lg">{kitVisualizando.eletricistaNome}</p>
                                 </div>
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">📅 Data de Entrega</p>
-                                    <p className="font-bold text-gray-900 text-lg">
+                                <div className="bg-blue-50 dark:bg-blue-900/30 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
+                                    <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold mb-1">📅 Data de Entrega</p>
+                                    <p className="font-bold text-gray-900 dark:text-dark-text text-lg">
                                         {new Date(kitVisualizando.dataEntrega).toLocaleDateString('pt-BR')}
                                     </p>
                                 </div>
                             </div>
 
                             {kitVisualizando.descricao && (
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <p className="text-xs text-gray-600 font-semibold mb-2">📝 Descrição</p>
-                                    <p className="text-sm text-gray-700">{kitVisualizando.descricao}</p>
+                                <div className="bg-gray-50 dark:bg-dark-card p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary font-semibold mb-2">📝 Descrição</p>
+                                    <p className="text-sm text-gray-700 dark:text-dark-text">{kitVisualizando.descricao}</p>
                                 </div>
                             )}
 
                             {/* Lista de Ferramentas */}
                             <div>
-                                <h3 className="font-bold text-gray-900 text-lg mb-4">🔧 Ferramentas do Kit ({kitVisualizando.itens.length})</h3>
+                                <h3 className="font-bold text-gray-900 dark:text-dark-text text-lg mb-4">🔧 Ferramentas do Kit ({kitVisualizando.itens.length})</h3>
                                 <div className="space-y-3">
                                     {kitVisualizando.itens.map((item, index) => (
-                                        <div key={item.id} className="bg-gradient-to-r from-gray-50 to-white border-2 border-gray-200 rounded-xl p-4">
+                                        <div key={item.id} className="bg-gradient-to-r from-gray-50 to-white dark:from-dark-card dark:to-dark-card border-2 border-gray-200 dark:border-dark-border rounded-xl p-4">
                                             <div className="flex items-start gap-4">
-                                                <div className="w-10 h-10 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold">
+                                                <div className="w-10 h-10 bg-purple-600 dark:bg-purple-500 text-white rounded-full flex items-center justify-center font-bold">
                                                     {index + 1}
                                                 </div>
                                                 <div className="flex-1">
-                                                    <h4 className="font-bold text-gray-900 mb-1">{item.ferramenta.nome}</h4>
-                                                    <p className="text-xs text-gray-500 mb-2">
+                                                    <h4 className="font-bold text-gray-900 dark:text-dark-text mb-1">{item.ferramenta.nome}</h4>
+                                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mb-2">
                                                         Código: {item.ferramenta.codigo} | Categoria: {item.ferramenta.categoria}
                                                     </p>
                                                     <div className="flex items-center gap-4 text-sm">
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-gray-600">Quantidade:</span>
-                                                            <span className="font-bold text-gray-900">x{item.quantidade}</span>
+                                                            <span className="text-gray-600 dark:text-dark-text-secondary">Quantidade:</span>
+                                                            <span className="font-bold text-gray-900 dark:text-dark-text">x{item.quantidade}</span>
                                                         </div>
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-gray-600">Estado:</span>
+                                                            <span className="text-gray-600 dark:text-dark-text-secondary">Estado:</span>
                                                             <span className={`px-2 py-1 rounded font-semibold text-xs ${
-                                                                item.estadoEntrega === 'Novo' ? 'bg-green-100 text-green-800' :
-                                                                item.estadoEntrega === 'Bom' ? 'bg-blue-100 text-blue-800' :
-                                                                item.estadoEntrega === 'Regular' ? 'bg-yellow-100 text-yellow-800' :
-                                                                'bg-orange-100 text-orange-800'
+                                                                item.estadoEntrega === 'Novo' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' :
+                                                                item.estadoEntrega === 'Bom' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300' :
+                                                                item.estadoEntrega === 'Regular' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' :
+                                                                'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300'
                                                             }`}>
                                                                 {item.estadoEntrega}
                                                             </span>
                                                         </div>
                                                     </div>
                                                     {item.observacoes && (
-                                                        <p className="text-xs text-gray-600 mt-2 italic">💡 {item.observacoes}</p>
+                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-2 italic">💡 {item.observacoes}</p>
                                                     )}
                                                 </div>
                                             </div>
@@ -2003,36 +2222,36 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                             {/* Foto do Kit Entregue */}
                             {kitVisualizando.imagemUrl && (
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                    <h4 className="font-bold text-blue-900 mb-3">📷 Foto do Kit Entregue</h4>
+                                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                    <h4 className="font-bold text-blue-900 dark:text-blue-300 mb-3">📷 Foto do Kit Entregue</h4>
                                     <img 
                                         src={getUploadUrl(kitVisualizando.imagemUrl)} 
                                         alt="Kit entregue"
-                                        className="w-full max-h-96 object-contain rounded-lg border border-gray-200"
+                                        className="w-full max-h-96 object-contain rounded-lg border border-gray-200 dark:border-dark-border"
                                     />
                                 </div>
                             )}
 
                             {kitVisualizando.observacoes && (
-                                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                                    <p className="text-xs font-semibold text-amber-900 mb-2">💡 Observações</p>
-                                    <p className="text-sm text-gray-700 whitespace-pre-wrap">{kitVisualizando.observacoes}</p>
+                                <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
+                                    <p className="text-xs font-semibold text-amber-900 dark:text-amber-300 mb-2">💡 Observações</p>
+                                    <p className="text-sm text-gray-700 dark:text-dark-text whitespace-pre-wrap">{kitVisualizando.observacoes}</p>
                                 </div>
                             )}
 
                             {/* Assinatura do Eletricista */}
                             {kitVisualizando.assinatura && (
-                                <div className="bg-purple-50 border-2 border-purple-300 rounded-xl p-6">
-                                    <h4 className="font-bold text-purple-900 mb-4 flex items-center gap-2">
+                                <div className="bg-purple-50 dark:bg-purple-900/30 border-2 border-purple-300 dark:border-purple-700 rounded-xl p-6">
+                                    <h4 className="font-bold text-purple-900 dark:text-purple-300 mb-4 flex items-center gap-2">
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                         </svg>
                                         Assinatura do Eletricista
                                     </h4>
-                                    <div className="bg-white border-2 border-dashed border-purple-300 rounded-lg p-6 text-center">
-                                        <p className="font-signature text-5xl text-purple-900 mb-2">{kitVisualizando.assinatura}</p>
-                                        <p className="text-xs text-purple-700">✍️ Assinatura Digital de Recebimento</p>
-                                        <p className="text-xs text-gray-500 mt-1">
+                                    <div className="bg-white dark:bg-dark-card border-2 border-dashed border-purple-300 dark:border-purple-700 rounded-lg p-6 text-center">
+                                        <p className="font-signature text-5xl text-purple-900 dark:text-purple-300 mb-2">{kitVisualizando.assinatura}</p>
+                                        <p className="text-xs text-purple-700 dark:text-purple-400">✍️ Assinatura Digital de Recebimento</p>
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
                                             Confirmado em: {new Date(kitVisualizando.dataEntrega).toLocaleDateString('pt-BR')}
                                         </p>
                                     </div>
@@ -2040,12 +2259,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             )}
 
                             {/* Informações Adicionais */}
-                            <div className="grid grid-cols-2 gap-4 text-xs text-gray-500">
-                                <div className="bg-gray-50 p-3 rounded-lg">
+                            <div className="grid grid-cols-2 gap-4 text-xs text-gray-500 dark:text-dark-text-secondary">
+                                <div className="bg-gray-50 dark:bg-dark-card p-3 rounded-lg border border-gray-200 dark:border-dark-border">
                                     <p className="font-semibold mb-1">Criado em:</p>
                                     <p>{new Date(kitVisualizando.createdAt).toLocaleString('pt-BR')}</p>
                                 </div>
-                                <div className="bg-gray-50 p-3 rounded-lg">
+                                <div className="bg-gray-50 dark:bg-dark-card p-3 rounded-lg border border-gray-200 dark:border-dark-border">
                                     <p className="font-semibold mb-1">ID do Kit:</p>
                                     <p className="font-mono text-xs">{kitVisualizando.id}</p>
                                 </div>
@@ -2080,33 +2299,35 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalEditarKit && kitEditando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-yellow-600 to-yellow-500">
-                            <div>
-                                <h2 className="text-2xl font-bold text-white">✏️ Editar Kit de Ferramentas</h2>
-                                <p className="text-yellow-100 text-sm mt-1">{kitEditando.nome}</p>
+                        <div className="modal-header bg-gradient-to-r from-yellow-600 to-yellow-500 dark:from-yellow-700 dark:to-yellow-600">
+                            <div className="flex justify-between items-center w-full">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-white">✏️ Editar Kit de Ferramentas</h2>
+                                    <p className="text-yellow-100 dark:text-yellow-200 text-sm mt-1">{kitEditando.nome}</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setModalEditarKit(false);
+                                        setKitEditando(null);
+                                        setFotoKitEntregue(null);
+                                        setFotoKitPreview('');
+                                        setItensParaRemover([]);
+                                        setFerramentasSelecionadas([]);
+                                    }}
+                                    className="text-white/80 hover:text-white transition-colors"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => {
-                                    setModalEditarKit(false);
-                                    setKitEditando(null);
-                                    setFotoKitEntregue(null);
-                                    setFotoKitPreview('');
-                                }}
-                                className="text-white/80 hover:text-white transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
                         </div>
 
-                        <form onSubmit={handleSalvarEdicaoKit} className="p-6 space-y-6">
+                        <form onSubmit={handleSalvarEdicaoKit} className="modal-body space-y-6">
                             {/* Informações do Kit */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                <h3 className="font-bold text-blue-900 mb-4">📋 Informações do Kit</h3>
+                            <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                <h3 className="font-bold text-blue-900 dark:text-blue-300 mb-4">📋 Informações do Kit</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Nome do Kit *
                                         </label>
                                         <input
@@ -2120,35 +2341,35 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Eletricista
                                         </label>
                                         <input
                                             type="text"
                                             value={formKit.eletricistaNome}
                                             disabled
-                                            className="input-field bg-gray-100"
+                                            className="input-field bg-gray-100 dark:bg-dark-card"
                                         />
-                                        <p className="text-xs text-gray-500 mt-1">Eletricista não pode ser alterado</p>
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Eletricista não pode ser alterado</p>
                                     </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4 mt-4">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Data de Entrega
                                         </label>
                                         <input
                                             type="date"
                                             value={formKit.dataEntrega}
                                             disabled
-                                            className="input-field bg-gray-100"
+                                            className="input-field bg-gray-100 dark:bg-dark-card"
                                         />
-                                        <p className="text-xs text-gray-500 mt-1">Data de entrega não pode ser alterada</p>
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Data de entrega não pode ser alterada</p>
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                             Descrição
                                         </label>
                                         <input
@@ -2164,32 +2385,57 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                             {/* Itens Existentes */}
                             <div>
-                                <h3 className="font-bold text-gray-900 mb-4">🔧 Ferramentas Atuais ({kitEditando.itens.length})</h3>
-                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2 max-h-48 overflow-y-auto">
-                                    {kitEditando.itens.map((item) => (
-                                        <div key={item.id} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
-                                            <div>
-                                                <p className="font-semibold text-gray-900">{item.ferramenta.nome}</p>
-                                                <p className="text-xs text-gray-500">{item.ferramenta.codigo} - Qtd: {item.quantidade}</p>
+                                <h3 className="font-bold text-gray-900 dark:text-dark-text mb-4">
+                                    🔧 Ferramentas Atuais ({kitEditando.itens.filter(item => !itensParaRemover.includes(item.ferramentaId)).length})
+                                </h3>
+                                <div className="bg-gray-50 dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl p-4 space-y-2 max-h-48 overflow-y-auto">
+                                    {kitEditando.itens
+                                        .filter(item => !itensParaRemover.includes(item.ferramentaId))
+                                        .map((item) => (
+                                        <div key={item.id} className={`bg-white dark:bg-dark-card border-2 rounded-lg p-3 flex items-center justify-between ${itensParaRemover.includes(item.ferramentaId) ? 'opacity-50 border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-dark-border'}`}>
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{item.ferramenta.nome}</p>
+                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.ferramenta.codigo} - Qtd: {item.quantidade}</p>
                                             </div>
-                                            <span className="px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800">
-                                                {item.estadoEntrega}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="px-2 py-1 text-xs font-semibold rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
+                                                    {item.estadoEntrega}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoverItemExistenteDoKit(item.ferramentaId)}
+                                                    className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center gap-1"
+                                                    title="Remover do kit"
+                                                >
+                                                    <TrashIcon className="w-3 h-3" />
+                                                    Remover
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
+                                    {kitEditando.itens.filter(item => !itensParaRemover.includes(item.ferramentaId)).length === 0 && (
+                                        <p className="text-sm text-gray-500 dark:text-dark-text-secondary text-center py-4">Nenhuma ferramenta no kit</p>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Adicionar Novos Itens */}
                             <div>
-                                <h3 className="font-bold text-gray-900 mb-4">➕ Adicionar Novas Ferramentas</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-gray-50 rounded-xl border border-gray-200">
-                                    {ferramentas.filter(f => f.ativo && !kitEditando.itens.some(i => i.ferramentaId === f.id)).map((ferramenta) => {
+                                <h3 className="font-bold text-gray-900 dark:text-dark-text mb-4">➕ Adicionar Novas Ferramentas</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2 bg-gray-50 dark:bg-dark-card rounded-xl border border-gray-200 dark:border-dark-border">
+                                    {ferramentas.filter(f => {
+                                        // Mostrar apenas ferramentas que:
+                                        // 1. Estão ativas
+                                        // 2. NÃO estão no kit original OU estão marcadas para remoção
+                                        const estaNoKitOriginal = kitEditando.itens.some(i => i.ferramentaId === f.id);
+                                        const estaMarcadaParaRemover = itensParaRemover.includes(f.id);
+                                        return f.ativo && (!estaNoKitOriginal || estaMarcadaParaRemover);
+                                    }).map((ferramenta) => {
                                         const isSelected = ferramentasSelecionadas.includes(ferramenta.id);
                                         const itemKit = formKit.itens.find(i => i.ferramentaId === ferramenta.id);
 
                                         return (
-                                            <div key={ferramenta.id} className="bg-white border-2 rounded-xl p-4">
+                                            <div key={ferramenta.id} className="bg-white dark:bg-dark-card border-2 rounded-xl p-4 border-gray-200 dark:border-dark-border">
                                                 <div
                                                     className={`flex items-start gap-3 cursor-pointer ${isSelected ? 'mb-3' : ''}`}
                                                     onClick={() => handleAdicionarFerramentaAoKit(ferramenta.id)}
@@ -2217,58 +2463,71 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                 </div>
 
                                                 {isSelected && itemKit && (
-                                                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">
-                                                                Quantidade
+                                                    <>
+                                                        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-200">
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">
+                                                                    Quantidade
+                                                                    {(ferramenta.quantidade || 0) < itemKit.quantidade && (
+                                                                        <span className="text-red-600 ml-1">⚠️</span>
+                                                                    )}
+                                                                </label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    max={ferramenta.quantidade || 0}
+                                                                    value={itemKit.quantidade}
+                                                                    onChange={(e) => {
+                                                                        const qty = parseInt(e.target.value) || 1;
+                                                                        const maxQty = ferramenta.quantidade || 0;
+                                                                        const finalQty = Math.max(1, Math.min(qty, maxQty));
+                                                                        handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
+                                                                    }}
+                                                                    className={`input-field text-sm ${
+                                                                        (ferramenta.quantidade || 0) < itemKit.quantidade 
+                                                                            ? 'border-red-500 bg-red-50' 
+                                                                            : ''
+                                                                    }`}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                />
                                                                 {(ferramenta.quantidade || 0) < itemKit.quantidade && (
-                                                                    <span className="text-red-600 ml-1">⚠️</span>
+                                                                    <p className="text-xs text-red-600 mt-1">
+                                                                        Máximo disponível: {ferramenta.quantidade || 0}
+                                                                    </p>
                                                                 )}
-                                                            </label>
-                                                            <input
-                                                                type="number"
-                                                                min="1"
-                                                                max={ferramenta.quantidade || 0}
-                                                                value={itemKit.quantidade}
-                                                                onChange={(e) => {
-                                                                    const qty = parseInt(e.target.value) || 1;
-                                                                    const maxQty = ferramenta.quantidade || 0;
-                                                                    const finalQty = Math.max(1, Math.min(qty, maxQty));
-                                                                    handleAtualizarItemKit(ferramenta.id, 'quantidade', finalQty);
-                                                                }}
-                                                                className={`input-field text-sm ${
-                                                                    (ferramenta.quantidade || 0) < itemKit.quantidade 
-                                                                        ? 'border-red-500 bg-red-50' 
-                                                                        : ''
-                                                                }`}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            {(ferramenta.quantidade || 0) < itemKit.quantidade && (
-                                                                <p className="text-xs text-red-600 mt-1">
-                                                                    Máximo disponível: {ferramenta.quantidade || 0}
-                                                                </p>
-                                                            )}
-                                                            {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
-                                                                <p className="text-xs text-green-600 mt-1">
-                                                                    Disponível: {ferramenta.quantidade || 0}
-                                                                </p>
-                                                            )}
+                                                                {(ferramenta.quantidade || 0) >= itemKit.quantidade && (ferramenta.quantidade || 0) > 0 && (
+                                                                    <p className="text-xs text-green-600 mt-1">
+                                                                        Disponível: {ferramenta.quantidade || 0}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs text-gray-600">Estado</label>
+                                                                <select
+                                                                    value={itemKit.estadoEntrega}
+                                                                    onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
+                                                                    className="select-field text-sm"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <option value="Novo">Novo</option>
+                                                                    <option value="Bom">Bom</option>
+                                                                    <option value="Regular">Regular</option>
+                                                                    <option value="Desgastado">Desgastado</option>
+                                                                </select>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <label className="text-xs text-gray-600">Estado</label>
-                                                            <select
-                                                                value={itemKit.estadoEntrega}
-                                                                onChange={(e) => handleAtualizarItemKit(ferramenta.id, 'estadoEntrega', e.target.value)}
-                                                                className="select-field text-sm"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            >
-                                                                <option value="Novo">Novo</option>
-                                                                <option value="Bom">Bom</option>
-                                                                <option value="Regular">Regular</option>
-                                                                <option value="Desgastado">Desgastado</option>
-                                                            </select>
-                                                        </div>
-                                                    </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoverItemDoKit(ferramenta.id);
+                                                            }}
+                                                            className="w-full mt-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" />
+                                                            Remover do Kit
+                                                        </button>
+                                                    </>
                                                 )}
                                             </div>
                                         );
@@ -2278,13 +2537,13 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                             {/* Observações de Atualização */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                     📝 Observações de Atualização
                                 </label>
                                 <textarea
                                     value={formKit.observacoes}
                                     onChange={(e) => setFormKit({...formKit, observacoes: e.target.value})}
-                                    className="input-field"
+                                    className="textarea-field"
                                     rows={3}
                                     placeholder="Descreva as alterações realizadas no kit..."
                                 />
@@ -2292,12 +2551,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
                             {/* Upload de Nova Foto */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                     📷 Nova Foto do Kit
                                 </label>
                                 <div className="flex items-center gap-4">
                                     {fotoKitPreview && (
-                                        <div className="w-32 h-32 border-2 border-gray-300 rounded-lg overflow-hidden">
+                                        <div className="w-32 h-32 border-2 border-gray-300 dark:border-dark-border rounded-lg overflow-hidden">
                                             <img 
                                                 src={fotoKitPreview} 
                                                 alt="Preview do kit" 
@@ -2306,12 +2565,12 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         </div>
                                     )}
                                     <label className="flex-1 cursor-pointer">
-                                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 hover:border-blue-500 hover:bg-blue-50 transition-all">
+                                        <div className="border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl p-4 hover:border-blue-500 dark:hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all">
                                             <div className="flex items-center justify-center gap-2">
-                                                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <svg className="w-6 h-6 text-gray-400 dark:text-dark-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                                 </svg>
-                                                <span className="text-sm text-gray-600">
+                                                <span className="text-sm text-gray-600 dark:text-dark-text-secondary">
                                                     {fotoKitEntregue ? fotoKitEntregue.name : 'Clique para selecionar nova foto'}
                                                 </span>
                                             </div>
@@ -2327,16 +2586,16 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             </div>
 
                             {/* Histórico */}
-                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                                <h4 className="font-bold text-gray-900 mb-3">📅 Histórico</h4>
+                            <div className="bg-gray-50 dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl p-4">
+                                <h4 className="font-bold text-gray-900 dark:text-dark-text mb-3">📅 Histórico</h4>
                                 <div className="grid grid-cols-2 gap-4 text-sm">
                                     <div>
-                                        <p className="text-xs text-gray-600 font-semibold mb-1">Data de Criação</p>
-                                        <p className="text-gray-900">{new Date(kitEditando.createdAt).toLocaleString('pt-BR')}</p>
+                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary font-semibold mb-1">Data de Criação</p>
+                                        <p className="text-gray-900 dark:text-dark-text">{new Date(kitEditando.createdAt).toLocaleString('pt-BR')}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs text-gray-600 font-semibold mb-1">Última Atualização</p>
-                                        <p className="text-gray-900">{new Date(kitEditando.updatedAt).toLocaleString('pt-BR')}</p>
+                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary font-semibold mb-1">Última Atualização</p>
+                                        <p className="text-gray-900 dark:text-dark-text">{new Date((kitEditando as any).updatedAt || kitEditando.createdAt).toLocaleString('pt-BR')}</p>
                                     </div>
                                 </div>
                             </div>
@@ -2349,6 +2608,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                         setKitEditando(null);
                                         setFotoKitEntregue(null);
                                         setFotoKitPreview('');
+                                        setItensParaRemover([]);
+                                        setFerramentasSelecionadas([]);
                                     }}
                                     className="btn-secondary"
                                 >
@@ -2379,6 +2640,51 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     kitData={kitPDFData}
                 />
             )}
+
+            {/* AlertDialog de Confirmação de Exclusão de Kit */}
+            <AlertDialog
+                isOpen={showDeleteKitDialog}
+                onClose={() => {
+                    setShowDeleteKitDialog(false);
+                    setKitToDelete(null);
+                }}
+                onConfirm={confirmDeleteKit}
+                title={`Excluir permanentemente o kit "${kitToDelete?.nome}"?`}
+                message=""
+                confirmText="Excluir Permanentemente"
+                cancelText="Cancelar"
+                variant="danger"
+            >
+                <div className="space-y-3">
+                    <p className="text-gray-700 dark:text-gray-300">
+                        Tem certeza que deseja excluir permanentemente o kit <strong>"{kitToDelete?.nome}"</strong>?
+                    </p>
+                    <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm text-red-800 dark:text-red-200">
+                        <p className="font-semibold mb-2">⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL e irá:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                            <li>Excluir permanentemente o kit</li>
+                            <li>Devolver todas as ferramentas ao estoque</li>
+                            <li>Remover todas as informações relacionadas do banco de dados</li>
+                        </ul>
+                        <p className="mt-2 font-semibold">Esta ação não pode ser desfeita!</p>
+                    </div>
+                </div>
+            </AlertDialog>
+
+            {/* AlertDialog de Confirmação de Desativação de Ferramenta */}
+            <AlertDialog
+                isOpen={showDeleteFerramentaDialog}
+                onClose={() => {
+                    setShowDeleteFerramentaDialog(false);
+                    setFerramentaToDelete(null);
+                }}
+                onConfirm={confirmDeleteFerramenta}
+                title="Desativar Ferramenta"
+                message="Tem certeza que deseja desativar esta ferramenta? Ela não aparecerá mais nas listagens, mas os dados serão preservados."
+                confirmText="Desativar"
+                cancelText="Cancelar"
+                variant="warning"
+            />
         </div>
     );
 };

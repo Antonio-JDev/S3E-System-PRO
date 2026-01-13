@@ -37,9 +37,9 @@ router.put('/:id', authorize('admin', 'gerente'), MovimentacoesController.atuali
 
 /**
  * @route DELETE /api/movimentacoes/:id
- * @desc Deleta uma movimentação e reverte o estoque
- * @access Admin only
+ * @desc Deleta uma movimentação e reverte o estoque (hard delete)
+ * @access Admin e Desenvolvedor only
  */
-router.delete('/:id', authorize('admin'), MovimentacoesController.deletarMovimentacao);
+router.delete('/:id', authorize('admin', 'desenvolvedor'), MovimentacoesController.deletarMovimentacao);
 
 export default router;

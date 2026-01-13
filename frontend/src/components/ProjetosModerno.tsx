@@ -166,12 +166,13 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
     const [statusFilter, setStatusFilter] = useState<string>('Todos');
     const [responsavelFilter, setResponsavelFilter] = useState<string>('Todos');
     const [mostrarCancelados, setMostrarCancelados] = useState(false);
-    const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Projetos'));
+    const [mostrarApenasOSRecentes, setMostrarApenasOSRecentes] = useState(true); // ✅ NOVO: Filtrar apenas OS >= 2155 por padrão
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Ordem De Serviços'));
     
     // Salvar viewMode no localStorage quando mudar
     const handleViewModeChange = (mode: 'grid' | 'list') => {
         setViewMode(mode);
-        saveViewMode('Projetos', mode);
+        saveViewMode('Ordem De Serviços', mode);
     };
 
     // Modais
@@ -321,6 +322,28 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 return false;
             }
             
+            // ✅ NOVO: Filtrar apenas OS >= 2155 se o filtro estiver ativo
+            if (mostrarApenasOSRecentes) {
+                // Extrair número da OS diretamente
+                let numeroOS: number | null = null;
+                
+                // Prioridade: usar numeroSequencial do orçamento vinculado
+                if (projeto.orcamento?.numeroSequencial) {
+                    numeroOS = projeto.orcamento.numeroSequencial;
+                } else if (projeto.orcamentoId && orcamentos.length > 0) {
+                    // Fallback: buscar no array de orçamentos
+                    const orcamentoVinculado = orcamentos.find(o => o.id === projeto.orcamentoId);
+                    if (orcamentoVinculado?.numeroSequencial) {
+                        numeroOS = orcamentoVinculado.numeroSequencial;
+                    }
+                }
+                
+                // Se não encontrou número do orçamento, considera como OS antiga (< 2155)
+                if (numeroOS === null || numeroOS < 2155) {
+                    return false;
+                }
+            }
+            
             const matchesSearch = 
                 projeto.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 projeto.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -332,7 +355,45 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
             
             return matchesSearch && matchesStatus && matchesResponsavel;
         });
-    }, [projetos, searchTerm, statusFilter, responsavelFilter, mostrarCancelados]);
+    }, [projetos, searchTerm, statusFilter, responsavelFilter, mostrarCancelados, mostrarApenasOSRecentes, orcamentos]);
+
+    // Função para gerar número OS baseado no número do orçamento vinculado
+    const gerarNumeroOS = (projeto: Projeto): string => {
+        // Prioridade: usar numeroSequencial do orçamento vinculado
+        if (projeto.orcamento?.numeroSequencial) {
+            return `OS-${projeto.orcamento.numeroSequencial}`;
+        }
+        
+        // Fallback: se não tiver orçamento vinculado, tentar buscar no array de orçamentos
+        if (projeto.orcamentoId && orcamentos.length > 0) {
+            const orcamentoVinculado = orcamentos.find(o => o.id === projeto.orcamentoId);
+            if (orcamentoVinculado?.numeroSequencial) {
+                return `OS-${orcamentoVinculado.numeroSequencial}`;
+            }
+        }
+        
+        // Último fallback: usar índice (para projetos antigos sem orçamento)
+        const projetosOrdenados = [...projetos].sort((a, b) => {
+            const dataA = new Date(a.createdAt || a.dataInicio || 0).getTime();
+            const dataB = new Date(b.createdAt || b.dataInicio || 0).getTime();
+            return dataA - dataB;
+        });
+        
+        const index = projetosOrdenados.findIndex(p => p.id === projeto.id);
+        const numero = index >= 0 ? index + 1 : projetosOrdenados.length + 1;
+        const numeroValido = isNaN(numero) ? 1 : numero;
+        
+        return `OS-${numeroValido.toString().padStart(3, '0')}`;
+    };
+
+    // ✅ NOVO: Função para extrair o número da OS (sem o prefixo "OS-")
+    const extrairNumeroOS = (projeto: Projeto): number | null => {
+        const numeroOS = gerarNumeroOS(projeto);
+        // Remove "OS-" e tenta converter para número
+        const numero = numeroOS.replace(/^OS-/, '');
+        const numeroInt = parseInt(numero, 10);
+        return isNaN(numeroInt) ? null : numeroInt;
+    };
 
     // ==================== HANDLERS ====================
     const handleOpenCreateModal = (projeto: Projeto | null = null) => {
@@ -413,7 +474,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 }
             }
         } catch (err) {
-            toast.error('Erro ao salvar projeto');
+            toast.error('Erro ao salvar ordem de serviço');
         }
     };
 
@@ -434,7 +495,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         // Verificar permissão antes de tentar exclusão permanente
         if (permanent && !canDeletePermanently) {
             toast.error('🚫 Acesso negado', {
-                description: 'Apenas Administradores e Desenvolvedores podem excluir projetos permanentemente.'
+                description: 'Apenas Administradores e Desenvolvedores podem excluir ordens de serviço permanentemente.'
             });
             return;
         }
@@ -444,21 +505,21 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 // Exclusão permanente do banco de dados
                 const response = await projetosService.excluirPermanentemente(projetoToDelete.id);
                 
-                toast.success('⚠️ Projeto excluído permanentemente!', {
-                    description: `"${projetoToDelete.titulo}" foi removido do banco de dados.`
+                toast.success('⚠️ Ordem de serviço excluída permanentemente!', {
+                    description: `"${projetoToDelete.titulo}" foi removida do banco de dados.`
                 });
             } else {
                 // Soft delete (marca como CANCELADO)
                 await projetosService.desativar(projetoToDelete.id);
-                toast.success('Projeto cancelado', {
-                    description: `"${projetoToDelete.titulo}" foi marcado como CANCELADO.`
+                toast.success('Ordem de serviço cancelada', {
+                    description: `"${projetoToDelete.titulo}" foi marcada como CANCELADA.`
                 });
             }
             setProjetos(prev => prev.filter(p => p.id !== projetoToDelete.id));
             setProjetoToDelete(null);
         } catch (err: any) {
-            const errorMessage = err?.response?.data?.error || err?.message || 'Erro ao excluir projeto';
-            toast.error('Erro ao excluir projeto', {
+            const errorMessage = err?.response?.data?.error || err?.message || 'Erro ao excluir ordem de serviço';
+            toast.error('Erro ao excluir ordem de serviço', {
                 description: errorMessage
             });
         }
@@ -701,8 +762,8 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Projetos</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Hub central de gerenciamento de projetos</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Ordem De Serviços</h1>
+                        <p className="text-sm sm:text-base text-gray-500 mt-1">Hub central de gerenciamento de ordens de serviço</p>
                     </div>
                 </div>
                 <div className="flex gap-3">
@@ -718,7 +779,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                     >
                         <PlusIcon className="w-5 h-5" />
-                        Novo Projeto
+                        Nova Ordem De Serviço
                     </button>
                 </div>
             </header>
@@ -773,10 +834,32 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 {/* Resultado da Busca */}
                 <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
                     <p className="text-sm text-gray-600">
-                        Exibindo <span className="font-bold text-gray-900">{filteredProjetos.length}</span> de <span className="font-bold text-gray-900">{projetos.length}</span> projetos
+                        Exibindo <span className="font-bold text-gray-900">{filteredProjetos.length}</span> de <span className="font-bold text-gray-900">{projetos.length}</span> ordens de serviço
                     </p>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                         <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
+                        
+                        {/* ✅ NOVO: Botão para mostrar todas as OS ou apenas >= 2155 */}
+                        <button
+                            onClick={() => setMostrarApenasOSRecentes(!mostrarApenasOSRecentes)}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                mostrarApenasOSRecentes
+                                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-300'
+                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
+                            }`}
+                            title={mostrarApenasOSRecentes ? 'Mostrar apenas OS a partir de 2155' : 'Mostrar todas as OS'}
+                        >
+                            {mostrarApenasOSRecentes ? (
+                                <span className="inline-flex items-center gap-1">
+                                    <span>📋 OS {'>='} 2155</span>
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1">
+                                    <span>📚 Todas as OS</span>
+                                </span>
+                            )}
+                        </button>
+                        
                         {/* Toggle Mostrar Cancelados */}
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -800,15 +883,15 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 </div>
             </div>
 
-            {/* Grid de Projetos */}
+            {/* Grid de Ordens de Serviço */}
             {filteredProjetos.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
                     <ClipboardIcon className="w-20 h-20 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhum projeto encontrado</h3>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhuma ordem de serviço encontrada</h3>
                     <p className="text-gray-500 mb-6">
                         {searchTerm || statusFilter !== 'Todos' || responsavelFilter !== 'Todos'
                             ? 'Tente ajustar os filtros de busca'
-                            : 'Comece criando seu primeiro projeto'}
+                            : 'Comece criando sua primeira ordem de serviço'}
                     </p>
                     {!searchTerm && statusFilter === 'Todos' && responsavelFilter === 'Todos' && (
                         <button
@@ -816,7 +899,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                             className="bg-gradient-to-r from-blue-600 to-blue-500 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                         >
                             <PlusIcon className="w-5 h-5 inline mr-2" />
-                            Criar Primeiro Projeto
+                            Criar Primeira Ordem De Serviço
                         </button>
                     )}
                 </div>
@@ -825,6 +908,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                     {filteredProjetos.map((projeto) => {
                         // Calcular progresso real do projeto (mesmo cálculo do modal)
                         const progresso = calcularProgressoProjeto(projeto);
+                        const numeroOS = gerarNumeroOS(projeto);
                         
                         return (
                             <div key={projeto.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 hover:border-blue-300 relative group">
@@ -875,6 +959,11 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
                                 {/* Conteúdo do Card */}
                                 <div className="mb-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded">
+                                            {numeroOS}
+                                        </span>
+                                    </div>
                                     <h3 className="font-bold text-lg text-gray-900 mb-2 pr-8">{projeto.titulo}</h3>
                                     <p className="text-sm text-gray-600 line-clamp-2">{projeto.descricao}</p>
                                 </div>
@@ -926,15 +1015,22 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Projeto</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Ordem De Serviço</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                            {filteredProjetos.map((projeto) => (
+                            {filteredProjetos.map((projeto) => {
+                                const numeroOS = gerarNumeroOS(projeto);
+                                return (
                                 <tr key={projeto.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded">
+                                                {numeroOS}
+                                            </span>
+                                        </div>
                                         <p className="font-semibold text-gray-900">{projeto.titulo}</p>
                                         <p className="text-xs text-gray-500">{projeto.descricao || 'Sem descrição'}</p>
                                     </td>
@@ -966,7 +1062,8 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                                         </button>
                                     </td>
                                 </tr>
-                            ))}
+                            );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -978,7 +1075,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                     <div className="bg-white rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         <div className="flex justify-between items-center p-6 border-b border-gray-100">
                             <h2 className="text-2xl font-bold text-gray-900">
-                                {projetoToEdit ? 'Editar Projeto' : 'Novo Projeto'}
+                                {projetoToEdit ? 'Editar Ordem De Serviço' : 'Nova Ordem De Serviço'}
                             </h2>
                             <button
                                 onClick={() => setIsCreateModalOpen(false)}
@@ -992,7 +1089,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="md:col-span-2">
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Título do Projeto *
+                                        Título da Ordem De Serviço *
                                     </label>
                                     <input
                                         type="text"
@@ -1013,7 +1110,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                                         onChange={(e) => setFormState({...formState, descricao: e.target.value})}
                                         rows={3}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                        placeholder="Descreva o projeto..."
+                                        placeholder="Descreva a ordem de serviço..."
                                     />
                                 </div>
 
@@ -1265,7 +1362,7 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                     <div className="bg-white rounded-2xl shadow-strong max-w-lg w-full p-6">
                         <h3 className="text-xl font-bold text-gray-900 mb-4">Confirmar Exclusão</h3>
                         <p className="text-gray-600 mb-4">
-                            Tem certeza que deseja excluir o projeto <strong>"{projetoToDelete.titulo}"</strong>?
+                            Tem certeza que deseja excluir a ordem de serviço <strong>"{projetoToDelete.titulo}"</strong>?
                         </p>
                         
                         {/* Opções de Exclusão */}
@@ -1273,9 +1370,9 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                             <div className="flex items-start gap-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                                 <span className="text-yellow-600">⚠️</span>
                                 <div>
-                                    <p className="text-sm font-semibold text-yellow-900">Cancelar Projeto (Recomendado)</p>
+                                    <p className="text-sm font-semibold text-yellow-900">Cancelar Ordem De Serviço (Recomendado)</p>
                                     <p className="text-xs text-yellow-700 mt-1">
-                                        Marca o projeto como CANCELADO. Os dados permanecem no banco.
+                                        Marca a ordem de serviço como CANCELADA. Os dados permanecem no banco.
                                     </p>
                                 </div>
                             </div>

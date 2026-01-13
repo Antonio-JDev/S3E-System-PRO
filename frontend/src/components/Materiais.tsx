@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { type MaterialItem, MaterialCategory } from '../types';
 import { materiaisService, Material } from '../services/materiaisService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { comprasService } from '../services/comprasService';
+import { movimentacoesService } from '../services/movimentacoesService';
 import { axiosApiService } from '../services/axiosApi';
 import { getUploadUrl } from '../config/api';
 import SupplierCombobox from './ui/SupplierCombobox';
@@ -132,6 +134,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [itemToEdit, setItemToEdit] = useState<MaterialItem | null>(null);
     const [itemToDelete, setItemToDelete] = useState<MaterialItem | null>(null);
+    const [movimentacoesCount, setMovimentacoesCount] = useState<number>(0);
+    const [kitItemsCount, setKitItemsCount] = useState<number>(0);
+    const [loadingMovimentacoes, setLoadingMovimentacoes] = useState(false);
 
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const [showCorrigirNomesDialog, setShowCorrigirNomesDialog] = useState(false);
@@ -142,6 +147,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [materialSelecionado, setMaterialSelecionado] = useState<MaterialItem | null>(null);
     const [historicoCompras, setHistoricoCompras] = useState<any[]>([]);
     const [loadingHistorico, setLoadingHistorico] = useState(false);
+    
+    // Estados para processar fracionamento
+    const [processandoFracionamento, setProcessandoFracionamento] = useState(false);
+    const [comprasFracionamentoPendentes, setComprasFracionamentoPendentes] = useState<any[]>([]);
+    const [modalFracionamentoPendente, setModalFracionamentoPendente] = useState(false);
     
     // Estados para exportação/importação
     const [menuExportarOpen, setMenuExportarOpen] = useState(false);
@@ -209,7 +219,12 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     porcentagemLucro: material.porcentagemLucro,
                     supplier: material.fornecedor 
                         ? { id: material.fornecedor.id, name: material.fornecedor.nome } 
-                        : { id: '', name: 'Sem fornecedor' }
+                        : { id: '', name: 'Sem fornecedor' },
+                    // ✅ Campos de fracionamento
+                    quantidadePorEmbalagem: material.quantidadePorEmbalagem,
+                    tipoEmbalagem: material.tipoEmbalagem,
+                    precoEmbalagem: material.precoEmbalagem,
+                    precoUnitario: material.precoUnitario
                 }));
 
                 // ✅ CORREÇÃO: Exibir TODOS os materiais ativos, independente do estoque
@@ -559,9 +574,28 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     };
 
 
-    const handleOpenDeleteDialog = (material: MaterialItem) => {
+    const handleOpenDeleteDialog = async (material: MaterialItem) => {
         setItemToDelete(material);
         setShowDeleteDialog(true);
+        
+        // Buscar quantidade de movimentações relacionadas
+        if (isAdminOrDev) {
+            setLoadingMovimentacoes(true);
+            try {
+                const response = await movimentacoesService.listar({ materialId: material.id });
+                if (response.success && response.data) {
+                    const count = Array.isArray(response.data) ? response.data.length : 0;
+                    setMovimentacoesCount(count);
+                } else {
+                    setMovimentacoesCount(0);
+                }
+            } catch (error) {
+                console.error('Erro ao buscar movimentações:', error);
+                setMovimentacoesCount(0);
+            } finally {
+                setLoadingMovimentacoes(false);
+            }
+        }
     };
 
     const handleDelete = async () => {
@@ -577,28 +611,21 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             return;
         }
         
-        // Confirmação adicional
-        const confirmMessage = `TEM CERTEZA POIS PODE INFLUENCIAR NO REGISTRO DE UMA COMPRA*\n\n` +
-            `Material: ${itemToDelete.name}\n\n` +
-            `Esta ação não pode ser desfeita. O material será excluído, mas permanecerá no histórico de compras e contas a pagar.`;
-        
-        if (!window.confirm(confirmMessage)) {
-            setShowDeleteDialog(false);
-            setItemToDelete(null);
-            return;
-        }
-        
         try {
             setShowDeleteDialog(false);
             const materialNome = itemToDelete.name;
-            // ✅ CORREÇÃO: Passar ?permanent=true para excluir permanentemente (apenas admin/dev)
+            // ✅ Passar ?permanent=true para excluir permanentemente (apenas admin/dev)
             const response = await materiaisService.deleteMaterial(itemToDelete.id, true);
             if (response.success) {
-                // ✅ CORREÇÃO: Remover imediatamente da lista antes de recarregar
+                // ✅ Remover imediatamente da lista antes de recarregar
                 setMaterials(prev => prev.filter(m => m.id !== itemToDelete.id));
                 
+                const movimentacoesMsg = (response as any).movimentacoesExcluidas > 0 
+                    ? ` ${(response as any).movimentacoesExcluidas} movimentação(ões) também foram excluída(s).`
+                    : '';
+                
                 toast.success('Material excluído com sucesso!', {
-                    description: `O material "${materialNome}" foi excluído permanentemente do sistema.`,
+                    description: `O material "${materialNome}" foi excluído permanentemente do sistema.${movimentacoesMsg}`,
                 });
                 setItemToDelete(null);
                 
@@ -656,6 +683,60 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             setHistoricoCompras([]);
         } finally {
             setLoadingHistorico(false);
+        }
+    };
+
+    const handleProcessarFracionamento = async () => {
+        try {
+            setProcessandoFracionamento(true);
+            
+            // Primeiro, buscar compras pendentes para mostrar ao usuário
+            const comprasPendentes = await comprasService.buscarComprasComFracionamentoPendente();
+            
+            if (!comprasPendentes.success || !comprasPendentes.data || comprasPendentes.data.length === 0) {
+                toast.info('✅ Nenhuma compra com fracionamento pendente encontrada');
+                return;
+            }
+
+            setComprasFracionamentoPendentes(comprasPendentes.data);
+            setModalFracionamentoPendente(true);
+        } catch (error: any) {
+            console.error('Erro ao buscar compras pendentes:', error);
+            toast.error('❌ Erro ao buscar compras pendentes', {
+                description: error.message || 'Não foi possível buscar compras com fracionamento pendente'
+            });
+        } finally {
+            setProcessandoFracionamento(false);
+        }
+    };
+
+    const handleConfirmarProcessarFracionamento = async () => {
+        try {
+            setProcessandoFracionamento(true);
+            setModalFracionamentoPendente(false);
+            
+            const resultado = await comprasService.processarAtualizacoesFracionamento();
+            
+            if (resultado.success) {
+                toast.success('✅ Fracionamento processado com sucesso!', {
+                    description: `${resultado.comprasProcessadas} compra(s) processada(s), ${resultado.itensAtualizados} item(ns) atualizado(s)`
+                });
+                
+                // Recarregar materiais para mostrar estoque atualizado
+                await loadMaterials();
+            } else {
+                toast.error('❌ Erro ao processar fracionamento', {
+                    description: resultado.error || 'Não foi possível processar as atualizações'
+                });
+            }
+        } catch (error: any) {
+            console.error('Erro ao processar fracionamento:', error);
+            toast.error('❌ Erro ao processar fracionamento', {
+                description: error.message || 'Ocorreu um erro inesperado'
+            });
+        } finally {
+            setProcessandoFracionamento(false);
+            setComprasFracionamentoPendentes([]);
         }
     };
 
@@ -1296,6 +1377,28 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <PlusIcon className="w-5 h-5" />
                         Novo Material
                     </button>
+                    
+                    {/* Botão de Atualizar Fracionamento */}
+                    <button
+                        onClick={handleProcessarFracionamento}
+                        disabled={processandoFracionamento}
+                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-500 text-white rounded-xl hover:from-blue-700 hover:to-indigo-600 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Atualizar estoque com base em fracionamentos configurados nas compras"
+                    >
+                        {processandoFracionamento ? (
+                            <>
+                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                Processando...
+                            </>
+                        ) : (
+                            <>
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Atualizar Fracionamento
+                            </>
+                        )}
+                    </button>
                 </div>
             </header>
 
@@ -1601,14 +1704,25 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <PencilIcon className="w-4 h-4" />
                                     Editar
                                 </button>
-                                <button
-                                    onClick={() => handleOpenDeleteDialog(material)}
-                                    className="flex items-center justify-center gap-1 px-3 py-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors text-sm font-semibold"
-                                    title={isAdminOrDev ? 'Excluir material (apenas admin/desenvolvedor)' : 'Desativar material'}
-                                >
-                                    <TrashIcon className="w-4 h-4" />
-                                    {isAdminOrDev ? 'Excluir' : 'Desativar'}
-                                </button>
+                                {isAdminOrDev ? (
+                                    <button
+                                        onClick={() => handleOpenDeleteDialog(material)}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors text-sm font-semibold"
+                                        title="Excluir material permanentemente (apenas admin/desenvolvedor)"
+                                    >
+                                        <TrashIcon className="w-4 h-4" />
+                                        Excluir
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => handleOpenDeleteDialog(material)}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-900/70 transition-colors text-sm font-semibold"
+                                        title="Desativar material"
+                                    >
+                                        <TrashIcon className="w-4 h-4" />
+                                        Desativar
+                                    </button>
+                                )}
                             </div>
                             </div>
                         </div>
@@ -1729,13 +1843,23 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             >
                                                 <PencilIcon className="w-4 h-4" />
                                             </button>
-                                            <button
-                                                onClick={() => handleOpenDeleteDialog(material)}
-                                                className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
-                                                title={isAdminOrDev ? 'Excluir material (apenas admin/desenvolvedor)' : 'Desativar material'}
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
+                                            {isAdminOrDev ? (
+                                                <button
+                                                    onClick={() => handleOpenDeleteDialog(material)}
+                                                    className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
+                                                    title="Excluir material permanentemente (apenas admin/desenvolvedor)"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleOpenDeleteDialog(material)}
+                                                    className="p-2 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-200 transition-colors"
+                                                    title="Desativar material"
+                                                >
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>
@@ -2098,26 +2222,81 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             )}
 
             {/* AlertDialog de Confirmação de Exclusão */}
-            <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-                <AlertDialogContent>
+            <AlertDialog open={showDeleteDialog} onOpenChange={(open) => {
+                setShowDeleteDialog(open);
+                if (!open) {
+                    setItemToDelete(null);
+                    setMovimentacoesCount(0);
+                }
+            }}>
+                <AlertDialogContent className="max-w-md">
                     <AlertDialogHeader>
                         <AlertDialogTitle>
-                            {isAdminOrDev ? '🗑️ Excluir Material' : '⚠️ Desativar Material'}
+                            {isAdminOrDev ? '🗑️ Excluir Material Permanentemente' : '⚠️ Desativar Material'}
                         </AlertDialogTitle>
-                        <AlertDialogDescription>
+                        <AlertDialogDescription className="space-y-3">
                             {isAdminOrDev ? (
                                 <>
-                                    <strong>TEM CERTEZA POIS PODE INFLUENCIAR NO REGISTRO DE UMA COMPRA*</strong>
-                                    <br /><br />
-                                    Material: <strong>"{itemToDelete?.name}"</strong>
-                                    <br /><br />
-                                    Esta ação não pode ser desfeita. O material será excluído, mas permanecerá no histórico de compras e contas a pagar.
+                                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                        <p className="text-sm font-semibold text-red-800 mb-2">
+                                            ⚠️ ATENÇÃO: Esta ação é irreversível!
+                                        </p>
+                                        <p className="text-sm text-red-700">
+                                            O material será excluído permanentemente do banco de dados (hard delete).
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                        <p className="text-sm font-semibold text-gray-800 mb-1">
+                                            Material:
+                                        </p>
+                                        <p className="text-sm text-gray-700">
+                                            <strong>"{itemToDelete?.name}"</strong>
+                                        </p>
+                                        {itemToDelete?.sku && (
+                                            <p className="text-xs text-gray-600 mt-1">
+                                                SKU: {itemToDelete.sku}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {loadingMovimentacoes ? (
+                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                            <p className="text-sm text-yellow-700">
+                                                🔍 Verificando movimentações relacionadas...
+                                            </p>
+                                        </div>
+                                    ) : movimentacoesCount > 0 ? (
+                                        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                                            <p className="text-sm font-semibold text-orange-800 mb-1">
+                                                📦 Movimentações relacionadas:
+                                            </p>
+                                            <p className="text-sm text-orange-700">
+                                                Este material possui <strong>{movimentacoesCount} movimentação(ões)</strong> de estoque que também serão excluídas permanentemente.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                            <p className="text-sm text-blue-700">
+                                                ℹ️ Nenhuma movimentação de estoque encontrada para este material.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                        <p className="text-xs text-yellow-800">
+                                            <strong>Nota:</strong> O material permanecerá no histórico de compras e contas a pagar para manter a integridade dos registros financeiros.
+                                        </p>
+                                    </div>
                                 </>
                             ) : (
                                 <>
-                                    Tem certeza que deseja desativar o material <strong>"{itemToDelete?.name}"</strong>?
-                                    <br /><br />
-                                    O material será desativado e não aparecerá mais nas listagens, mas permanecerá no histórico.
+                                    <p className="text-gray-700">
+                                        Tem certeza que deseja desativar o material <strong>"{itemToDelete?.name}"</strong>?
+                                    </p>
+                                    <p className="text-sm text-gray-600">
+                                        O material será desativado e não aparecerá mais nas listagens, mas permanecerá no histórico.
+                                    </p>
                                 </>
                             )}
                         </AlertDialogDescription>
@@ -2126,6 +2305,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <AlertDialogCancel onClick={() => {
                             setShowDeleteDialog(false);
                             setItemToDelete(null);
+                            setMovimentacoesCount(0);
                         }}>
                             Cancelar
                         </AlertDialogCancel>
@@ -2135,12 +2315,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     handleDesativar(itemToDelete);
                                     setShowDeleteDialog(false);
                                     setItemToDelete(null);
+                                    setMovimentacoesCount(0);
                                 }
                             }}
-                            className="bg-red-600 hover:bg-red-700"
-                            disabled={loading}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            disabled={loading || loadingMovimentacoes}
                         >
-                            {loading ? (isAdminOrDev ? 'Excluindo...' : 'Desativando...') : (isAdminOrDev ? 'Excluir Material' : 'Desativar Material')}
+                            {loading ? (isAdminOrDev ? 'Excluindo...' : 'Desativando...') : (isAdminOrDev ? 'Excluir Permanentemente' : 'Desativar Material')}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
@@ -2357,6 +2538,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                                         </td>
                                                         <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                                             {compra.quantidade}
+                                                            {(compra as any).quantidadeFracionada && (
+                                                                <span className="ml-2 text-blue-600 font-medium">
+                                                                    ({compra.quantidade} {(compra as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {compra.quantidade * (compra as any).quantidadeFracionada} unidades)
+                                                                </span>
+                                                            )}
                                                         </td>
                                                         <td className="px-4 py-3 text-sm font-bold text-blue-600 text-right">
                                                             R$ {parseFloat(compra.valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -2713,6 +2899,116 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     Cancelar
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de Compras com Fracionamento Pendente */}
+            {modalFracionamentoPendente && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-indigo-600">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-xl font-bold text-white">📦 Atualizar Estoque por Fracionamento</h3>
+                                    <p className="text-sm text-blue-100 mt-1">
+                                        {comprasFracionamentoPendentes.length} compra(s) com fracionamento pendente
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setModalFracionamentoPendente(false);
+                                        setComprasFracionamentoPendentes([]);
+                                    }}
+                                    className="text-white/80 hover:text-white hover:bg-white/20 rounded-lg p-2 transition-all"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6 space-y-4">
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-2">
+                                    ℹ️ As seguintes compras têm itens com fracionamento configurado que ainda não foram aplicados ao estoque:
+                                </p>
+                                <p className="text-xs text-blue-700 dark:text-blue-300">
+                                    Ao confirmar, o estoque será atualizado com as quantidades unitárias corretas. Cada compra será processada apenas uma vez.
+                                </p>
+                            </div>
+
+                            <div className="space-y-3 max-h-96 overflow-y-auto">
+                                {comprasFracionamentoPendentes.map((compra: any) => (
+                                    <div key={compra.id} className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl p-4">
+                                        <div className="flex items-start justify-between mb-2">
+                                            <div>
+                                                <p className="font-semibold text-gray-900 dark:text-white">
+                                                    NF: {compra.numeroNF} - {compra.fornecedorNome}
+                                                </p>
+                                                <p className="text-xs text-gray-600 dark:text-gray-400">
+                                                    Compra #{compra.numeroSequencial} • {new Date(compra.dataCompra).toLocaleDateString('pt-BR')}
+                                                </p>
+                                            </div>
+                                            <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-lg text-xs font-semibold">
+                                                {compra.itensPendentes.length} item(ns)
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="mt-3 space-y-2">
+                                            {compra.itensPendentes.map((item: any, idx: number) => (
+                                                <div key={idx} className="bg-white dark:bg-dark-card rounded-lg p-3 border border-gray-200 dark:border-dark-border">
+                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{item.nomeProduto}</p>
+                                                    <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                                                        <span className="font-semibold">
+                                                            {item.quantidade} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} × {item.quantidadeFracionada} un = 
+                                                        </span>
+                                                        <span className="ml-1 text-blue-600 dark:text-blue-400 font-bold">
+                                                            {item.quantidadeTotalUnidades} unidades
+                                                        </span>
+                                                        {item.material && (
+                                                            <span className="ml-2 text-gray-500">
+                                                                (Estoque atual: {item.material.estoqueAtual} un)
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-gray-200 dark:border-dark-border flex justify-end gap-3">
+                            <button
+                                onClick={() => {
+                                    setModalFracionamentoPendente(false);
+                                    setComprasFracionamentoPendentes([]);
+                                }}
+                                className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-dark-hover rounded-lg hover:bg-gray-200 dark:hover:bg-dark-border transition-all font-semibold"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleConfirmarProcessarFracionamento}
+                                disabled={processandoFracionamento}
+                                className="px-6 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                            >
+                                {processandoFracionamento ? (
+                                    <>
+                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        Processando...
+                                    </>
+                                ) : (
+                                    'Confirmar e Processar'
+                                )}
+                            </button>
                         </div>
                     </div>
                 </div>

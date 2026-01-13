@@ -36,14 +36,14 @@ const QuickActions: React.FC<QuickActionsProps> = ({ onNavigate }) => {
                 </button>
                 
                 <button 
-                    onClick={() => onNavigate('Projetos')} 
+                    onClick={() => onNavigate('Ordem De Serviços')} 
                     className="w-full flex justify-between items-center p-3.5 bg-gray-50 text-gray-700 rounded-xl hover:bg-gray-100 transition-all hover:shadow-soft group border border-gray-100 hover:border-gray-200"
                 >
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
                             <PlusCircleIcon className="w-4.5 h-4.5 text-green-600" />
                         </div>
-                        <span className="font-semibold">Novo Projeto</span>
+                        <span className="font-semibold">Nova Ordem De Serviço</span>
                     </div>
                     <ArrowRightIcon className="w-4 h-4 text-green-600 group-hover:translate-x-1 transition-transform duration-200" />
                 </button>

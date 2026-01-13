@@ -69,6 +69,14 @@ router.post('/', checkPermission('create_orcamento'), createOrcamento);
 // ==================== ROTAS ESPECÍFICAS (DEVEM VIR ANTES DE /:id) ====================
 // IMPORTANTE: Rotas específicas como /:id/aprovar devem vir ANTES de /:id para evitar conflitos de roteamento
 
+// Middleware de debug para todas as rotas PUT/PATCH
+router.use((req, res, next) => {
+  if ((req.method === 'PUT' || req.method === 'PATCH') && req.path.includes('/status')) {
+    console.log(`🔍 [DEBUG] ${req.method} ${req.path} - ID: ${req.params.id}, Status: ${JSON.stringify(req.body)}`);
+  }
+  next();
+});
+
 /**
  * @route POST /api/orcamentos/:id/aprovar
  * @route PUT /api/orcamentos/:id/aprovar
@@ -94,10 +102,18 @@ router.post('/:id/recusar', checkPermission('update_orcamento'), recusarOrcament
 
 /**
  * @route PATCH /api/orcamentos/:id/status
+ * @route PUT /api/orcamentos/:id/status
  * @desc Atualiza o status de um orçamento
  * @access RBAC: update_orcamento (admin, gerente, engenheiro, comprador)
  */
-router.patch('/:id/status', checkPermission('update_orcamento'), updateOrcamentoStatus);
+router.patch('/:id/status', (req, res, next) => {
+  console.log('🔍 Rota PATCH /:id/status capturada!', { id: req.params.id, status: req.body?.status });
+  next();
+}, checkPermission('update_orcamento'), updateOrcamentoStatus);
+router.put('/:id/status', (req, res, next) => {
+  console.log('🔍 Rota PUT /:id/status capturada!', { id: req.params.id, status: req.body?.status });
+  next();
+}, checkPermission('update_orcamento'), updateOrcamentoStatus);
 
 // Rotas de PDF (devem vir depois de /:id/aprovar mas antes de /:id genérico)
 router.post('/:id/pdf/preview-personalizado', PDFOrcamentoController.uploadMiddleware, PDFOrcamentoController.gerarPreviewPersonalizado);

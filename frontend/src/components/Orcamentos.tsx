@@ -174,6 +174,51 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const [orcamentoToEdit, setOrcamentoToEdit] = useState<Orcamento | null>(null);
     const [orcamentoToView, setOrcamentoToView] = useState<Orcamento | null>(null);
     
+    // Estado para modal de visualização de itens do kit
+    const [showModalItensKit, setShowModalItensKit] = useState(false);
+    const [itensKitParaVisualizar, setItensKitParaVisualizar] = useState<any[]>([]);
+    const [nomeKitParaVisualizar, setNomeKitParaVisualizar] = useState<string>('');
+
+    // Função auxiliar para formatar o tipo do item
+    const formatarTipoItem = (tipo: string): string => {
+        const tipos: { [key: string]: string } = {
+            'MATERIAL': 'Material',
+            'SERVICO': 'Serviço',
+            'COTACAO': 'Banco Frio',
+            'QUADRO_PRONTO': 'Quadro',
+            'CUSTO_EXTRA': 'Custo Extra',
+            'KIT': 'Kit'
+        };
+        return tipos[tipo] || tipo;
+    };
+
+    // Função auxiliar para aplicar BDI aos itens do kit
+    const aplicarBdiAosItensKit = (itensKit: any[], bdi: number, bdiOriginal?: number): any[] => {
+        return itensKit.map(itemKit => {
+            // Se houver valorVendaOriginal, usar como base
+            // Caso contrário, tentar calcular a partir do valorVenda atual e do BDI original
+            let valorBase = itemKit.valorVendaOriginal;
+            
+            if (!valorBase && itemKit.valorVenda && bdiOriginal !== undefined) {
+                // Calcular valor base a partir do valor atual e do BDI original
+                valorBase = itemKit.valorVenda / (1 + bdiOriginal / 100);
+            } else if (!valorBase) {
+                // Se não conseguir calcular, usar o valorVenda atual como base
+                valorBase = itemKit.valorVenda || 0;
+            }
+            
+            // Aplicar o novo BDI ao valor base
+            const valorVendaComBdi = valorBase * (1 + bdi / 100);
+            
+            return {
+                ...itemKit,
+                valorVenda: valorVendaComBdi,
+                // Manter o valorVendaOriginal para referência futura
+                valorVendaOriginal: itemKit.valorVendaOriginal || valorBase
+            };
+        });
+    };
+    
     // Estado para AlertDialog de aprovação
     const [showAprovarDialog, setShowAprovarDialog] = useState(false);
     const [orcamentoToAprovar, setOrcamentoToAprovar] = useState<Orcamento | null>(null);
@@ -278,8 +323,23 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         if (tipo === 'MATERIAL' && (item.material?.nome || item.materialNome)) {
             return item.material?.nome || item.materialNome;
         }
-        if (tipo === 'KIT' && item.kit?.nome) {
-            return item.kit.nome;
+        // ✅ Para kits: priorizar item.descricao (nome customizado salvo) se for kit customizado, senão usar item.kit?.nome (kit cadastrado)
+        if (tipo === 'KIT') {
+            // Se for kit customizado (sem kitId), usar item.descricao que contém o nome do usuário
+            if (!item.kitId && item.descricao) {
+                return item.descricao;
+            }
+            // Se for kit cadastrado, usar item.kit?.nome
+            if (item.kit?.nome) {
+                return item.kit.nome;
+            }
+            // Fallback: usar item.descricao ou item.nome se existir
+            if (item.descricao) {
+                return item.descricao;
+            }
+            if (item.nome) {
+                return item.nome;
+            }
         }
         if (tipo === 'SERVICO') {
             return item.servicoNome || item.descricao || 'Serviço';
@@ -628,6 +688,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             .filter(orc => {
                 // Incluir reprovados
                 if (orc.status === 'Recusado') return true;
+                // Incluir declinados
+                if (orc.status === 'Declinado') return true;
+                // Incluir cancelados
+                if (orc.status === 'Cancelado') return true;
                 // Incluir expirados (exceto aprovados)
                 if (isOrcamentoExpirado(orc)) return true;
                 return false;
@@ -655,8 +719,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         // Filtro normal para aba de listagem
         return orcamentos
             .filter(orc => {
-                // Na listagem principal, excluir reprovados e expirados
+                // Na listagem principal, excluir reprovados, declinados, cancelados e expirados
                 if (orc.status === 'Recusado') return false;
+                if (orc.status === 'Declinado') return false;
+                if (orc.status === 'Cancelado') return false;
                 if (isOrcamentoExpirado(orc)) return false;
                 // Aplicar filtro de status
                 return statusFilter === 'Todos' || orc.status === statusFilter;
@@ -1666,10 +1732,20 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         setDeletePermanent(false);
     };
 
-    // Alterar status do orçamento (mantido para compatibilidade)
-    const handleChangeStatus = async (orcamentoId: string, novoStatus: 'Pendente' | 'Aprovado' | 'Recusado') => {
+    // Alterar status do orçamento
+    const handleChangeStatus = async (orcamentoId: string, novoStatus: 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado') => {
         const promise = (async () => {
             console.log(`🔄 Alterando status do orçamento ${orcamentoId} para ${novoStatus}...`);
+            
+            // Se for declinar e o orçamento estiver aprovado, confirmar
+            const orcamento = orcamentos.find(o => o.id === orcamentoId);
+            if (novoStatus === 'Declinado' && orcamento?.status === 'Aprovado') {
+                const confirmar = window.confirm('Este orçamento está aprovado. Ao declinar, o projeto será cancelado. Deseja continuar?');
+                if (!confirmar) {
+                    throw new Error('Operação cancelada');
+                }
+            }
+            
             const response = await orcamentosService.atualizarStatus(orcamentoId, novoStatus);
 
             if (response.success) {
@@ -1845,8 +1921,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const getStatusClass = (status: string) => {
         switch (status) {
             case 'Pendente': return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
+            case 'Enviado ao Cliente': return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200';
             case 'Aprovado': return 'bg-green-100 text-green-800 ring-1 ring-green-200';
             case 'Recusado': return 'bg-red-100 text-red-800 ring-1 ring-red-200';
+            case 'Declinado': return 'bg-gray-900 text-white ring-1 ring-gray-800';
+            case 'Cancelado': return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
             default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
         }
     };
@@ -1957,14 +2036,14 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             <PlusIcon className="w-5 h-5" />
                             Novo Orçamento
                         </button>
-                        {/* Botão de Reset (apenas para admin) */}
-                        {user?.role?.toLowerCase() === 'admin' && (
+                        {/* Botão de Reset (apenas para admin e desenvolvedor) */}
+                        {(user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'desenvolvedor') && (
                             <button
                                 type="button"
                                 onClick={handleResetarOrcamentos}
                                 disabled={resetting}
                                 className="btn-danger flex items-center gap-2"
-                                title="Resetar todos os orçamentos e a sequência (apenas admin)"
+                                title="Resetar todos os orçamentos e a sequência (apenas admin/desenvolvedor)"
                             >
                                 <svg className={`w-5 h-5 ${resetting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -2093,6 +2172,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             >
                                 <option value="Todos">Todos os Status</option>
                                 <option value="Pendente">Pendente</option>
+                                <option value="Enviado ao Cliente">Enviado ao Cliente</option>
                                 <option value="Aprovado">Aprovado</option>
                                 <option value="Recusado">Recusado</option>
                             </select>
@@ -2101,7 +2181,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     {abaAtiva === 'reprovados-expirados' && (
                         <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-3">
                             <p className="text-xs text-orange-800 font-semibold">
-                                ⚠️ Exibindo apenas orçamentos reprovados e expirados
+                                ⚠️ Exibindo apenas orçamentos reprovados, declinados, cancelados e expirados
                             </p>
                         </div>
                     )}
@@ -2111,7 +2191,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     <p className="text-sm text-gray-600">
                         {abaAtiva === 'reprovados-expirados' ? (
                             <>
-                                Exibindo <span className="font-bold text-gray-900">{orcamentosReprovadosExpirados.length}</span> orçamentos reprovados/expirados
+                                Exibindo <span className="font-bold text-gray-900">{orcamentosReprovadosExpirados.length}</span> orçamentos reprovados/declinados/cancelados/expirados
                             </>
                         ) : (
                             <>
@@ -2150,13 +2230,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         <span className="text-4xl">📋</span>
                     </div>
                     <h3 className="text-lg font-bold text-gray-900 mb-2">
-                        {abaAtiva === 'reprovados-expirados' 
-                            ? 'Nenhum orçamento reprovado ou expirado encontrado' 
+                        {abaAtiva === 'reprovados-expirados'
+                            ? 'Nenhum orçamento reprovado, declinado, cancelado ou expirado encontrado'
                             : 'Nenhum orçamento encontrado'}
                     </h3>
                     <p className="text-gray-500 mb-6">
                         {abaAtiva === 'reprovados-expirados' 
-                            ? 'Não há orçamentos reprovados ou expirados no momento'
+                            ? 'Não há orçamentos reprovados, declinados, cancelados ou expirados no momento'
                             : searchTerm || statusFilter !== 'Todos'
                                 ? 'Tente ajustar os filtros de busca'
                                 : 'Comece criando seu primeiro orçamento'}
@@ -2249,6 +2329,21 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             // Buscar orçamento completo do backend para garantir relações carregadas
                                             const response = await orcamentosService.buscar(orcamento.id);
                                             if (response.success && response.data) {
+                                                // Debug: verificar se itensDoKit está presente
+                                                console.log('📦 Orçamento carregado:', response.data);
+                                                if (response.data.items) {
+                                                    response.data.items.forEach((item: any, idx: number) => {
+                                                        if (item.tipo === 'KIT') {
+                                                            console.log(`🔍 Item KIT ${idx}:`, {
+                                                                nome: item.nome || item.descricao,
+                                                                itensDoKit: item.itensDoKit,
+                                                                temItensDoKit: !!item.itensDoKit,
+                                                                tipoItensDoKit: typeof item.itensDoKit,
+                                                                isArray: Array.isArray(item.itensDoKit)
+                                                            });
+                                                        }
+                                                    });
+                                                }
                                                 setOrcamentoToView(response.data);
                                             } else {
                                                 // Fallback: usar o orçamento da lista
@@ -2326,8 +2421,41 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     )}
                                 </div>
                                 
-                                {/* Botões de Aprovação/Recusa - Apenas para Pendentes */}
+                                {/* Botões de Status */}
                                 {orcamento.status === 'Pendente' && (
+                                    <div className="flex flex-col gap-2">
+                                        <button
+                                            onClick={() => handleChangeStatus(orcamento.id, 'Enviado ao Cliente')}
+                                            className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-semibold shadow-md text-sm"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                            </svg>
+                                            Enviado ao Cliente
+                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleAprovarOrcamento(orcamento.id)}
+                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                Aprovar
+                                            </button>
+                                            <button
+                                                onClick={() => handleRecusarOrcamento(orcamento.id)}
+                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-lg hover:from-red-700 hover:to-red-600 transition-all font-semibold shadow-md"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                                Recusar
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                {orcamento.status === 'Enviado ao Cliente' && (
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => handleAprovarOrcamento(orcamento.id)}
@@ -2339,15 +2467,26 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             Aprovar
                                         </button>
                                         <button
-                                            onClick={() => handleRecusarOrcamento(orcamento.id)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-lg hover:from-red-700 hover:to-red-600 transition-all font-semibold shadow-md"
+                                            onClick={() => handleChangeStatus(orcamento.id, 'Declinado')}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-lg hover:from-gray-800 hover:to-gray-700 transition-all font-semibold shadow-md"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
-                                            Recusar
+                                            Declinar
                                         </button>
                                     </div>
+                                )}
+                                {orcamento.status === 'Aprovado' && (
+                                    <button
+                                        onClick={() => handleChangeStatus(orcamento.id, 'Declinado')}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-lg hover:from-orange-700 hover:to-orange-600 transition-all font-semibold shadow-md text-sm"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                        Declinar
+                                    </button>
                                 )}
                             </div>
                         </div>
@@ -2355,8 +2494,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 </div>
             ) : (
                 /* Visualização em Lista */
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-soft" style={{ overflow: 'visible' }}>
-                    <div className="overflow-x-auto">
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-soft" style={{ overflow: 'visible', position: 'relative' }}>
+                    <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
@@ -2409,8 +2548,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         <div className="flex flex-col items-center gap-1">
                                             <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(orcamento.status)}`}>
                                                 {orcamento.status === 'Pendente' && '⏳ '}
+                                                {orcamento.status === 'Enviado ao Cliente' && '📤 '}
                                                 {orcamento.status === 'Aprovado' && '✅ '}
                                                 {orcamento.status === 'Recusado' && '❌ '}
+                                                {orcamento.status === 'Declinado' && '🔻 '}
+                                                {orcamento.status === 'Cancelado' && '🚫 '}
                                                 {orcamento.status}
                                             </span>
                                             {isOrcamentoExpirado(orcamento) && (
@@ -2420,8 +2562,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible' }}>
-                                        <div className="flex items-center justify-center" style={{ position: 'relative', zIndex: 1 }}>
+                                    <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
+                                        <div className="flex items-center justify-center" style={{ position: 'relative' }}>
                                             <ActionsDropdown
                                                 actions={[
                                                     {
@@ -2523,16 +2665,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         variant: 'default'
                                                     },
                                                     {
-                                                        label: 'PDF Rápido',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => handleGerarPDFProfissional(orcamento),
-                                                        variant: 'default'
-                                                    },
-                                                    {
                                                         label: 'Personalizar PDF',
                                                         icon: (
                                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2541,6 +2673,29 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         ),
                                                         onClick: () => handlePersonalizarPDF(orcamento),
                                                         variant: 'default'
+                                                    },
+                                                    // Ações de status
+                                                    {
+                                                        label: 'Marcar como Enviado ao Cliente',
+                                                        icon: (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                                            </svg>
+                                                        ),
+                                                        onClick: () => handleChangeStatus(orcamento.id, 'Enviado ao Cliente'),
+                                                        variant: 'primary',
+                                                        show: orcamento.status === 'Pendente'
+                                                    },
+                                                    {
+                                                        label: 'Declinar Orçamento',
+                                                        icon: (
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                            </svg>
+                                                        ),
+                                                        onClick: () => handleChangeStatus(orcamento.id, 'Declinado'),
+                                                        variant: 'danger',
+                                                        show: orcamento.status === 'Aprovado'
                                                     },
                                                     {
                                                         label: 'Cancelar',
@@ -4288,8 +4443,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Status</h4>
                                         <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${getStatusClass(orcamentoToView.status)}`}>
                                             {orcamentoToView.status === 'Pendente' && '⏳ '}
+                                            {orcamentoToView.status === 'Enviado ao Cliente' && '📤 '}
                                             {orcamentoToView.status === 'Aprovado' && '✅ '}
                                             {orcamentoToView.status === 'Recusado' && '❌ '}
+                                            {orcamentoToView.status === 'Declinado' && '🔻 '}
+                                            {orcamentoToView.status === 'Cancelado' && '🚫 '}
                                             {orcamentoToView.status}
                                         </span>
                                     </div>
@@ -4425,6 +4583,42 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                                 })() : <span className="text-blue-600 dark:text-blue-400">• Sem data</span>}
                                                                             </div>
                                                                         )}
+                                                                        {/* Botão para ver itens do kit customizado */}
+                                                                        {tipo === 'KIT' && (() => {
+                                                                            // Verificar se tem itensDoKit (pode ser array ou objeto JSON)
+                                                                            const itensDoKit = item.itensDoKit;
+                                                                            const temItensDoKit = itensDoKit && (
+                                                                                (Array.isArray(itensDoKit) && itensDoKit.length > 0) ||
+                                                                                (typeof itensDoKit === 'object' && Object.keys(itensDoKit).length > 0)
+                                                                            );
+                                                                            
+                                                                            if (!temItensDoKit) return null;
+                                                                            
+                                                                            const itensArray = Array.isArray(itensDoKit) ? itensDoKit : [itensDoKit];
+                                                                            
+                                                                            return (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => {
+                                                                                        e.preventDefault();
+                                                                                        e.stopPropagation();
+                                                                                        // Aplicar BDI do orçamento aos itens do kit antes de exibir
+                                                                                        const bdiOrcamento = orcamentoToView?.bdi || 0;
+                                                                                        const itensComBdi = aplicarBdiAosItensKit(itensArray, bdiOrcamento);
+                                                                                        setItensKitParaVisualizar(itensComBdi);
+                                                                                        setNomeKitParaVisualizar(itemNome);
+                                                                                        setShowModalItensKit(true);
+                                                                                    }}
+                                                                                    className="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50 rounded-md transition-colors"
+                                                                                >
+                                                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                                    </svg>
+                                                                                    Ver itens do kit ({itensArray.length})
+                                                                                </button>
+                                                                            );
+                                                                        })()}
                                                                     </div>
                                                                 </td>
                                                                 <td className="px-4 py-4 text-center">
@@ -4503,6 +4697,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         <div className={`w-3 h-3 rounded-full ${
                                             orcamentoToView.status === 'Aprovado' ? 'bg-green-500' :
                                             orcamentoToView.status === 'Pendente' ? 'bg-yellow-500' :
+                                            orcamentoToView.status === 'Enviado ao Cliente' ? 'bg-blue-500' :
+                                            orcamentoToView.status === 'Declinado' ? 'bg-gray-900' :
+                                            orcamentoToView.status === 'Cancelado' ? 'bg-gray-500' :
                                             'bg-red-500'
                                         }`}></div>
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -4512,9 +4709,21 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 </div>
 
                                 {/* Botões de Ação */}
-                                <div className="flex gap-3">
+                                <div className="flex gap-3 flex-wrap">
                                     {orcamentoToView.status === 'Pendente' && (
                                         <>
+                                            <button
+                                                onClick={() => {
+                                                    handleChangeStatus(orcamentoToView.id, 'Enviado ao Cliente');
+                                                    setOrcamentoToView(null);
+                                                }}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                                </svg>
+                                                Enviado ao Cliente
+                                            </button>
                                             <button
                                                 onClick={() => {
                                                     handleAprovarOrcamento(orcamentoToView.id);
@@ -4540,6 +4749,48 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 Recusar
                                             </button>
                                         </>
+                                    )}
+                                    {orcamentoToView.status === 'Enviado ao Cliente' && (
+                                        <>
+                                            <button
+                                                onClick={() => {
+                                                    handleAprovarOrcamento(orcamentoToView.id);
+                                                    setOrcamentoToView(null);
+                                                }}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                Aprovar
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    handleChangeStatus(orcamentoToView.id, 'Declinado');
+                                                    setOrcamentoToView(null);
+                                                }}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl hover:from-gray-800 hover:to-gray-700 transition-all shadow-medium font-semibold"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                                Declinar
+                                            </button>
+                                        </>
+                                    )}
+                                    {orcamentoToView.status === 'Aprovado' && (
+                                        <button
+                                            onClick={() => {
+                                                handleChangeStatus(orcamentoToView.id, 'Declinado');
+                                                setOrcamentoToView(null);
+                                            }}
+                                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                            Declinar
+                                        </button>
                                     )}
                                     <button
                                         onClick={async () => {
@@ -4657,8 +4908,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     </h3>
                                     <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getStatusClass(orcamentoToView.status)}`}>
                                         {orcamentoToView.status === 'Pendente' && '⏳ '}
+                                        {orcamentoToView.status === 'Enviado ao Cliente' && '📤 '}
                                         {orcamentoToView.status === 'Aprovado' && '✅ '}
                                         {orcamentoToView.status === 'Recusado' && '❌ '}
+                                        {orcamentoToView.status === 'Declinado' && '🔻 '}
+                                        {orcamentoToView.status === 'Cancelado' && '🚫 '}
                                         {orcamentoToView.status}
                                     </span>
                                 </div>
@@ -4823,6 +5077,29 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                                 Última cotação: {new Date(dataAtualizacao).toLocaleDateString('pt-BR')}
                                                                             </p>
                                                                         )}
+                                                                        {/* Botão para ver itens do kit customizado */}
+                                                                        {tipo === 'KIT' && item.itensDoKit && Array.isArray(item.itensDoKit) && item.itensDoKit.length > 0 && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={(e) => {
+                                                                                    e.preventDefault();
+                                                                                    e.stopPropagation();
+                                                                                    // Aplicar BDI do orçamento aos itens do kit antes de exibir
+                                                                                    const bdiOrcamento = orcamentoToView?.bdi || 0;
+                                                                                    const itensComBdi = aplicarBdiAosItensKit(item.itensDoKit, bdiOrcamento);
+                                                                                    setItensKitParaVisualizar(itensComBdi);
+                                                                                    setNomeKitParaVisualizar(itemNome);
+                                                                                    setShowModalItensKit(true);
+                                                                                }}
+                                                                                className="mt-1 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors"
+                                                                            >
+                                                                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                                </svg>
+                                                                                Ver itens do kit ({item.itensDoKit.length})
+                                                                            </button>
+                                                                        )}
                                                                     </div>
                                                                 </td>
                                                                 <td className="px-3 py-3 text-center align-top text-xs font-medium text-gray-700">
@@ -4873,16 +5150,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             {/* Ações do Orçamento */}
                             <div className="flex gap-3 pt-6 border-t border-gray-100">
                                 <button
-                                    onClick={() => orcamentoToView && handleGerarPDFProfissional(orcamentoToView)}
-                                    className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#0a1a2f] hover:bg-[#0d2240] dark:bg-gradient-to-r dark:from-purple-600 dark:to-indigo-600 text-white rounded-xl dark:hover:from-purple-700 dark:hover:to-indigo-700 transition-all shadow-medium font-semibold"
-                                    title="Gerar PDF com marca d'água padrão S3E"
-                                >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                                    </svg>
-                                    📄 Gerar PDF Rápido
-                                </button>
-                                <button
                                     onClick={() => {
                                         if (orcamentoToView) {
                                             const orcamentoCopy = orcamentoToView;
@@ -4902,6 +5169,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     <>
                                         <button
                                             onClick={() => {
+                                                handleChangeStatus(orcamentoToView.id, 'Enviado ao Cliente');
+                                                setOrcamentoToView(null);
+                                            }}
+                                            className="flex-1 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-4 py-2.5 rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                                        >
+                                            📤 Enviado ao Cliente
+                                        </button>
+                                        <button
+                                            onClick={() => {
                                                 handleAprovarOrcamento(orcamentoToView.id);
                                                 setOrcamentoToView(null);
                                             }}
@@ -4919,6 +5195,39 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             ❌ Recusar
                                         </button>
                                     </>
+                                )}
+                                {orcamentoToView.status === 'Enviado ao Cliente' && (
+                                    <>
+                                        <button
+                                            onClick={() => {
+                                                handleAprovarOrcamento(orcamentoToView.id);
+                                                setOrcamentoToView(null);
+                                            }}
+                                            className="flex-1 bg-gradient-to-r from-green-600 to-green-500 text-white px-4 py-2.5 rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                                        >
+                                            ✅ Aprovar Orçamento
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                handleChangeStatus(orcamentoToView.id, 'Declinado');
+                                                setOrcamentoToView(null);
+                                            }}
+                                            className="flex-1 bg-gradient-to-r from-gray-900 to-gray-800 text-white px-4 py-2.5 rounded-xl hover:from-gray-800 hover:to-gray-700 transition-all shadow-medium font-semibold"
+                                        >
+                                            🔻 Declinar
+                                        </button>
+                                    </>
+                                )}
+                                {orcamentoToView.status === 'Aprovado' && (
+                                    <button
+                                        onClick={() => {
+                                            handleChangeStatus(orcamentoToView.id, 'Declinado');
+                                            setOrcamentoToView(null);
+                                        }}
+                                        className="flex-1 bg-gradient-to-r from-orange-600 to-orange-500 text-white px-4 py-2.5 rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                                    >
+                                        🔻 Declinar
+                                    </button>
                                 )}
                             </div>
                         </div>
@@ -5128,6 +5437,127 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 cancelText="Cancelar"
                 variant="success"
             />
+
+            {/* Modal de Visualização de Itens do Kit */}
+            {showModalItensKit && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+                        {/* Header */}
+                        <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">Itens do Kit: {nomeKitParaVisualizar}</h2>
+                                <p className="text-blue-100 text-sm mt-1">
+                                    {itensKitParaVisualizar.length} {itensKitParaVisualizar.length === 1 ? 'item' : 'itens'}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowModalItensKit(false);
+                                    setItensKitParaVisualizar([]);
+                                    setNomeKitParaVisualizar('');
+                                }}
+                                className="p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Nome</th>
+                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Código</th>
+                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Tipo</th>
+                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Quantidade</th>
+                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Valor de Venda</th>
+                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Subtotal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-100">
+                                        {itensKitParaVisualizar.map((itemKit: any, index: number) => {
+                                            const valorVenda = itemKit.valorVenda || 0;
+                                            const quantidade = itemKit.quantidade || 1;
+                                            const subtotal = valorVenda * quantidade;
+                                            const tipoItem = itemKit.tipo || 'MATERIAL';
+                                            
+                                            return (
+                                                <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                                    <td className="px-4 py-3">
+                                                        <p className="font-medium text-gray-900">{itemKit.nome || 'Item sem nome'}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <p className="text-sm text-gray-600">{itemKit.codigo || '-'}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                            {formatarTipoItem(tipoItem)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-center">
+                                                        <p className="text-sm font-medium text-gray-900">
+                                                            {quantidade} {itemKit.unidadeMedida || 'UN'}
+                                                        </p>
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <p className="text-sm font-medium text-gray-900">
+                                                            R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                        {itemKit.valorVendaOriginal && itemKit.valorVendaOriginal !== valorVenda && (
+                                                            <p className="text-xs text-gray-500 line-through">
+                                                                R$ {itemKit.valorVendaOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </p>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        <p className="text-sm font-bold text-purple-700">
+                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                    <tfoot className="bg-gray-50">
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-3 text-right font-semibold text-gray-900">
+                                                Total do Kit:
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <p className="text-lg font-bold text-purple-700">
+                                                    R$ {itensKitParaVisualizar.reduce((sum: number, item: any) => {
+                                                        const valorVenda = item.valorVenda || 0;
+                                                        const quantidade = item.quantidade || 1;
+                                                        return sum + (valorVenda * quantidade);
+                                                    }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
+                                            </td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="border-t border-gray-200 p-4 flex justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowModalItensKit(false);
+                                    setItensKitParaVisualizar([]);
+                                    setNomeKitParaVisualizar('');
+                                }}
+                                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* AlertDialog de Confirmação de Exclusão */}
             <AlertDialog

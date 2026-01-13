@@ -73,6 +73,8 @@ type ServiceFormState = {
     tipo: ServiceType;
     tipoServico: 'MAO_DE_OBRA' | 'MONTAGEM' | 'ENGENHARIA' | 'PROJETOS' | 'ADMINISTRATIVO'; // ✅ NOVO: Tipo de serviço
     price: string; 
+    custo: string; // ✅ NOVO: Custo do serviço
+    temCusto: boolean; // ✅ NOVO: Flag para indicar se o serviço tem custo
     unidade: string;
     name: string;
     internalCode: string;
@@ -85,6 +87,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<ServiceType | 'Todos'>('Todos');
+    const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'Ativos' | 'Inativos'>('Todos');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [serviceToEdit, setServiceToEdit] = useState<Service | null>(null);
@@ -112,6 +115,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
         tipo: ServiceType.Instalacao,
         tipoServico: 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço padrão
         price: '',
+        custo: '',
+        temCusto: false, // ✅ NOVO: Flag para indicar se tem custo
         unidade: 'un',
         name: '',
         internalCode: '',
@@ -156,7 +161,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     internalCode: serv.codigo,
                     description: serv.descricao || '',
                     type: serv.tipo,
-                    price: serv.preco
+                    price: serv.preco,
+                    ativo: serv.ativo !== undefined ? serv.ativo : true // Garantir que ativo seja preservado
                 }));
                 setServices(servicesFormatados);
             } else {
@@ -194,17 +200,28 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 const tipoServico = (s as any).tipoServico;
                 return tipoServico === tipoServicoFilter;
             })
+            .filter(s => {
+                // Filtro por status (ativo/inativo)
+                if (ativoFilter === 'Todos') return true;
+                const isAtivo = (s as any).ativo !== false && (s as any).ativo !== undefined;
+                if (ativoFilter === 'Ativos') return isAtivo;
+                if (ativoFilter === 'Inativos') return !isAtivo;
+                return true;
+            })
             .filter(s =>
                 (s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (s.internalCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (s.description || '').toLowerCase().includes(searchTerm.toLowerCase())
             );
-    }, [services, searchTerm, typeFilter, tipoServicoFilter]);
+    }, [services, searchTerm, typeFilter, tipoServicoFilter, ativoFilter]);
 
     // Estatísticas calculadas
     const stats = useMemo(() => {
         const total = services.length;
-        const ativos = services.filter(s => (s.price || 0) > 0).length; // Considera ativo se tem preço
+        const ativos = services.filter(s => {
+            const isAtivo = (s as any).ativo !== false && (s as any).ativo !== undefined;
+            return isAtivo;
+        }).length;
         const inativos = total - ativos;
         const precoMedio = total > 0 ? services.reduce((sum, s) => sum + (s.price || s.preco || 0), 0) / total : 0;
         
@@ -223,6 +240,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             description: '', 
             type: ServiceType.Instalacao, 
             price: '', 
+            custo: '',
+            temCusto: false,
             unidade: 'un' 
         });
     };
@@ -235,6 +254,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             const description = (service as any).description || service.descricao || '';
             const type = (service as any).type || service.tipo || ServiceType.Instalacao;
             const price = String((service as any).price || service.preco || 0);
+            const custo = (service as any).custo !== undefined && (service as any).custo !== null ? String((service as any).custo) : '';
+            const temCusto = custo !== '' && parseFloat(custo) > 0;
             const unidade = service.unidade || 'un';
             
             setFormState({ 
@@ -248,6 +269,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 description,
                 type,
                 price,
+                custo,
+                temCusto,
                 unidade
             });
         } else {
@@ -333,10 +356,27 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        // Validar custo se temCusto estiver ativado (aceita vazio, 0 ou qualquer valor positivo)
+        let custoValue: number | null = null;
+        if (formState.temCusto) {
+            if (formState.custo && formState.custo.trim() !== '') {
+                custoValue = parseFloat(formState.custo);
+                if (isNaN(custoValue) || custoValue < 0) {
+                    toast.error('O custo deve ser um número válido e positivo');
+                    return;
+                }
+                // Se for 0, manter como null (não tem custo)
+                if (custoValue === 0) {
+                    custoValue = null;
+                }
+            }
+            // Se estiver vazio, manter como null
+        }
+
         try {
             if (serviceToEdit) {
                 // Atualizar serviço existente
-                const servicoData = {
+                const servicoData: any = {
                     nome: formState.name.trim(),
                     codigo: formState.internalCode.trim(),
                     descricao: formState.description?.trim() || '',
@@ -345,6 +385,13 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     preco: priceValue,
                     unidade: formState.unidade || 'un'
                 };
+                
+                // Adicionar custo apenas se temCusto estiver ativado
+                if (formState.temCusto && custoValue !== null) {
+                    servicoData.custo = custoValue;
+                } else {
+                    servicoData.custo = null;
+                }
                 
                 console.log('📤 Atualizando serviço:', servicoData);
                 
@@ -360,7 +407,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                 }
             } else {
                 // Criar novo serviço
-                const servicoData = {
+                const servicoData: any = {
                     nome: formState.name.trim(),
                     codigo: formState.internalCode.trim(),
                     descricao: formState.description?.trim() || '',
@@ -369,6 +416,13 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     preco: priceValue,
                     unidade: formState.unidade || 'un'
                 };
+                
+                // Adicionar custo apenas se temCusto estiver ativado
+                if (formState.temCusto && custoValue !== null) {
+                    servicoData.custo = custoValue;
+                } else {
+                    servicoData.custo = null;
+                }
                 
                 console.log('📤 Criando novo serviço:', servicoData);
                 
@@ -451,8 +505,10 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             const previewData = data.servicos.map((serv: any) => ({
                 codigo: serv.codigo || 'N/A',
                 nome: serv.nome || 'N/A',
+                tipo: serv.tipo || 'Outro', // ✅ CORRIGIDO: Campo tipo estava faltando!
                 tipoServico: serv.tipoServico || 'MAO_DE_OBRA',
                 preco: serv.preco || 0,
+                custo: serv.custo !== undefined ? serv.custo : null, // ✅ NOVO: Custo
                 unidade: serv.unidade || 'un',
                 descricao: serv.descricao || ''
             }));
@@ -507,15 +563,31 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             const response = await servicosService.desativar(serviceToDelete.id);
             
             if (response.success) {
-                toast.error('✅ Serviço removido com sucesso!');
+                toast.success('✅ Serviço desativado com sucesso!');
                 handleCloseDeleteModal();
                 await loadServices();
             } else {
-                toast.error(`❌ Erro ao remover serviço: ${response.error || 'Erro desconhecido'}`);
+                toast.error(`❌ Erro ao desativar serviço: ${response.error || 'Erro desconhecido'}`);
             }
         } catch (error) {
-            console.error('Erro ao remover serviço:', error);
-            toast.error('❌ Erro ao remover serviço. Verifique o console para mais detalhes.');
+            console.error('Erro ao desativar serviço:', error);
+            toast.error('❌ Erro ao desativar serviço. Verifique o console para mais detalhes.');
+        }
+    };
+
+    const handleReativarServico = async (service: Service) => {
+        try {
+            const response = await servicosService.reativar(service.id);
+            
+            if (response.success) {
+                toast.success('✅ Serviço reativado com sucesso!');
+                await loadServices();
+            } else {
+                toast.error(`❌ Erro ao reativar serviço: ${response.error || 'Erro desconhecido'}`);
+            }
+        } catch (error) {
+            console.error('Erro ao reativar serviço:', error);
+            toast.error('❌ Erro ao reativar serviço. Verifique o console para mais detalhes.');
         }
     };
 
@@ -800,6 +872,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
                     <div>
                         <select
+                            value={ativoFilter}
+                            onChange={(e) => setAtivoFilter(e.target.value as 'Todos' | 'Ativos' | 'Inativos')}
                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-cyan-500"
                         >
                             <option value="Todos">Todos os Status</option>
@@ -888,9 +962,18 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex justify-center">
-                                                <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
-                                                    ✅ Ativo
-                                                </span>
+                                                {(() => {
+                                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
+                                                    return isAtivo ? (
+                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                                            ✅ Ativo
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-red-100 text-red-800 ring-1 ring-red-200">
+                                                            ❌ Inativo
+                                                        </span>
+                                                    );
+                                                })()}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
@@ -909,13 +992,26 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                                 >
                                                     <PencilIcon className="w-4 h-4" />
                                                 </button>
-                                                <button
-                                                    onClick={() => handleOpenDeleteModal(service)}
-                                                    className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
-                                                    title="Desativar"
-                                                >
-                                                    <TrashIcon className="w-4 h-4" />
-                                                </button>
+                                                {(() => {
+                                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
+                                                    return isAtivo ? (
+                                                        <button
+                                                            onClick={() => handleOpenDeleteModal(service)}
+                                                            className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                            title="Desativar"
+                                                        >
+                                                            <TrashIcon className="w-4 h-4" />
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleReativarServico(service)}
+                                                            className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                                                            title="Ativar"
+                                                        >
+                                                            <ArrowPathIcon className="w-4 h-4" />
+                                                        </button>
+                                                    );
+                                                })()}
                                             </div>
                                         </td>
                                     </tr>
@@ -946,9 +1042,18 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         })()}
                                     </div>
                                 </div>
-                                <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
-                                    ✅ Ativo
-                                </span>
+                                {(() => {
+                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
+                                    return isAtivo ? (
+                                        <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
+                                            ✅ Ativo
+                                        </span>
+                                    ) : (
+                                        <span className="px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 ring-1 ring-red-200 dark:ring-red-800">
+                                            ❌ Inativo
+                                        </span>
+                                    );
+                                })()}
                             </div>
 
                             {/* Informações */}
@@ -995,13 +1100,26 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     <PencilIcon className="w-4 h-4" />
                                     Editar
                                 </button>
-                                <button
-                                    onClick={() => handleOpenDeleteModal(service)}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                >
-                                    <TrashIcon className="w-4 h-4" />
-                                    Desativar
-                                </button>
+                                {(() => {
+                                    const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
+                                    return isAtivo ? (
+                                        <button
+                                            onClick={() => handleOpenDeleteModal(service)}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
+                                            Desativar
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={() => handleReativarServico(service)}
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                        >
+                                            <ArrowPathIcon className="w-4 h-4" />
+                                            Ativar
+                                        </button>
+                                    );
+                                })()}
                             </div>
                         </div>
                     ))}
@@ -1160,6 +1278,50 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                         placeholder="0,00"
                                     />
                                 </div>
+
+                                {/* ✅ NOVO: Campo de Custo */}
+                                <div className="md:col-span-2">
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={formState.temCusto}
+                                                onChange={(e) => {
+                                                    setFormState(prev => ({
+                                                        ...prev,
+                                                        temCusto: e.target.checked,
+                                                        custo: e.target.checked ? prev.custo : ''
+                                                    }));
+                                                }}
+                                                className="w-5 h-5 text-cyan-600 rounded focus:ring-cyan-500"
+                                            />
+                                            <span className="text-sm font-semibold text-gray-700 dark:text-dark-text">
+                                                Este serviço tem custo
+                                            </span>
+                                        </label>
+                                    </div>
+                                    
+                                    {formState.temCusto && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                Custo (R$)
+                                            </label>
+                                            <input
+                                                type="number"
+                                                name="custo"
+                                                value={formState.custo}
+                                                onChange={handleInputChange}
+                                                min="0"
+                                                step="0.01"
+                                                className="input-field"
+                                                placeholder="0,00"
+                                            />
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                Informe o custo do serviço (aceita vazio, 0 ou qualquer valor positivo)
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 dark:border-dark-border">
@@ -1214,9 +1376,18 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="bg-gray-50 dark:bg-dark-bg p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Status</h3>
-                                    <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
-                                        ✅ Ativo
-                                    </span>
+                                    {(() => {
+                                        const isAtivo = (serviceToView as any).ativo !== false && (serviceToView as any).ativo !== undefined;
+                                        return isAtivo ? (
+                                            <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800">
+                                                ✅ Ativo
+                                            </span>
+                                        ) : (
+                                            <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 ring-1 ring-red-200 dark:ring-red-800">
+                                                ❌ Inativo
+                                            </span>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -1225,7 +1396,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                 <p className="text-gray-700 dark:text-dark-text-secondary">{serviceToView.description || serviceToView.descricao || 'Sem descrição'}</p>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Preço</h3>
                                     <p className="text-2xl font-bold text-green-700 dark:text-green-400">
@@ -1233,6 +1404,19 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                     </p>
                                     <p className="text-sm text-green-600 dark:text-green-400">/{serviceToView.unidade || 'un'}</p>
                                 </div>
+                                {(() => {
+                                    const custo = (serviceToView as any).custo;
+                                    const temCusto = custo !== undefined && custo !== null && custo > 0;
+                                    return temCusto ? (
+                                        <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 p-4 rounded-xl">
+                                            <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Custo</h3>
+                                            <p className="text-2xl font-bold text-orange-700 dark:text-orange-400">
+                                                R$ {custo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-sm text-orange-600 dark:text-orange-400">/{serviceToView.unidade || 'un'}</p>
+                                        </div>
+                                    ) : null;
+                                })()}
                                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-dark-text mb-2">Unidade de Medida</h3>
                                     <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{serviceToView.unidade || 'un'}</p>

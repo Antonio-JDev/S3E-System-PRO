@@ -572,6 +572,30 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Validar que não há ferramentas com códigos duplicados no kit
+    const ferramentasIds = itens.map((item: any) => item.ferramentaId);
+    const ferramentasUnicas = await Promise.all(
+      ferramentasIds.map(async (id: string) => {
+        const ferramenta = await prisma.ferramenta.findUnique({
+          where: { id },
+          select: { id: true, codigo: true, nome: true }
+        });
+        return ferramenta;
+      })
+    );
+
+    // Verificar códigos duplicados
+    const codigos = ferramentasUnicas.map(f => f?.codigo).filter(Boolean);
+    const codigosUnicos = new Set(codigos);
+    if (codigos.length !== codigosUnicos.size) {
+      const codigosDuplicados = codigos.filter((codigo, index) => codigos.indexOf(codigo) !== index);
+      res.status(400).json({
+        success: false,
+        error: `Existem ferramentas com códigos duplicados no kit. Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+      });
+      return;
+    }
+
     // Validar estoque e calcular preço total antes de criar o kit
     let precoTotalKit = 0;
     const ferramentasParaValidar = await Promise.all(
@@ -734,10 +758,59 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
         }
       });
 
-      // 2. Se itens foram fornecidos, adicionar novos itens
-      if (itens && Array.isArray(itens) && itens.length > 0) {
+      // 2. Se itens foram fornecidos, sincronizar itens do kit
+      if (itens !== undefined && Array.isArray(itens)) {
+        // Obter IDs das ferramentas que devem estar no kit
+        const ferramentasIdsAtuais = itens.map(item => item.ferramentaId);
+        const ferramentasIdsExistentes = kit.itens.map(item => item.ferramentaId);
+
+        // Identificar itens a remover (estavam no kit mas não estão mais na lista)
+        const itensParaRemover = kit.itens.filter(item => !ferramentasIdsAtuais.includes(item.ferramentaId));
+
+        // Remover itens que foram excluídos e devolver ao estoque
+        for (const itemRemover of itensParaRemover) {
+          await tx.kitFerramentaItem.delete({
+            where: { id: itemRemover.id }
+          });
+
+          // Devolver ao estoque
+          await tx.ferramenta.update({
+            where: { id: itemRemover.ferramentaId },
+            data: {
+              quantidade: {
+                increment: itemRemover.quantidade
+              }
+            }
+          });
+        }
+
+        // Identificar itens novos (não estavam no kit)
+        const itensNovos = itens.filter(item => !ferramentasIdsExistentes.includes(item.ferramentaId));
+
+        // Validar que não há ferramentas com códigos duplicados no kit (incluindo itens existentes)
+        const todosFerramentasIds = itens.map((item: any) => item.ferramentaId);
+        const todasFerramentas = await Promise.all(
+          todosFerramentasIds.map(async (id: string) => {
+            const ferramenta = await tx.ferramenta.findUnique({
+              where: { id },
+              select: { id: true, codigo: true, nome: true }
+            });
+            return ferramenta;
+          })
+        );
+
+        // Verificar códigos duplicados
+        const codigos = todasFerramentas.map(f => f?.codigo).filter(Boolean);
+        const codigosUnicos = new Set(codigos);
+        if (codigos.length !== codigosUnicos.size) {
+          const codigosDuplicados = codigos.filter((codigo, index) => codigos.indexOf(codigo) !== index);
+          throw new Error(
+            `Existem ferramentas com códigos duplicados no kit. Códigos duplicados: ${[...new Set(codigosDuplicados)].join(', ')}`
+          );
+        }
+
         // Validar estoque para novos itens
-        for (const item of itens) {
+        for (const item of itensNovos) {
           const ferramenta = await tx.ferramenta.findUnique({
             where: { id: item.ferramentaId }
           });
@@ -757,8 +830,8 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
           }
         }
 
-        // Adicionar novos itens ao kit
-        for (const item of itens) {
+        // Adicionar novos itens ao kit e dar baixa no estoque
+        for (const item of itensNovos) {
           await tx.kitFerramentaItem.create({
             data: {
               kitId: id,
@@ -770,19 +843,61 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
           });
 
           // Dar baixa no estoque
-          const ferramenta = await tx.ferramenta.findUnique({
-            where: { id: item.ferramentaId }
+          await tx.ferramenta.update({
+            where: { id: item.ferramentaId },
+            data: {
+              quantidade: {
+                decrement: item.quantidade || 1
+              }
+            }
           });
+        }
 
-          if (ferramenta) {
-            await tx.ferramenta.update({
-              where: { id: item.ferramentaId },
+        // Atualizar itens existentes (quantidade e estado)
+        const itensParaAtualizar = itens.filter(item => ferramentasIdsExistentes.includes(item.ferramentaId));
+        for (const item of itensParaAtualizar) {
+          const itemExistente = kit.itens.find(i => i.ferramentaId === item.ferramentaId);
+          if (itemExistente) {
+            const novaQuantidade = item.quantidade || 1;
+            const quantidadeAnterior = itemExistente.quantidade;
+
+            // Atualizar item
+            await tx.kitFerramentaItem.update({
+              where: { id: itemExistente.id },
               data: {
-                quantidade: {
-                  decrement: item.quantidade || 1
-                }
+                quantidade: novaQuantidade,
+                estadoEntrega: item.estadoEntrega || itemExistente.estadoEntrega,
+                observacoes: item.observacoes !== undefined ? item.observacoes : itemExistente.observacoes
               }
             });
+
+            // Ajustar estoque se quantidade mudou
+            if (novaQuantidade !== quantidadeAnterior) {
+              const diferenca = novaQuantidade - quantidadeAnterior;
+              if (diferenca > 0) {
+                // Aumentou quantidade - verificar estoque e dar baixa
+                const ferramenta = await tx.ferramenta.findUnique({
+                  where: { id: item.ferramentaId }
+                });
+                if (ferramenta && ferramenta.quantidade < diferenca) {
+                  throw new Error(`Estoque insuficiente para aumentar quantidade. Disponível: ${ferramenta.quantidade}, Necessário: ${diferenca}`);
+                }
+                await tx.ferramenta.update({
+                  where: { id: item.ferramentaId },
+                  data: {
+                    quantidade: { decrement: diferenca }
+                  }
+                });
+              } else {
+                // Diminuiu quantidade - devolver ao estoque
+                await tx.ferramenta.update({
+                  where: { id: item.ferramentaId },
+                  data: {
+                    quantidade: { increment: Math.abs(diferenca) }
+                  }
+                });
+              }
+            }
           }
         }
       }
@@ -836,15 +951,23 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
 
 /**
  * DELETE /api/kits-ferramenta/:id
- * Desativa um kit
+ * Exclui permanentemente um kit (hard delete)
  */
 export const deletarKit = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = (req as any).user?.userId;
     const { id } = req.params;
 
+    // Buscar kit com itens para devolver ao estoque
     const kit = await prisma.kitFerramenta.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        itens: {
+          include: {
+            ferramenta: true
+          }
+        }
+      }
     });
 
     if (!kit) {
@@ -855,10 +978,33 @@ export const deletarKit = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Desativar (soft delete)
-    await prisma.kitFerramenta.update({
-      where: { id },
-      data: { ativo: false }
+    // Salvar dados para audit log antes de deletar
+    const kitNome = kit.nome;
+    const eletricistaId = kit.eletricistaId;
+    const quantidadeItens = kit.itens?.length || 0;
+
+    // Devolver ferramentas ao estoque e deletar kit permanentemente em transação
+    await prisma.$transaction(async (tx) => {
+      // 1. Devolver ferramentas ao estoque
+      if (kit.itens && kit.itens.length > 0) {
+        for (const item of kit.itens) {
+          await tx.ferramenta.update({
+            where: { id: item.ferramentaId },
+            data: {
+              quantidade: {
+                increment: item.quantidade
+              }
+            }
+          });
+        }
+        console.log(`✅ ${kit.itens.length} ferramentas devolvidas ao estoque do kit "${kit.nome}"`);
+      }
+
+      // 2. Deletar kit permanentemente (hard delete)
+      // Os itens serão deletados automaticamente pelo cascade (onDelete: Cascade)
+      await tx.kitFerramenta.delete({
+        where: { id }
+      });
     });
 
     // Audit log
@@ -868,22 +1014,22 @@ export const deletarKit = async (req: Request, res: Response): Promise<void> => 
         action: 'DELETE',
         entity: 'KitFerramenta',
         entityId: id,
-        description: `Kit "${kit.nome}" desativado`,
-        metadata: { eletricistaId: kit.eletricistaId }
+        description: `Kit "${kitNome}" excluído permanentemente (${quantidadeItens} itens)`,
+        metadata: { eletricistaId: eletricistaId }
       }
     });
 
-    console.log(`✅ Kit desativado: ${kit.nome}`);
+    console.log(`✅ Kit excluído permanentemente: ${kitNome}`);
 
     res.json({
       success: true,
-      message: '✅ Kit desativado com sucesso!'
+      message: '✅ Kit excluído com sucesso!'
     });
   } catch (error) {
     console.error('❌ Erro ao deletar kit:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao desativar kit'
+      error: 'Erro ao excluir kit'
     });
   }
 };
