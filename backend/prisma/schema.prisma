@@ -54,14 +54,14 @@ model AuditLog {
   hash         String? // Hash SHA-256 deste registro
   previousHash String? // Hash do registro anterior na mesma cadeia
   chainId      String? // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
-  sequence     Int?    // Ordem dentro da cadeia (1, 2, 3, ...)
+  sequence     Int? // Ordem dentro da cadeia (1, 2, 3, ...)
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])
   @@index([entity])
-   @@index([entity, entityId])
+  @@index([entity, entityId])
   @@index([chainId])
   @@index([createdAt])
   @@map("audit_logs")
@@ -172,6 +172,11 @@ model Material {
   porcentagemLucro       Float? // Porcentagem de lucro ((valorVenda - preco) / preco * 100)
   ultimaAtualizacaoPreco DateTime? // Data da última atualização de preço
   fornecedorId           String?
+  // Campos de fracionamento (para materiais vendidos em caixas/pacotes)
+  quantidadePorEmbalagem Float? // Quantidade padrão de unidades por embalagem (ex: 100)
+  tipoEmbalagem          String? // Tipo de embalagem padrão: "CAIXA", "PACOTE", "FARDO", etc.
+  precoEmbalagem         Float? // Preço da embalagem completa (para materiais fracionados)
+  precoUnitario          Float? // Preço calculado por unidade individual (precoEmbalagem / quantidadePorEmbalagem)
   ativo                  Boolean   @default(true)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
@@ -228,17 +233,18 @@ model Cotacao {
 }
 
 model Servico {
-  id        String   @id @default(uuid())
-  nome      String
-  codigo    String   @unique
-  descricao String?
-  tipo      String // Instalacao, Manutencao, Consultoria, LaudoTecnico
+  id          String      @id @default(uuid())
+  nome        String
+  codigo      String      @unique
+  descricao   String?
+  tipo        String // Instalacao, Manutencao, Consultoria, LaudoTecnico
   tipoServico TipoServico @default(MAO_DE_OBRA) // ✅ NOVO: Tipo de serviço para classificação
-  preco     Float
-  unidade   String   @default("un") // un, hora, m2, etc
-  ativo     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  preco       Float
+  custo       Float?      // ✅ NOVO: Custo do serviço (opcional)
+  unidade     String      @default("un") // un, hora, m2, etc
+  ativo       Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   @@map("servicos")
 }
@@ -289,7 +295,7 @@ model Orcamento {
   descricao        String? // HTML do Quill editor ou texto rico
   descricaoProjeto String? // Descrição técnica avançada do projeto
   validade         DateTime
-  status           String   @default("Pendente") // Pendente, Aprovado, Recusado
+  status           String   @default("Pendente") // Pendente, Enviado ao Cliente, Aprovado, Recusado, Declinado, Cancelado
   bdi              Float    @default(0) // Margem de lucro (%)
   custoTotal       Float    @default(0)
   precoVenda       Float    @default(0)
@@ -341,6 +347,9 @@ model OrcamentoItem {
   // ✅ NOVOS CAMPOS: Conversão de unidades (OPCIONAIS para compatibilidade)
   unidadeVenda String? // Unidade de venda (ex: 'cm' para barramentos, pode ser diferente da unidade de estoque)
   tipoMaterial String? // Tipo do material: BARRAMENTO_COBRE, TRILHO_DIN, CABO, PADRAO
+
+  // ✅ Campo para armazenar itens de kits customizados criados no orçamento
+  itensDoKit Json? // Array de objetos com {nome, codigo, valorVenda, quantidade, materialId?, cotacaoId?}
 
   orcamento Orcamento @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
   material  Material? @relation(fields: [materialId], references: [id])
@@ -541,7 +550,7 @@ model Compra {
   fornecedorCNPJ   String
   fornecedorTel    String?
   numeroNF         String
-  serieNF          String?   // Série da Nota Fiscal (ex: "1", "2", etc.)
+  serieNF          String? // Série da Nota Fiscal (ex: "1", "2", etc.)
   dataEmissaoNF    DateTime
   dataCompra       DateTime
   dataRecebimento  DateTime?
@@ -569,9 +578,14 @@ model CompraItem {
   materialId  String?
   nomeProduto String
   ncm         String?
-  quantidade  Float
-  valorUnit   Float
+  quantidade  Float // Quantidade de embalagens
+  valorUnit   Float // Preço por embalagem
   valorTotal  Float
+  // Campos de fracionamento
+  quantidadeFracionada Float? // Quantidade de unidades individuais dentro do pacote/caixa (ex: 100)
+  tipoEmbalagem       String? // Tipo de embalagem: "CAIXA", "PACOTE", "FARDO", etc.
+  unidadeEmbalagem    String? // Unidade da embalagem: "cx", "pct", "fardo", etc.
+  fracionamentoAplicado Boolean @default(false) // ✅ Marca se o fracionamento já foi aplicado ao estoque
 
   compra   Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade)
   material Material? @relation(fields: [materialId], references: [id])
@@ -647,23 +661,23 @@ model ContaReceber {
 }
 
 model ContaPagar {
-  id             String    @id @default(uuid())
-  tipo           String    @default("FORNECEDOR") // FORNECEDOR, RH, DESPESA_FIXA
-  fornecedorId   String? // Opcional para permitir despesas sem fornecedor específico
-  compraId       String?
-  funcionarioId  String? // Para salários (RH)
-  despesaFixaId  String? // Para despesas fixas
-  descricao      String
-  valorParcela   Float // Valor da parcela/despesa
-  dataVencimento DateTime
+  id              String    @id @default(uuid())
+  tipo            String    @default("FORNECEDOR") // FORNECEDOR, RH, DESPESA_FIXA
+  fornecedorId    String? // Opcional para permitir despesas sem fornecedor específico
+  compraId        String?
+  funcionarioId   String? // Para salários (RH)
+  despesaFixaId   String? // Para despesas fixas
+  descricao       String
+  valorParcela    Float // Valor da parcela/despesa
+  dataVencimento  DateTime
   dataAgendamento DateTime? // Data agendada para pagamento
-  dataPagamento  DateTime?
-  status         String    @default("Pendente") // Pendente, Pago, Atrasado, Cancelado
-  numeroParcela  Int?
-  totalParcelas  Int?
-  observacoes    String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  dataPagamento   DateTime?
+  status          String    @default("Pendente") // Pendente, Pago, Atrasado, Cancelado
+  numeroParcela   Int?
+  totalParcelas   Int?
+  observacoes     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
 
@@ -742,18 +756,18 @@ model NotaFiscal {
 // ============================================
 
 model NFeFila {
-  id              String   @id @default(uuid())
-  notaFiscalId    String?
-  empresaFiscalId String?
-  ambiente        String   // '1' = Produção, '2' = Homologação
-  modo            String   // NORMAL, SVC-AN, SVC-RS
-  xmlAssinado     String   // XML da NF-e já assinado (pronto para envio)
-  status          String   @default("PENDENTE") // PENDENTE, ENVIANDO, ENVIADA, FALHA
-  tentativas      Int      @default(0)
-  ultimoErro      String?
+  id               String   @id @default(uuid())
+  notaFiscalId     String?
+  empresaFiscalId  String?
+  ambiente         String // '1' = Produção, '2' = Homologação
+  modo             String // NORMAL, SVC-AN, SVC-RS
+  xmlAssinado      String // XML da NF-e já assinado (pronto para envio)
+  status           String   @default("PENDENTE") // PENDENTE, ENVIANDO, ENVIADA, FALHA
+  tentativas       Int      @default(0)
+  ultimoErro       String?
   proximaTentativa DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   notaFiscal    NotaFiscal?    @relation(fields: [notaFiscalId], references: [id])
   empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id])
@@ -861,7 +875,7 @@ model Obra {
   projeto Projeto?     @relation(fields: [projetoId], references: [id], onDelete: Cascade)
   cliente Cliente?     @relation(fields: [clienteId], references: [id])
   tarefas TarefaObra[]
-  compras Compra[]     // ✅ NOVO: Compras avulsas vinculadas a esta obra
+  compras Compra[] // ✅ NOVO: Compras avulsas vinculadas a esta obra
 
   @@map("obras")
 }

@@ -1,0 +1,116 @@
+{
+  "versao": "1.0.0",
+  "dataExportacao": "2025-01-13T10:00:00.000Z",
+  "servicos": [
+    {
+      "codigo": "MOB-001",
+      "nome": "Instalação de Tomada 2P+T",
+      "descricao": "Instalação de tomada padrão brasileiro 2P+T 10A/20A",
+      "tipo": "Instalação",
+      "tipoServico": "MAO_DE_OBRA",
+      "preco": 50.00,
+      "custo": 25.00,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "MOB-002",
+      "nome": "Instalação de Interruptor Simples",
+      "descricao": "Instalação de interruptor simples 10A",
+      "tipo": "Instalação",
+      "tipoServico": "MAO_DE_OBRA",
+      "preco": 40.00,
+      "custo": 20.00,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "MOB-003",
+      "nome": "Lançamento de Cabo em Eletroduto",
+      "descricao": "Lançamento de cabo elétrico em eletroduto existente",
+      "tipo": "Instalação",
+      "tipoServico": "MAO_DE_OBRA",
+      "preco": 15.00,
+      "custo": 8.00,
+      "unidade": "m",
+      "ativo": true
+    },
+    {
+      "codigo": "MONT-001",
+      "nome": "Montagem de Quadro de Distribuição",
+      "descricao": "Montagem e instalação de quadro de distribuição até 12 disjuntores",
+      "tipo": "Instalação",
+      "tipoServico": "MONTAGEM",
+      "preco": 500.00,
+      "custo": 300.00,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "MONT-002",
+      "nome": "Montagem de Painel Elétrico",
+      "descricao": "Montagem de painel elétrico industrial",
+      "tipo": "Instalação",
+      "tipoServico": "MONTAGEM",
+      "preco": 800.00,
+      "custo": 500.00,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "ENG-PRO-001",
+      "nome": "Projeto Elétrico Residencial",
+      "descricao": "Elaboração de projeto elétrico residencial completo",
+      "tipo": "Projeto",
+      "tipoServico": "PROJETOS",
+      "preco": 1500.00,
+      "custo": null,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "ENG-PRO-002",
+      "nome": "Projeto Elétrico Comercial",
+      "descricao": "Elaboração de projeto elétrico comercial",
+      "tipo": "Projeto",
+      "tipoServico": "PROJETOS",
+      "preco": 3000.00,
+      "custo": 2000.00,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "ENG-PRO-003",
+      "nome": "Laudo Técnico de Instalações",
+      "descricao": "Elaboração de laudo técnico de instalações elétricas",
+      "tipo": "LaudoTecnico",
+      "tipoServico": "ENGENHARIA",
+      "preco": 800.00,
+      "custo": 0,
+      "unidade": "un",
+      "ativo": true
+    },
+    {
+      "codigo": "ADM-001",
+      "nome": "Serviço Administrativo",
+      "descricao": "Serviço administrativo padrão",
+      "tipo": "Outro",
+      "tipoServico": "ADMINISTRATIVO",
+      "preco": 100.00,
+      "custo": 50.00,
+      "unidade": "hora",
+      "ativo": true
+    },
+    {
+      "codigo": "ADM-002",
+      "nome": "Consultoria Administrativa",
+      "descricao": "Consultoria em processos administrativos",
+      "tipo": "Consultoria",
+      "tipoServico": "ADMINISTRATIVO",
+      "preco": 150.00,
+      "custo": null,
+      "unidade": "hora",
+      "ativo": true
+    }
+  ]
+}

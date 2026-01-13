@@ -26,7 +26,7 @@ export const getProjetos = async (req: Request, res: Response): Promise<void> =>
           select: { id: true, nome: true, cpfCnpj: true }
         },
         orcamento: {
-          select: { id: true, precoVenda: true, status: true }
+          select: { id: true, precoVenda: true, status: true, numeroSequencial: true }
         },
         tasks: {
           select: { id: true, titulo: true, status: true, prioridade: true },
@@ -76,7 +76,12 @@ export const getProjetoById = async (req: Request, res: Response): Promise<void>
       include: {
         cliente: true,
         orcamento: {
-          include: {
+          select: {
+            id: true,
+            precoVenda: true,
+            status: true,
+            numeroSequencial: true,
+            titulo: true,
             items: {
               include: {
                 material: { select: { nome: true, sku: true } },
