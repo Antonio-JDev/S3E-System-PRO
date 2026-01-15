@@ -13,11 +13,12 @@ import PrecoValidadeFlag from '../components/PrecoValidadeFlag';
 import HistoricoPrecosModal from '../components/HistoricoPrecosModal';
 import UnitSelector from '../components/UnitSelector';
 import UnitDisplay from '../components/UnitDisplay';
-import { identificarTipoMaterial } from '../utils/unitConverter';
+import { identificarTipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento } from '../utils/unitConverter';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { getUploadUrl } from '../config/api';
 import ClienteCombobox from '../components/ui/ClienteCombobox';
 import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
+import CidadeAutocomplete from '../components/ui/CidadeAutocomplete';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
@@ -214,6 +215,21 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const [showCriarKitModal, setShowCriarKitModal] = useState(false);
     const [nomeKit, setNomeKit] = useState('');
     
+    // Estado para modal de visualização de itens do kit
+    const [showModalItensKit, setShowModalItensKit] = useState(false);
+    const [itensKitParaVisualizar, setItensKitParaVisualizar] = useState<any[]>([]);
+    const [nomeKitParaVisualizar, setNomeKitParaVisualizar] = useState<string>('');
+    
+    // Estados para edição de kit unificado
+    const [showModalEditarKit, setShowModalEditarKit] = useState(false);
+    const [kitEmEdicao, setKitEmEdicao] = useState<{ index: number; item: OrcamentoItem & { itensDoKit?: any[] } } | null>(null);
+    const [itensKitEdicao, setItensKitEdicao] = useState<any[]>([]);
+    
+    // Estado para modal de detalhes de sub-kit (kit dentro de kit)
+    const [showModalDetalhesSubKit, setShowModalDetalhesSubKit] = useState(false);
+    const [itensSubKitParaVisualizar, setItensSubKitParaVisualizar] = useState<any[]>([]);
+    const [nomeSubKitParaVisualizar, setNomeSubKitParaVisualizar] = useState<string>('');
+    
     // Estados para comparação estoque vs banco frio
     const [materiaisComEstoque, setMateriaisComEstoque] = useState<Material[]>([]);
     const [cotacoesBancoFrio, setCotacoesBancoFrio] = useState<any[]>([]);
@@ -245,6 +261,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     
     // Estado para modo de adição (com novas opções)
     const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'cotacoes' | 'manual' | 'comparacao'>('materiais');
+    // Estado para seleção múltipla no modal
+    const [itensSelecionadosModal, setItensSelecionadosModal] = useState<Set<string>>(new Set()); // IDs dos itens selecionados no modal
+    const [unidadeVendaSelecionada, setUnidadeVendaSelecionada] = useState<{ [key: string]: string }>({}); // Unidade de venda selecionada para cada item
     const [novoItemManual, setNovoItemManual] = useState({
         nome: '',
         descricao: '',
@@ -453,15 +472,38 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             if (kitsRes.success && kitsRes.data) {
                 const kitsData = Array.isArray(kitsRes.data) ? kitsRes.data : [];
                 // Mapear kits do backend para o formato esperado
-                const kitsMapeados = kitsData.map((kit: any) => ({
-                    id: kit.id,
-                    nome: kit.nome,
-                    descricao: kit.descricao || '',
-                    items: kit.items || [],
-                    custoTotal: kit.preco || 0,
-                    precoSugerido: kit.preco || 0,
-                    ativo: kit.ativo !== false
-                }));
+                const kitsMapeados = kitsData.map((kit: any) => {
+                    // Garantir que itensFaltantes seja sempre um array
+                    let itensFaltantesProcessados: any[] = [];
+                    if (kit.itensFaltantes) {
+                        if (typeof kit.itensFaltantes === 'string') {
+                            try {
+                                const parsed = JSON.parse(kit.itensFaltantes);
+                                itensFaltantesProcessados = Array.isArray(parsed) ? parsed : [parsed];
+                            } catch (e) {
+                                console.error('Erro ao fazer parse de itensFaltantes:', e);
+                                itensFaltantesProcessados = [];
+                            }
+                        } else if (Array.isArray(kit.itensFaltantes)) {
+                            itensFaltantesProcessados = kit.itensFaltantes;
+                        } else if (typeof kit.itensFaltantes === 'object') {
+                            itensFaltantesProcessados = [kit.itensFaltantes];
+                        }
+                    }
+                    
+                    return {
+                        id: kit.id,
+                        nome: kit.nome,
+                        descricao: kit.descricao || '',
+                        items: kit.items || [],
+                        itensFaltantes: itensFaltantesProcessados, // ✅ IMPORTANTE: Incluir itensFaltantes (cotações + serviços)
+                        custoTotal: kit.preco || 0,
+                        precoSugerido: kit.preco || 0,
+                        ativo: kit.ativo !== false,
+                        temItensCotacao: kit.temItensCotacao || false,
+                        statusEstoque: kit.statusEstoque || 'COMPLETO'
+                    };
+                });
                 setKits(kitsMapeados);
                 console.log(`✅ ${kitsMapeados.length} kits carregados`);
             }
@@ -515,6 +557,16 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
     }, [modoAdicao]);
 
+    // Expandir modal automaticamente quando houver texto na busca global
+    useEffect(() => {
+        if (showItemModal && buscaGlobal.trim()) {
+            setModalExpandido(true);
+        } else if (showItemModal && !buscaGlobal.trim() && modalExpandido && modoAdicao !== 'comparacao') {
+            // Não colapsar automaticamente se estiver em modo comparação manual
+            // setModalExpandido(false);
+        }
+    }, [buscaGlobal, showItemModal]);
+
     // Filtrar serviços para seleção (apenas ativos)
     const filteredServicos = useMemo(() => {
         if (!itemSearchTerm.trim()) return (servicos || []).filter(s => s && s.ativo);
@@ -550,6 +602,68 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             )
         );
     }, [kits, itemSearchTerm]);
+
+    const getKitCustoTotal = (kit: any) => {
+        if (!kit) return 0;
+        
+        // Custo dos materiais do estoque real
+        const custoEstoque = Array.isArray(kit.items)
+            ? kit.items.reduce((sum: number, kitItem: any) => {
+                const precoCompra = kitItem.material?.preco || 0; // Preço de compra do material
+                return sum + precoCompra * (kitItem.quantidade || 0);
+            }, 0)
+            : 0;
+        
+        // Custo das cotações do banco frio e serviços
+        const custoExtras = Array.isArray(kit.itensFaltantes)
+            ? kit.itensFaltantes.reduce((sum: number, item: any) => {
+                let custoUnit = 0;
+                
+                // Para serviços: buscar dados completos do serviço
+                if (item.tipo === 'SERVICO' && item.servicoId) {
+                    const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
+                    if (servicoCompleto) {
+                        custoUnit = servicoCompleto.custo || 0;
+                    }
+                }
+                // Para cotações: buscar dados completos da cotação
+                else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+                    const cotacaoCompleta = cotacoes.find((c: any) => c.id === item.cotacaoId);
+                    if (cotacaoCompleta) {
+                        custoUnit = cotacaoCompleta.valorUnitario || 0;
+                    }
+                }
+                // Fallback: usar dados do item
+                else {
+                    custoUnit = item.valorUnitario || item.custo || 0;
+                }
+                
+                return sum + custoUnit * (item.quantidade || 0);
+            }, 0)
+            : 0;
+        
+        return custoEstoque + custoExtras;
+    };
+
+    const getKitPrecoVendaTotal = (kit: any) => {
+        if (!kit) return 0;
+
+        const totalEstoque = Array.isArray(kit.items)
+            ? kit.items.reduce((sum: number, kitItem: any) => {
+                const precoVenda = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
+                return sum + precoVenda * (kitItem.quantidade || 0);
+            }, 0)
+            : 0;
+
+        const totalExtras = Array.isArray(kit.itensFaltantes)
+            ? kit.itensFaltantes.reduce((sum: number, item: any) => {
+                const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
+                return sum + precoUnit * (item.quantidade || 0);
+            }, 0)
+            : 0;
+
+        return totalEstoque + totalExtras;
+    };
 
     // Filtrar cotações para seleção
     const filteredCotacoes = useMemo(() => {
@@ -669,7 +783,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
             // Usar valorVenda se disponível, senão usar preco (preço de compra)
             const precoVenda = material.valorVenda || material.preco;
-            const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
+            const precoBase = precoVenda; // Base para aplicar BDI
 
             const newItem: OrcamentoItem = {
                 tipo: 'MATERIAL',
@@ -679,9 +793,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 unidadeMedida: material.unidadeMedida,
                 ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
                 quantidade: qtd,
-                custoUnit: material.preco,
-                precoBase: precoBase, // Base do preço de venda (sem BDI)
-                precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
+                custoUnit: material.preco, // Custo de compra
+                precoBase: precoBase, // Valor de venda base (sem BDI)
+                precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
                 subtotal: precoBase * (1 + formState.bdi / 100) * qtd
             };
             
@@ -695,7 +809,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         if (cotacao) {
             // Usar valorVenda se disponível; senão, aplicar markup padrão de 40% sobre o valor da cotação
             const valorVenda = cotacao.valorVenda || (cotacao.valorUnitario || 0) * 1.4;
-            const precoBase = valorVenda;
+            const precoBase = valorVenda; // Base para aplicar BDI
 
             const newItem: OrcamentoItem = {
                 tipo: 'COTACAO',
@@ -705,9 +819,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 unidadeMedida: cotacao.unidadeMedida || 'UN',
                 ncm: cotacao.ncm || undefined, // ✅ NCM da cotação para faturamento
                 quantidade: qtd,
-                custoUnit: cotacao.valorUnitario || 0,
-                precoBase: precoBase, // Base do preço de venda (sem BDI)
-                precoUnit: precoBase * (1 + formState.bdi / 100),
+                custoUnit: cotacao.valorUnitario || 0, // Custo da cotação
+                precoBase: precoBase, // Valor de venda base (sem BDI)
+                precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
                 subtotal: precoBase * (1 + formState.bdi / 100) * qtd,
                 dataAtualizacaoCotacao: cotacao.dataAtualizacao
             };
@@ -791,19 +905,34 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
     // Adicionar material do estoque ao orçamento
     const handleAddItem = (material: Material, manterModalAberto = false, unidadeVendaParam?: string) => {
-        // Identificar tipo de material para conversão de unidades
-        const tipoMaterial = identificarTipoMaterial(material.nome);
         const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
         
-        // Usar valorVenda se disponível, senão usar preco (preço de compra)
-        let precoVenda = material.valorVenda || material.preco;
+        // Determinar preço de venda e custo baseado na unidade
+        let precoVenda = material.preco; // Fallback para preço de compra
+        let custoUnit = material.preco; // Custo padrão
         
-        // Se for barramento e a unidade for cm, ajustar o preço (dividir por 100)
-        if ((tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') && unidadeVenda === 'cm') {
-            precoVenda = precoVenda / 100; // Preço por metro / 100 = preço por cm
+        // Se a unidade de medida do estoque for M ou KG/M, usar valores específicos
+        if (podeVenderEmMetroOuCm(material.unidadeMedida)) {
+            if (unidadeVenda === 'm') {
+                // Usar valorVendaM se disponível, senão calcular do valorVenda padrão ou preço
+                precoVenda = (material as any).valorVendaM || material.valorVenda || material.preco;
+                custoUnit = material.preco; // Custo em metro é o preço de compra
+            } else if (unidadeVenda === 'cm') {
+                // Usar valorVendaCM se disponível, senão calcular dividindo valorVendaM por 100
+                precoVenda = (material as any).valorVendaCM || 
+                            ((material as any).valorVendaM ? (material as any).valorVendaM / 100 : 
+                            (material.valorVenda ? material.valorVenda / 100 : material.preco / 100));
+                // Usar custoCM se disponível, senão calcular dividindo preço por 100
+                custoUnit = (material as any).custoCM || 
+                           (material.preco ? material.preco / 100 : 0);
+            }
+        } else {
+            // Para outras unidades, usar valorVenda padrão se disponível
+            precoVenda = material.valorVenda || material.preco;
+            custoUnit = material.preco; // Custo padrão
         }
         
-        const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
+        const precoBase = precoVenda; // Base para aplicar BDI
 
         const newItem: OrcamentoItem = {
             tipo: 'MATERIAL',
@@ -811,13 +940,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             nome: material.nome,
             descricao: material.nome, // Usar o nome como descrição
             unidadeMedida: material.unidadeMedida,
-            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
-            tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
+            unidadeVenda: unidadeVenda, // ✅ Unidade de venda
             ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
             quantidade: 1,
-            custoUnit: material.preco,
-            precoBase: precoBase, // Base do preço de venda (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
+            custoUnit: custoUnit, // Custo baseado na unidade de venda
+            precoBase: precoBase, // Valor de venda base (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
             subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
@@ -837,10 +965,114 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     useEscapeKey(showItemModal, () => {
         setShowItemModal(false);
         setModalExpandido(false);
+        setItensSelecionadosModal(new Set());
+        setUnidadeVendaSelecionada({});
     });
+
+    // Função para adicionar múltiplos itens selecionados
+    const handleAdicionarSelecionados = () => {
+        if (itensSelecionadosModal.size === 0) {
+            toast.error('Nenhum item selecionado', {
+                description: 'Selecione pelo menos um item para adicionar'
+            });
+            return;
+        }
+
+        let adicionados = 0;
+        
+        if (modoAdicao === 'materiais') {
+            filteredMaterials.forEach(material => {
+                if (itensSelecionadosModal.has(material.id)) {
+                    const unidadeVenda = unidadeVendaSelecionada[material.id] || material.unidadeMedida;
+                    handleAddItem(material, true, unidadeVenda);
+                    adicionados++;
+                }
+            });
+        } else if (modoAdicao === 'servicos') {
+            filteredServicos.forEach(servico => {
+                if (itensSelecionadosModal.has(servico.id)) {
+                    handleAddServico(servico, true);
+                    adicionados++;
+                }
+            });
+        } else if (modoAdicao === 'kits') {
+            filteredKits.forEach(kit => {
+                if (itensSelecionadosModal.has(kit.id)) {
+                    handleAddKit(kit, true);
+                    adicionados++;
+                }
+            });
+        } else if (modoAdicao === 'quadros') {
+            filteredQuadros.forEach(quadro => {
+                if (itensSelecionadosModal.has(quadro.id)) {
+                    handleAddQuadro(quadro, true);
+                    adicionados++;
+                }
+            });
+        } else if (modoAdicao === 'cotacoes') {
+            filteredCotacoes.forEach(cotacao => {
+                if (itensSelecionadosModal.has(cotacao.id)) {
+                    const unidadeVenda = unidadeVendaSelecionada[cotacao.id] || cotacao.unidadeMedida || 'UN';
+                    handleAddCotacao(cotacao, true, unidadeVenda);
+                    adicionados++;
+                }
+            });
+        }
+
+        toast.success(`${adicionados} item(ns) adicionado(s)`, {
+            description: `Foram adicionados ${adicionados} item(ns) ao orçamento`
+        });
+
+        // Limpar seleção
+        setItensSelecionadosModal(new Set());
+        setUnidadeVendaSelecionada({});
+    };
+
+    // Função para selecionar/deselecionar item
+    const handleToggleSelecaoItem = (itemId: string) => {
+        setItensSelecionadosModal(prev => {
+            const novo = new Set(prev);
+            if (novo.has(itemId)) {
+                novo.delete(itemId);
+                // Remover unidade de venda selecionada
+                const novasUnidades = { ...unidadeVendaSelecionada };
+                delete novasUnidades[itemId];
+                setUnidadeVendaSelecionada(novasUnidades);
+            } else {
+                novo.add(itemId);
+            }
+            return novo;
+        });
+    };
+
+    // Função para selecionar todos os itens visíveis
+    const handleSelecionarTodos = () => {
+        let ids: string[] = [];
+        
+        if (modoAdicao === 'materiais') {
+            ids = filteredMaterials.map(m => m.id);
+        } else if (modoAdicao === 'servicos') {
+            ids = filteredServicos.map(s => s.id);
+        } else if (modoAdicao === 'kits') {
+            ids = filteredKits.map(k => k.id);
+        } else if (modoAdicao === 'quadros') {
+            ids = filteredQuadros.map(q => q.id);
+        } else if (modoAdicao === 'cotacoes') {
+            ids = filteredCotacoes.map(c => c.id);
+        }
+
+        setItensSelecionadosModal(new Set(ids));
+    };
+
+    // Função para deselecionar todos
+    const handleDeselecionarTodos = () => {
+        setItensSelecionadosModal(new Set());
+        setUnidadeVendaSelecionada({});
+    };
 
     // Adicionar serviço ao orçamento
     const handleAddServico = (servico: Servico, manterModalAberto = false) => {
+        const precoBase = servico.preco; // Base para aplicar BDI
         const newItem: OrcamentoItem = {
             tipo: 'SERVICO',
             servicoNome: servico.nome,
@@ -848,9 +1080,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             descricao: servico.descricao,
             unidadeMedida: servico.unidade || 'UN',
             quantidade: 1,
-            custoUnit: servico.preco,
-            precoUnit: servico.preco * (1 + formState.bdi / 100),
-            subtotal: servico.preco * (1 + formState.bdi / 100)
+            custoUnit: servico.custo || 0, // Custo do serviço (se não houver, usar 0)
+            precoBase: precoBase, // Valor base (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
+            subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -866,15 +1099,18 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
     // Adicionar quadro ao orçamento
     const handleAddQuadro = (quadro: Quadro, manterModalAberto = false) => {
+        const precoVenda = quadro.precoSugerido || quadro.custoTotal;
+        const precoBase = precoVenda; // Base para aplicar BDI
         const newItem: OrcamentoItem = {
             tipo: 'QUADRO_PRONTO',
             nome: quadro.nome,
             descricao: quadro.descricao,
             unidadeMedida: 'UN',
             quantidade: 1,
-            custoUnit: quadro.custoTotal,
-            precoUnit: quadro.precoSugerido || quadro.custoTotal * (1 + formState.bdi / 100),
-            subtotal: quadro.precoSugerido || quadro.custoTotal * (1 + formState.bdi / 100)
+            custoUnit: quadro.custoTotal, // Custo do quadro
+            precoBase: precoBase, // Valor base (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
+            subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -890,18 +1126,18 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
     const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVendaParam?: string) => {
-        // Identificar tipo de material para conversão de unidades
-        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
-        const unidadeVenda = unidadeVendaParam || 'UN';
+        const unidadeVenda = unidadeVendaParam || cotacao.unidadeMedida || 'UN';
         
-        // Calcular preço baseado na unidade de venda
-        let precoUnitario = cotacao.valorUnitario;
-        if (tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') {
-            if (unidadeVenda === 'cm') {
-                // Se vender em cm, dividir o preço por metro por 100
-                precoUnitario = cotacao.valorUnitario / 100;
-            }
+        // Calcular custo baseado na unidade de venda
+        let custoUnitario = cotacao.valorUnitario || 0;
+        // Se a unidade de medida permitir venda em M/cm e estiver vendendo em cm, dividir por 100
+        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeVenda === 'cm') {
+            custoUnitario = cotacao.valorUnitario / 100;
         }
+        
+        // Usar valorVenda da cotação se disponível, senão aplicar markup de 40% sobre o custo
+        const valorVenda = cotacao.valorVenda || (custoUnitario * 1.4);
+        const precoBase = valorVenda; // Base para aplicar BDI
         
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
@@ -913,9 +1149,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
             tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
             quantidade: 1,
-            custoUnit: precoUnitario,
-            precoUnit: precoUnitario * (1 + formState.bdi / 100),
-            subtotal: precoUnitario * (1 + formState.bdi / 100)
+            custoUnit: custoUnitario, // Custo é sempre o valor da cotação (valorUnitario)
+            precoBase: precoBase, // Valor de venda base (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
+            subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -931,6 +1168,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
     // Adicionar kit ao orçamento
     const handleAddKit = (kit: Kit, manterModalAberto = false) => {
+        const custoTotalKit = getKitCustoTotal(kit);
+        const precoVendaTotalKit = getKitPrecoVendaTotal(kit);
+        const precoBase = precoVendaTotalKit; // Base para aplicar BDI
         const newItem: OrcamentoItem = {
             tipo: 'KIT',
             kitId: kit.id,
@@ -938,9 +1178,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             descricao: kit.descricao,
             unidadeMedida: 'UN',
             quantidade: 1,
-            custoUnit: kit.custoTotal,
-            precoUnit: kit.precoSugerido || kit.custoTotal * (1 + formState.bdi / 100),
-            subtotal: kit.precoSugerido || kit.custoTotal * (1 + formState.bdi / 100)
+            custoUnit: custoTotalKit, // Custo do kit
+            precoBase: precoBase, // Valor de venda base (sem BDI)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
+            subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
         setItems(prev => [...prev, newItem]);
@@ -1096,7 +1337,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             }
         }, 0);
 
-        // Preparar array de itens do kit para salvar (com nome, código e valor de venda atualizado)
+        // Preparar array de itens do kit para salvar (com nome, código, valor de venda e custo unitário)
         const itensDoKitParaSalvar = itensParaKit.map(item => {
             // Buscar material completo para obter código (sku) e valorVenda original (apenas para referência)
             let codigo = '';
@@ -1127,14 +1368,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             return {
                 nome: item.nome,
                 codigo: codigo,
+                custoUnit: item.custoUnit || 0, // ✅ Incluir custo unitário de cada item
                 valorVenda: valorVendaAtualizado, // Sempre usar o precoUnit atual (com BDI e edições manuais)
                 valorVendaOriginal: valorVendaOriginal, // Valor de venda original do cadastro (para referência)
                 quantidade: item.quantidade,
                 unidadeMedida: item.unidadeMedida,
                 materialId: item.materialId || null,
                 cotacaoId: item.cotacaoId || null,
+                kitId: item.kitId || null, // ✅ Preservar kitId se for um kit do catálogo
                 tipo: item.tipo,
-                subtotal: item.subtotal // Usar o subtotal atual do item
+                subtotal: item.subtotal, // Usar o subtotal atual do item
+                // ✅ Preservar composição de kits unificados
+                ...((item as any).itensDoKit && {
+                    itensDoKit: (item as any).itensDoKit
+                })
             };
         });
 
@@ -1176,6 +1423,193 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
         toast.success('Kit criado com sucesso!', {
             description: `${nomeKit.trim()} - R$ ${precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        });
+    };
+
+    // Funções para editar kit unificado
+    const handleBaixarItemParaLista = (indexItem: number) => {
+        if (!kitEmEdicao) return;
+
+        const itemParaBaixar = itensKitEdicao[indexItem];
+        if (!itemParaBaixar) return;
+
+        // Criar um novo item de orçamento baseado no item do kit
+        const novoItemOrcamento: OrcamentoItem = {
+            tipo: itemParaBaixar.tipo || 'MATERIAL',
+            nome: itemParaBaixar.nome,
+            unidadeMedida: itemParaBaixar.unidadeMedida || 'UN',
+            quantidade: itemParaBaixar.quantidade || 1,
+            custoUnit: itemParaBaixar.custoUnit || 0,
+            precoUnit: itemParaBaixar.valorVenda || 0,
+            subtotal: (itemParaBaixar.valorVenda || 0) * (itemParaBaixar.quantidade || 1),
+            materialId: itemParaBaixar.materialId,
+            cotacaoId: itemParaBaixar.cotacaoId,
+            kitId: itemParaBaixar.kitId,
+            descricao: itemParaBaixar.nome,
+            ...(itemParaBaixar.tipo === 'KIT' && itemParaBaixar.itensDoKit && {
+                itensDoKit: itemParaBaixar.itensDoKit
+            })
+        };
+
+        // Remover item do kit em edição
+        const novosItensKit = itensKitEdicao.filter((_, i) => i !== indexItem);
+        setItensKitEdicao(novosItensKit);
+
+        // Adicionar item à lista do orçamento E atualizar o kit
+        const novosItems = [...items];
+        
+        // Inserir novo item antes do kit
+        novosItems.splice(kitEmEdicao.index, 0, novoItemOrcamento);
+        
+        // Atualizar o kit (agora está no índice + 1) com a nova composição
+        const novoIndiceKit = kitEmEdicao.index + 1;
+        const custoTotal = novosItensKit.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+        const subtotalTotal = novosItensKit.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+        
+        novosItems[novoIndiceKit] = {
+            ...novosItems[novoIndiceKit],
+            custoUnit: custoTotal,
+            precoUnit: subtotalTotal,
+            subtotal: subtotalTotal,
+            itensDoKit: novosItensKit
+        } as OrcamentoItem & { itensDoKit?: any[] };
+        
+        setItems(novosItems);
+        
+        // Atualizar o índice do kit em edição
+        setKitEmEdicao({ index: novoIndiceKit, item: novosItems[novoIndiceKit] as any });
+
+        toast.success('Item baixado para lista', {
+            description: `${itemParaBaixar.nome} foi adicionado à lista do orçamento`,
+            icon: '⬇️'
+        });
+    };
+
+    const handleRemoverItemDoKit = (indexItem: number) => {
+        if (!kitEmEdicao) return;
+        
+        const itemParaRemover = itensKitEdicao[indexItem];
+        if (!itemParaRemover) return;
+
+        // Remover item do kit em edição
+        const novosItensKit = itensKitEdicao.filter((_, i) => i !== indexItem);
+        setItensKitEdicao(novosItensKit);
+        
+        // Atualizar o kit no orçamento imediatamente
+        const custoTotal = novosItensKit.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+        const subtotalTotal = novosItensKit.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+        
+        setItems(prev => prev.map((item, i) => {
+            if (i === kitEmEdicao.index) {
+                return {
+                    ...item,
+                    custoUnit: custoTotal,
+                    precoUnit: subtotalTotal,
+                    subtotal: subtotalTotal,
+                    itensDoKit: novosItensKit
+                } as OrcamentoItem & { itensDoKit?: any[] };
+            }
+            return item;
+        }));
+        
+        // Atualizar o kitEmEdicao também
+        setKitEmEdicao(prev => prev ? {
+            ...prev,
+            item: {
+                ...prev.item,
+                itensDoKit: novosItensKit
+            }
+        } : null);
+        
+        toast.success('Item removido do kit', {
+            description: `${itemParaRemover.nome} foi removido da composição`,
+            icon: '🗑️'
+        });
+    };
+
+    const handleSalvarEdicaoKit = () => {
+        if (!kitEmEdicao) return;
+
+        if (itensKitEdicao.length === 0) {
+            // Se não sobrou nenhum item, remover o kit completamente
+            setItems(prev => prev.filter((_, i) => i !== kitEmEdicao.index));
+            setShowModalEditarKit(false);
+            setKitEmEdicao(null);
+            setItensKitEdicao([]);
+            toast.info('Kit removido', {
+                description: 'O kit foi removido pois não há mais itens na composição'
+            });
+            return;
+        }
+
+        // Recalcular valores do kit
+        const custoTotal = itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+        const subtotalTotal = itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+
+        // Atualizar o kit na lista de itens
+        setItems(prev => prev.map((item, i) => {
+            if (i === kitEmEdicao.index) {
+                return {
+                    ...item,
+                    custoUnit: custoTotal,
+                    precoUnit: subtotalTotal,
+                    subtotal: subtotalTotal,
+                    itensDoKit: itensKitEdicao
+                } as OrcamentoItem & { itensDoKit?: any[] };
+            }
+            return item;
+        }));
+
+        setShowModalEditarKit(false);
+        setKitEmEdicao(null);
+        setItensKitEdicao([]);
+
+        toast.success('Kit atualizado com sucesso!', {
+            description: `${itensKitEdicao.length} ${itensKitEdicao.length === 1 ? 'item mantido' : 'itens mantidos'} na composição`,
+            icon: '✅'
+        });
+    };
+
+    const handleDesunificarKit = () => {
+        if (!kitEmEdicao) return;
+
+        // Baixar todos os itens do kit para a lista
+        const novosItems = [...items];
+        
+        // Remover o kit
+        novosItems.splice(kitEmEdicao.index, 1);
+        
+        // Adicionar todos os itens do kit na posição onde estava o kit
+        itensKitEdicao.forEach((itemKit, idx) => {
+            const novoItemOrcamento: OrcamentoItem = {
+                tipo: itemKit.tipo || 'MATERIAL',
+                nome: itemKit.nome,
+                unidadeMedida: itemKit.unidadeMedida || 'UN',
+                quantidade: itemKit.quantidade || 1,
+                custoUnit: itemKit.custoUnit || 0,
+                precoUnit: itemKit.valorVenda || 0,
+                subtotal: (itemKit.valorVenda || 0) * (itemKit.quantidade || 1),
+                materialId: itemKit.materialId,
+                cotacaoId: itemKit.cotacaoId,
+                kitId: itemKit.kitId,
+                descricao: itemKit.nome,
+                // Se for um kit unificado, preservar sua composição
+                ...(itemKit.tipo === 'KIT' && itemKit.itensDoKit && {
+                    itensDoKit: itemKit.itensDoKit
+                })
+            };
+            
+            novosItems.splice(kitEmEdicao.index + idx, 0, novoItemOrcamento);
+        });
+        
+        setItems(novosItems);
+        setShowModalEditarKit(false);
+        setKitEmEdicao(null);
+        setItensKitEdicao([]);
+
+        toast.success('Kit desunificado!', {
+            description: `${itensKitEdicao.length} ${itensKitEdicao.length === 1 ? 'item foi adicionado' : 'itens foram adicionados'} à lista do orçamento`,
+            icon: '📦'
         });
     };
 
@@ -1248,11 +1682,22 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             if (item.tipo === 'KIT' && item.kitId) {
                 const kitCompleto = kits.find((k: any) => k.id === item.kitId);
                 if (kitCompleto && kitCompleto.items) {
-                    // Recalcular preço de venda total do kit baseado nos materiais
-                    const precoVendaTotalKit = kitCompleto.items.reduce((sum: number, kitItem: any) => {
+                    // Recalcular preço de venda total do kit baseado nos materiais do estoque
+                    let precoVendaTotalKit = kitCompleto.items.reduce((sum: number, kitItem: any) => {
                         const precoVenda = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
                         return sum + (precoVenda * kitItem.quantidade);
                     }, 0);
+                    
+                    // ⚠️ IMPORTANTE: Incluir itens do banco frio E serviços no cálculo do preço de venda
+                    if (kitCompleto.itensFaltantes && Array.isArray(kitCompleto.itensFaltantes) && kitCompleto.itensFaltantes.length > 0) {
+                        const precoVendaExtras = kitCompleto.itensFaltantes.reduce((sum: number, itemKit: any) => {
+                            // Incluir tanto cotações quanto serviços
+                            const precoUnit = itemKit.precoUnit || itemKit.preco || itemKit.valorUnitario || 0;
+                            const quantidade = itemKit.quantidade || 0;
+                            return sum + (precoUnit * quantidade);
+                        }, 0);
+                        precoVendaTotalKit += precoVendaExtras;
+                    }
                     
                     const precoBase = precoVendaTotalKit;
                     const precoUnit = precoBase * (1 + newBdi / 100);
@@ -1758,12 +2203,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                 Cidade
                             </label>
-                            <input
-                                type="text"
+                            <CidadeAutocomplete
                                 value={formState.cidade}
-                                onChange={(e) => setFormState(prev => ({ ...prev, cidade: e.target.value }))}
-                                className="input-field"
-                                placeholder="Ex: Florianópolis"
+                                onChange={(cidade) => setFormState(prev => ({ ...prev, cidade }))}
+                                placeholder="Digite para buscar cidade..."
                             />
                         </div>
 
@@ -1969,7 +2412,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                             <div className="flex-1 min-w-0">
                                                 <p className="font-semibold text-gray-900 dark:text-dark-text truncate">{item.nome}</p>
                                                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary">{item.unidadeMedida}</span>
+                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary">
+                                                        {formatarUnidadeOrcamento(item.unidadeVenda || item.unidadeMedida)}
+                                                    </span>
                                                     {/* Campo NCM */}
                                                     <div className="flex items-center gap-1">
                                                         <label className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">NCM:</label>
@@ -2060,14 +2505,145 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 />
                                             </div>
 
-                                            {/* Subtotal - Compacto */}
-                                            <div className="flex-shrink-0 w-32">
+                                            {/* Subtotal e Lucro */}
+                                            <div className="flex-shrink-0 w-40">
                                                 <label className="block text-xs font-medium text-gray-600 dark:text-dark-text-secondary mb-1">Subtotal</label>
                                                 <p className="text-base font-bold text-purple-700 dark:text-purple-300">
                                                     R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </p>
+                                                {(() => {
+                                                    const custoTotal = item.custoUnit * item.quantidade;
+                                                    const lucro = item.subtotal - custoTotal;
+                                                    const percentualLucro = custoTotal > 0 ? ((lucro / custoTotal) * 100) : 0;
+                                                    return (
+                                                        <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium" title={`Margem: ${percentualLucro.toFixed(1)}%`}>
+                                                            💰 Lucro: R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </p>
+                                                    );
+                                                })()}
                                             </div>
 
+                                            {/* Botões Ver Itens e Editar (apenas para kits) - Compacto */}
+                                            {item.tipo === 'KIT' && (
+                                                <div className="flex-shrink-0 flex gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            // Se for kit customizado (sem kitId), usar itensDoKit
+                                                            if (!item.kitId && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                                                                setItensKitParaVisualizar((item as any).itensDoKit);
+                                                                setNomeKitParaVisualizar(item.nome);
+                                                                setShowModalItensKit(true);
+                                                            } 
+                                                            // Se for kit do catálogo (com kitId), buscar itens do kit completo
+                                                            else if (item.kitId) {
+                                                                const kitCompleto = kits.find((k: any) => k.id === item.kitId);
+                                                                if (kitCompleto) {
+                                                                    // Preparar itens do kit do catálogo para visualização
+                                                                    const itensEstoque = (kitCompleto.items || []).map((kitItem: any) => ({
+                                                                        nome: kitItem.material?.nome || 'Material',
+                                                                        codigo: kitItem.material?.sku || '',
+                                                                        custoUnit: kitItem.material?.preco || 0, // Custo de compra do material
+                                                                        valorVenda: kitItem.material?.valorVenda || kitItem.material?.preco || 0,
+                                                                        quantidade: kitItem.quantidade,
+                                                                        unidadeMedida: kitItem.material?.unidadeMedida || 'un',
+                                                                        tipo: 'MATERIAL',
+                                                                        subtotal: (kitItem.quantidade || 0) * (kitItem.material?.valorVenda || kitItem.material?.preco || 0)
+                                                                    }));
+                                                                    
+                                                                    // Adicionar itens do banco frio e serviços
+                                                                    const itensBancoFrio = (kitCompleto.itensFaltantes || []).map((item: any) => {
+                                                                        if (item.tipo === 'SERVICO' && item.servicoId) {
+                                                                            // Buscar dados completos do serviço
+                                                                            const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
+                                                                            if (servicoCompleto) {
+                                                                                return {
+                                                                                    nome: servicoCompleto.nome,
+                                                                                    codigo: servicoCompleto.codigo,
+                                                                                    custoUnit: servicoCompleto.custo || 0,
+                                                                                    valorVenda: servicoCompleto.preco || 0,
+                                                                                    quantidade: item.quantidade || 0,
+                                                                                    unidadeMedida: servicoCompleto.unidade || 'un',
+                                                                                    tipo: 'SERVICO',
+                                                                                    subtotal: (item.quantidade || 0) * (servicoCompleto.preco || 0)
+                                                                                };
+                                                                            }
+                                                                        } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+                                                                            // Buscar dados completos da cotação
+                                                                            const cotacaoCompleta = cotacoes.find((c: any) => c.id === item.cotacaoId);
+                                                                            if (cotacaoCompleta) {
+                                                                                return {
+                                                                                    nome: cotacaoCompleta.nome,
+                                                                                    codigo: cotacaoCompleta.fornecedorNome || cotacaoCompleta.sku || '',
+                                                                                    custoUnit: cotacaoCompleta.valorUnitario || 0,
+                                                                                    valorVenda: cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0,
+                                                                                    quantidade: item.quantidade || 0,
+                                                                                    unidadeMedida: cotacaoCompleta.unidadeMedida || 'un',
+                                                                                    tipo: 'COTACAO',
+                                                                                    subtotal: (item.quantidade || 0) * (cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0),
+                                                                                    dataUltimaCotacao: cotacaoCompleta.dataAtualizacao
+                                                                                };
+                                                                            }
+                                                                        }
+                                                                        
+                                                                        // Fallback: usar dados do item mesmo
+                                                                        return {
+                                                                            nome: item.nome || item.materialNome || item.servicoNome || 'Item',
+                                                                            codigo: item.codigo || item.sku || '',
+                                                                            custoUnit: item.valorUnitario || item.custo || 0,
+                                                                            valorVenda: item.precoUnit || item.preco || item.valorUnitario || 0,
+                                                                            quantidade: item.quantidade || 0,
+                                                                            unidadeMedida: item.unidadeMedida || item.unidade || 'un',
+                                                                            tipo: item.tipo || 'COTACAO',
+                                                                            subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || item.valorUnitario || 0),
+                                                                            dataUltimaCotacao: item.dataUltimaCotacao || item.dataAtualizacao
+                                                                        };
+                                                                    });
+                                                                    
+                                                                    const todosItens = [...itensEstoque, ...itensBancoFrio];
+                                                                    setItensKitParaVisualizar(todosItens);
+                                                                    setNomeKitParaVisualizar(kitCompleto.nome);
+                                                                    setShowModalItensKit(true);
+                                                                } else {
+                                                                    toast.error('Kit não encontrado', {
+                                                                        description: 'Não foi possível carregar os detalhes do kit'
+                                                                    });
+                                                                }
+                                                            } else {
+                                                                toast.warning('Kit sem itens', {
+                                                                    description: 'Este kit não possui itens cadastrados'
+                                                                });
+                                                            }
+                                                        }}
+                                                        className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                                                        title="Ver itens do kit"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                        </svg>
+                                                    </button>
+                                                    
+                                                    {/* Botão Editar (apenas para kits unificados - sem kitId) */}
+                                                    {!item.kitId && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit) && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setKitEmEdicao({ index, item: item as any });
+                                                                setItensKitEdicao([...(item as any).itensDoKit]);
+                                                                setShowModalEditarKit(true);
+                                                            }}
+                                                            className="p-2 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition-colors"
+                                                            title="Editar kit unificado"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+                                            
                                             {/* Botão Deletar - Compacto */}
                                             <div className="flex-shrink-0">
                                                 <button
@@ -2279,6 +2855,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         setCotacaoSelecionadaComparacao(null);
                                         setMateriaisSelecionadosComparacao(new Set());
                                         setCotacoesSelecionadasComparacao(new Set());
+                                        setItensSelecionadosModal(new Set());
+                                        setUnidadeVendaSelecionada({});
                                         setSearchEstoque('');
                                         setSearchCotacoes('');
                                         setSearchGlobalComparacao('');
@@ -2293,23 +2871,21 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             </div>
 
                             {/* Campo de Busca Universal no Header */}
-                            {!modalExpandido && (
-                                <div className="mb-4">
-                                    <div className="relative">
-                                        <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                        </svg>
-                                        <input
-                                            type="text"
-                                            value={buscaGlobal}
-                                            onChange={(e) => setBuscaGlobal(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
-                                            placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
-                                            style={{ color: 'white' }}
-                                        />
-                                    </div>
+                            <div className="mb-4">
+                                <div className="relative">
+                                    <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                    <input
+                                        type="text"
+                                        value={buscaGlobal}
+                                        onChange={(e) => setBuscaGlobal(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
+                                        placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
+                                        style={{ color: 'white' }}
+                                    />
                                 </div>
-                            )}
+                            </div>
 
                             {/* Abas */}
                             <div className="flex gap-2 flex-wrap items-center">
@@ -2424,14 +3000,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         {/* Conteúdo do Modal */}
                         <div className="flex-1 overflow-y-auto p-6">
                             {/* Resultados da Busca Global */}
-                            {!modalExpandido && (
-                                <div className="mb-6">
-                                    {/* Resultados da Busca Global */}
-                                    {buscaGlobal.trim() && (
-                                        <div className="mt-4 space-y-4">
+                            {/* Resultados da Busca Global - Layout lado a lado quando expandido */}
+                            {buscaGlobal.trim() && (
+                                <div className={`mb-6 ${modalExpandido ? 'grid grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto' : 'space-y-4'}`}>
                                             {/* Materiais */}
                                             {resultadosBuscaGlobal.materiais.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>📦</span> Materiais ({resultadosBuscaGlobal.materiais.length})
                                                     </h4>
@@ -2463,24 +3037,32 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                                             {/* Serviços */}
                                             {resultadosBuscaGlobal.servicos.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>🔧</span> Serviços ({resultadosBuscaGlobal.servicos.length})
                                                     </h4>
                                                     <div className="space-y-2 max-h-48 overflow-y-auto">
                                                         {resultadosBuscaGlobal.servicos.map(servico => (
-                                                            <button
+                                                            <div
                                                                 key={servico.id}
-                                                                type="button"
-                                                                onClick={() => handleAddServico(servico, true)}
                                                                 className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700 transition-all"
                                                             >
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-
-                                                                    Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
-                                                                </p>
-                                                            </button>
+                                                                <div className="flex justify-between items-start gap-3">
+                                                                    <div className="flex-1">
+                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
+                                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                            Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddServico(servico, true)}
+                                                                        className="px-3 py-1 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
+                                                                    >
+                                                                        + Inserir
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -2502,8 +3084,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                             >
                                                                 <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
                                                                 <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-
-                                                                    {kit.items?.length || 0} itens • Preço: R$ {((kit.precoSugerido ?? kit.custoTotal) ?? 0).toFixed(2)}
+                                                                    {kit.items?.length || 0} itens • Preço: R$ {getKitPrecoVendaTotal(kit).toFixed(2)}
                                                                 </p>
                                                             </button>
                                                         ))}
@@ -2513,7 +3094,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                                             {/* Quadros */}
                                             {resultadosBuscaGlobal.quadros.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>⚡</span> Quadros ({resultadosBuscaGlobal.quadros.length})
                                                     </h4>
@@ -2544,8 +3125,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     </h4>
                                                     <div className="space-y-2 max-h-48 overflow-y-auto">
                                                         {resultadosBuscaGlobal.cotacoes.map(cotacao => {
-                                                            const tipoMat = identificarTipoMaterial(cotacao.nome);
-                                                            const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                            const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
+                                                            
+                                                            // Calcular valores para exibição
+                                                            const custoUnitario = cotacao.valorUnitario || 0;
+                                                            const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+                                                            const porcentagemLucro = custoUnitario > 0 
+                                                                ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
+                                                                : 0;
+                                                            const unidadeMedida = cotacao.unidadeMedida || 'UN';
                                                             
                                                             return (
                                                                 <div
@@ -2561,7 +3149,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                         <div className="flex-1">
                                                                             <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
                                                                             <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'} • R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}/m
+                                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
+                                                                                <br />
+                                                                                Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
+                                                                                {valorVendaBase > 0 && (
+                                                                                    <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
+                                                                                    {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
+                                                                                    </>
+                                                                                )}
                                                                             </p>
                                                                             {temSelecaoUnidade && (
                                                                                 <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
@@ -2595,7 +3190,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                                     onClick={() => handleAddCotacao(cotacao, true)}
                                                                                     className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
                                                                                 >
-                                                                                    + Add
+                                                                                    + Inserir
                                                                                 </button>
                                                                             )}
                                                                         </div>
@@ -2609,13 +3204,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                                             {/* Nenhum resultado */}
                                             {Object.values(resultadosBuscaGlobal).every(arr => arr.length === 0) && (
-                                                <div className="text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl">
+                                                <div className={`text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl ${modalExpandido ? 'col-span-2' : ''}`}>
                                                     <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum item encontrado para "{buscaGlobal}"</p>
                                                 </div>
                                             )}
                                         </div>
-                                    )}
-                                </div>
                             )}
 
                             {/* Modo: Comparação Estoque vs Banco Frio (Modal Expandido) */}
@@ -3051,16 +3644,36 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             )}
 
                             {/* Modo: Materiais */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'materiais' && (
+                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'materiais' && (
                                 <div>
-                                    <div className="mb-4">
+                                    <div className="mb-4 flex items-center gap-3">
                                         <input
                                             type="text"
                                             value={itemSearchTerm}
                                             onChange={(e) => setItemSearchTerm(e.target.value)}
-                                            className="input-field"
+                                            className="input-field flex-1"
                                             placeholder="🔍 Buscar material por nome ou SKU..."
                                         />
+                                        {modalExpandido && (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSelecionarTodos}
+                                                    className="px-3 py-2 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                                                >
+                                                    Selecionar Todos
+                                                </button>
+                                                {itensSelecionadosModal.size > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleDeselecionarTodos}
+                                                        className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                                    >
+                                                        Desmarcar Todos
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {filteredMaterials.length === 0 ? (
@@ -3074,16 +3687,30 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
                                             {filteredMaterials.map(material => {
-                                                const tipoMat = identificarTipoMaterial(material.nome);
-                                                const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                const temSelecaoUnidade = podeVenderEmMetroOuCm(material.unidadeMedida);
+                                                
+                                                const estaSelecionado = itensSelecionadosModal.has(material.id);
                                                 
                                                 return (
                                                     <div
                                                         key={material.id}
-                                                        className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                            estaSelecionado 
+                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                                : 'border-gray-200 dark:border-dark-border hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700'
+                                                        }`}
                                                     >
                                                         <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex-1">
+                                                            <div className="flex items-start gap-3 flex-1">
+                                                                {modalExpandido && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionado}
+                                                                        onChange={() => handleToggleSelecaoItem(material.id)}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                    />
+                                                                )}
+                                                                <div className="flex-1">
                                                                 <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
                                                                 <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
                                                                     SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
@@ -3100,31 +3727,141 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                         💡 Este material pode ser vendido em metros ou centímetros
                                                                     </p>
                                                                 )}
+                                                                </div>
                                                             </div>
                                                             <div className="flex items-center gap-2">
-                                                                {temSelecaoUnidade ? (
-                                                                    <>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleAddItem(material, false, 'm')}
-                                                                            className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-                                                                            title="Adicionar em metros"
+                                                                {modalExpandido ? (
+                                                                    temSelecaoUnidade ? (
+                                                                        <select
+                                                                            value={unidadeVendaSelecionada[material.id] || 'm'}
+                                                                            onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [material.id]: e.target.value }))}
+                                                                            className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                            onClick={(e) => e.stopPropagation()}
                                                                         >
-                                                                            + Metro
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleAddItem(material, false, 'cm')}
-                                                                            className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
-                                                                            title="Adicionar em centímetros"
-                                                                        >
-                                                                            + cm
-                                                                        </button>
-                                                                    </>
+                                                                            <option value="m">Metros</option>
+                                                                            <option value="cm">Centímetros</option>
+                                                                        </select>
+                                                                    ) : null
                                                                 ) : (
+                                                                    temSelecaoUnidade ? (
+                                                                        <>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddItem(material, false, 'm')}
+                                                                                className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                                title="Adicionar em metros"
+                                                                            >
+                                                                                + Metro
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddItem(material, false, 'cm')}
+                                                                                className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                                                                                title="Adicionar em centímetros"
+                                                                            >
+                                                                                + cm
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAddItem(material)}
+                                                                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                        >
+                                                                            + Adicionar
+                                                                        </button>
+                                                                    )
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Modo: Serviços */}
+                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'servicos' && (
+                                <div>
+                                    <div className="mb-4 flex items-center gap-3">
+                                        <input
+                                            type="text"
+                                            value={itemSearchTerm}
+                                            onChange={(e) => setItemSearchTerm(e.target.value)}
+                                            className="input-field flex-1"
+                                            placeholder="🔍 Buscar serviço por nome ou código..."
+                                        />
+                                        {modalExpandido && (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSelecionarTodos}
+                                                    className="px-3 py-2 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                                                >
+                                                    Selecionar Todos
+                                                </button>
+                                                {itensSelecionadosModal.size > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleDeselecionarTodos}
+                                                        className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                                    >
+                                                        Desmarcar Todos
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {filteredServicos.length === 0 ? (
+                                        <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
+                                            <div className="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                                                <span className="text-2xl">🔧</span>
+                                            </div>
+                                            <p className="text-gray-500 dark:text-dark-text-secondary font-medium">Nenhum serviço encontrado</p>
+                                            <p className="text-gray-400 dark:text-dark-text-secondary text-sm mt-1">Cadastre serviços na página de Serviços</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                                            {filteredServicos.map(servico => {
+                                                const estaSelecionado = itensSelecionadosModal.has(servico.id);
+                                                
+                                                return (
+                                                    <div
+                                                        key={servico.id}
+                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                            estaSelecionado 
+                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                                : 'border-gray-200 dark:border-dark-border hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700'
+                                                        }`}
+                                                    >
+                                                        <div className="flex justify-between items-start gap-4">
+                                                            <div className="flex items-start gap-3 flex-1">
+                                                                {modalExpandido && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionado}
+                                                                        onChange={() => handleToggleSelecaoItem(servico.id)}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                    />
+                                                                )}
+                                                                <div className="flex-1">
+                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
+                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                        Código: {servico.codigo || 'N/A'} • Tipo: {servico.tipo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
+                                                                    </p>
+                                                                    {servico.descricao && (
+                                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{servico.descricao}</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {!modalExpandido && (
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => handleAddItem(material)}
+                                                                        onClick={() => handleAddServico(servico)}
                                                                         className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
                                                                     >
                                                                         + Adicionar
@@ -3140,53 +3877,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 </div>
                             )}
 
-                            {/* Modo: Serviços */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'servicos' && (
-                                <div>
-                                    <div className="mb-4">
-                                        <input
-                                            type="text"
-                                            value={itemSearchTerm}
-                                            onChange={(e) => setItemSearchTerm(e.target.value)}
-                                            className="input-field"
-                                            placeholder="🔍 Buscar serviço por nome ou código..."
-                                        />
-                                    </div>
-
-                                    {filteredServicos.length === 0 ? (
-                                        <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                            <div className="w-16 h-16 bg-gray-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                <span className="text-2xl">🔧</span>
-                                            </div>
-                                            <p className="text-gray-500 dark:text-dark-text-secondary font-medium">Nenhum serviço encontrado</p>
-                                            <p className="text-gray-400 dark:text-dark-text-secondary text-sm mt-1">Cadastre serviços na página de Serviços</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredServicos.map(servico => (
-                                                <button
-                                                    key={servico.id}
-                                                    type="button"
-                                                    onClick={() => handleAddServico(servico)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700 transition-all"
-                                                >
-                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
-                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-
-                                                        Código: {servico.codigo || 'N/A'} • Tipo: {servico.tipo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
-                                                    </p>
-                                                    {servico.descricao && (
-                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{servico.descricao}</p>
-                                                    )}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
                             {/* Modo: Kits */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'kits' && (
+                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'kits' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -3210,22 +3902,53 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </div>
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredKits.map(kit => (
-                                                <button
-                                                    key={kit.id}
-                                                    type="button"
-                                                    onClick={() => handleAddKit(kit)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700 transition-all"
-                                                >
-                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
-                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                        {kit.items.length} itens • Custo Total: R$ {kit.custoTotal.toFixed(2)} • Preço: R$ {(kit.precoSugerido || kit.custoTotal).toFixed(2)}
-                                                    </p>
-                                                    {kit.descricao && (
-                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{kit.descricao}</p>
-                                                    )}
-                                                </button>
-                                            ))}
+                                            {filteredKits.map(kit => {
+                                                const estaSelecionado = itensSelecionadosModal.has(kit.id);
+                                                
+                                                return (
+                                                    <div
+                                                        key={kit.id}
+                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                            estaSelecionado 
+                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                                : 'border-gray-200 dark:border-dark-border hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700'
+                                                        }`}
+                                                    >
+                                                        <div className="flex justify-between items-start gap-4">
+                                                            <div className="flex items-start gap-3 flex-1">
+                                                                {modalExpandido && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionado}
+                                                                        onChange={() => handleToggleSelecaoItem(kit.id)}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                    />
+                                                                )}
+                                                                <div className="flex-1">
+                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
+                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                {(kit.items?.length || 0) + (kit.itensFaltantes?.length || 0)} itens • Custo Total: R$ {getKitCustoTotal(kit).toFixed(2)} • Preço: R$ {getKitPrecoVendaTotal(kit).toFixed(2)}
+                                                            </p>
+                                                            {kit.descricao && (
+                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{kit.descricao}</p>
+                                                            )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {!modalExpandido && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddKit(kit)}
+                                                                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                    >
+                                                                        + Adicionar
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>
@@ -3256,38 +3979,89 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </div>
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredQuadros.map(quadro => (
-                                                <button
-                                                    key={quadro.id}
-                                                    type="button"
-                                                    onClick={() => handleAddQuadro(quadro)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700 transition-all"
-                                                >
-                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{quadro.nome}</p>
-                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                        Custo: R$ {quadro.custoTotal.toFixed(2)} • Preço: R$ {(quadro.precoSugerido || quadro.custoTotal).toFixed(2)}
-                                                    </p>
-                                                    {quadro.descricao && (
-                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{quadro.descricao}</p>
-                                                    )}
-                                                </button>
-                                            ))}
+                                            {filteredQuadros.map(quadro => {
+                                                const estaSelecionado = itensSelecionadosModal.has(quadro.id);
+                                                
+                                                return (
+                                                    <div
+                                                        key={quadro.id}
+                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                            estaSelecionado 
+                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                                : 'border-gray-200 dark:border-dark-border hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700'
+                                                        }`}
+                                                    >
+                                                        <div className="flex justify-between items-start gap-4">
+                                                            <div className="flex items-start gap-3 flex-1">
+                                                                {modalExpandido && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionado}
+                                                                        onChange={() => handleToggleSelecaoItem(quadro.id)}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                    />
+                                                                )}
+                                                                <div className="flex-1">
+                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{quadro.nome}</p>
+                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                Custo: R$ {quadro.custoTotal.toFixed(2)} • Preço: R$ {(quadro.precoSugerido || quadro.custoTotal).toFixed(2)}
+                                                            </p>
+                                                            {quadro.descricao && (
+                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{quadro.descricao}</p>
+                                                            )}
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {!modalExpandido && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddQuadro(quadro)}
+                                                                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                    >
+                                                                        + Adicionar
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>
                             )}
 
                             {/* Modo: Cotações (Banco Frio) */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'cotacoes' && (
+                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'cotacoes' && (
                                 <div>
-                                    <div className="mb-4">
+                                    <div className="mb-4 flex items-center gap-3">
                                         <input
                                             type="text"
                                             value={itemSearchTerm}
                                             onChange={(e) => setItemSearchTerm(e.target.value)}
-                                            className="input-field"
+                                            className="input-field flex-1"
                                             placeholder="🔍 Buscar cotação por nome, NCM ou fornecedor..."
                                         />
+                                        {modalExpandido && (
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleSelecionarTodos}
+                                                    className="px-3 py-2 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+                                                >
+                                                    Selecionar Todos
+                                                </button>
+                                                {itensSelecionadosModal.size > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleDeselecionarTodos}
+                                                        className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                                    >
+                                                        Desmarcar Todos
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mb-4">
@@ -3309,66 +4083,107 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
                                             {filteredCotacoes.map(cotacao => {
-                                                const tipoMat = identificarTipoMaterial(cotacao.nome);
-                                                const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
+                                                
+                                                // Calcular valores para exibição
+                                                const custoUnitario = cotacao.valorUnitario || 0;
+                                                const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+                                                const porcentagemLucro = custoUnitario > 0 
+                                                    ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
+                                                    : 0;
+                                                const unidadeMedida = cotacao.unidadeMedida || 'UN';
+                                                
+                                                const estaSelecionado = itensSelecionadosModal.has(cotacao.id);
                                                 
                                                 return (
                                                     <div
                                                         key={cotacao.id}
-                                                        className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                            estaSelecionado 
+                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
+                                                                : 'border-gray-200 dark:border-dark-border hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700'
+                                                        }`}
                                                     >
                                                         <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex-1">
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                    NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                </p>
-                                                                {cotacao.observacoes && (
-                                                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
+                                                            <div className="flex items-start gap-3 flex-1">
+                                                                {modalExpandido && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionado}
+                                                                        onChange={() => handleToggleSelecaoItem(cotacao.id)}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                    />
                                                                 )}
-                                                                {temSelecaoUnidade && (
-                                                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                                                        💡 Este material pode ser vendido em metros ou centímetros
+                                                                <div className="flex-1">
+                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
+                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                        NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
+                                                                        <br />
+                                                                        Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
+                                                                        {valorVendaBase > 0 && (
+                                                                            <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
+                                                                            {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
+                                                                            </>
+                                                                        )}
                                                                     </p>
-                                                                )}
+                                                                    {cotacao.observacoes && (
+                                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
+                                                                    )}
+                                                                    {temSelecaoUnidade && (
+                                                                        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                            💡 Este material pode ser vendido em metros ou centímetros
+                                                                        </p>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                             <div className="flex flex-col items-end gap-2">
                                                                 <div className="text-right">
-                                                                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                                                                        R$ {cotacao.valorUnitario.toFixed(2)}/m
-                                                                    </p>
                                                                     <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
                                                                         Atualizado em {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
                                                                     </p>
                                                                 </div>
                                                                 <div className="flex items-center gap-2">
-                                                                    {temSelecaoUnidade ? (
-                                                                        <>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleAddCotacao(cotacao, false, 'm')}
-                                                                                className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-                                                                                title="Adicionar em metros"
+                                                                    {modalExpandido ? (
+                                                                        temSelecaoUnidade ? (
+                                                                            <select
+                                                                                value={unidadeVendaSelecionada[cotacao.id] || 'm'}
+                                                                                onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [cotacao.id]: e.target.value }))}
+                                                                                className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                                onClick={(e) => e.stopPropagation()}
                                                                             >
-                                                                                + Metro
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => handleAddCotacao(cotacao, false, 'cm')}
-                                                                                className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
-                                                                                title="Adicionar em centímetros"
-                                                                            >
-                                                                                + cm
-                                                                            </button>
-                                                                        </>
+                                                                                <option value="m">Metros</option>
+                                                                                <option value="cm">Centímetros</option>
+                                                                            </select>
+                                                                        ) : null
                                                                     ) : (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => handleAddCotacao(cotacao)}
-                                                                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-                                                                        >
-                                                                            + Adicionar
-                                                                        </button>
+                                                                        temSelecaoUnidade ? (
+                                                                            <>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleAddCotacao(cotacao, false, 'm')}
+                                                                                    className="px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                                    title="Adicionar em metros"
+                                                                                >
+                                                                                    + Metro
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleAddCotacao(cotacao, false, 'cm')}
+                                                                                    className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                                                                                    title="Adicionar em centímetros"
+                                                                                >
+                                                                                    + cm
+                                                                                </button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddCotacao(cotacao)}
+                                                                                className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                                                                            >
+                                                                                + Inserir
+                                                                            </button>
+                                                                        )
                                                                     )}
                                                                 </div>
                                                             </div>
@@ -3537,6 +4352,19 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         Inserir {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} Item(ns) Selecionado(s)
                                     </button>
                                 )}
+                                {/* Botão para adicionar múltiplos itens selecionados quando modal estiver expandido */}
+                                {modalExpandido && itensSelecionadosModal.size > 0 && modoAdicao !== 'comparacao' && modoAdicao !== 'manual' && (
+                                    <button
+                                        type="button"
+                                        onClick={handleAdicionarSelecionados}
+                                        className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-lg hover:from-indigo-700 hover:to-indigo-600 transition-colors font-semibold flex items-center gap-2"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Adicionar {itensSelecionadosModal.size} Item(ns) Selecionado(s)
+                                    </button>
+                                )}
                             </div>
                             <div className="flex gap-3">
                                 <button
@@ -3669,6 +4497,686 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
+
+        {/* Modal de Visualização de Itens do Kit */}
+        {showModalItensKit && (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+                onClick={(e) => {
+                    // Fechar modal ao clicar no backdrop
+                    if (e.target === e.currentTarget) {
+                        setShowModalItensKit(false);
+                        setItensKitParaVisualizar([]);
+                        setNomeKitParaVisualizar('');
+                    }
+                }}
+            >
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+                    {/* Header Fixo */}
+                    <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-700 rounded-t-2xl">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-md">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                        Itens do Kit
+                                    </h3>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                                        {nomeKitParaVisualizar}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowModalItensKit(false);
+                                    setItensKitParaVisualizar([]);
+                                    setNomeKitParaVisualizar('');
+                                }}
+                                className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-gray-50 dark:bg-gray-900">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                    {itensKitParaVisualizar.map((itemKit: any, index: number) => {
+                                        const valorVenda = itemKit.valorVenda || 0;
+                                        const quantidade = itemKit.quantidade || 1;
+                                        const subtotal = valorVenda * quantidade;
+                                        const tipoItem = itemKit.tipo || 'MATERIAL';
+                                        
+                                        // Detectar se é um kit (unificado ou catálogo)
+                                        const ehKit = tipoItem === 'KIT' || itemKit.kitId || (itemKit.itensDoKit && Array.isArray(itemKit.itensDoKit));
+                                        const ehKitUnificado = ehKit && !itemKit.kitId && itemKit.itensDoKit;
+                                        const ehKitCatalogo = ehKit && itemKit.kitId;
+                                        
+                                        // Cores por tipo
+                                        const corTipo = {
+                                            'MATERIAL': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+                                            'COTACAO': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                                            'SERVICO': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+                                            'KIT': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                                        }[tipoItem] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+                                        
+                                        return (
+                                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                                    <div className="font-medium">{itemKit.nome}</div>
+                                                    {itemKit.dataUltimaCotacao && (
+                                                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                            📅 Cotação: {(() => {
+                                                                try {
+                                                                    const data = new Date(itemKit.dataUltimaCotacao);
+                                                                    return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
+                                                                } catch {
+                                                                    return 'Sem data';
+                                                                }
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                                                    {itemKit.codigo || '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${corTipo}`}>
+                                                        {tipoItem === 'MATERIAL' && '📦 Estoque'}
+                                                        {tipoItem === 'COTACAO' && '❄️ Banco Frio'}
+                                                        {tipoItem === 'SERVICO' && '⚙️ Serviço'}
+                                                        {ehKitUnificado && '🎁 Kit Unificado'}
+                                                        {ehKitCatalogo && '📚 Kit Catálogo'}
+                                                        {ehKit && !ehKitUnificado && !ehKitCatalogo && '🎁 Kit'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white">
+                                                    {quantidade} {itemKit.unidadeMedida}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-white">
+                                                    R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-sm font-bold text-teal-700 dark:text-teal-400">
+                                                    R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    {ehKit && (
+                                                        <button
+                                                            onClick={async () => {
+                                                                // Se for kit unificado, mostrar seus itens
+                                                                if (ehKitUnificado && itemKit.itensDoKit) {
+                                                                    setItensSubKitParaVisualizar(itemKit.itensDoKit);
+                                                                    setNomeSubKitParaVisualizar(itemKit.nome);
+                                                                    setShowModalDetalhesSubKit(true);
+                                                                }
+                                                                // Se for kit do catálogo, buscar os itens do kit
+                                                                else if (ehKitCatalogo && itemKit.kitId) {
+                                                                    const kitCompleto = kits.find((k: any) => k.id === itemKit.kitId);
+                                                                    if (kitCompleto) {
+                                                                        // Preparar itens do kit do catálogo
+                                                                        const itensEstoque = (kitCompleto.items || []).map((kitItem: any) => ({
+                                                                            nome: kitItem.material?.nome || 'Material',
+                                                                            codigo: kitItem.material?.sku || '',
+                                                                            custoUnit: kitItem.material?.preco || 0,
+                                                                            valorVenda: kitItem.material?.valorVenda || kitItem.material?.preco || 0,
+                                                                            quantidade: kitItem.quantidade,
+                                                                            unidadeMedida: kitItem.material?.unidadeMedida || 'un',
+                                                                            tipo: 'MATERIAL',
+                                                                            subtotal: (kitItem.quantidade || 0) * (kitItem.material?.valorVenda || kitItem.material?.preco || 0)
+                                                                        }));
+                                                                        
+                                                                        // Adicionar itens do banco frio e serviços
+                                                                        const itensBancoFrio = (kitCompleto.itensFaltantes || []).map((item: any) => {
+                                                                            if (item.tipo === 'SERVICO') {
+                                                                                const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
+                                                                                if (servicoCompleto) {
+                                                                                    return {
+                                                                                        nome: servicoCompleto.nome,
+                                                                                        codigo: servicoCompleto.codigo,
+                                                                                        custoUnit: servicoCompleto.custo || 0,
+                                                                                        valorVenda: servicoCompleto.preco || 0,
+                                                                                        quantidade: item.quantidade || 0,
+                                                                                        unidadeMedida: servicoCompleto.unidade || 'un',
+                                                                                        tipo: 'SERVICO',
+                                                                                        subtotal: (item.quantidade || 0) * (servicoCompleto.preco || 0)
+                                                                                    };
+                                                                                }
+                                                                            } else if (item.tipo === 'COTACAO') {
+                                                                                const cotacaoCompleta = cotacoes.find((c: any) => c.id === item.cotacaoId);
+                                                                                if (cotacaoCompleta) {
+                                                                                    return {
+                                                                                        nome: cotacaoCompleta.nome,
+                                                                                        codigo: cotacaoCompleta.fornecedorNome || cotacaoCompleta.sku || '',
+                                                                                        custoUnit: cotacaoCompleta.valorUnitario || 0,
+                                                                                        valorVenda: cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0,
+                                                                                        quantidade: item.quantidade || 0,
+                                                                                        unidadeMedida: cotacaoCompleta.unidadeMedida || 'un',
+                                                                                        tipo: 'COTACAO',
+                                                                                        subtotal: (item.quantidade || 0) * (cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0),
+                                                                                        dataUltimaCotacao: cotacaoCompleta.dataAtualizacao
+                                                                                    };
+                                                                                }
+                                                                            }
+                                                                            
+                                                                            return {
+                                                                                nome: item.nome || 'Item',
+                                                                                codigo: item.codigo || '',
+                                                                                custoUnit: item.valorUnitario || item.custo || 0,
+                                                                                valorVenda: item.precoUnit || item.preco || 0,
+                                                                                quantidade: item.quantidade || 0,
+                                                                                unidadeMedida: item.unidadeMedida || 'un',
+                                                                                tipo: item.tipo || 'COTACAO',
+                                                                                subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                                                                                dataUltimaCotacao: item.dataUltimaCotacao
+                                                                            };
+                                                                        }).filter(Boolean);
+                                                                        
+                                                                        const todosItens = [...itensEstoque, ...itensBancoFrio];
+                                                                        setItensSubKitParaVisualizar(todosItens);
+                                                                        setNomeSubKitParaVisualizar(kitCompleto.nome);
+                                                                        setShowModalDetalhesSubKit(true);
+                                                                    } else {
+                                                                        toast.error('Kit não encontrado', {
+                                                                            description: 'Não foi possível carregar os detalhes do kit'
+                                                                        });
+                                                                    }
+                                                                }
+                                                            }}
+                                                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 rounded-lg transition-colors"
+                                                            title="Ver detalhes do kit"
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                            </svg>
+                                                            Ver Detalhes
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot className="bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-700">
+                                    {(() => {
+                                        const valorTotal = itensKitParaVisualizar.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+                                        const custoTotal = itensKitParaVisualizar.reduce((sum, item) => {
+                                            // Para materiais: usar preco (custo de compra)
+                                            // Para cotações: usar valorUnitario (custo da cotação) 
+                                            // Para serviços: usar custoUnit se definido, senão 0
+                                            const custoUnit = item.custoUnit || item.valorUnitario || item.preco || 0;
+                                            return sum + (custoUnit * (item.quantidade || 1));
+                                        }, 0);
+                                        const lucroTotal = valorTotal - custoTotal;
+                                        const margemLucro = custoTotal > 0 ? ((lucroTotal / custoTotal) * 100) : 0;
+                                        
+                                        return (
+                                            <>
+                                                <tr>
+                                                    <td colSpan={6} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                                        Custo Total do Kit:
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-base font-bold text-red-600 dark:text-red-400">
+                                                        R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td colSpan={6} className="px-4 py-3 text-right text-sm font-bold text-gray-900 dark:text-white">
+                                                        Valor de Venda Total:
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-lg font-bold text-teal-700 dark:text-teal-400">
+                                                        R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                </tr>
+                                                <tr className="border-t-2 border-gray-300 dark:border-gray-600">
+                                                    <td colSpan={6} className="px-4 py-4 text-right text-sm font-bold text-gray-900 dark:text-white">
+                                                        💰 Lucro do Kit:
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right text-lg font-bold text-green-600 dark:text-green-400">
+                                                        R$ {lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                            Margem: {margemLucro.toFixed(1)}%
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </>
+                                        );
+                                    })()}
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Footer Fixo */}
+                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowModalItensKit(false);
+                                    setItensKitParaVisualizar([]);
+                                    setNomeKitParaVisualizar('');
+                                }}
+                                className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Modal de Edição de Kit Unificado */}
+        {showModalEditarKit && kitEmEdicao && (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        setShowModalEditarKit(false);
+                        setKitEmEdicao(null);
+                        setItensKitEdicao([]);
+                    }
+                }}
+            >
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+                    {/* Header */}
+                    <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-gray-700 dark:to-gray-700 rounded-t-2xl">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center shadow-md">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                        Editar Kit Unificado
+                                    </h3>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                                        {kitEmEdicao.item.nome} - {itensKitEdicao.length} {itensKitEdicao.length === 1 ? 'item' : 'itens'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowModalEditarKit(false);
+                                    setKitEmEdicao(null);
+                                    setItensKitEdicao([]);
+                                }}
+                                className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="space-y-3">
+                            {itensKitEdicao.map((itemKit: any, index: number) => {
+                                const valorVenda = itemKit.valorVenda || 0;
+                                const quantidade = itemKit.quantidade || 1;
+                                const subtotal = valorVenda * quantidade;
+                                const custoUnit = itemKit.custoUnit || 0;
+                                const custoTotal = custoUnit * quantidade;
+                                const lucro = subtotal - custoTotal;
+                                const tipoItem = itemKit.tipo || 'MATERIAL';
+                                
+                                return (
+                                    <div
+                                        key={index}
+                                        className="bg-gradient-to-r from-gray-50 to-white dark:from-gray-700 dark:to-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-600 hover:shadow-md transition-shadow"
+                                    >
+                                        <div className="flex items-center gap-4">
+                                            {/* Info do Item */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <h4 className="font-semibold text-gray-900 dark:text-white truncate">
+                                                        {itemKit.nome}
+                                                    </h4>
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                        tipoItem === 'MATERIAL' ? 'bg-green-100 text-green-800' :
+                                                        tipoItem === 'COTACAO' ? 'bg-blue-100 text-blue-800' :
+                                                        tipoItem === 'SERVICO' ? 'bg-purple-100 text-purple-800' :
+                                                        tipoItem === 'KIT' ? 'bg-amber-100 text-amber-800' :
+                                                        'bg-gray-100 text-gray-800'
+                                                    }`}>
+                                                        {tipoItem === 'MATERIAL' && '📦 Estoque'}
+                                                        {tipoItem === 'COTACAO' && '❄️ Banco Frio'}
+                                                        {tipoItem === 'SERVICO' && '⚙️ Serviço'}
+                                                        {tipoItem === 'KIT' && '🎁 Kit'}
+                                                        {!['MATERIAL', 'COTACAO', 'SERVICO', 'KIT'].includes(tipoItem) && tipoItem}
+                                                    </span>
+                                                </div>
+                                                
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                                    <div>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Código</p>
+                                                        <p className="font-medium text-gray-700 dark:text-gray-300">{itemKit.codigo || '-'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Quantidade</p>
+                                                        <p className="font-medium text-gray-700 dark:text-gray-300">{quantidade} {itemKit.unidadeMedida}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Valor Unit.</p>
+                                                        <p className="font-semibold text-teal-700 dark:text-teal-400">
+                                                            R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Subtotal</p>
+                                                        <p className="font-bold text-purple-700 dark:text-purple-400">
+                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="mt-2 flex items-center gap-4 text-xs">
+                                                    <span className="text-red-600 dark:text-red-400">
+                                                        💵 Custo: R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                    <span className="text-green-600 dark:text-green-400 font-medium">
+                                                        💰 Lucro: R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* Botões de Ação */}
+                                            <div className="flex flex-col gap-2 flex-shrink-0">
+                                                <button
+                                                    onClick={() => handleBaixarItemParaLista(index)}
+                                                    className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 rounded-lg transition-colors"
+                                                    title="Baixar item para lista do orçamento"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                                                    </svg>
+                                                    Baixar
+                                                </button>
+                                                
+                                                <button
+                                                    onClick={() => handleRemoverItemDoKit(index)}
+                                                    className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                                                    title="Remover item do kit"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                    </svg>
+                                                    Excluir
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                        {/* Resumo Financeiro */}
+                        {itensKitEdicao.length > 0 && (
+                            <div className="mt-6 p-4 bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-800 rounded-xl border border-teal-200 dark:border-gray-600">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Custo Total</p>
+                                        <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                                            R$ {itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Valor de Venda Total</p>
+                                        <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
+                                            R$ {itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Lucro do Kit</p>
+                                        <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                                            💰 R$ {(() => {
+                                                const custo = itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+                                                const venda = itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+                                                return (venda - custo).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                                            })()}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
+                        <div className="flex justify-between items-center">
+                            <button
+                                onClick={handleDesunificarKit}
+                                className="px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 rounded-lg transition-colors"
+                            >
+                                📦 Desunificar Kit
+                            </button>
+                            
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => {
+                                        setShowModalEditarKit(false);
+                                        setKitEmEdicao(null);
+                                        setItensKitEdicao([]);
+                                    }}
+                                    className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={handleSalvarEdicaoKit}
+                                    className="px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-amber-600 to-amber-500 rounded-lg hover:from-amber-700 hover:to-amber-600 transition-all shadow-md"
+                                >
+                                    ✓ Salvar Alterações
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Modal de Detalhes de Sub-Kit (Kit dentro de Kit) */}
+        {showModalDetalhesSubKit && (
+            <div
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60"
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        setShowModalDetalhesSubKit(false);
+                        setItensSubKitParaVisualizar([]);
+                        setNomeSubKitParaVisualizar('');
+                    }
+                }}
+            >
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col">
+                    {/* Header */}
+                    <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-gray-700 dark:to-gray-700 rounded-t-2xl">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center shadow-md">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                                        Detalhes do Kit
+                                    </h3>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                                        {nomeSubKitParaVisualizar} - {itensSubKitParaVisualizar.length} {itensSubKitParaVisualizar.length === 1 ? 'item' : 'itens'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowModalDetalhesSubKit(false);
+                                    setItensSubKitParaVisualizar([]);
+                                    setNomeSubKitParaVisualizar('');
+                                }}
+                                className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-gray-50 dark:bg-gray-900">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
+                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
+                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
+                                    {itensSubKitParaVisualizar.map((itemKit: any, index: number) => {
+                                        const valorVenda = itemKit.valorVenda || 0;
+                                        const quantidade = itemKit.quantidade || 1;
+                                        const subtotal = valorVenda * quantidade;
+                                        const tipoItem = itemKit.tipo || 'MATERIAL';
+                                        
+                                        const corTipo = {
+                                            'MATERIAL': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+                                            'COTACAO': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+                                            'SERVICO': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+                                        }[tipoItem] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+                                        
+                                        return (
+                                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
+                                                    <div className="font-medium">{itemKit.nome}</div>
+                                                    {itemKit.dataUltimaCotacao && (
+                                                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                            📅 Cotação: {(() => {
+                                                                try {
+                                                                    const data = new Date(itemKit.dataUltimaCotacao);
+                                                                    return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
+                                                                } catch {
+                                                                    return 'Sem data';
+                                                                }
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                                                    {itemKit.codigo || '-'}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${corTipo}`}>
+                                                        {tipoItem === 'MATERIAL' && '📦 Estoque'}
+                                                        {tipoItem === 'COTACAO' && '❄️ Banco Frio'}
+                                                        {tipoItem === 'SERVICO' && '⚙️ Serviço'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white">
+                                                    {quantidade} {itemKit.unidadeMedida}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-white">
+                                                    R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-sm font-bold text-teal-700 dark:text-teal-400">
+                                                    R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot className="bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-gray-700 dark:to-gray-700">
+                                    {(() => {
+                                        const valorTotal = itensSubKitParaVisualizar.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+                                        const custoTotal = itensSubKitParaVisualizar.reduce((sum, item) => {
+                                            const custoUnit = item.custoUnit || item.valorUnitario || item.preco || 0;
+                                            return sum + (custoUnit * (item.quantidade || 1));
+                                        }, 0);
+                                        const lucroTotal = valorTotal - custoTotal;
+                                        const margemLucro = custoTotal > 0 ? ((lucroTotal / custoTotal) * 100) : 0;
+                                        
+                                        return (
+                                            <>
+                                                <tr>
+                                                    <td colSpan={5} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                                        Custo Total:
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-base font-bold text-red-600 dark:text-red-400">
+                                                        R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td colSpan={5} className="px-4 py-3 text-right text-sm font-bold text-gray-900 dark:text-white">
+                                                        Valor de Venda Total:
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-lg font-bold text-teal-700 dark:text-teal-400">
+                                                        R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </td>
+                                                </tr>
+                                                <tr className="border-t-2 border-gray-300 dark:border-gray-600">
+                                                    <td colSpan={5} className="px-4 py-4 text-right text-sm font-bold text-gray-900 dark:text-white">
+                                                        💰 Lucro:
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right text-lg font-bold text-green-600 dark:text-green-400">
+                                                        R$ {lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                            Margem: {margemLucro.toFixed(1)}%
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </>
+                                        );
+                                    })()}
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowModalDetalhesSubKit(false);
+                                    setItensSubKitParaVisualizar([]);
+                                    setNomeSubKitParaVisualizar('');
+                                }}
+                                className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
 
         </>
     );

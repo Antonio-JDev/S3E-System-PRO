@@ -106,7 +106,9 @@ class ComprasService {
           ncm: ncm, // ✅ Sempre usar NCM do material quando disponível
           sku: sku, // ✅ Sempre usar SKU do material quando disponível
           unidadeMedida: unidadeMedida, // ✅ Preservar unidade de medida
-          material: it.material // ✅ Preservar objeto material completo para referência
+          material: it.material, // ✅ Preservar objeto material completo para referência
+          materialVinculado: it.materialVinculado || it.material, // ✅ Preservar materialVinculado (ou usar material como fallback)
+          matchAutomatico: it.matchAutomatico // ✅ Preservar flag de match automático
         };
       }),
       totalAmount: compraDTO.valorTotal || compraDTO.totalAmount || 0,

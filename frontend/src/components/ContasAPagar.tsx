@@ -58,6 +58,12 @@ const ShoppingCartIcon = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 // ==================== TYPES ====================
+interface CompraBasica {
+    id: string;
+    numeroSequencial: number;
+    numeroNF: string;
+}
+
 interface ContaPagar {
     id: string;
     compraId?: string;
@@ -72,6 +78,7 @@ interface ContaPagar {
     dataPagamento?: string;
     status: 'Pendente' | 'Pago' | 'Atrasado';
     observacoes?: string;
+    compra?: CompraBasica;
 }
 
 interface ItemCompra {
@@ -253,10 +260,22 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
             const response = await financeiroService.listarContasPagar();
             
             if (response.success && response.data) {
+                // Debug: verificar estrutura dos dados recebidos
+                console.log('📦 Dados recebidos do backend:', {
+                    tipo: Array.isArray(response.data) ? 'array' : typeof response.data,
+                    primeiraConta: Array.isArray(response.data) ? response.data[0] : null,
+                    temCompra: Array.isArray(response.data) && response.data[0]?.compra ? 'sim' : 'não'
+                });
+                
                 // Processar e enriquecer dados
                 const contasProcessadas = response.data.map((conta: any) => {
                     // Detectar atraso
                     const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
+                    
+                    // Debug: verificar se compra está vindo do backend
+                    if (conta.compraId && !conta.compra) {
+                        console.warn(`⚠️ Conta ${conta.id} tem compraId (${conta.compraId}) mas não tem objeto compra`);
+                    }
                     
                     return {
                         id: conta.id,
@@ -272,12 +291,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         dataPagamento: conta.dataPagamento,
                         status: isAtrasada ? 'Atrasado' : conta.status,
                         observacoes: conta.observacoes,
-                        tipo: conta.tipo || 'FORNECEDOR' // Adicionar tipo
+                        tipo: conta.tipo || 'FORNECEDOR', // Adicionar tipo
+                        compra: conta.compra // Incluir dados da compra (numeroSequencial, numeroNF, etc)
                     };
                 });
                 
                 setContasPagar(contasProcessadas);
                 console.log(`✅ ${contasProcessadas.length} contas a pagar carregadas`);
+                console.log('📦 Exemplo de conta com compra:', contasProcessadas.find(c => c.compra));
             } else {
                 console.warn('⚠️ Erro ao carregar contas:', response.error);
                 setContasPagar([]);
@@ -1105,7 +1126,13 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                             <div>
                                                 <p className="font-semibold text-gray-900">Parcela {conta.numeroParcela}</p>
                                                 {conta.compraId && (
-                                                    <p className="text-xs text-blue-600 mt-1">Compra: {conta.compraId.slice(0, 8)}</p>
+                                                    conta.compra?.numeroSequencial ? (
+                                                        <p className="text-xs text-blue-600 mt-1 hover:underline cursor-pointer" title={`NF: ${conta.compra.numeroNF || 'N/A'}`}>
+                                                            Compra #{conta.compra.numeroSequencial}
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-xs text-gray-500 mt-1">Compra: {conta.compraId.slice(0, 8)}...</p>
+                                                    )
                                                 )}
                                             </div>
                                         </td>

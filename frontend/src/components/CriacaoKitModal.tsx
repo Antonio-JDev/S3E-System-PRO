@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
-import { identificarTipoMaterial } from '../utils/unitConverter';
+import { identificarTipoMaterial, podeVenderEmMetroOuCm } from '../utils/unitConverter';
+import { servicosService, Servico } from '../services/servicosService';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -57,6 +58,7 @@ interface ItemKit {
     unidadeVenda?: string; // ✅ NOVO: Unidade de venda
     tipoMaterial?: 'BARRAMENTO_COBRE' | 'TRILHO_DIN' | 'CABO' | 'PADRAO'; // ✅ NOVO: Tipo para conversão
     isCotacao: boolean;
+    isServico?: boolean; // ✅ NOVO: Indica se é um serviço
     dataUltimaCotacao?: string;
 }
 
@@ -72,10 +74,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
     const [descricaoKit, setDescricaoKit] = useState('');
     const [tipoKit, setTipoKit] = useState<string>('medidores');
     const [searchTerm, setSearchTerm] = useState('');
-    const [fonteDados, setFonteDados] = useState<'ESTOQUE' | 'COTACOES'>('ESTOQUE');
+    const [fonteDados, setFonteDados] = useState<'ESTOQUE' | 'COTACOES' | 'SERVICOS'>('ESTOQUE');
     
     const [materiais, setMateriais] = useState<Material[]>([]);
     const [cotacoes, setCotacoes] = useState<Material[]>([]);
+    const [servicos, setServicos] = useState<Servico[]>([]);
     const [itensKit, setItensKit] = useState<ItemKit[]>([]);
     
     const [loading, setLoading] = useState(false);
@@ -87,6 +90,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         if (isOpen) {
             loadMateriais();
             loadCotacoes();
+            loadServicos();
             
             // Se tem kit para editar, carregar seus dados
             if (kitParaEditar) {
@@ -135,18 +139,39 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 console.log('   - Itens banco frio (itensFaltantes):', itensFaltantesArray.length);
                 console.log('   - Detalhes banco frio:', itensFaltantesArray);
                 
-                const itensBancoFrio: ItemKit[] = itensFaltantesArray.map((item: any) => ({
-                    materialId: `cotacao_${item.cotacaoId || item.id || ''}`,
-                    nome: item.nome || item.materialNome || 'Item do Banco Frio',
-                    quantidade: item.quantidade || 0,
-                    precoUnit: item.precoUnit || item.preco || 0,
-                    subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
-                    unidadeMedida: item.unidadeMedida || 'un',
-                    isCotacao: true,
-                    dataUltimaCotacao: item.dataUltimaCotacao || item.dataAtualizacao
-                }));
+                // Separar itens do banco frio e serviços
+                const itensBancoFrio: ItemKit[] = [];
+                const itensServicos: ItemKit[] = [];
                 
-                setItensKit([...itensEstoque, ...itensBancoFrio]);
+                itensFaltantesArray.forEach((item: any) => {
+                    // Se tem tipo 'SERVICO', é um serviço
+                    if (item.tipo === 'SERVICO') {
+                        itensServicos.push({
+                            materialId: `servico_${item.servicoId || item.id || ''}`,
+                            nome: item.nome || item.servicoNome || 'Serviço',
+                            quantidade: item.quantidade || 0,
+                            precoUnit: item.precoUnit || item.preco || 0,
+                            subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                            unidadeMedida: item.unidadeMedida || item.unidade || 'un',
+                            isCotacao: false,
+                            isServico: true
+                        });
+                    } else {
+                        // É um item do banco frio (cotação)
+                        itensBancoFrio.push({
+                            materialId: `cotacao_${item.cotacaoId || item.id || ''}`,
+                            nome: item.nome || item.materialNome || 'Item do Banco Frio',
+                            quantidade: item.quantidade || 0,
+                            precoUnit: item.precoUnit || item.preco || 0,
+                            subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                            unidadeMedida: item.unidadeMedida || 'un',
+                            isCotacao: true,
+                            dataUltimaCotacao: item.dataUltimaCotacao || item.dataAtualizacao
+                        });
+                    }
+                });
+                
+                setItensKit([...itensEstoque, ...itensBancoFrio, ...itensServicos]);
             }
         } else {
             // Reset ao fechar
@@ -194,6 +219,8 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     descricao: m.descricao,
                     preco: m.preco || 0,
                     valorVenda: m.valorVenda || null, // Incluir valorVenda para atualização dinâmica
+                    valorVendaM: m.valorVendaM || null, // Valor de venda em metros
+                    valorVendaCM: m.valorVendaCM || null, // Valor de venda em centímetros
                     estoque: m.estoque || 0,
                     unidadeMedida: m.unidadeMedida || m.unidade || 'un'
                 })));
@@ -229,8 +256,10 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                             // preco representa o valor de compra; valorVenda é o preço para o cliente
                             preco: cotacao.valorUnitario || 0,
                             valorVenda,
+                            valorVendaM: cotacao.valorVendaM || null, // Valor de venda em metros
+                            valorVendaCM: cotacao.valorVendaCM || null, // Valor de venda em centímetros
                             estoque: 0, // Cotações não têm estoque físico
-                            unidadeMedida: 'un',
+                            unidadeMedida: cotacao.unidadeMedida || 'un',
                             _isCotacao: true,
                             _cotacaoId: cotacao.id,
                             _itemCotacaoId: cotacao.id,
@@ -252,7 +281,33 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         }
     };
 
+    const loadServicos = async () => {
+        try {
+            const response = await servicosService.listar({ ativo: true });
+            
+            if (response.success && response.data) {
+                const servicosArray = Array.isArray(response.data) ? response.data : [];
+                setServicos(servicosArray);
+                console.log(`✅ ${servicosArray.length} serviços carregados`);
+            }
+        } catch (error) {
+            console.error('❌ Erro ao carregar serviços:', error);
+            toast.error('Erro ao carregar serviços');
+        }
+    };
+
     const materiaisFiltrados = useMemo(() => {
+        if (fonteDados === 'SERVICOS') {
+            if (!searchTerm) {
+                return servicos;
+            }
+            return servicos.filter(s => 
+                s.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (s.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
+                s.codigo.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+        }
+        
         const fonte = fonteDados === 'ESTOQUE' ? materiais : cotacoes;
         
         if (!searchTerm) {
@@ -268,50 +323,93 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                  (m.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
                  m.id.toLowerCase().includes(searchTerm.toLowerCase()));
         });
-    }, [materiais, cotacoes, fonteDados, searchTerm]);
+    }, [materiais, cotacoes, servicos, fonteDados, searchTerm]);
 
     const valorTotal = useMemo(() => {
         return itensKit.reduce((total, item) => total + item.subtotal, 0);
     }, [itensKit]);
 
     const handleAdicionarItem = (material: Material, unidadeVendaParam?: string) => {
+        try {
+            // Verificar se já existe
+            const jaExiste = itensKit.some(item => item.materialId === material.id);
+            if (jaExiste) {
+                toast.warning('Item já adicionado', {
+                    description: 'Este material já está no kit'
+                });
+                return;
+            }
+
+            const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
+
+            // Determinar preço de venda baseado na unidade
+            let precoVenda = material.preco || 0;
+            
+            // Se a unidade de medida permitir venda em M/cm, usar valores específicos
+            if (podeVenderEmMetroOuCm(material.unidadeMedida)) {
+                if (unidadeVenda === 'm') {
+                    // Usar valorVendaM se disponível, senão usar valorVenda padrão ou preço
+                    precoVenda = (material as any).valorVendaM || (material as any).valorVenda || material.preco || 0;
+                } else if (unidadeVenda === 'cm') {
+                    // Usar valorVendaCM se disponível, senão calcular dividindo valorVendaM por 100
+                    precoVenda = (material as any).valorVendaCM || 
+                                ((material as any).valorVendaM ? (material as any).valorVendaM / 100 : 
+                                ((material as any).valorVenda ? (material as any).valorVenda / 100 : (material.preco || 0) / 100));
+                }
+            } else {
+                // Para outras unidades, usar valorVenda padrão se disponível
+                precoVenda = (material as any).valorVenda || material.preco || 0;
+            }
+            
+            const novoItem: ItemKit = {
+                materialId: material.id,
+                nome: material.nome,
+                quantidade: 1,
+                precoUnit: precoVenda,
+                subtotal: precoVenda,
+                unidadeMedida: material.unidadeMedida,
+                unidadeVenda: unidadeVenda,
+                isCotacao: material._isCotacao || false,
+                dataUltimaCotacao: material._dataUltimaCotacao
+            };
+
+            setItensKit(prev => [...prev, novoItem]);
+            toast.success('Item adicionado ao kit', {
+                description: `${material.nome} (${unidadeVenda})`,
+                icon: '✅'
+            });
+        } catch (error) {
+            console.error('❌ Erro ao adicionar item ao kit:', error);
+            toast.error('Erro ao adicionar item ao kit', {
+                description: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    };
+
+    const handleAdicionarServico = (servico: Servico) => {
         // Verificar se já existe
-        const jaExiste = itensKit.some(item => item.materialId === material.id);
+        const jaExiste = itensKit.some(item => item.materialId === `servico_${servico.id}`);
         if (jaExiste) {
-            toast.warning('Item já adicionado', {
-                description: 'Este material já está no kit'
+            toast.warning('Serviço já adicionado', {
+                description: 'Este serviço já está no kit'
             });
             return;
         }
 
-        // Identificar tipo de material para conversão de unidades
-        const tipoMaterial = identificarTipoMaterial(material.nome);
-        const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
-
-        // Usar valorVenda se disponível, senão usar preco (preço de compra)
-        let precoVenda = (material as any).valorVenda || material.preco || 0;
-        
-        // Se for barramento e a unidade for cm, ajustar o preço (dividir por 100)
-        if ((tipoMaterial === 'BARRAMENTO_COBRE' || tipoMaterial === 'TRILHO_DIN') && unidadeVenda === 'cm') {
-            precoVenda = precoVenda / 100; // Preço por metro / 100 = preço por cm
-        }
-        
         const novoItem: ItemKit = {
-            materialId: material.id,
-            nome: material.nome,
+            materialId: `servico_${servico.id}`,
+            nome: servico.nome,
             quantidade: 1,
-            precoUnit: precoVenda,
-            subtotal: precoVenda,
-            unidadeMedida: material.unidadeMedida,
-            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
-            tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
-            isCotacao: material._isCotacao || false,
-            dataUltimaCotacao: material._dataUltimaCotacao
+            precoUnit: servico.preco || 0,
+            subtotal: servico.preco || 0,
+            unidadeMedida: servico.unidade || 'un',
+            isCotacao: false,
+            isServico: true
         };
 
         setItensKit(prev => [...prev, novoItem]);
-        toast.success('Item adicionado ao kit', {
-            description: `${material.nome} (${unidadeVenda})`,
+        toast.success('Serviço adicionado ao kit', {
+            description: `${servico.nome}`,
             icon: '✅'
         });
     };
@@ -355,9 +453,36 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         try {
             setIsSaving(true);
 
-            // Separar itens de estoque real e banco frio
-            const itensBancoFrio = itensKit.filter(item => item.isCotacao);
-            const itensEstoqueReal = itensKit.filter(item => !item.isCotacao);
+            // Separar itens de estoque real, banco frio e serviços
+            const itensBancoFrio = itensKit.filter(item => item.isCotacao && !item.isServico);
+            const itensServicos = itensKit.filter(item => item.isServico);
+            const itensEstoqueReal = itensKit.filter(item => !item.isCotacao && !item.isServico);
+
+            // Combinar banco frio e serviços em um único array para o backend
+            const itensExtras: any[] = [];
+            
+            // Adicionar itens do banco frio
+            if (itensBancoFrio.length > 0) {
+                itensExtras.push(...itensBancoFrio.map(item => ({
+                    cotacaoId: item.materialId.replace('cotacao_', ''), // Remove prefixo
+                    nome: item.nome,
+                    quantidade: item.quantidade,
+                    precoUnit: item.precoUnit,
+                    dataUltimaCotacao: item.dataUltimaCotacao,
+                    tipo: 'COTACAO' as const
+                })));
+            }
+            
+            // Adicionar serviços
+            if (itensServicos.length > 0) {
+                itensExtras.push(...itensServicos.map(item => ({
+                    servicoId: item.materialId.replace('servico_', ''), // Remove prefixo
+                    nome: item.nome,
+                    quantidade: item.quantidade,
+                    precoUnit: item.precoUnit,
+                    tipo: 'SERVICO' as const
+                })));
+            }
 
             const kitData = {
                 nome: nomeKit,
@@ -368,22 +493,18 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     materialId: item.materialId,
                     quantidade: item.quantidade
                 })),
-                // Itens do banco frio salvos separadamente como JSON para referência
-                itensBancoFrio: itensBancoFrio.length > 0 ? itensBancoFrio.map(item => ({
-                    cotacaoId: item.materialId.replace('cotacao_', ''), // Remove prefixo
-                    nome: item.nome,
-                    quantidade: item.quantidade,
-                    precoUnit: item.precoUnit,
-                    dataUltimaCotacao: item.dataUltimaCotacao
-                })) : undefined,
-                temItensCotacao: itensBancoFrio.length > 0
+                // Combinar banco frio e serviços em um único array
+                itensBancoFrio: itensExtras.length > 0 ? itensExtras : undefined,
+                temItensCotacao: itensBancoFrio.length > 0 || itensServicos.length > 0
             };
 
             console.log('📤 Enviando kit para o backend:', kitData);
             console.log('   - Itens estoque real:', kitData.items.length);
-            console.log('   - Itens banco frio:', kitData.itensBancoFrio?.length || 0);
+            console.log('   - Itens banco frio:', itensBancoFrio.length);
+            console.log('   - Serviços:', itensServicos.length);
+            console.log('   - Total itens extras (banco frio + serviços):', itensExtras.length);
             if (kitData.itensBancoFrio) {
-                console.log('   - Detalhes banco frio:', kitData.itensBancoFrio);
+                console.log('   - Detalhes itens extras:', kitData.itensBancoFrio);
             }
 
             let response;
@@ -399,12 +520,18 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
 
             if (response.success) {
                 const temCotacao = itensBancoFrio.length > 0;
+                const temServicos = itensServicos.length > 0;
+                let descricao = `Kit "${nomeKit}" ${modoEdicao ? 'atualizado' : 'adicionado ao catálogo'}`;
+                if (temCotacao || temServicos) {
+                    const partes: string[] = [];
+                    if (temCotacao) partes.push(`${itensBancoFrio.length} item(ns) do banco frio`);
+                    if (temServicos) partes.push(`${itensServicos.length} serviço(s)`);
+                    descricao = `⚠️ Kit contém ${partes.join(' e ')}. ${temCotacao ? 'Compre os itens do banco frio' : ''} para usar em obras.`;
+                }
                 toast.success(modoEdicao ? 'Kit atualizado com sucesso!' : 'Kit criado com sucesso!', {
-                    description: temCotacao 
-                        ? `⚠️ Kit contém ${itensBancoFrio.length} item(ns) do banco frio. Compre-os para usar em obras.`
-                        : `Kit "${nomeKit}" ${modoEdicao ? 'atualizado' : 'adicionado ao catálogo'}`,
+                    description: descricao,
                     icon: '✅',
-                    duration: temCotacao ? 6000 : 4000
+                    duration: (temCotacao || temServicos) ? 6000 : 4000
                 });
                 onSave();
                 onClose();
@@ -427,18 +554,18 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto">
                 {/* Header */}
-                <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-teal-50 to-blue-50">
+                <div className="relative p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-700">
                     <div className="flex items-center gap-4">
                         <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium">
                             <WrenchScrewdriverIcon className="w-7 h-7 text-white" />
                         </div>
                         <div className="flex-1">
-                            <h2 className="text-2xl font-bold text-gray-900">
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
                                 {modoEdicao ? 'Editar Kit' : 'Criar Novo Kit'}
                             </h2>
-                            <p className="text-sm text-gray-600 mt-1">
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                                 {modoEdicao 
                                     ? 'Atualize a composição e informações do kit'
                                     : 'Monte um kit personalizado com materiais do estoque ou cotações'}
@@ -447,7 +574,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     </div>
                     <button
                         onClick={onClose}
-                        className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl transition-colors"
+                        className="absolute top-4 right-4 p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
                     >
                         <XMarkIcon className="w-6 h-6" />
                     </button>
@@ -471,13 +598,13 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                         </div>
 
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                 Tipo do Kit *
                             </label>
                             <select
                                 value={tipoKit}
                                 onChange={(e) => setTipoKit(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                             >
                                 <option value="medidores">Medidores</option>
                                 <option value="comando">Comando</option>
@@ -501,20 +628,27 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     </div>
 
                     {/* Fonte de Dados */}
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border border-blue-200">
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-700 dark:to-gray-700 p-4 rounded-xl border border-blue-200 dark:border-gray-600">
                         <div className="flex items-center justify-between mb-3">
                             <div>
-                                <h3 className="font-semibold text-gray-800">Fonte de Dados</h3>
-                                <p className="text-sm text-gray-600 mt-1">
-                                    Usando materiais do {fonteDados === 'ESTOQUE' ? 'estoque real' : 'banco frio (cotações)'}
+                                <h3 className="font-semibold text-gray-800 dark:text-white">Fonte de Dados</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                    {fonteDados === 'ESTOQUE' && 'Usando materiais do estoque real'}
+                                    {fonteDados === 'COTACOES' && 'Usando materiais do banco frio (cotações)'}
+                                    {fonteDados === 'SERVICOS' && 'Usando serviços disponíveis'}
                                 </p>
                                 {fonteDados === 'COTACOES' && (
                                     <p className="text-xs text-blue-700 mt-2 font-medium">
                                         ℹ️ Itens do banco frio podem ser adicionados ao kit. Eles devem ser comprados antes de usar em obras.
                                     </p>
                                 )}
+                                {fonteDados === 'SERVICOS' && (
+                                    <p className="text-xs text-purple-700 mt-2 font-medium">
+                                        ℹ️ Serviços podem ser adicionados ao kit para criar kits personalizados completos.
+                                    </p>
+                                )}
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                                 <button
                                     onClick={() => {
                                         setFonteDados('ESTOQUE');
@@ -537,11 +671,25 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
                                         fonteDados === 'COTACOES'
                                             ? 'bg-blue-600 text-white shadow-md'
-                                            : 'bg-white text-gray-700 hover:bg-gray-50'
+                                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
                                     }`}
                                 >
                                     <span>❄️</span>
                                     Banco Frio (Cotações)
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setFonteDados('SERVICOS');
+                                        setSearchTerm(''); // Limpar busca ao trocar
+                                    }}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                                        fonteDados === 'SERVICOS'
+                                            ? 'bg-purple-600 text-white shadow-md'
+                                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                    }`}
+                                >
+                                    <span>⚙️</span>
+                                    Serviços
                                 </button>
                             </div>
                         </div>
@@ -552,9 +700,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                         {/* Coluna 1: Materiais Disponíveis */}
                         <div className="border border-gray-200 rounded-xl p-4">
                             <div className="flex justify-between items-center mb-3">
-                                <h3 className="font-semibold text-gray-800">Materiais Disponíveis</h3>
+                                <h3 className="font-semibold text-gray-800">
+                                    {fonteDados === 'SERVICOS' ? 'Serviços Disponíveis' : 'Materiais Disponíveis'}
+                                </h3>
                                 <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                                    {fonteDados === 'ESTOQUE' ? materiais.length : cotacoes.length} disponíveis
+                                    {fonteDados === 'ESTOQUE' ? materiais.length : fonteDados === 'COTACOES' ? cotacoes.length : servicos.length} disponíveis
                                 </span>
                             </div>
                             
@@ -563,34 +713,88 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                 <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Buscar material..."
+                                    placeholder={fonteDados === 'SERVICOS' ? 'Buscar serviço...' : 'Buscar material...'}
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                                    className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:ring-2 focus:ring-teal-500"
                                 />
                             </div>
 
-                            {/* Lista de materiais */}
+                            {/* Lista de materiais ou serviços */}
                             <div className="max-h-96 overflow-y-auto space-y-2">
                                 {loading ? (
                                     <div className="text-center py-8">
                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600 mx-auto"></div>
-                                        <p className="text-sm text-gray-600 mt-2">Carregando materiais...</p>
+                                        <p className="text-sm text-gray-600 mt-2">
+                                            {fonteDados === 'SERVICOS' ? 'Carregando serviços...' : 'Carregando materiais...'}
+                                        </p>
                                     </div>
                                 ) : materiaisFiltrados.length === 0 ? (
                                     <div className="text-center py-8">
                                         <p className="text-gray-500 font-medium">
                                             {fonteDados === 'ESTOQUE' 
                                                 ? 'Nenhum material em estoque encontrado' 
-                                                : 'Nenhum item de cotação encontrado'}
+                                                : fonteDados === 'COTACOES'
+                                                ? 'Nenhum item de cotação encontrado'
+                                                : 'Nenhum serviço encontrado'}
                                         </p>
                                         {fonteDados === 'COTACOES' && cotacoes.length === 0 && (
-                                            <p className="text-xs text-gray-400 mt-2">
+                                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                                                 Importe cotações na página de Cotações para usar itens do banco frio
                                             </p>
                                         )}
+                                        {fonteDados === 'SERVICOS' && servicos.length === 0 && (
+                                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                                Cadastre serviços na página de Serviços para adicionar ao kit
+                                            </p>
+                                        )}
                                     </div>
+                                ) : fonteDados === 'SERVICOS' ? (
+                                    // Lista de serviços
+                                    (materiaisFiltrados as any[]).map((servico: Servico) => (
+                                        <div
+                                            key={servico.id}
+                                            className="bg-purple-50 p-3 rounded-lg hover:bg-purple-100 transition-colors border border-purple-200"
+                                        >
+                                            <div className="flex justify-between items-start gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                                                        {servico.nome}
+                                                    </p>
+                                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                        <span className="text-xs text-gray-600">
+                                                            Código: {servico.codigo}
+                                                        </span>
+                                                        <span className="text-xs font-semibold text-purple-700">
+                                                            R$ {(servico.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </span>
+                                                        <span className="text-xs text-gray-600">
+                                                            Unidade: {servico.unidade || 'un'}
+                                                        </span>
+                                                        {servico.tipoServico && (
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                                                {servico.tipoServico}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {servico.descricao && (
+                                                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                                            {servico.descricao}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={() => handleAdicionarServico(servico)}
+                                                    className="p-2 text-purple-600 hover:bg-purple-200 rounded-lg transition-colors flex-shrink-0"
+                                                    title="Adicionar serviço ao kit"
+                                                >
+                                                    <PlusIcon className="w-5 h-5" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
                                 ) : (
+                                    // Lista de materiais (estoque ou cotações)
                                     materiaisFiltrados.map((material) => (
                                         <div
                                             key={material.id}
@@ -598,7 +802,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                         >
                                             <div className="flex justify-between items-start gap-2">
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="font-medium text-gray-900 text-sm truncate">
+                                                    <p className="font-medium text-gray-900 dark:text-white text-sm truncate">
                                                         {material.nome}
                                                     </p>
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -635,8 +839,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                     </div>
                                                 </div>
                                                 {(() => {
-                                                    const tipoMat = identificarTipoMaterial(material.nome);
-                                                    const temSelecaoUnidade = tipoMat === 'BARRAMENTO_COBRE' || tipoMat === 'TRILHO_DIN';
+                                                    const temSelecaoUnidade = podeVenderEmMetroOuCm(material.unidadeMedida);
                                                     
                                                     return temSelecaoUnidade ? (
                                                         <div className="flex gap-1 flex-shrink-0">
@@ -673,12 +876,17 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                         </div>
 
                         {/* Coluna 2: Itens do Kit */}
-                        <div className="border border-gray-200 rounded-xl p-4 bg-gradient-to-br from-teal-50 to-blue-50">
-                            <h3 className="font-semibold text-gray-800 mb-3">
+                        <div className="border border-gray-200 dark:border-gray-600 rounded-xl p-4 bg-gradient-to-br from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-800">
+                            <h3 className="font-semibold text-gray-800 dark:text-white mb-3">
                                 Composição do Kit ({itensKit.length} {itensKit.length === 1 ? 'item' : 'itens'})
                                 {itensKit.some(i => i.isCotacao) && (
                                     <span className="ml-2 text-xs text-blue-600 font-normal">
                                         ({itensKit.filter(i => i.isCotacao).length} do banco frio)
+                                    </span>
+                                )}
+                                {itensKit.some(i => i.isServico) && (
+                                    <span className="ml-2 text-xs text-purple-600 font-normal">
+                                        ({itensKit.filter(i => i.isServico).length} serviço(s))
                                     </span>
                                 )}
                             </h3>
@@ -695,22 +903,35 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                         <div
                                             key={index}
                                             className={`p-3 rounded-lg border-2 ${
-                                                item.isCotacao 
-                                                    ? 'bg-blue-50 border-blue-300' 
-                                                    : 'bg-white border-gray-200'
+                                                item.isServico
+                                                    ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700'
+                                                    : item.isCotacao 
+                                                    ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' 
+                                                    : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600'
                                             }`}
                                         >
                                             <div className="flex justify-between items-start gap-2 mb-2">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-1">
-                                                        {item.isCotacao && (
+                                                        {item.isServico && (
+                                                            <span className="text-lg">⚙️</span>
+                                                        )}
+                                                        {item.isCotacao && !item.isServico && (
                                                             <span className="text-lg">❄️</span>
                                                         )}
-                                                        <p className={`font-medium text-sm ${item.isCotacao ? 'text-blue-900' : 'text-gray-900'}`}>
+                                                        <p className={`font-medium text-sm ${
+                                                            item.isServico ? 'text-purple-900' :
+                                                            item.isCotacao ? 'text-blue-900' : 'text-gray-900'
+                                                        }`}>
                                                             {item.nome}
                                                         </p>
                                                     </div>
-                                                    {item.isCotacao && item.dataUltimaCotacao && (
+                                                    {item.isServico && (
+                                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 mt-1">
+                                                            Serviço
+                                                        </span>
+                                                    )}
+                                                    {item.isCotacao && !item.isServico && item.dataUltimaCotacao && (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mt-1">
                                                             Banco Frio - Cotação: {(() => {
                                                                 const data = new Date(item.dataUltimaCotacao);
@@ -740,8 +961,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                     <span className="text-xs text-gray-600">{item.unidadeMedida}</span>
                                                 </div>
                                                 <div className="text-right flex-1">
-                                                    <p className="text-xs text-gray-600">Unit.: R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                                                    <p className="text-sm font-bold text-teal-700">
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400">Unit.: R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                                    <p className={`text-sm font-bold ${
+                                                        item.isServico ? 'text-purple-700' :
+                                                        item.isCotacao ? 'text-blue-700' : 'text-teal-700'
+                                                    }`}>
                                                         Subtotal: R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                     </p>
                                                 </div>
@@ -763,16 +987,31 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                         </div>
                                     </div>
                                     
-                                    {/* Aviso se houver itens do banco frio */}
-                                    {itensKit.some(item => item.isCotacao) && (
-                                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                            <p className="text-xs text-blue-800 font-medium flex items-start gap-2">
-                                                <span className="text-base">ℹ️</span>
-                                                <span>
-                                                    Este kit contém {itensKit.filter(i => i.isCotacao).length} item(ns) do banco frio. 
-                                                    O kit será criado, mas itens de cotação precisam ser comprados antes de usar em obras.
-                                                </span>
-                                            </p>
+                                    {/* Avisos se houver itens do banco frio ou serviços */}
+                                    {(itensKit.some(item => item.isCotacao) || itensKit.some(item => item.isServico)) && (
+                                        <div className="mt-3 space-y-2">
+                                            {itensKit.some(item => item.isCotacao) && (
+                                                <div className="p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
+                                                    <p className="text-xs text-blue-800 dark:text-blue-300 font-medium flex items-start gap-2">
+                                                        <span className="text-base">ℹ️</span>
+                                                        <span>
+                                                            Este kit contém {itensKit.filter(i => i.isCotacao).length} item(ns) do banco frio. 
+                                                            O kit será criado, mas itens de cotação precisam ser comprados antes de usar em obras.
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {itensKit.some(item => item.isServico) && (
+                                                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                                    <p className="text-xs text-purple-800 font-medium flex items-start gap-2">
+                                                        <span className="text-base">⚙️</span>
+                                                        <span>
+                                                            Este kit contém {itensKit.filter(i => i.isServico).length} serviço(s). 
+                                                            Os serviços serão incluídos no kit personalizado.
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </>
@@ -781,11 +1020,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     </div>
 
                     {/* Botões de ação */}
-                    <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+                    <div className="flex justify-end gap-3 pt-6 border-t border-gray-200 dark:border-gray-700">
                         <button
                             type="button"
                             onClick={onClose}
-                            className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
+                            className="px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-all font-semibold"
                         >
                             Cancelar
                         </button>

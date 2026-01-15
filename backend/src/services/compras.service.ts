@@ -3,6 +3,7 @@ import { EstoqueService } from './estoque.service';
 import { ContasPagarService } from './contasPagar.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
+import { normalizarNomeProduto, compararNomesProdutos } from '../utils/stringUtils';
 
 const prisma = new PrismaClient();
 
@@ -12,6 +13,7 @@ export interface CompraItemPayload {
     ncm?: string;
     quantidade: number; // Quantidade de embalagens
     valorUnit: number; // Preço por embalagem
+    unidadeMedida?: string; // Unidade de medida do produto (ex: 'un', 'm', 'kg')
     // Campos de fracionamento
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
@@ -167,6 +169,10 @@ export class ComprasService {
                 unidadeEmbalagem?: string;
             }> = [];
             
+            // Contadores para resumo
+            let materiaisCriados = 0;
+            let materiaisIncrementados = 0;
+            
             for (const item of items) {
                 let materialId = item.materialId;
                 
@@ -184,32 +190,40 @@ export class ComprasService {
                     console.log(`💰 Preço embalagem: R$ ${precoEmbalagem.toFixed(2)} | Preço unitário: R$ ${precoUnitarioCalculado.toFixed(4)}`);
                 }
                 
-                // Se não tem materialId, criar ou buscar Material
+                // Se não tem materialId, tentar fazer match automático ou criar Material
                 if (!materialId) {
-                    console.log(`🆕 Item sem materialId: "${item.nomeProduto}". Criando Material...`);
+                    console.log(`🔍 Item sem materialId: "${item.nomeProduto}". Buscando match...`);
                     
-                    // Tentar encontrar material existente pelo nome EXATO
-                    // ✅ CORREÇÃO: Usar nome completo e exato para evitar agrupar materiais diferentes
-                    // que tenham nomes similares mas especificações diferentes (ex: diâmetros, tamanhos)
+                    // ✅ PRIORIDADE 1: Se o payload trouxer explicitamente um materialId (usuário vinculou no frontend)
+                    // Isso já foi verificado acima, então seguimos para match automático
+                    
+                    // ✅ PRIORIDADE 2: Match automático usando NOME normalizado
                     let material: { id: string; preco: number | null } | null = null;
                     
-                    // Buscar por nome exato (case-insensitive mas completo)
-                    material = await tx.material.findFirst({
-                        where: { 
-                            descricao: item.nomeProduto.trim() // Nome completo e exato
-                        }
+                    // Buscar todos os materiais existentes e comparar nomes normalizados
+                    const todosMateriais = await tx.material.findMany({
+                        select: { id: true, nome: true, preco: true }
                     });
                     
-                    // Se não encontrou por nome exato e tem NCM, tentar por NCM + nome
-                    if (!material && item.ncm) {
-                        material = await tx.material.findFirst({
-                            where: { 
-                                AND: [
-                                    { ncm: String(item.ncm) },
-                                    { descricao: item.nomeProduto.trim() }
-                                ]
-                            }
-                        });
+                    // Normalizar o nome do item da compra
+                    const nomeItemNormalizado = normalizarNomeProduto(item.nomeProduto);
+                    
+                    // Buscar material com nome normalizado igual
+                    const materiaisMatch = todosMateriais.filter(m => 
+                        compararNomesProdutos(m.nome, item.nomeProduto)
+                    );
+                    
+                    if (materiaisMatch.length === 1) {
+                        // Encontrado exatamente um match - usar esse material
+                        material = { id: materiaisMatch[0].id, preco: materiaisMatch[0].preco };
+                        console.log(`✅ Match automático encontrado: "${materiaisMatch[0].nome}" (ID: ${material.id})`);
+                        materiaisIncrementados++;
+                    } else if (materiaisMatch.length > 1) {
+                        // Múltiplos matches (ambiguidade) - não fazer match automático
+                        console.log(`⚠️ Múltiplos matches encontrados para "${item.nomeProduto}". Não será feito match automático.`);
+                    } else {
+                        // Nenhum match encontrado
+                        console.log(`❌ Nenhum match encontrado para "${item.nomeProduto}". Será criado novo material.`);
                     }
                     
                     // Se não encontrou, CRIAR novo Material
@@ -250,8 +264,13 @@ export class ComprasService {
                             data: materialData
                         });
                         console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
+                        materiaisCriados++;
                     } else {
                         console.log(`🔗 Material existente encontrado: ${material.id}`);
+                        // Se o material já existia e não foi contado como incrementado (porque não foi match automático, mas foi vinculado manualmente)
+                        if (!materialId) {
+                            materiaisIncrementados++;
+                        }
                         
                         // Preparar dados de atualização
                         const updateData: any = {};
@@ -398,7 +417,12 @@ export class ComprasService {
             return {
                 compra,
                 contasPagar: null,
-                estoqueAtualizado: false // Sempre false na criação
+                estoqueAtualizado: false, // Sempre false na criação
+                estatisticas: {
+                    materiaisCriados,
+                    materiaisIncrementados,
+                    totalItens: items.length
+                }
             };
         });
 
@@ -522,7 +546,12 @@ export class ComprasService {
                                     nome: true,
                                     sku: true,
                                     categoria: true,
-                                    ncm: true
+                                    ncm: true,
+                                    unidadeMedida: true,
+                                    preco: true,
+                                    valorVenda: true,
+                                    estoque: true,
+                                    descricao: true
                                 }
                             }
                         }
@@ -654,6 +683,10 @@ export class ComprasService {
         // Se mudou para Recebido e antes não estava, atualizar estoque
         const deveAtualizarEstoque = novoStatus === 'Recebido' && compra.status !== 'Recebido';
 
+        // Contadores para estatísticas (declarados fora do bloco para uso no retorno)
+        let materiaisCriados = 0;
+        let materiaisIncrementados = 0;
+
         const resultado = await prisma.$transaction(async (tx) => {
             // Atualizar compra
             const compraAtualizada = await tx.compra.update({
@@ -672,28 +705,43 @@ export class ComprasService {
                 for (const item of compra.items) {
                     let materialIdFinal = item.materialId;
                     
-                    // Se item não tem materialId, criar Material automaticamente
+                    // Se item não tem materialId, tentar fazer match automático ou criar Material
                     if (!materialIdFinal) {
-                        console.log(`🆕 Item sem material vinculado: "${item.nomeProduto}". Criando...`);
+                        console.log(`🔍 Item sem material vinculado: "${item.nomeProduto}". Buscando match...`);
                         
-                        // Tentar encontrar material existente
+                        // ✅ PRIORIDADE 1: Se o payload trouxer explicitamente um materialId (usuário vinculou no frontend)
+                        // Isso já foi verificado acima, então seguimos para match automático
+                        
+                        // ✅ PRIORIDADE 2: Match automático usando NOME normalizado
                         let material: { id: string } | null = null;
-                        if (item.ncm) {
-                            material = await tx.material.findFirst({
-                                where: { sku: String(item.ncm) }
-                            });
+                        
+                        // Buscar todos os materiais existentes e comparar nomes normalizados
+                        const todosMateriais = await tx.material.findMany({
+                            select: { id: true, nome: true }
+                        });
+                        
+                        // Normalizar o nome do item da compra
+                        const nomeItemNormalizado = normalizarNomeProduto(item.nomeProduto);
+                        
+                        // Buscar material com nome normalizado igual
+                        const materiaisMatch = todosMateriais.filter(m => 
+                            compararNomesProdutos(m.nome, item.nomeProduto)
+                        );
+                        
+                        if (materiaisMatch.length === 1) {
+                            // Encontrado exatamente um match - usar esse material
+                            material = { id: materiaisMatch[0].id };
+                            console.log(`✅ Match automático encontrado: "${materiaisMatch[0].nome}" (ID: ${material.id})`);
+                            materiaisIncrementados++;
+                        } else if (materiaisMatch.length > 1) {
+                            // Múltiplos matches (ambiguidade) - não fazer match automático
+                            console.log(`⚠️ Múltiplos matches encontrados para "${item.nomeProduto}". Não será feito match automático.`);
+                        } else {
+                            // Nenhum match encontrado
+                            console.log(`❌ Nenhum match encontrado para "${item.nomeProduto}". Será criado novo material.`);
                         }
                         
-                        // ✅ CORREÇÃO: Buscar por nome exato
-                        if (!material) {
-                            material = await tx.material.findFirst({
-                                where: { 
-                                    descricao: item.nomeProduto.trim() // Nome completo e exato
-                                }
-                            });
-                        }
-                        
-                        // Criar novo Material se não encontrou
+                        // Criar novo Material se não encontrou match
                         if (!material) {
                             // Gerar SKU único e aleatório
                             const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
@@ -703,13 +751,13 @@ export class ComprasService {
                             
                             material = await tx.material.create({
                                 data: {
-                                    nome: item.nomeProduto, // ✅ Campo obrigatório
+                                    nome: item.nomeProduto, // ✅ Campo obrigatório - salvar nome exatamente como veio
                                     sku: skuGerado, // ✅ Campo obrigatório e único
                                     tipo: 'Produto', // ✅ Campo obrigatório
                                     categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
                                     descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
-                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML - sempre string
-                                    unidadeMedida: 'UN',
+                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML
+                                    unidadeMedida: 'UN', // Valor padrão, CompraItem não tem unidadeMedida
                                     preco: item.valorUnit,
                                     estoque: 0,
                                     estoqueMinimo: 5,
@@ -717,6 +765,7 @@ export class ComprasService {
                                 }
                             });
                             console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
+                            materiaisCriados++;
                         }
                         
                         if (!material) {
@@ -734,6 +783,42 @@ export class ComprasService {
                     
                     // ✅ Dar entrada no estoque (considerando fracionamento)
                     if (materialIdFinal) {
+                        // ✅ ATUALIZAR PREÇO DO MATERIAL COM O VALOR DA ÚLTIMA COMPRA
+                        const materialAtual = await tx.material.findUnique({
+                            where: { id: materialIdFinal },
+                            select: { preco: true, fornecedorId: true }
+                        });
+                        
+                        if (materialAtual) {
+                            // ✅ PROCESSAR FRACIONAMENTO para calcular preço unitário
+                            const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                            const precoParaUsar = temFracionamento 
+                                ? item.valorUnit / item.quantidadeFracionada // Preço unitário quando fracionado
+                                : item.valorUnit; // Preço normal
+                            
+                            // Atualizar preço se for diferente (sempre usar o valor da última compra)
+                            if (materialAtual.preco !== precoParaUsar) {
+                                await tx.material.update({
+                                    where: { id: materialIdFinal },
+                                    data: {
+                                        preco: precoParaUsar,
+                                        fornecedorId: compra.fornecedorId
+                                    }
+                                });
+                                console.log(`💰 Preço atualizado na recepção: R$ ${materialAtual.preco} → R$ ${precoParaUsar} (Material: ${materialIdFinal})`);
+                            } else if (materialAtual.preco === null) {
+                                // Se material não tinha preço, definir agora
+                                await tx.material.update({
+                                    where: { id: materialIdFinal },
+                                    data: {
+                                        preco: precoParaUsar,
+                                        fornecedorId: compra.fornecedorId
+                                    }
+                                });
+                                console.log(`💰 Preço definido na recepção: R$ ${precoParaUsar} (Material: ${materialIdFinal})`);
+                            }
+                        }
+                        
                         // ✅ PROCESSAR FRACIONAMENTO
                         const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
                         const quantidadeParaEstoque = temFracionamento 
@@ -782,16 +867,30 @@ export class ComprasService {
                 console.log('✅ Todos os Materials criados e estoque atualizado!');
             }
 
-            return compraAtualizada;
+            return {
+                compra: compraAtualizada,
+                estatisticas: deveAtualizarEstoque ? {
+                    materiaisCriados,
+                    materiaisIncrementados,
+                    totalItens: compra.items.length
+                } : undefined
+            };
         });
-
+        
+        // Extrair compra e estatísticas do resultado
+        const compraAtualizada = (resultado as any).compra || resultado;
+        const estatisticas = (resultado as any).estatisticas;
+        
         // Após a transação, se a compra passou a ficar como "Recebido",
         // gerar contas a pagar (se ainda não existirem) usando as duplicatas/condições salvas em xmlData
-        if (novoStatus === 'Recebido') {
+        if (novoStatus === 'Recebido' && compra.status !== 'Recebido') {
             await ComprasService.gerarContasPagarAoReceberCompra(id);
         }
 
-        return resultado;
+        return {
+            compra: compraAtualizada,
+            estatisticas
+        };
     }
 
     /**
@@ -923,17 +1022,47 @@ export class ComprasService {
                     
                     // ✅ CORREÇÃO: Dar entrada no estoque usando a transação existente
                     if (materialIdFinal) {
+                        // ✅ ATUALIZAR PREÇO DO MATERIAL COM O VALOR DA ÚLTIMA COMPRA
+                        const materialAtual = await tx.material.findUnique({
+                            where: { id: materialIdFinal },
+                            select: { preco: true, fornecedorId: true, estoque: true, nome: true }
+                        });
+                        
+                        if (materialAtual) {
+                            // ✅ PROCESSAR FRACIONAMENTO para calcular preço unitário
+                            const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                            const precoParaUsar = temFracionamento 
+                                ? item.valorUnit / item.quantidadeFracionada // Preço unitário quando fracionado
+                                : item.valorUnit; // Preço normal
+                            
+                            // Atualizar preço se for diferente (sempre usar o valor da última compra)
+                            if (materialAtual.preco !== precoParaUsar) {
+                                await tx.material.update({
+                                    where: { id: materialIdFinal },
+                                    data: {
+                                        preco: precoParaUsar,
+                                        fornecedorId: compra.fornecedorId
+                                    }
+                                });
+                                console.log(`💰 Preço atualizado na remessa parcial: R$ ${materialAtual.preco} → R$ ${precoParaUsar} (Material: ${materialIdFinal})`);
+                            } else if (materialAtual.preco === null) {
+                                // Se material não tinha preço, definir agora
+                                await tx.material.update({
+                                    where: { id: materialIdFinal },
+                                    data: {
+                                        preco: precoParaUsar,
+                                        fornecedorId: compra.fornecedorId
+                                    }
+                                });
+                                console.log(`💰 Preço definido na remessa parcial: R$ ${precoParaUsar} (Material: ${materialIdFinal})`);
+                            }
+                        }
+                        
                         // ✅ PROCESSAR FRACIONAMENTO
                         const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
                         const quantidadeParaEstoque = temFracionamento 
                             ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
                             : item.quantidade; // Quantidade normal
-                        
-                        // Buscar material atual para verificar estoque antes
-                        const materialAtual = await tx.material.findUnique({
-                            where: { id: materialIdFinal },
-                            select: { estoque: true, nome: true }
-                        });
                         
                         const estoqueAnterior = materialAtual?.estoque || 0;
                         console.log(`📦 Material: ${materialAtual?.nome || materialIdFinal}`);

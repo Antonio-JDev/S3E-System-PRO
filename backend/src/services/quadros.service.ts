@@ -6,7 +6,7 @@ export interface QuadroConfig {
   tipo: 'POLICARBONATO' | 'ALUMINIO' | 'COMANDO';
   caixas: { materialId: string; quantidade: number }[];
   disjuntorGeral?: { materialId: string; quantidade: number };
-  barramento?: { materialId: string; quantidade: number };
+  barramento?: { materialId: string; quantidade: number; unidade?: 'METROS' | 'CM' };
   medidores: { disjuntorId: string; medidorId?: string; quantidade: number }[];
   cabos: { materialId: string; quantidade: number; unidade: 'METROS' | 'CM' }[];
   dps?: {
@@ -27,11 +27,23 @@ export class QuadrosService {
       // Buscar materiais da configuração
       const materiais = await this.buscarMateriaisConfig(config);
       
+      // Buscar cotações se houver itens de cotação
+      const idsCotacoes = this.extrairIdsConfig(config)
+        .filter(id => id.startsWith('cotacao_'))
+        .map(id => id.replace('cotacao_', ''));
+      
+      const cotacoes = idsCotacoes.length > 0
+        ? await prisma.cotacao.findMany({
+            where: { id: { in: idsCotacoes } },
+            select: { id: true, nome: true, valorUnitario: true, valorVenda: true }
+          })
+        : [];
+      
       // Validar estoque e identificar itens faltantes
       const validacao = await this.validarEstoque(config, materiais);
       
-      // Calcular preço total baseado nos materiais
-      const precoTotal = this.calcularPrecoTotal(materiais, config);
+      // Calcular preço total baseado nos materiais e cotações
+      const precoTotal = await this.calcularPrecoTotal(materiais, cotacoes, config);
       
       // Montar itens do kit (apenas os que NÃO são de cotações)
       const itensKit = this.montarItensKit(config);
@@ -79,35 +91,70 @@ export class QuadrosService {
   private static async validarEstoque(config: QuadroConfig, materiais: any[]) {
     const itensFaltantes: any[] = [];
     
-    // Se for do banco frio, todos os itens estão "faltantes"
-    if (config.fonteDados === 'COTACOES' || config.temItensCotacao) {
-      // Extrair todos os IDs e quantidades
-      const todosItens = this.extrairTodosItens(config);
-      
-      todosItens.forEach(item => {
+    // Extrair todos os IDs e quantidades
+    const todosItens = this.extrairTodosItens(config);
+    
+    // Verificar se há itens de cotação (começam com 'cotacao_')
+    const temItensCotacao = todosItens.some(item => item.materialId.startsWith('cotacao_'));
+    
+    // Se houver itens de cotação, adicionar aos faltantes
+    if (temItensCotacao || config.fonteDados === 'COTACOES' || config.temItensCotacao) {
+      // Usar for...of para permitir await
+      for (const item of todosItens) {
         // Itens de cotação começam com 'cotacao_'
         if (item.materialId.startsWith('cotacao_')) {
-          const material = materiais.find(m => m.id === item.materialId);
-          if (material) {
+          // Extrair ID real da cotação (remover prefixo 'cotacao_')
+          const cotacaoId = item.materialId.replace('cotacao_', '');
+          
+          // Buscar cotação no banco para obter nome
+          try {
+            const cotacao = await prisma.cotacao.findUnique({
+              where: { id: cotacaoId },
+              select: { nome: true }
+            });
+            
             itensFaltantes.push({
               materialId: item.materialId,
+              cotacaoId: cotacaoId,
               quantidade: item.quantidade,
-              nome: material.nome || material.descricao,
+              nome: cotacao?.nome || 'Item de Cotação',
+              tipo: 'COTACAO'
+            });
+          } catch (error) {
+            // Se não encontrar a cotação, adicionar mesmo assim
+            itensFaltantes.push({
+              materialId: item.materialId,
+              cotacaoId: cotacaoId,
+              quantidade: item.quantidade,
+              nome: 'Item de Cotação',
               tipo: 'COTACAO'
             });
           }
         }
-      });
-      
-      return { itensFaltantes, statusEstoque: 'PENDENTE' };
+      }
     }
     
-    // Se for do estoque, validar disponibilidade
-    const todosItens = this.extrairTodosItens(config);
+    // Se for do estoque, validar disponibilidade (apenas materiais reais, não cotações)
+    // Reutilizar todosItens já declarado acima
     
     for (const item of todosItens) {
+      // Pular itens de cotação (já foram tratados acima)
+      if (item.materialId.startsWith('cotacao_')) {
+        continue;
+      }
+      
       const material = materiais.find(m => m.id === item.materialId);
-      if (material && material.estoque < item.quantidade) {
+      if (!material) {
+        // Material não encontrado
+        itensFaltantes.push({
+          materialId: item.materialId,
+          quantidade: item.quantidade,
+          quantidadeFaltante: item.quantidade,
+          nome: 'Material não encontrado',
+          tipo: 'MATERIAL_NAO_ENCONTRADO'
+        });
+      } else if (material.estoque < item.quantidade) {
+        // Estoque insuficiente
         itensFaltantes.push({
           materialId: item.materialId,
           quantidade: item.quantidade,
@@ -135,7 +182,8 @@ export class QuadrosService {
     
     // Barramento
     if (config.barramento) {
-      itens.push({ materialId: config.barramento.materialId, quantidade: config.barramento.quantidade });
+      const qtd = config.barramento.unidade === 'CM' ? config.barramento.quantidade / 100 : config.barramento.quantidade;
+      itens.push({ materialId: config.barramento.materialId, quantidade: qtd });
     }
     
     // Medidores
@@ -254,94 +302,119 @@ export class QuadrosService {
 
   private static async buscarMateriaisConfig(config: QuadroConfig) {
     const ids = this.extrairIdsConfig(config);
+    // Filtrar apenas IDs de materiais reais (não cotações que começam com 'cotacao_')
+    const idsMateriais = ids.filter(id => !id.startsWith('cotacao_'));
+    
+    // Se não houver materiais reais, retornar array vazio
+    if (idsMateriais.length === 0) {
+      return [];
+    }
+    
     return prisma.material.findMany({ 
-      where: { id: { in: ids } } 
+      where: { id: { in: idsMateriais } } 
     });
   }
 
-  private static calcularPrecoTotal(materiais: any[], config: QuadroConfig): number {
+  private static async calcularPrecoTotal(materiais: any[], cotacoes: any[], config: QuadroConfig): Promise<number> {
     let total = 0;
     
     // Mapa de materiais por ID para acesso rápido
     const materiaisMap = new Map(materiais.map(m => [m.id, m]));
     
+    // Mapa de cotações por ID (com prefixo 'cotacao_') para acesso rápido
+    const cotacoesMap = new Map(cotacoes.map(c => [`cotacao_${c.id}`, c]));
+    
+    // Função auxiliar para obter preço (de material ou cotação)
+    const getPreco = (materialId: string): number => {
+      if (materialId.startsWith('cotacao_')) {
+        const cotacao = cotacoesMap.get(materialId);
+        if (cotacao) {
+          return cotacao.valorVenda || cotacao.valorUnitario || 0;
+        }
+        return 0;
+      } else {
+        const material = materiaisMap.get(materialId);
+        if (material) {
+          return (material as any).valorVenda || material.preco || 0;
+        }
+        return 0;
+      }
+    };
+    
     // Caixas
     config.caixas.forEach(item => {
-      const material = materiaisMap.get(item.materialId);
-      if (material) total += material.preco * item.quantidade;
+      const preco = getPreco(item.materialId);
+      total += preco * item.quantidade;
     });
     
     // Disjuntor Geral
     if (config.disjuntorGeral) {
-      const material = materiaisMap.get(config.disjuntorGeral.materialId);
-      if (material) total += material.preco * config.disjuntorGeral.quantidade;
+      const preco = getPreco(config.disjuntorGeral.materialId);
+      total += preco * config.disjuntorGeral.quantidade;
     }
     
     // Barramento
     if (config.barramento) {
-      const material = materiaisMap.get(config.barramento.materialId);
-      if (material) total += material.preco * config.barramento.quantidade;
+      const preco = getPreco(config.barramento.materialId);
+      const qtd = config.barramento.unidade === 'CM' ? config.barramento.quantidade / 100 : config.barramento.quantidade;
+      total += preco * qtd;
     }
     
     // Medidores
     config.medidores.forEach(item => {
-      const materialDisjuntor = materiaisMap.get(item.disjuntorId);
-      if (materialDisjuntor) total += materialDisjuntor.preco * item.quantidade;
+      const precoDisjuntor = getPreco(item.disjuntorId);
+      total += precoDisjuntor * item.quantidade;
       
       if (item.medidorId) {
-        const materialMedidor = materiaisMap.get(item.medidorId);
-        if (materialMedidor) total += materialMedidor.preco * item.quantidade;
+        const precoMedidor = getPreco(item.medidorId);
+        total += precoMedidor * item.quantidade;
       }
     });
     
     // Cabos
     config.cabos.forEach(item => {
-      const material = materiaisMap.get(item.materialId);
-      if (material) {
-        const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-        total += material.preco * qtd;
-      }
+      const preco = getPreco(item.materialId);
+      const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
+      total += preco * qtd;
     });
     
     // DPS
     if (config.dps) {
       config.dps.items.forEach(item => {
-        const material = materiaisMap.get(item.materialId);
-        if (material) total += material.preco * item.quantidade;
+        const preco = getPreco(item.materialId);
+        total += preco * item.quantidade;
       });
     }
     
     // Born
     if (config.born) {
       config.born.forEach(item => {
-        const material = materiaisMap.get(item.materialId);
-        if (material) total += material.preco * item.quantidade;
+        const preco = getPreco(item.materialId);
+        total += preco * item.quantidade;
       });
     }
     
     // Parafusos
     if (config.parafusos) {
       config.parafusos.forEach(item => {
-        const material = materiaisMap.get(item.materialId);
-        if (material) total += material.preco * item.quantidade;
+        const preco = getPreco(item.materialId);
+        total += preco * item.quantidade;
       });
     }
     
     // Trilhos
     if (config.trilhos) {
       config.trilhos.forEach(item => {
-        const material = materiaisMap.get(item.materialId);
-        if (material) {
-          const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-          total += material.preco * qtd;
-        }
+        const preco = getPreco(item.materialId);
+        const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
+        total += preco * qtd;
       });
     }
     
     // Componentes finais
     config.componentes.forEach(item => {
-      const material = materiaisMap.get(item.materialId);
-      if (material) total += material.preco * item.quantidade;
+      const preco = getPreco(item.materialId);
+      total += preco * item.quantidade;
     });
     
     return total;
@@ -350,80 +423,64 @@ export class QuadrosService {
   private static montarItensKit(config: QuadroConfig) {
     const itens: any[] = [];
     
+    // Função auxiliar para adicionar item apenas se não for cotação
+    const adicionarItemSeNaoCotacao = (materialId: string, quantidade: number) => {
+      // Não adicionar itens de cotação (começam com 'cotacao_')
+      if (!materialId.startsWith('cotacao_')) {
+        itens.push({
+          materialId: materialId,
+          quantidade: quantidade
+        });
+      }
+    };
+    
     // Caixas
     config.caixas.forEach(item => {
-      itens.push({
-        materialId: item.materialId,
-        quantidade: item.quantidade
-      });
+      adicionarItemSeNaoCotacao(item.materialId, item.quantidade);
     });
     
     // Disjuntor Geral
     if (config.disjuntorGeral) {
-      itens.push({
-        materialId: config.disjuntorGeral.materialId,
-        quantidade: config.disjuntorGeral.quantidade
-      });
+      adicionarItemSeNaoCotacao(config.disjuntorGeral.materialId, config.disjuntorGeral.quantidade);
     }
     
     // Barramento
     if (config.barramento) {
-      itens.push({
-        materialId: config.barramento.materialId,
-        quantidade: config.barramento.quantidade
-      });
+      adicionarItemSeNaoCotacao(config.barramento.materialId, config.barramento.quantidade);
     }
     
     // Medidores
     config.medidores.forEach(item => {
-      itens.push({
-        materialId: item.disjuntorId,
-        quantidade: item.quantidade
-      });
+      adicionarItemSeNaoCotacao(item.disjuntorId, item.quantidade);
       if (item.medidorId) {
-        itens.push({
-          materialId: item.medidorId,
-          quantidade: item.quantidade
-        });
+        adicionarItemSeNaoCotacao(item.medidorId, item.quantidade);
       }
     });
     
     // Cabos
     config.cabos.forEach(item => {
       const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-      itens.push({
-        materialId: item.materialId,
-        quantidade: qtd
-      });
+      adicionarItemSeNaoCotacao(item.materialId, qtd);
     });
     
     // DPS
     if (config.dps) {
       config.dps.items.forEach(item => {
-        itens.push({
-          materialId: item.materialId,
-          quantidade: item.quantidade
-        });
+        adicionarItemSeNaoCotacao(item.materialId, item.quantidade);
       });
     }
     
     // Born
     if (config.born) {
       config.born.forEach(item => {
-        itens.push({
-          materialId: item.materialId,
-          quantidade: item.quantidade
-        });
+        adicionarItemSeNaoCotacao(item.materialId, item.quantidade);
       });
     }
     
     // Parafusos
     if (config.parafusos) {
       config.parafusos.forEach(item => {
-        itens.push({
-          materialId: item.materialId,
-          quantidade: item.quantidade
-        });
+        adicionarItemSeNaoCotacao(item.materialId, item.quantidade);
       });
     }
     
@@ -431,19 +488,13 @@ export class QuadrosService {
     if (config.trilhos) {
       config.trilhos.forEach(item => {
         const qtd = item.unidade === 'CM' ? item.quantidade / 100 : item.quantidade;
-        itens.push({
-          materialId: item.materialId,
-          quantidade: qtd
-        });
+        adicionarItemSeNaoCotacao(item.materialId, qtd);
       });
     }
     
     // Componentes finais
     config.componentes.forEach(item => {
-      itens.push({
-        materialId: item.materialId,
-        quantidade: item.quantidade
-      });
+      adicionarItemSeNaoCotacao(item.materialId, item.quantidade);
     });
     
     return itens;

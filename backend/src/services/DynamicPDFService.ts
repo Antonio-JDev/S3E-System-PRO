@@ -215,7 +215,7 @@ export class DynamicPDFService {
                 ` : ''}
                 
                 <!-- Informações do Orçamento -->
-                <h1>ORÇAMENTO Nº ${orcamentoData.numero}</h1>
+                <h1>ORÇAMENTO ${orcamentoData.numero}</h1>
                 <div class="info-box">
                     <strong>Projeto:</strong> ${orcamentoData.projeto.titulo}<br>
                     <strong>Data:</strong> ${orcamentoData.data} | <strong>Validade:</strong> ${orcamentoData.validade}

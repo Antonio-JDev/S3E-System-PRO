@@ -289,7 +289,14 @@ export class ContasPagarService {
                 take: limit,
                 orderBy: { dataVencimento: 'asc' },
                 include: {
-                    fornecedor: true
+                    fornecedor: true,
+                    compra: {
+                        select: {
+                            id: true,
+                            numeroSequencial: true,
+                            numeroNF: true
+                        }
+                    }
                 }
             }),
             prisma.contaPagar.count({ where })
@@ -313,7 +320,14 @@ export class ContasPagarService {
         const conta = await prisma.contaPagar.findUnique({
             where: { id },
             include: {
-                fornecedor: true
+                fornecedor: true,
+                compra: {
+                    select: {
+                        id: true,
+                        numeroSequencial: true,
+                        numeroNF: true
+                    }
+                }
             }
         });
 
@@ -389,7 +403,14 @@ export class ContasPagarService {
             },
             orderBy: { dataVencimento: 'asc' },
             include: {
-                fornecedor: true
+                fornecedor: true,
+                compra: {
+                    select: {
+                        id: true,
+                        numeroSequencial: true,
+                        numeroNF: true
+                    }
+                }
             }
         });
     }
@@ -412,7 +433,14 @@ export class ContasPagarService {
             },
             orderBy: { dataVencimento: 'asc' },
             include: {
-                fornecedor: true
+                fornecedor: true,
+                compra: {
+                    select: {
+                        id: true,
+                        numeroSequencial: true,
+                        numeroNF: true
+                    }
+                }
             }
         });
     }
@@ -425,7 +453,14 @@ export class ContasPagarService {
             where: { tipo },
             orderBy: { dataVencimento: 'asc' },
             include: {
-                fornecedor: true
+                fornecedor: true,
+                compra: {
+                    select: {
+                        id: true,
+                        numeroSequencial: true,
+                        numeroNF: true
+                    }
+                }
             }
         });
     }

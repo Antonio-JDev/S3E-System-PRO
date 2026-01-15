@@ -202,18 +202,18 @@ export class ProjetosService {
           });
 
           if (kit) {
-            // Verificar itens do banco frio do kit
+            // Verificar itens do banco frio do kit (apenas cotações, não serviços)
+            // IMPORTANTE: Serviços não precisam de estoque e não devem ser validados aqui
+            // Cotações só serão validadas quando vinculadas a um produto do estoque na ordem de serviço
             if (kit.temItensCotacao && kit.itensFaltantes) {
               const itensFrios = Array.isArray(kit.itensFaltantes) ? kit.itensFaltantes : [];
-              itensFrios.forEach((itemFrio: any) => {
-                materiaisFaltantes.push({
-                  nome: `${itemFrio.nome} (do kit ${kit.nome})`,
-                  necessario: itemFrio.quantidade * item.quantidade,
-                  disponivel: 0,
-                  falta: itemFrio.quantidade * item.quantidade,
-                  bancoFrio: true
-                });
-              });
+              // Filtrar apenas cotações (excluir serviços)
+              const cotacoes = itensFrios.filter((item: any) => item.tipo === 'COTACAO' || (!item.tipo && !item.servicoId));
+              
+              // NOTA: Cotações não devem ser validadas aqui, apenas na ordem de serviço
+              // quando forem vinculadas a um produto do estoque através do campo "localizar"
+              // Por enquanto, apenas registramos que existem cotações, mas não validamos estoque
+              // A validação acontecerá quando o item de cotação for vinculado a um material do estoque
             }
 
             // Verificar materiais reais do kit

@@ -104,7 +104,10 @@ interface MaterialFormState {
     supplierName: string;
 
     price: string; // Preço de custo
-    valorVenda: string; // Preço de venda
+    custoCM: string; // Custo por centímetro (calculado automaticamente para materiais em M ou KG/M)
+    valorVenda: string; // Preço de venda (para unidades padrão)
+    valorVendaM: string; // Preço de venda em metros (para unidade M ou KG/M)
+    valorVendaCM: string; // Preço de venda em centímetros (para unidade M ou KG/M)
     porcentagemLucro: string; // Porcentagem de lucro (calculado automaticamente)
 }
 
@@ -184,7 +187,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         supplierName: '',
 
         price: '', // Preço de custo
-        valorVenda: '', // Preço de venda
+        custoCM: '', // Custo por centímetro (calculado automaticamente para materiais em M ou KG/M)
+        valorVenda: '', // Preço de venda (para unidades padrão)
+        valorVendaM: '', // Preço de venda em metros (para unidade M ou KG/M)
+        valorVendaCM: '', // Preço de venda em centímetros (para unidade M ou KG/M)
         porcentagemLucro: '' // Porcentagem de lucro
     });
 
@@ -216,6 +222,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
                     price: material.preco || 0,
                     valorVenda: material.valorVenda,
+                    valorVendaM: (material as any).valorVendaM,
+                    valorVendaCM: (material as any).valorVendaCM,
                     porcentagemLucro: material.porcentagemLucro,
                     supplier: material.fornecedor 
                         ? { id: material.fornecedor.id, name: material.fornecedor.nome } 
@@ -294,6 +302,34 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         return ((valorVenda - precoCusto) / precoCusto) * 100;
     };
 
+    // Função auxiliar para obter o valor de venda correto baseado na unidade de medida
+    const getValorVendaExibicao = (material: MaterialItem) => {
+        const unidadeUpper = (material.unitOfMeasure || '').toUpperCase().trim();
+        const podeVenderMCM = (unidadeUpper === 'M' || unidadeUpper === 'KG/M' || unidadeUpper === 'M/KG');
+        
+        if (podeVenderMCM) {
+            // Para materiais em M ou KG/M, mostrar valorVendaM se disponível
+            const valorVendaM = (material as any).valorVendaM;
+            if (valorVendaM && valorVendaM > 0) {
+                return {
+                    principal: valorVendaM,
+                    secundario: (material as any).valorVendaCM,
+                    unidade: 'm',
+                    temValor: true
+                };
+            }
+        }
+        
+        // Para outras unidades ou se não tiver valorVendaM, usar valorVenda padrão
+        const valorVenda = (material as any).valorVenda;
+        return {
+            principal: valorVenda || material.price || 0,
+            secundario: null,
+            unidade: material.unitOfMeasure || 'un',
+            temValor: !!valorVenda
+        };
+    };
+
     // Carregar fornecedores
     const loadFornecedores = async () => {
         try {
@@ -315,34 +351,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         loadFornecedores();
         
         if (item) {
-            // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
-            let unidadeMedidaFinal = item.unitOfMeasure || 'un';
-            const nomeMaterialLower = (item.name || '').toLowerCase();
-            
-            // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
-            
-            // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
-            
-            // Se for cabo, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
-            
+            // ✅ Removida lógica automática que forçava unidade baseada no nome
+            // Agora o usuário tem controle total sobre a unidade de medida
             setItemToEdit(item);
             setFormState({
                 name: item.name,
@@ -352,16 +362,19 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 description: item.description,
                 stock: item.stock.toString(),
                 minStock: item.minStock.toString(),
-                unitOfMeasure: unidadeMedidaFinal, // ✅ Usar unidade ajustada
+                unitOfMeasure: item.unitOfMeasure || 'un', // ✅ Usar unidade do item
                 location: item.location || '',
                 imageUrl: item.imageUrl,
                 supplierId: item.supplier?.id || item.supplierId || '',
                 supplierName: item.supplier?.name || item.supplierName || '',
 
                 price: (item.price || 0).toString(),
+                custoCM: ((item as any).custoCM || 0).toString(),
                 valorVenda: (item.valorVenda || 0).toString(),
-                porcentagemLucro: (item.porcentagemLucro || (item.valorVenda && item.price 
-                    ? calcularPorcentagemLucro(item.price, item.valorVenda).toFixed(2) 
+                valorVendaM: ((item as any).valorVendaM || 0).toString(),
+                valorVendaCM: ((item as any).valorVendaCM || 0).toString(),
+                porcentagemLucro: (item.porcentagemLucro || (item.valorVenda && item.price
+                    ? calcularPorcentagemLucro(item.price, item.valorVenda).toFixed(2)
                     : '0')).toString()
             });
         } else {
@@ -381,7 +394,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 supplierName: '',
 
                 price: '',
+                custoCM: '',
                 valorVenda: '',
+                valorVendaM: '',
+                valorVendaCM: '',
                 porcentagemLucro: ''
             });
         }
@@ -453,10 +469,24 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         try {
 
             const precoCusto = parseFloat(formState.price) || 0;
+            const custoCM = parseFloat(formState.custoCM) || 0;
             const valorVenda = parseFloat(formState.valorVenda) || 0;
-            const porcentagemLucro = precoCusto > 0 && valorVenda > 0 
-                ? calcularPorcentagemLucro(precoCusto, valorVenda) 
-                : 0;
+            const valorVendaM = parseFloat(formState.valorVendaM) || 0;
+            const valorVendaCM = parseFloat(formState.valorVendaCM) || 0;
+            
+            // Calcular porcentagem de lucro baseado na unidade
+            let porcentagemLucro = 0;
+            if (formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') {
+                // Para M ou KG/M, usar valorVendaM se disponível
+                if (precoCusto > 0 && valorVendaM > 0) {
+                    porcentagemLucro = calcularPorcentagemLucro(precoCusto, valorVendaM);
+                }
+            } else {
+                // Para outras unidades, usar valorVenda padrão
+                if (precoCusto > 0 && valorVenda > 0) {
+                    porcentagemLucro = calcularPorcentagemLucro(precoCusto, valorVenda);
+                }
+            }
 
             // Verificar se o nome do fornecedor corresponde a um fornecedor existente
             let fornecedorIdFinal = formState.supplierId;
@@ -469,33 +499,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 }
             }
 
-            // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
-            let unidadeMedidaFinal = formState.unitOfMeasure;
-            const nomeMaterialLower = formState.name.toLowerCase();
-            
-            // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
-            
-            // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
-            
-            // Se for cabo, garantir que a unidade seja 'm' (metro)
-            if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
-                if (unidadeMedidaFinal !== 'm') {
-                    console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
-                    unidadeMedidaFinal = 'm';
-                }
-            }
+            // ✅ Removida lógica automática que forçava unidade baseada no nome
+            // Agora o usuário tem controle total sobre a unidade de medida
+            const unidadeMedidaFinal = formState.unitOfMeasure;
 
             const materialData = {
                 sku: formState.sku, // ✅ Usar sku em vez de codigo
@@ -504,7 +510,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 unidadeMedida: unidadeMedidaFinal, // ✅ Usar unidadeMedida em vez de unidade
 
                 preco: precoCusto,
+                custoCM: (formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && custoCM > 0 ? custoCM : undefined,
                 valorVenda: valorVenda > 0 ? valorVenda : undefined,
+                valorVendaM: valorVendaM > 0 ? valorVendaM : undefined,
+                valorVendaCM: valorVendaCM > 0 ? valorVendaCM : undefined,
                 porcentagemLucro: porcentagemLucro > 0 ? porcentagemLucro : undefined,
                 estoque: parseFloat(formState.stock),
                 estoqueMinimo: parseFloat(formState.minStock),
@@ -840,7 +849,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             `;
             
             // Construir linhas da tabela
-            const linhasTabela = materiaisCriticos.map(material => `
+            const linhasTabela = materiaisCriticos.map(material => {
+                const valorVenda = getValorVendaExibicao(material);
+                const valorVendaTexto = valorVenda.secundario && valorVenda.secundario > 0
+                    ? `R$ ${valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m<br/>R$ ${valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm`
+                    : `R$ ${valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${valorVenda.unidade === 'm' ? '/m' : ''}`;
+                
+                return `
                 <tr>
                     <td>${material.sku || 'N/A'}</td>
                     <td>${material.name || ''}</td>
@@ -849,10 +864,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     <td>${material.stock}</td>
                     <td>${material.minStock}</td>
                     <td>R$ ${(material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td>R$ ${((material as any).valorVenda || material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                    <td>${valorVendaTexto}</td>
                     ${incluirFornecedor ? `<td>${material.supplierName || material.supplier?.name || 'N/A'}</td>` : ''}
                 </tr>
-            `).join('');
+            `;
+            }).join('');
             
             const html = `
                 <!DOCTYPE html>
@@ -1652,15 +1668,31 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 
                                 {/* Valor de Venda */}
                                 <div className="bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 rounded-lg p-2 mt-2">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-xs text-teal-600 dark:text-teal-400 font-medium">💵 Valor de Venda:</span>
-                                        <span className="font-bold text-teal-700 dark:text-teal-400">
-                                            R$ {((material as any).valorVenda || material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </span>
-                                    </div>
-                                    {!((material as any).valorVenda) && (
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Usando preço de compra</p>
-                                    )}
+                                    {(() => {
+                                        const valorVenda = getValorVendaExibicao(material);
+                                        return (
+                                            <>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-teal-600 dark:text-teal-400 font-medium">💵 Valor de Venda:</span>
+                                                    <span className="font-bold text-teal-700 dark:text-teal-400">
+                                                        R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        {valorVenda.unidade === 'm' && <span className="text-xs ml-1">/m</span>}
+                                                    </span>
+                                                </div>
+                                                {valorVenda.secundario && valorVenda.secundario > 0 && (
+                                                    <div className="flex justify-between items-center mt-1">
+                                                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">💵 Venda em cm:</span>
+                                                        <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                                                            R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {!valorVenda.temValor && (
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Usando preço de compra</p>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -1798,12 +1830,25 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         </p>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
-                                            R$ {((material as any).valorVenda || material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </p>
-                                        {!((material as any).valorVenda) && (
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Sem valor de venda</p>
-                                        )}
+                                        {(() => {
+                                            const valorVenda = getValorVendaExibicao(material);
+                                            return (
+                                                <>
+                                                    <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
+                                                        R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        {valorVenda.unidade === 'm' && <span className="text-xs text-gray-500 ml-1">/m</span>}
+                                                    </p>
+                                                    {valorVenda.secundario && valorVenda.secundario > 0 && (
+                                                        <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                                                            R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
+                                                        </p>
+                                                    )}
+                                                    {!valorVenda.temValor && (
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Sem valor de venda</p>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="px-6 py-4">
                                         <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
@@ -1968,6 +2013,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     >
                                         <option value="un">Unidade</option>
                                         <option value="m">Metro</option>
+                                        <option value="kg/m">KG/M</option>
                                         <option value="kg">Quilograma</option>
                                         <option value="l">Litro</option>
                                         <option value="cx">Caixa</option>
@@ -2100,13 +2146,22 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             value={formState.price}
                                             onChange={(e) => {
                                                 const novoPreco = e.target.value;
+                                                const precoNum = parseFloat(novoPreco) || 0;
+                                                
+                                                // Calcular custoCM automaticamente se unidade for M ou KG/M
+                                                let novoCustoCM = formState.custoCM;
+                                                if ((formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && precoNum > 0) {
+                                                    novoCustoCM = (precoNum / 100).toFixed(2);
+                                                }
+                                                
                                                 const valorVenda = parseFloat(formState.valorVenda) || 0;
-                                                const novaPorcentagem = valorVenda > 0 && parseFloat(novoPreco) > 0
-                                                    ? calcularPorcentagemLucro(parseFloat(novoPreco) || 0, valorVenda)
+                                                const novaPorcentagem = valorVenda > 0 && precoNum > 0
+                                                    ? calcularPorcentagemLucro(precoNum, valorVenda)
                                                     : 0;
                                                 setFormState({
                                                     ...formState,
                                                     price: novoPreco,
+                                                    custoCM: novoCustoCM,
                                                     porcentagemLucro: novaPorcentagem.toFixed(2)
                                                 });
                                             }}
@@ -2118,32 +2173,119 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         />
                                     </div>
 
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                            Valor de Venda (R$)
-                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado em orçamentos</span>
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={formState.valorVenda}
-                                            onChange={(e) => {
-                                                const novoValorVenda = e.target.value;
-                                                const precoCusto = parseFloat(formState.price) || 0;
-                                                const novaPorcentagem = precoCusto > 0 && parseFloat(novoValorVenda) > 0
-                                                    ? calcularPorcentagemLucro(precoCusto, parseFloat(novoValorVenda) || 0)
-                                                    : 0;
-                                                setFormState({
-                                                    ...formState,
-                                                    valorVenda: novoValorVenda,
-                                                    porcentagemLucro: novaPorcentagem.toFixed(2)
-                                                });
-                                            }}
-                                            min="0"
-                                            step="0.01"
-                                            className="input-field"
-                                            placeholder="0,00"
-                                        />
-                                    </div>
+                                    {/* Custo por Centímetro - Mostrar apenas para M ou KG/M */}
+                                    {(formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                Custo por Centímetro (R$/cm)
+                                                <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Calculado automaticamente (Custo / 100)</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                value={formState.custoCM}
+                                                readOnly
+                                                min="0"
+                                                step="0.01"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-gray-800 cursor-not-allowed text-gray-700 dark:text-dark-text"
+                                                placeholder="0,00"
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Valor de Venda - Mostrar campos diferentes baseado na unidade */}
+                                    {(formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') ? (
+                                        <>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                    Valor de Venda em Metro (R$/m)
+                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado quando vender em metros</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={formState.valorVendaM}
+                                                    onChange={(e) => {
+                                                        const novoValorVendaM = e.target.value;
+                                                        const valorVendaMNum = parseFloat(novoValorVendaM) || 0;
+                                                        
+                                                        // Calcular valorVendaCM automaticamente (dividir por 100)
+                                                        const novoValorVendaCM = valorVendaMNum > 0 
+                                                            ? (valorVendaMNum / 100).toFixed(2) 
+                                                            : '';
+                                                        
+                                                        const precoCusto = parseFloat(formState.price) || 0;
+                                                        const novaPorcentagem = precoCusto > 0 && valorVendaMNum > 0
+                                                            ? calcularPorcentagemLucro(precoCusto, valorVendaMNum)
+                                                            : 0;
+                                                        setFormState({
+                                                            ...formState,
+                                                            valorVendaM: novoValorVendaM,
+                                                            valorVendaCM: novoValorVendaCM,
+                                                            porcentagemLucro: novaPorcentagem.toFixed(2)
+                                                        });
+                                                    }}
+                                                    min="0"
+                                                    step="0.01"
+                                                    className="input-field"
+                                                    placeholder="0,00"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                    Valor de Venda em Centímetro (R$/cm)
+                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado quando vender em centímetros</span>
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    value={formState.valorVendaCM}
+                                                    onChange={(e) => {
+                                                        const novoValorVendaCM = e.target.value;
+                                                        const precoCusto = parseFloat(formState.price) || 0;
+                                                        // Para CM, calcular porcentagem baseado no valor em CM * 100 (equivalente a 1 metro)
+                                                        const valorCMEmMetro = parseFloat(novoValorVendaCM) * 100;
+                                                        const novaPorcentagem = precoCusto > 0 && valorCMEmMetro > 0
+                                                            ? calcularPorcentagemLucro(precoCusto, valorCMEmMetro)
+                                                            : 0;
+                                                        setFormState({
+                                                            ...formState,
+                                                            valorVendaCM: novoValorVendaCM,
+                                                            porcentagemLucro: novaPorcentagem.toFixed(2)
+                                                        });
+                                                    }}
+                                                    min="0"
+                                                    step="0.01"
+                                                    className="input-field"
+                                                    placeholder="0,00"
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                Valor de Venda (R$)
+                                                <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado em orçamentos</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                value={formState.valorVenda}
+                                                onChange={(e) => {
+                                                    const novoValorVenda = e.target.value;
+                                                    const precoCusto = parseFloat(formState.price) || 0;
+                                                    const novaPorcentagem = precoCusto > 0 && parseFloat(novoValorVenda) > 0
+                                                        ? calcularPorcentagemLucro(precoCusto, parseFloat(novoValorVenda) || 0)
+                                                        : 0;
+                                                    setFormState({
+                                                        ...formState,
+                                                        valorVenda: novoValorVenda,
+                                                        porcentagemLucro: novaPorcentagem.toFixed(2)
+                                                    });
+                                                }}
+                                                min="0"
+                                                step="0.01"
+                                                className="input-field"
+                                                placeholder="0,00"
+                                            />
+                                        </div>
+                                    )}
 
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
@@ -2234,7 +2376,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <AlertDialogTitle>
                             {isAdminOrDev ? '🗑️ Excluir Material Permanentemente' : '⚠️ Desativar Material'}
                         </AlertDialogTitle>
-                        <AlertDialogDescription className="space-y-3">
+                        <div className="space-y-3">
                             {isAdminOrDev ? (
                                 <>
                                     <div className="bg-red-50 border border-red-200 rounded-lg p-3">
@@ -2291,15 +2433,15 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 </>
                             ) : (
                                 <>
-                                    <p className="text-gray-700">
+                                    <AlertDialogDescription className="text-gray-700">
                                         Tem certeza que deseja desativar o material <strong>"{itemToDelete?.name}"</strong>?
-                                    </p>
-                                    <p className="text-sm text-gray-600">
+                                    </AlertDialogDescription>
+                                    <AlertDialogDescription className="text-sm text-gray-600">
                                         O material será desativado e não aparecerá mais nas listagens, mas permanecerá no histórico.
-                                    </p>
+                                    </AlertDialogDescription>
                                 </>
                             )}
-                        </AlertDialogDescription>
+                        </div>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel onClick={() => {
@@ -2461,13 +2603,25 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     </div>
                                     <div className="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
                                         <p className="text-sm text-purple-700 dark:text-purple-300 mb-1">Valor de Venda</p>
-                                        <p className="text-lg font-bold text-purple-900 dark:text-purple-100">
-                                            {materialSelecionado.valorVenda 
-                                                ? `R$ ${materialSelecionado.valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-                                                : <span className="text-gray-400">Não definido</span>
-                                            }
-                                        </p>
-                                        <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">Usado em orçamentos</p>
+                                        {(() => {
+                                            const valorVenda = getValorVendaExibicao(materialSelecionado);
+                                            return (
+                                                <>
+                                                    <p className="text-lg font-bold text-purple-900 dark:text-purple-100">
+                                                        {valorVenda.temValor 
+                                                            ? `R$ ${valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${valorVenda.unidade === 'm' ? '/m' : ''}`
+                                                            : <span className="text-gray-400">Não definido</span>
+                                                        }
+                                                    </p>
+                                                    {valorVenda.secundario && valorVenda.secundario > 0 && (
+                                                        <p className="text-sm font-semibold text-green-600 dark:text-green-400 mt-1">
+                                                            R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
+                                                        </p>
+                                                    )}
+                                                    <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">Usado em orçamentos</p>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-xl p-4">
                                         <p className="text-sm text-green-700 dark:text-green-300 mb-1">Porcentagem de Lucro</p>
@@ -2719,12 +2873,25 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-teal-800 dark:text-teal-300 mb-2">💵 Preço de Venda</h3>
-                                    <p className="text-3xl font-bold text-teal-700 dark:text-teal-400">
-                                        R$ {((materialParaVisualizar as any).valorVenda || materialParaVisualizar.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </p>
-                                    {!((materialParaVisualizar as any).valorVenda) && (
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Usando preço de compra</p>
-                                    )}
+                                    {(() => {
+                                        const valorVenda = getValorVendaExibicao(materialParaVisualizar);
+                                        return (
+                                            <>
+                                                <p className="text-3xl font-bold text-teal-700 dark:text-teal-400">
+                                                    R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    {valorVenda.unidade === 'm' && <span className="text-lg ml-1">/m</span>}
+                                                </p>
+                                                {valorVenda.secundario && valorVenda.secundario > 0 && (
+                                                    <p className="text-xl font-semibold text-green-600 dark:text-green-400 mt-2">
+                                                        R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
+                                                    </p>
+                                                )}
+                                                {!valorVenda.temValor && (
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Usando preço de compra</p>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                                 <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">📦 Valor Total em Estoque</h3>

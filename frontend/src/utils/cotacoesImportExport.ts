@@ -7,6 +7,7 @@ export interface CotacaoTemplate {
     ncm?: string;
     valorUnitario: number;
     valorVenda?: number;
+    unidadeMedida?: string; // un, m, cm, kg, etc.
     fornecedorNome?: string;
     observacoes?: string;
     ativo?: boolean;
@@ -43,6 +44,7 @@ export function generateEmptyTemplate(): CotacoesImportData {
                 ncm: '85369090',
                 valorUnitario: 10.50,
                 valorVenda: 14.70,
+                unidadeMedida: 'un',
                 fornecedorNome: 'Fornecedor Exemplo LTDA',
                 observacoes: 'Observações sobre a cotação',
                 ativo: true
@@ -64,6 +66,7 @@ export function generateExampleTemplate(): CotacoesImportData {
                 ncm: '85362000',
                 valorUnitario: 25.50,
                 valorVenda: 35.70,
+                unidadeMedida: 'un',
                 fornecedorNome: 'Distribuidora Elétrica ABC',
                 observacoes: 'Prazo de entrega: 5 dias úteis',
                 ativo: true
@@ -73,6 +76,7 @@ export function generateExampleTemplate(): CotacoesImportData {
                 ncm: '85444200',
                 valorUnitario: 3.80,
                 valorVenda: 5.32,
+                unidadeMedida: 'm',
                 fornecedorNome: 'Cabos e Fios XYZ',
                 observacoes: 'Venda por metro',
                 ativo: true
@@ -82,6 +86,7 @@ export function generateExampleTemplate(): CotacoesImportData {
                 ncm: '85363000',
                 valorUnitario: 8.90,
                 valorVenda: 12.46,
+                unidadeMedida: 'un',
                 fornecedorNome: 'Materiais Elétricos DEF',
                 ativo: true
             }
@@ -101,6 +106,7 @@ export function exportToJSON(cotacoes: CotacaoTemplate[]): CotacoesImportData {
             ncm: c.ncm || '',
             valorUnitario: c.valorUnitario,
             valorVenda: c.valorVenda,
+            unidadeMedida: c.unidadeMedida || 'un',
             fornecedorNome: c.fornecedorNome || '',
             observacoes: c.observacoes || '',
             ativo: c.ativo !== false

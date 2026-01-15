@@ -158,35 +158,10 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
       console.log(`✅ SKU gerado: ${skuFinal}`);
     }
     
-    // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
-    let unidadeMedidaFinal = unidadeMedida || 'un';
-    if (nome) {
-      const nomeMaterialLower = nome.toLowerCase();
-      
-      // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
-      
-      // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
-      
-      // Se for cabo, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
-    }
+    // Usar unidade de medida fornecida ou padrão 'un' se não especificada
+    // ✅ Removida lógica automática que forçava unidade baseada no nome
+    // Agora o usuário tem controle total sobre a unidade de medida
+    const unidadeMedidaFinal = unidadeMedida || 'un';
     
     const material = await prisma.material.create({
       data: {
@@ -233,42 +208,24 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
       console.log(`🔍 Categoria auto-classificada na atualização: "${categoria}" para "${nomeFinal}"`);
     }
 
-    // ✅ Detectar tipo de material e ajustar unidade de medida automaticamente
+    // Se unidadeMedida não foi fornecida, buscar a atual do material (preservar valor existente)
     let unidadeMedidaFinal = unidadeMedida;
-    if (nomeFinal) {
-      const nomeMaterialLower = nomeFinal.toLowerCase();
-      
-      // Se for barramento DIN, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('barramento') && nomeMaterialLower.includes('din')) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento DIN`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
-      
-      // Se for barramento de cobre, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('barramento') && (nomeMaterialLower.includes('cobre') || nomeMaterialLower.includes('cu'))) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para barramento de cobre`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
-      
-      // Se for cabo, garantir que a unidade seja 'm' (metro)
-      if (nomeMaterialLower.includes('cabo') || nomeMaterialLower.includes('fio')) {
-        if (unidadeMedidaFinal !== 'm') {
-          console.log(`🔄 Ajustando unidade de medida de "${unidadeMedidaFinal}" para "m" (metro) para cabo`);
-          unidadeMedidaFinal = 'm';
-        }
-      }
+    if (!unidadeMedidaFinal) {
+      const materialAtual = await prisma.material.findUnique({
+        where: { id },
+        select: { unidadeMedida: true }
+      });
+      unidadeMedidaFinal = materialAtual?.unidadeMedida || 'un';
     }
+    // ✅ Removida lógica automática que forçava unidade baseada no nome
+    // Agora o usuário tem controle total sobre a unidade de medida
 
     const material = await prisma.material.update({
       where: { id },
       data: {
         ...rest,
         ...(nomeFinal && { nome: nomeFinal }),
-        ...(unidadeMedidaFinal && { unidadeMedida: unidadeMedidaFinal }),
+        unidadeMedida: unidadeMedidaFinal, // ✅ Sempre atualizar a unidade
         categoria
       }
     });

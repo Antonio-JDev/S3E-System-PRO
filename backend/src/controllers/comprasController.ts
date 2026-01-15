@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { XMLParser } from 'fast-xml-parser';
 import { ComprasService, CompraPayload } from '../services/compras.service';
+import { compararNomesProdutos } from '../utils/stringUtils';
 
 const prisma = new PrismaClient();
 const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
@@ -127,11 +128,13 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
     }
 
     const resultado = await ComprasService.registrarCompra(compraData);
+    const estatisticas = (resultado as any).estatisticas;
 
     res.status(201).json({
       success: true,
       message: 'Compra registrada com sucesso',
-      data: resultado
+      data: resultado,
+      estatisticas: estatisticas || undefined
     });
   } catch (error) {
     console.error('Erro ao criar compra:', error);
@@ -181,6 +184,23 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
       sku?: string;
       materialId?: string;
     }> = [];
+    // ✅ NOVO: Buscar todos os materiais existentes para match automático
+    const todosMateriais = await prisma.material.findMany({
+      select: { 
+        id: true, 
+        nome: true, 
+        sku: true, 
+        unidadeMedida: true, 
+        preco: true, 
+        valorVenda: true,
+        estoque: true,
+        categoria: true,
+        ncm: true,
+        descricao: true
+      }
+    });
+    console.log(`🔍 Buscando match automático para ${todosMateriais.length} materiais existentes...`);
+
     const det = Array.isArray(nfe.det) ? nfe.det : nfe.det ? [nfe.det] : [];
     for (const item of det) {
       if (item && item.prod) {
@@ -188,14 +208,48 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         const ncmValue = item.prod.NCM;
         const ncmString = ncmValue ? String(ncmValue) : '';
         
-        items.push({
-          nomeProduto: item.prod.xProd || '',
+        const nomeProduto = item.prod.xProd || '';
+        
+        // ✅ NOVO: Tentar fazer match automático por nome normalizado
+        let materialId: string | undefined = undefined;
+        let materialMatch: any = null;
+        
+        if (nomeProduto) {
+          const materiaisMatch = todosMateriais.filter(m => 
+            compararNomesProdutos(m.nome, nomeProduto)
+          );
+          
+          if (materiaisMatch.length === 1) {
+            // Match exato encontrado
+            materialId = materiaisMatch[0].id;
+            materialMatch = materiaisMatch[0];
+            console.log(`✅ Match automático encontrado: "${nomeProduto}" → Material ID: ${materialId}`);
+          } else if (materiaisMatch.length > 1) {
+            // Múltiplos matches - não vincular automaticamente, deixar usuário escolher
+            console.log(`⚠️ Múltiplos matches encontrados para "${nomeProduto}" (${materiaisMatch.length}). Usuário deve escolher manualmente.`);
+          } else {
+            // Nenhum match encontrado
+            console.log(`🆕 Nenhum match encontrado para "${nomeProduto}". Será criado novo material.`);
+          }
+        }
+        
+        const itemData: any = {
+          nomeProduto,
           ncm: ncmString,
           quantidade: parseFloat(item.prod.qCom || '0'),
           valorUnit: parseFloat(item.prod.vUnCom || '0'),
           valorTotal: parseFloat(item.prod.vProd || '0'),
-          sku: item.prod.cProd || item.prod.cEAN || item.prod.cEANTrib || undefined
-        });
+          sku: item.prod.cProd || item.prod.cEAN || item.prod.cEANTrib || undefined,
+          materialId, // ✅ ID do material se match automático encontrado
+        };
+        
+        // Adicionar campos extras apenas se existirem (para o frontend)
+        if (materialMatch) {
+          (itemData as any).materialVinculado = materialMatch;
+          (itemData as any).matchAutomatico = !!materialId;
+        }
+        
+        items.push(itemData);
       }
     }
 
@@ -260,7 +314,9 @@ export const updateCompraStatus = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const compraAtualizada = await ComprasService.atualizarStatusCompra(id, status);
+    const resultado = await ComprasService.atualizarStatusCompra(id, status);
+    const compraAtualizada = (resultado as any).compra || resultado;
+    const estatisticas = (resultado as any).estatisticas;
 
     res.json({
       success: true,

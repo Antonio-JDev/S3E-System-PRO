@@ -110,6 +110,7 @@ interface Cotacao {
   ncm: string | null;
   valorUnitario: number;
   valorVenda?: number | null;
+  unidadeMedida?: string; // un, m, cm, kg, etc.
   fornecedorId: string | null;
   fornecedorNome: string | null;
   dataAtualizacao: string;
@@ -127,6 +128,7 @@ interface CotacaoPreview {
   ncm: string;
   valorUnitario: number;
   valorVenda: number;
+  unidadeMedida?: string;
   fornecedorNome: string;
   observacoes: string;
   status?: 'novo' | 'atualizado' | 'mantido';
@@ -290,6 +292,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     ncm: '',
     valorUnitario: '',
     valorVenda: '',
+    unidadeMedida: 'un',
     fornecedorNome: '',
     observacoes: ''
   });
@@ -299,6 +302,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
     ncm: '',
     valorUnitario: '',
     valorVenda: '',
+    unidadeMedida: 'un',
     fornecedorId: '',
     fornecedorNome: '',
     observacoes: ''
@@ -487,6 +491,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       ncm: cotacao.ncm || '',
       valorUnitario: cotacao.valorUnitario.toString(),
       valorVenda: (cotacao.valorVenda || cotacao.valorUnitario * 1.4).toString(),
+      unidadeMedida: cotacao.unidadeMedida || 'un',
       fornecedorNome: cotacao.fornecedorNome || '',
       observacoes: cotacao.observacoes || ''
     });
@@ -512,6 +517,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
       if (createFormData.valorVenda) {
         payload.valorVenda = parseFloat(createFormData.valorVenda);
       }
+      if (createFormData.unidadeMedida) payload.unidadeMedida = createFormData.unidadeMedida;
       if (createFormData.fornecedorId) payload.fornecedorId = createFormData.fornecedorId;
       if (createFormData.fornecedorNome) payload.fornecedorNome = createFormData.fornecedorNome;
       if (createFormData.observacoes) payload.observacoes = createFormData.observacoes;
@@ -556,6 +562,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
         ncm: formData.ncm,
         valorUnitario: valorUnitarioNovo,
         valorVenda: parseFloat(formData.valorVenda),
+        unidadeMedida: formData.unidadeMedida,
         fornecedorNome: formData.fornecedorNome,
         observacoes: formData.observacoes,
         atualizarDataCotacao: valorUnitarioMudou // Só atualizar data se valorUnitario mudou
@@ -855,6 +862,9 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     NCM
                   </th>
+                  <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Unidade
+                  </th>
                   <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Valor Unitário
                   </th>
@@ -893,6 +903,11 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {cotacao.ncm || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                        {cotacao.unidadeMedida || 'un'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className="font-semibold text-green-600">
@@ -1108,6 +1123,27 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
               
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Unidade de Medida *
+                </label>
+                <select
+                  value={formData.unidadeMedida}
+                  onChange={(e) => setFormData({ ...formData, unidadeMedida: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  required
+                >
+                  <option value="un">Unidade (un)</option>
+                  <option value="m">Metro (m)</option>
+                  <option value="cm">Centímetro (cm)</option>
+                  <option value="kg">Quilograma (kg)</option>
+                  <option value="l">Litro (l)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Unidade de cálculo do material. Se for Metro (m), poderá ser inserido como M ou CM nos orçamentos.
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Fornecedor
                 </label>
                 <input
@@ -1227,6 +1263,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                     ncm: '',
                     valorUnitario: '',
                     valorVenda: '',
+                    unidadeMedida: 'un',
                     fornecedorId: '',
                     fornecedorNome: '',
                     observacoes: ''
@@ -1313,6 +1350,28 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                 </p>
               </div>
 
+              {/* Unidade de Medida */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Unidade de Medida *
+                </label>
+                <select
+                  value={createFormData.unidadeMedida}
+                  onChange={(e) => setCreateFormData({ ...createFormData, unidadeMedida: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  required
+                >
+                  <option value="un">Unidade (un)</option>
+                  <option value="m">Metro (m)</option>
+                  <option value="cm">Centímetro (cm)</option>
+                  <option value="kg">Quilograma (kg)</option>
+                  <option value="l">Litro (l)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Unidade de cálculo do material. Se for Metro (m), poderá ser inserido como M ou CM nos orçamentos.
+                </p>
+              </div>
+
               {/* Fornecedor */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -1380,6 +1439,7 @@ const Cotacoes: React.FC<CotacoesProps> = ({ toggleSidebar }) => {
                     ncm: '',
                     valorUnitario: '',
                     valorVenda: '',
+                    unidadeMedida: 'un',
                     fornecedorId: '',
                     fornecedorNome: '',
                     observacoes: ''

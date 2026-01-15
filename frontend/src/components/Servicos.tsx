@@ -5,6 +5,7 @@ import { servicosService, type Servico } from '../services/servicosService';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ActionsDropdown from './ui/ActionsDropdown';
+import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { 
     generateEmptyTemplate, 
     generateExampleTemplate, 
@@ -88,7 +89,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [typeFilter, setTypeFilter] = useState<ServiceType | 'Todos'>('Todos');
     const [ativoFilter, setAtivoFilter] = useState<'Todos' | 'Ativos' | 'Inativos'>('Todos');
-    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Serviços'));
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [serviceToEdit, setServiceToEdit] = useState<Service | null>(null);
     const [serviceToView, setServiceToView] = useState<Service | null>(null);
@@ -128,6 +129,12 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         loadServices();
     }, []);
+
+    // Handler para mudança de modo de visualização
+    const handleViewModeChange = (mode: 'grid' | 'list') => {
+        setViewMode(mode);
+        saveViewMode('Serviços', mode);
+    };
 
     // Gerar código automaticamente quando tipoServico mudar (apenas para novos serviços)
     useEffect(() => {
@@ -821,7 +828,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             </button>
                         )}
                         <button
-                            onClick={() => setViewMode('grid')}
+                            onClick={() => handleViewModeChange('grid')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
                                 viewMode === 'grid'
                                     ? 'bg-purple-600 text-white shadow-md'
@@ -832,7 +839,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             Grade
                         </button>
                         <button
-                            onClick={() => setViewMode('list')}
+                            onClick={() => handleViewModeChange('list')}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
                                 viewMode === 'list'
                                     ? 'bg-purple-600 text-white shadow-md'

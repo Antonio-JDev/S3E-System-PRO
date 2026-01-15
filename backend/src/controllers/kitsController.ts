@@ -48,14 +48,14 @@ export const criarKit = async (req: Request, res: Response) => {
             });
         }
 
-        // Validar que tem pelo menos itens de estoque OU itens do banco frio
+        // Validar que tem pelo menos itens de estoque OU itens do banco frio OU serviços
         const temItensEstoque = items && items.length > 0;
-        const temItensBancoFrio = itensBancoFrio && itensBancoFrio.length > 0;
+        const temItensExtras = itensBancoFrio && itensBancoFrio.length > 0;
         
-        if (!temItensEstoque && !temItensBancoFrio) {
+        if (!temItensEstoque && !temItensExtras) {
             return res.status(400).json({
                 success: false,
-                error: 'O kit deve ter pelo menos um item (estoque real ou banco frio)'
+                error: 'O kit deve ter pelo menos um item (estoque real, banco frio ou serviço)'
             });
         }
 
@@ -88,15 +88,15 @@ export const atualizarKit = async (req: Request, res: Response) => {
         const { id } = req.params;
         const { nome, descricao, tipo, preco, items, ativo, itensBancoFrio, temItensCotacao } = req.body;
 
-        // Validar que tem pelo menos itens de estoque OU itens do banco frio (se items foi fornecido)
+        // Validar que tem pelo menos itens de estoque OU itens do banco frio OU serviços (se items foi fornecido)
         if (items !== undefined || itensBancoFrio !== undefined) {
             const temItensEstoque = items && items.length > 0;
-            const temItensBancoFrio = itensBancoFrio && itensBancoFrio.length > 0;
+            const temItensExtras = itensBancoFrio && itensBancoFrio.length > 0;
             
-            if (!temItensEstoque && !temItensBancoFrio) {
+            if (!temItensEstoque && !temItensExtras) {
                 return res.status(400).json({
                     success: false,
-                    error: 'O kit deve ter pelo menos um item (estoque real ou banco frio)'
+                    error: 'O kit deve ter pelo menos um item (estoque real, banco frio ou serviço)'
                 });
             }
         }

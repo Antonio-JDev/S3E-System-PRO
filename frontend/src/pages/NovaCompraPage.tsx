@@ -44,6 +44,9 @@ type ExtendedItem = PurchaseOrderItem & {
     ncm?: string; 
     sku?: string; 
     unidadeMedida?: string;
+    materialId?: string; // ID do material do estoque vinculado
+    materialVinculado?: any; // Dados completos do material vinculado (para exibição)
+    matchAutomatico?: boolean; // Indica se foi feito match automático pelo sistema
     // Campos de fracionamento
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
@@ -107,6 +110,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const [showMaterialSearch, setShowMaterialSearch] = useState(false);
     const [materialSelecionado, setMaterialSelecionado] = useState<any | null>(null);
     const [isItemNovo, setIsItemNovo] = useState(false);
+    const [buscaMaterialPorItem, setBuscaMaterialPorItem] = useState<{ [key: number]: string }>({});
+    const [materialVisualizando, setMaterialVisualizando] = useState<{ itemIndex: number; material: any } | null>(null);
     
     // Estados de fracionamento
     const [fracionamentoAtivo, setFracionamentoAtivo] = useState(false);
@@ -128,11 +133,17 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         const carregarMateriais = async () => {
             try {
-                const response = await axiosApiService.get('/api/materiais');
-                const data = response.data || response;
-                setMateriais(data);
+                const resp = await axiosApiService.get<any[]>('/api/materiais');
+                if ((resp as any)?.success) {
+                    const data = (resp as any)?.data;
+                    setMateriais(Array.isArray(data) ? data : []);
+                } else {
+                    console.error('Erro ao carregar materiais:', resp);
+                    setMateriais([]);
+                }
             } catch (error) {
                 console.error('Erro ao carregar materiais:', error);
+                setMateriais([]);
             }
         };
         carregarMateriais();
@@ -156,10 +167,52 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         if (!buscaMaterial) return [];
         return materiais.filter(m => 
             matchCrossSearch(buscaMaterial, m.nome) ||
-            m.sku.toLowerCase().includes(buscaMaterial.toLowerCase()) ||
+            (m.sku || '').toLowerCase().includes(buscaMaterial.toLowerCase()) ||
             (m.descricao && m.descricao.toLowerCase().includes(buscaMaterial.toLowerCase()))
         ).slice(0, 10); // Limitar a 10 resultados
     }, [buscaMaterial, materiais]);
+
+    // Filtrar materiais por item específico
+    const getMateriaisFiltradosPorItem = (itemIndex: number) => {
+        const busca = buscaMaterialPorItem[itemIndex] || '';
+        if (!busca) return [];
+        return materiais.filter(m => 
+            matchCrossSearch(busca, m.nome) ||
+            (m.sku || '').toLowerCase().includes(busca.toLowerCase()) ||
+            (m.descricao && m.descricao.toLowerCase().includes(busca.toLowerCase()))
+        ).slice(0, 10);
+    };
+
+    // Função para vincular material a um item
+    const vincularMaterialAItem = (itemIndex: number, material: any) => {
+        setPurchaseItems(prev => prev.map((item, idx) => {
+            if (idx === itemIndex) {
+                return {
+                    ...item,
+                    materialId: material.id,
+                    materialVinculado: material,
+                    matchAutomatico: false
+                };
+            }
+            return item;
+        }));
+        setBuscaMaterialPorItem(prev => ({ ...prev, [itemIndex]: '' }));
+    };
+
+    // Função para remover vinculação de material
+    const removerVinculacaoMaterial = (itemIndex: number) => {
+        setPurchaseItems(prev => prev.map((item, idx) => {
+            if (idx === itemIndex) {
+                return {
+                    ...item,
+                    materialId: undefined,
+                    materialVinculado: undefined,
+                    matchAutomatico: false
+                };
+            }
+            return item;
+        }));
+    };
 
     // Função para detectar fracionamento automaticamente pela descrição
     const detectarFracionamento = (nomeProduto: string) => {
@@ -321,17 +374,25 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             // Preencher Itens
             if (data.items && Array.isArray(data.items)) {
                 const xmlItems: ExtendedItem[] = data.items.map((item: any) => ({
-                    productId: '',
+                    productId: item.materialId || '',
                     productName: item.nomeProduto || '',
                     quantity: item.quantidade || 0,
                     unitCost: item.valorUnit || 0,
                     totalCost: item.valorTotal || 0,
                     ncm: item.ncm || '',
                     sku: item.sku || '',
-                    unidadeMedida: item.unidadeMedida || item.unidade || 'un'
+                    unidadeMedida: item.unidadeMedida || item.unidade || 'un',
+                    materialId: item.materialId, // ✅ Preservar materialId se vier do backend (match automático)
+                    materialVinculado: item.materialVinculado, // ✅ Dados completos do material vinculado
+                    matchAutomatico: !!item.matchAutomatico // ✅ Flag indicando match automático
                 }));
                 setPurchaseItems(xmlItems);
                 console.log(`✅ ${xmlItems.length} itens adicionados ao formulário`);
+                // Log dos matches automáticos
+                const matchesAutomaticos = xmlItems.filter(it => it.matchAutomatico).length;
+                if (matchesAutomaticos > 0) {
+                    console.log(`🔍 ${matchesAutomaticos} item(ns) com match automático encontrado(s)`);
+                }
             }
 
             // Preencher Parcelas
@@ -396,6 +457,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: it.unidadeMedida || 'un',
+                    materialId: (it as ExtendedItem).materialId, // ✅ Incluir materialId quando houver vinculação
                     // Campos de fracionamento
                     quantidadeFracionada: it.quantidadeFracionada,
                     tipoEmbalagem: it.tipoEmbalagem,
@@ -414,9 +476,21 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             };
 
             console.log('📤 Criando nova compra:', payload);
-            await comprasService.createCompra(payload);
+            const response = await comprasService.createCompra(payload);
+            const estatisticas = (response as any)?.estatisticas || (response as any)?.data?.estatisticas;
 
-            toast.success('✅ Compra registrada com sucesso!');
+            // Exibir resumo se houver estatísticas
+            if (estatisticas) {
+                const mensagem = `✅ Compra registrada com sucesso!\n\n` +
+                    `📦 ${estatisticas.materiaisIncrementados || 0} item(ns) tiveram estoque incrementado em materiais existentes\n` +
+                    `🆕 ${estatisticas.materiaisCriados || 0} novo(s) material(is) foram criados`;
+                toast.success('Compra registrada', {
+                    description: mensagem,
+                    duration: 5000
+                });
+            } else {
+                toast.success('✅ Compra registrada com sucesso!');
+            }
             navigate('/compras'); // Volta para a página de compras
         } catch (error) {
             console.error('❌ Erro:', error);
@@ -957,58 +1031,178 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            {purchaseItems.map((item, index) => (
-                                <div key={index} className="bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl">
-                                    <div className="flex justify-between items-center">
-                                        <div className="flex-1">
-                                            <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
-                                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                {item.quantity} {item.unidadeMedida || 'un'} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                {item.quantidadeFracionada && (
-                                                    <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
-                                                        ({item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades)
-                                                    </span>
+                            {purchaseItems.map((item, index) => {
+                                const materiaisFiltradosItem = getMateriaisFiltradosPorItem(index);
+                                const mostraBusca = buscaMaterialPorItem[index] !== undefined;
+                                
+                                return (
+                                    <div key={index} className="bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl">
+                                        <div className="flex justify-between items-start gap-4">
+                                            <div className="flex-1">
+                                                <div className="flex items-start gap-3 mb-2">
+                                                    <div className="flex-1">
+                                                        <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
+                                                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                            {item.quantity} {item.unidadeMedida || 'un'} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            {item.quantidadeFracionada && (
+                                                                <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
+                                                                    ({item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades)
+                                                                </span>
+                                                            )}
+                                                        </p>
+                                                        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                                            {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
+                                                            {item.sku && <span className="mr-3">SKU: {item.sku}</span>}
+                                                            {item.unidadeMedida && <span>Unidade: {item.unidadeMedida}</span>}
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    {/* Indicadores de vinculação */}
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        {item.materialId && item.materialVinculado && !item.matchAutomatico ? (
+                                                            // Vinculação manual pelo usuário
+                                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-semibold">
+                                                                ✅ Vinculado: {item.materialVinculado.nome}
+                                                            </span>
+                                                        ) : item.matchAutomatico && item.materialVinculado ? (
+                                                            // Match automático encontrado pelo sistema
+                                                            <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded text-xs font-semibold">
+                                                                ⚠️ Match automático: {item.materialVinculado.nome}
+                                                            </span>
+                                                        ) : (
+                                                            // Nenhum match - será criado novo material
+                                                            <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
+                                                                🆕 Será criado novo material
+                                                            </span>
+                                                        )}
+                                                        
+                                                        {/* Botões de ação */}
+                                                        <div className="flex items-center gap-2">
+                                                            {/* Botão de olho para visualizar material (mostrar se houver materialId E materialVinculado) */}
+                                                            {item.materialId && item.materialVinculado && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setMaterialVisualizando({ itemIndex: index, material: item.materialVinculado })}
+                                                                    className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                                    title={item.matchAutomatico ? "Verificar material sugerido pelo sistema" : "Visualizar material vinculado"}
+                                                                >
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                    </svg>
+                                                                </button>
+                                                            )}
+                                                            
+                                                            {/* Botão de busca */}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (mostraBusca) {
+                                                                        setBuscaMaterialPorItem(prev => {
+                                                                            const novo = { ...prev };
+                                                                            delete novo[index];
+                                                                            return novo;
+                                                                        });
+                                                                    } else {
+                                                                        setBuscaMaterialPorItem(prev => ({ ...prev, [index]: '' }));
+                                                                    }
+                                                                }}
+                                                                className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                                                title="Buscar material do estoque"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                                                </svg>
+                                                            </button>
+                                                            
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setItemFracionamentoEditando({
+                                                                        productName: item.productName,
+                                                                        quantity: item.quantity,
+                                                                        quantidadeFracionada: item.quantidadeFracionada,
+                                                                        tipoEmbalagem: item.tipoEmbalagem,
+                                                                        unidadeEmbalagem: item.unidadeEmbalagem
+                                                                    });
+                                                                    setFracionamentoModalOpen(true);
+                                                                }}
+                                                                className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-semibold"
+                                                                title="Editar fracionamento"
+                                                            >
+                                                                📦 Editar
+                                                            </button>
+                                                            
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRemoveProduct(index)}
+                                                                className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                            >
+                                                                <TrashIcon className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Campo de busca de material */}
+                                                {mostraBusca && (
+                                                    <div className="mt-3 border-t border-gray-200 dark:border-dark-border pt-3">
+                                                        <div className="relative">
+                                                            <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                                            </svg>
+                                                            <input
+                                                                type="text"
+                                                                value={buscaMaterialPorItem[index] || ''}
+                                                                onChange={(e) => setBuscaMaterialPorItem(prev => ({ ...prev, [index]: e.target.value }))}
+                                                                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white text-sm"
+                                                                placeholder="Buscar material do estoque por nome ou SKU..."
+                                                                autoFocus
+                                                            />
+                                                        </div>
+                                                        
+                                                        {/* Lista de resultados da busca */}
+                                                        {materiaisFiltradosItem.length > 0 && (
+                                                            <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg">
+                                                                {materiaisFiltradosItem.map(material => (
+                                                                    <button
+                                                                        key={material.id}
+                                                                        type="button"
+                                                                        onClick={() => vincularMaterialAItem(index, material)}
+                                                                        className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors"
+                                                                    >
+                                                                        <p className="font-medium text-sm text-gray-900 dark:text-white">{material.nome}</p>
+                                                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                                            SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
+                                                                        </p>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {/* Opção para remover vinculação */}
+                                                        {item.materialId && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removerVinculacaoMaterial(index)}
+                                                                className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
+                                                            >
+                                                                Remover vinculação
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 )}
-                                            </p>
-                                            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                                                {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
-                                                {item.sku && <span className="mr-3">SKU: {item.sku}</span>}
-                                                {item.unidadeMedida && <span>Unidade: {item.unidadeMedida}</span>}
+                                            </div>
+                                            
+                                            <div className="flex items-center">
+                                                <p className="font-bold text-orange-700 dark:text-orange-400">
+                                                    R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </p>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <p className="font-bold text-orange-700 dark:text-orange-400">
-                                                R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </p>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setItemFracionamentoEditando({
-                                                        productName: item.productName,
-                                                        quantity: item.quantity,
-                                                        quantidadeFracionada: item.quantidadeFracionada,
-                                                        tipoEmbalagem: item.tipoEmbalagem,
-                                                        unidadeEmbalagem: item.unidadeEmbalagem
-                                                        // Nota: compraId não disponível em NovaCompraPage (compra ainda não foi criada)
-                                                    });
-                                                    setFracionamentoModalOpen(true);
-                                                }}
-                                                className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors font-semibold"
-                                                title="Editar fracionamento"
-                                            >
-                                                📦 Editar
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveProduct(index)}
-                                                className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                            </button>
-                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
 
                             <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border-2 border-orange-200 dark:border-orange-800 p-4 rounded-xl">
                                 <div className="flex justify-between items-center">
@@ -1251,6 +1445,89 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     }
                 }}
             />
+
+            {/* Modal de visualização de material */}
+            {materialVisualizando && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Detalhes do Material</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setMaterialVisualizando(null)}
+                                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-6">
+                            {materialVisualizando.material && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Nome</label>
+                                        <p className="text-gray-900 dark:text-white">{materialVisualizando.material.nome}</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">SKU</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.sku}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Categoria</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.categoria || 'N/A'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Estoque</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.estoque || 0} {materialVisualizando.material.unidadeMedida || 'un'}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Unidade de Medida</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.unidadeMedida || 'un'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Preço de Compra</label>
+                                            <p className="text-gray-900 dark:text-white">R$ {(materialVisualizando.material.preco || 0).toFixed(2)}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Valor de Venda</label>
+                                            <p className="text-gray-900 dark:text-white">R$ {(materialVisualizando.material.valorVenda || 0).toFixed(2)}</p>
+                                        </div>
+                                    </div>
+                                    {materialVisualizando.material.ncm && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">NCM</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.ncm}</p>
+                                        </div>
+                                    )}
+                                    {materialVisualizando.material.descricao && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Descrição</label>
+                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.descricao}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-6 border-t border-gray-200 dark:border-dark-border flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setMaterialVisualizando(null)}
+                                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

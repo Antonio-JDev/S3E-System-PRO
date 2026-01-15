@@ -182,13 +182,31 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         else if (item.tipo === 'MATERIAL' && item.materialId) {
           const material = await prisma.material.findUnique({
             where: { id: item.materialId },
-            select: { preco: true, valorVenda: true }
+            select: { preco: true, valorVenda: true, valorVendaM: true, valorVendaCM: true, unidadeMedida: true }
           });
           
           if (material) {
-            // Usar valorVenda se disponível, senão usar preco (preço de compra)
-            precoVendaUnit = material.valorVenda || material.preco || 0;
-            custoUnit = material.preco || 0; // Custo sempre é o preço de compra
+            // Determinar preço de venda e custo baseado na unidade de venda
+            const unidadeVenda = item.unidadeVenda || material.unidadeMedida;
+            const unidadeUpper = (material.unidadeMedida || '').toUpperCase().trim();
+            const podeVenderMCM = (unidadeUpper === 'M' || unidadeUpper === 'KG/M' || unidadeUpper === 'M/KG');
+            
+            if (podeVenderMCM && unidadeVenda === 'm') {
+              // Usar valorVendaM se disponível
+              precoVendaUnit = material.valorVendaM || material.valorVenda || material.preco || 0;
+              custoUnit = material.preco || 0; // Custo em metro é o preço de compra
+            } else if (podeVenderMCM && unidadeVenda === 'cm') {
+              // Usar valorVendaCM se disponível
+              precoVendaUnit = material.valorVendaCM || 
+                              (material.valorVendaM ? material.valorVendaM / 100 : 
+                              (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
+              // Calcular custoCM dividindo preço por 100 (custoCM não está no select, calcular diretamente)
+              custoUnit = material.preco ? material.preco / 100 : 0;
+            } else {
+              // Para outras unidades, usar valorVenda padrão
+              precoVendaUnit = material.valorVenda || material.preco || 0;
+              custoUnit = material.preco || 0; // Custo padrão
+            }
           }
         }
         
@@ -238,7 +256,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
                 return sum + precoVendaItem * kitItem.quantidade;
               }, 0);
               
-              // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
+              // IMPORTANTE: Incluir itens do banco frio E serviços no cálculo do preço de venda
               if (kit.itensFaltantes) {
                 let itensFaltantesArray: any[] = [];
                 // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
@@ -256,13 +274,14 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
                   itensFaltantesArray = [kit.itensFaltantes];
                 }
                 
-                // Somar preços dos itens do banco frio
-                const precoVendaBancoFrio = itensFaltantesArray.reduce((sum: number, itemBancoFrio: any) => {
-                  const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
-                  const quantidade = itemBancoFrio.quantidade || 0;
+                // Somar preços dos itens do banco frio E serviços
+                const precoVendaExtras = itensFaltantesArray.reduce((sum: number, item: any) => {
+                  // Incluir tanto cotações (tipo === 'COTACAO') quanto serviços (tipo === 'SERVICO')
+                  const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
+                  const quantidade = item.quantidade || 0;
                   return sum + (precoUnit * quantidade);
                 }, 0);
-                precoVendaTotalKit += precoVendaBancoFrio;
+                precoVendaTotalKit += precoVendaExtras;
               }
               
               custoUnit = custoTotalKit;
@@ -945,11 +964,39 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
                 sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
               );
               
-              // Calcular preço de venda do kit
+              // Calcular preço de venda do kit (soma dos valorVenda || preco dos materiais do estoque real)
               precoVendaUnit = kit.items.reduce((sum, kitItem) => {
                 const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
                 return sum + precoVendaItem * kitItem.quantidade;
               }, 0);
+              
+              // IMPORTANTE: Incluir itens do banco frio E serviços no cálculo do preço de venda
+              if (kit.itensFaltantes) {
+                let itensFaltantesArray: any[] = [];
+                // Processar itensFaltantes (pode vir como JSON string, array ou objeto)
+                if (typeof kit.itensFaltantes === 'string') {
+                  try {
+                    const parsed = JSON.parse(kit.itensFaltantes);
+                    itensFaltantesArray = Array.isArray(parsed) ? parsed : [parsed];
+                  } catch (e) {
+                    console.error('Erro ao fazer parse de itensFaltantes:', e);
+                    itensFaltantesArray = [];
+                  }
+                } else if (Array.isArray(kit.itensFaltantes)) {
+                  itensFaltantesArray = kit.itensFaltantes;
+                } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
+                  itensFaltantesArray = [kit.itensFaltantes];
+                }
+                
+                // Somar preços dos itens do banco frio E serviços
+                const precoVendaExtras = itensFaltantesArray.reduce((sum: number, item: any) => {
+                  // Incluir tanto cotações (tipo === 'COTACAO') quanto serviços (tipo === 'SERVICO')
+                  const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
+                  const quantidade = item.quantidade || 0;
+                  return sum + (precoUnit * quantidade);
+                }, 0);
+                precoVendaUnit += precoVendaExtras;
+              }
             }
           }
           

@@ -845,8 +845,7 @@ export class PDFOrcamentoService {
                     <strong>${new Date(orcamento.validade).toLocaleDateString('pt-BR')}</strong>
                 </div>
                 <div class="detail-item">
-                    <label>Status:</label>
-                    <strong>${orcamento.status}</strong>
+                    <strong style="font-size: 16px; font-weight: bold;">ORÇAMENTO ${orcamento.numeroSequencial}</strong>
                 </div>
                 ${(orcamento.previsaoInicio && orcamento.previsaoTermino) || orcamento.previsaoTermino ? `
                 <div class="detail-item">

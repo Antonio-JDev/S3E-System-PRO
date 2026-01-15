@@ -168,7 +168,10 @@ model Material {
   imagemUrl     String? // URL da imagem do material
 
   preco                  Float? // Preço de custo (última compra)
-  valorVenda             Float? // Preço de venda (usado em orçamentos)
+  custoCM                Float? // Custo por centímetro (calculado automaticamente: preco / 100 para materiais em M ou KG/M)
+  valorVenda             Float? // Preço de venda (usado em orçamentos) - para unidades padrão
+  valorVendaM            Float? // Preço de venda em metros (para materiais com unidade M ou KG/M)
+  valorVendaCM           Float? // Preço de venda em centímetros (para materiais com unidade M ou KG/M)
   porcentagemLucro       Float? // Porcentagem de lucro ((valorVenda - preco) / preco * 100)
   ultimaAtualizacaoPreco DateTime? // Data da última atualização de preço
   fornecedorId           String?
@@ -215,6 +218,7 @@ model Cotacao {
   ncm             String?
   valorUnitario   Float
   valorVenda      Float? // Valor de venda (padrão: valorUnitario * 1.4 = 40% de margem)
+  unidadeMedida   String   @default("un") // Unidade de medida: un, m, cm, kg, etc.
   fornecedorId    String?
   fornecedorNome  String? // Nome do fornecedor (redundante para performance)
   dataAtualizacao DateTime @default(now()) // Data da última cotação
@@ -565,9 +569,10 @@ model Compra {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  fornecedor Fornecedor   @relation(fields: [fornecedorId], references: [id])
-  obra       Obra?        @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
-  items      CompraItem[]
+  fornecedor  Fornecedor   @relation(fields: [fornecedorId], references: [id])
+  obra        Obra?        @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
+  items       CompraItem[]
+  contasPagar ContaPagar[] // Relação com contas a pagar
 
   @@map("compras")
 }
@@ -680,6 +685,7 @@ model ContaPagar {
   updatedAt       DateTime  @updatedAt
 
   fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
+  compra     Compra?     @relation(fields: [compraId], references: [id])
 
   @@index([tipo])
   @@index([status])

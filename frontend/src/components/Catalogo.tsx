@@ -7,6 +7,7 @@ import { ENDPOINTS } from '../config/api';
 import CriacaoQuadroModular from './CriacaoQuadroModular';
 import CriacaoKitModal from './CriacaoKitModal';
 import ViewToggle from './ui/ViewToggle';
+import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
@@ -73,7 +74,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<CatalogItemType | 'Todos'>('Todos');
     const [searchTerm, setSearchTerm] = useState('');
-    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Catálogo'));
     const [selectedItem, setSelectedItem] = useState<CatalogItem | null>(null);
     const [kitDetalhes, setKitDetalhes] = useState<any>(null);
     const [loadingKitDetalhes, setLoadingKitDetalhes] = useState(false);
@@ -197,6 +198,11 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
     }, [catalogItems]);
 
     // Handlers
+    const handleViewModeChange = (newView: 'grid' | 'list') => {
+        setViewMode(newView);
+        saveViewMode('Catálogo', newView);
+    };
+
     const handleOpenModal = async (item: CatalogItem | null = null) => {
         // Se for kit, abrir modal de edição de kit
         if (item && item.type === 'Kit') {
@@ -437,12 +443,12 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-white dark:hover:bg-gray-700 hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie produtos, kits e serviços</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">Catálogo</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">Gerencie produtos, kits e serviços</p>
                     </div>
                 </div>
                 <div className="flex gap-3">
@@ -472,14 +478,14 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
             {/* Cards de Estatísticas */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-100 to-teal-200 flex items-center justify-center">
                             <CubeIcon className="w-6 h-6 text-teal-600" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Total de Itens</p>
-                            <p className="text-2xl font-bold text-teal-600">{stats.totalItems}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total de Itens</p>
+                            <p className="text-2xl font-bold text-teal-600 dark:text-teal-400">{stats.totalItems}</p>
                         </div>
                     </div>
                 </div>
@@ -546,7 +552,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 placeholder="Buscar por nome, descrição ou categoria..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                             />
                         </div>
                     </div>
@@ -566,10 +572,10 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
                     <div className="flex items-center justify-end">
                         <div className="flex items-center gap-4">
-                            <p className="text-sm text-gray-600">
-                                <span className="font-bold text-gray-900">{filteredItems.length}</span> itens encontrados
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                <span className="font-bold text-gray-900 dark:text-white">{filteredItems.length}</span> itens encontrados
                             </p>
-                            <ViewToggle view={viewMode} onViewChange={setViewMode} />
+                            <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         </div>
                     </div>
                 </div>
@@ -614,11 +620,11 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredItems.map((item) => (
-                        <div key={item.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-teal-300 transition-all duration-200">
+                        <div key={item.id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200">
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
-                                    <h3 className="font-bold text-lg text-gray-900 mb-1">{item.name}</h3>
+                                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-1">{item.name}</h3>
                                     <div className="flex items-center gap-2">
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getTypeColor(item.type)}`}>
                                             {getTypeIcon(item.type)} {getTypeName(item.type)}
@@ -719,7 +725,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                 </div>
             ) : (
                 /* Visualização em Lista */
-                <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-soft">
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-soft">
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
@@ -736,7 +742,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4">
                                         <div>
-                                            <p className="font-semibold text-gray-900">{item.name}</p>
+                                            <p className="font-semibold text-gray-900 dark:text-white">{item.name}</p>
                                             <p className="text-sm text-gray-500 line-clamp-1">{item.description}</p>
                                             {/* Flags */}
                                             <div className="flex gap-2 mt-2">
@@ -868,19 +874,19 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             {/* MODAL DE VISUALIZAÇÃO */}
             {selectedItem && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-strong max-w-6xl w-full max-h-[95vh] overflow-hidden flex flex-col">
                         {/* Header fixo */}
-                        <div className="flex justify-between items-center p-6 border-b border-gray-200 bg-gradient-to-r from-teal-50 via-blue-50 to-purple-50 flex-shrink-0">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-teal-50 via-blue-50 to-purple-50 dark:from-gray-700 dark:via-gray-700 dark:to-gray-700 flex-shrink-0">
                             <div className="flex items-center gap-4">
                                 <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-lg">
                                     <CubeIcon className="w-7 h-7 text-white" />
                                 </div>
                                 <div>
-                                    <h2 className="text-3xl font-bold text-gray-900">Detalhes do Item</h2>
-                                    <p className="text-sm text-gray-600 mt-1">Informações completas do item</p>
+                                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Detalhes do Item</h2>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Informações completas do item</p>
                                 </div>
                             </div>
-                            <button onClick={handleCloseViewModal} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl transition-colors">
+                            <button onClick={handleCloseViewModal} className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors">
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
                         </div>
@@ -935,7 +941,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                         });
                                                     }
                                                     
-                                                    // Somar itens do banco frio
+                                                    // Somar itens do banco frio e serviços
                                                     if (kitDetalhes.itensFaltantes && Array.isArray(kitDetalhes.itensFaltantes)) {
                                                         kitDetalhes.itensFaltantes.forEach((item: any) => {
                                                             const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
@@ -951,8 +957,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                         <p className="text-xs text-teal-600">Preço total do kit</p>
                                     </div>
 
-                                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Status</h3>
+                                    <div className="bg-white dark:bg-gray-700 p-4 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Status</h3>
                                         <span className={`px-4 py-2 text-sm font-bold rounded-lg inline-block ${
                                             selectedItem.isActive 
                                                 ? 'bg-green-100 text-green-800 ring-2 ring-green-200' 
@@ -974,7 +980,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 <div className="mt-6">
                                     <div className="flex items-center gap-3 mb-6">
                                         <div className="w-1 h-8 bg-gradient-to-b from-teal-500 to-blue-500 rounded-full"></div>
-                                        <h3 className="text-2xl font-bold text-gray-900">Composição do Kit</h3>
+                                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Composição do Kit</h3>
                                     </div>
                                     
                                     {loadingKitDetalhes ? (
@@ -998,10 +1004,10 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                             const subtotal = (item.quantidade || 0) * precoVenda;
                                                             
                                                             return (
-                                                                <div key={index} className="bg-green-50 border border-green-200 p-4 rounded-lg hover:shadow-md transition-shadow">
+                                                                <div key={index} className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 p-4 rounded-lg hover:shadow-md transition-shadow">
                                                                     <div className="flex justify-between items-start gap-4">
                                                                         <div className="flex-1 min-w-0">
-                                                                            <p className="font-bold text-gray-900 text-sm mb-1">
+                                                                            <p className="font-bold text-gray-900 dark:text-white text-sm mb-1">
                                                                                 {item.material?.nome || item.material?.descricao || 'Material'}
                                                                             </p>
                                                                             <div className="flex flex-wrap gap-2 items-center mt-2">
@@ -1032,75 +1038,140 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                 </div>
                                             )}
 
-                                            {/* Coluna 2: Itens do Banco Frio */}
-                                            {kitDetalhes.itensFaltantes && Array.isArray(kitDetalhes.itensFaltantes) && kitDetalhes.itensFaltantes.length > 0 && (
-                                                <div className="bg-white rounded-xl border-2 border-blue-200 shadow-lg overflow-hidden">
-                                                    <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
-                                                        <h4 className="text-base font-bold text-white flex items-center gap-2">
-                                                            <span>❄️</span> Itens do Banco Frio ({kitDetalhes.itensFaltantes.length})
-                                                        </h4>
-                                                    </div>
-                                                    <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-                                                        {kitDetalhes.itensFaltantes.map((item: any, index: number) => {
-                                                            const nome = item.nome || item.materialNome || 'Item do Banco Frio';
-                                                            const quantidade = item.quantidade || 0;
-                                                            const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
-                                                            const subtotal = quantidade * precoUnit;
-                                                            const unidadeMedida = item.unidadeMedida || 'UN';
-                                                            const dataUltimaCotacao = item.dataUltimaCotacao || item.dataAtualizacao;
-                                                            
-                                                            return (
-                                                                <div key={index} className="bg-blue-50 border border-blue-200 p-4 rounded-lg hover:shadow-md transition-shadow">
-                                                                    <div className="flex justify-between items-start gap-4">
-                                                                        <div className="flex-1 min-w-0">
-                                                                            <p className="font-bold text-gray-900 text-sm mb-1">
-                                                                                {nome}
-                                                                            </p>
-                                                                            <div className="flex flex-wrap gap-2 items-center mt-2">
-                                                                                <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
-                                                                                    {quantidade} {unidadeMedida}
-                                                                                </span>
-                                                                                <span className="text-xs text-gray-500">×</span>
-                                                                                <span className="text-xs font-semibold text-blue-700">
-                                                                                    R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                                </span>
-                                                                                {dataUltimaCotacao && (
-                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                                                                                        📅 {(() => {
-                                                                                            try {
-                                                                                                const data = new Date(dataUltimaCotacao);
-                                                                                                return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
-                                                                                            } catch {
-                                                                                                return 'Sem data';
-                                                                                            }
-                                                                                        })()}
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="text-right flex-shrink-0">
-                                                                            <p className="text-lg font-bold text-blue-700">
-                                                                                R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                            </p>
-                                                                        </div>
-                                                                    </div>
+                                            {/* Coluna 2: Itens do Banco Frio e Serviços */}
+                                            {kitDetalhes.itensFaltantes && Array.isArray(kitDetalhes.itensFaltantes) && kitDetalhes.itensFaltantes.length > 0 && (() => {
+                                                const itensBancoFrio = kitDetalhes.itensFaltantes.filter((item: any) => !item.tipo || item.tipo === 'COTACAO');
+                                                const itensServicos = kitDetalhes.itensFaltantes.filter((item: any) => item.tipo === 'SERVICO');
+                                                
+                                                return (
+                                                    <>
+                                                        {/* Itens do Banco Frio */}
+                                                        {itensBancoFrio.length > 0 && (
+                                                            <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-blue-200 dark:border-blue-700 shadow-lg overflow-hidden">
+                                                                <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-4">
+                                                                    <h4 className="text-base font-bold text-white flex items-center gap-2">
+                                                                        <span>❄️</span> Itens do Banco Frio ({itensBancoFrio.length})
+                                                                    </h4>
                                                                 </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                    <div className="p-4 bg-orange-50 border-t border-orange-200">
-                                                        <p className="text-xs text-orange-800 font-medium flex items-center gap-2">
-                                                            <span>⚠️</span>
-                                                            Estes itens precisam ser comprados e adicionados ao estoque antes de usar o kit em obras
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                                                <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
+                                                                    {itensBancoFrio.map((item: any, index: number) => {
+                                                                        const nome = item.nome || item.materialNome || 'Item do Banco Frio';
+                                                                        const quantidade = item.quantidade || 0;
+                                                                        const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
+                                                                        const subtotal = quantidade * precoUnit;
+                                                                        const unidadeMedida = item.unidadeMedida || 'UN';
+                                                                        const dataUltimaCotacao = item.dataUltimaCotacao || item.dataAtualizacao;
+                                                                        
+                                                                        return (
+                                                                            <div key={index} className="bg-blue-50 border border-blue-200 p-4 rounded-lg hover:shadow-md transition-shadow">
+                                                                                <div className="flex justify-between items-start gap-4">
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className="font-bold text-gray-900 text-sm mb-1">
+                                                                                            {nome}
+                                                                                        </p>
+                                                                                        <div className="flex flex-wrap gap-2 items-center mt-2">
+                                                                                            <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+                                                                                                {quantidade} {unidadeMedida}
+                                                                                            </span>
+                                                                                            <span className="text-xs text-gray-500">×</span>
+                                                                                            <span className="text-xs font-semibold text-blue-700">
+                                                                                                R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                                            </span>
+                                                                                            {dataUltimaCotacao && (
+                                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                                                                    📅 {(() => {
+                                                                                                        try {
+                                                                                                            const data = new Date(dataUltimaCotacao);
+                                                                                                            return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
+                                                                                                        } catch {
+                                                                                                            return 'Sem data';
+                                                                                                        }
+                                                                                                    })()}
+                                                                                                </span>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="text-right flex-shrink-0">
+                                                                                        <p className="text-lg font-bold text-blue-700">
+                                                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <div className="p-4 bg-orange-50 border-t border-orange-200">
+                                                                    <p className="text-xs text-orange-800 font-medium flex items-center gap-2">
+                                                                        <span>⚠️</span>
+                                                                        Estes itens precisam ser comprados e adicionados ao estoque antes de usar o kit em obras
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {/* Serviços */}
+                                                        {itensServicos.length > 0 && (
+                                                            <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-purple-200 dark:border-purple-700 shadow-lg overflow-hidden">
+                                                                <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-4">
+                                                                    <h4 className="text-base font-bold text-white flex items-center gap-2">
+                                                                        <span>⚙️</span> Serviços ({itensServicos.length})
+                                                                    </h4>
+                                                                </div>
+                                                                <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
+                                                                    {itensServicos.map((item: any, index: number) => {
+                                                                        const nome = item.nome || item.servicoNome || 'Serviço';
+                                                                        const quantidade = item.quantidade || 0;
+                                                                        const precoUnit = item.precoUnit || item.preco || 0;
+                                                                        const subtotal = quantidade * precoUnit;
+                                                                        const unidadeMedida = item.unidade || item.unidadeMedida || 'UN';
+                                                                        
+                                                                        return (
+                                                                            <div key={index} className="bg-purple-50 border border-purple-200 p-4 rounded-lg hover:shadow-md transition-shadow">
+                                                                                <div className="flex justify-between items-start gap-4">
+                                                                                    <div className="flex-1 min-w-0">
+                                                                                        <p className="font-bold text-gray-900 text-sm mb-1">
+                                                                                            {nome}
+                                                                                        </p>
+                                                                                        <div className="flex flex-wrap gap-2 items-center mt-2">
+                                                                                            <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+                                                                                                {quantidade} {unidadeMedida}
+                                                                                            </span>
+                                                                                            <span className="text-xs text-gray-500">×</span>
+                                                                                            <span className="text-xs font-semibold text-purple-700">
+                                                                                                R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                                            </span>
+                                                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                                                                                ⚙️ Serviço
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="text-right flex-shrink-0">
+                                                                                        <p className="text-lg font-bold text-purple-700">
+                                                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <div className="p-4 bg-purple-50 border-t border-purple-200">
+                                                                    <p className="text-xs text-purple-800 font-medium flex items-center gap-2">
+                                                                        <span>⚙️</span>
+                                                                        Estes serviços estão incluídos no kit personalizado
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
 
                                             {/* Se não tem nenhum item */}
                                             {(!kitDetalhes.items || kitDetalhes.items.length === 0) && 
-                                             (!kitDetalhes.itensFaltantes || kitDetalhes.itensFaltantes.length === 0) && (
-                                                <div className="col-span-2 text-center py-12 text-gray-500 bg-gray-50 rounded-xl border border-gray-200">
+                                             (!kitDetalhes.itensFaltantes || !Array.isArray(kitDetalhes.itensFaltantes) || kitDetalhes.itensFaltantes.length === 0) && (
+                                                <div className="col-span-2 text-center py-12 text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600">
                                                     <p className="text-lg font-medium">Nenhum item na composição</p>
                                                 </div>
                                             )}
@@ -1114,7 +1185,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     {/* Resumo do Valor Total - Full Width */}
                                     {(kitDetalhes && ((kitDetalhes.items && kitDetalhes.items.length > 0) || 
                                      (kitDetalhes.itensFaltantes && Array.isArray(kitDetalhes.itensFaltantes) && kitDetalhes.itensFaltantes.length > 0))) && (
-                                        <div className="mt-6 p-6 bg-gradient-to-r from-teal-500 via-blue-500 to-purple-500 rounded-xl shadow-xl">
+                                        <div className="mt-6 p-6 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl shadow-xl">
                                             <div className="flex justify-between items-center">
                                                 <h4 className="text-xl font-bold text-white">Valor Total do Kit:</h4>
                                                 <p className="text-4xl font-bold text-white">
@@ -1144,41 +1215,113 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 </div>
                             )}
 
-                            {/* Alertas de Estoque (para quadros elétricos) */}
-                            {(selectedItem as any).statusEstoque === 'PENDENTE' && (selectedItem as any).itensFaltantes && (
-                                <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-6 shadow-lg">
-                                    <div className="flex items-center gap-4 mb-4">
-                                        <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center">
-                                            <span className="text-2xl">⚠️</span>
-                                        </div>
-                                        <div>
-                                            <h3 className="font-bold text-yellow-900 text-xl">Itens Faltantes em Estoque</h3>
-                                            <p className="text-sm text-yellow-700 mt-1">
-                                                Este quadro possui itens que precisam ser comprados ou reabastecidos
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {JSON.parse(JSON.stringify((selectedItem as any).itensFaltantes || [])).map((item: any, idx: number) => (
-                                            <div key={idx} className="bg-white border border-yellow-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                                                <p className="font-semibold text-gray-900 text-sm mb-2">{item.nome}</p>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">
-                                                        {item.tipo === 'COTACAO' ? '❄️ Banco Frio' : '📦 Estoque Insuficiente'}
-                                                    </span>
-                                                    <span className="text-sm font-bold text-yellow-700">
-                                                        {item.quantidade} un necessária(s)
-                                                    </span>
+                            {/* Alertas de Estoque (para quadros elétricos) - Apenas itens de estoque real */}
+                            {(() => {
+                                // Filtrar apenas itens de estoque real que estão faltando
+                                // Excluir serviços (tipo === 'SERVICO') e cotações (tipo === 'COTACAO')
+                                const itensFaltantesEstoque = (selectedItem as any).itensFaltantes 
+                                    ? JSON.parse(JSON.stringify((selectedItem as any).itensFaltantes || [])).filter((item: any) => {
+                                        // Apenas itens que são de estoque real e estão faltando
+                                        // Excluir serviços e cotações (estes não devem aparecer aqui)
+                                        return item.tipo === 'ESTOQUE_INSUFICIENTE' || item.tipo === 'MATERIAL_NAO_ENCONTRADO';
+                                    })
+                                    : [];
+                                
+                                // Verificar se há itens de estoque real faltando
+                                const temItensFaltantesEstoque = itensFaltantesEstoque.length > 0;
+                                
+                                // Verificar se há itens de estoque real no kit que podem estar faltando
+                                const kitDetalhes = (selectedItem as any);
+                                const temItensEstoqueReal = kitDetalhes.items && kitDetalhes.items.length > 0;
+                                
+                                // Mostrar apenas se houver itens de estoque real faltando
+                                if (!temItensFaltantesEstoque && temItensEstoqueReal && (selectedItem as any).statusEstoque === 'PENDENTE') {
+                                    // Verificar se há itens de estoque real com estoque insuficiente
+                                    const itensComEstoqueInsuficiente = kitDetalhes.items?.filter((item: any) => {
+                                        const estoque = item.material?.estoque || 0;
+                                        const quantidade = item.quantidade || 0;
+                                        return estoque < quantidade;
+                                    }) || [];
+                                    
+                                    if (itensComEstoqueInsuficiente.length > 0) {
+                                        return (
+                                            <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-6 shadow-lg">
+                                                <div className="flex items-center gap-4 mb-4">
+                                                    <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center">
+                                                        <span className="text-2xl">⚠️</span>
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="font-bold text-yellow-900 text-xl">Itens Faltantes em Estoque</h3>
+                                                        <p className="text-sm text-yellow-700 mt-1">
+                                                            Este kit possui itens de estoque real que precisam ser reabastecidos
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    {itensComEstoqueInsuficiente.map((item: any, idx: number) => {
+                                                        const estoque = item.material?.estoque || 0;
+                                                        const quantidade = item.quantidade || 0;
+                                                        const falta = quantidade - estoque;
+                                                        return (
+                                                            <div key={idx} className="bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                                                <p className="font-semibold text-gray-900 dark:text-white text-sm mb-2">{item.material?.nome || 'Item'}</p>
+                                                                <div className="flex justify-between items-center">
+                                                                    <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+                                                                        📦 Estoque Insuficiente
+                                                                    </span>
+                                                                    <span className="text-sm font-bold text-yellow-700">
+                                                                        {falta} un necessária(s)
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+                                        );
+                                    }
+                                }
+                                
+                                // Se houver itens faltantes já processados
+                                if (temItensFaltantesEstoque) {
+                                    return (
+                                        <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-6 shadow-lg">
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center">
+                                                    <span className="text-2xl">⚠️</span>
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-yellow-900 text-xl">Itens Faltantes em Estoque</h3>
+                                                    <p className="text-sm text-yellow-700 mt-1">
+                                                        Este kit possui itens de estoque real que precisam ser reabastecidos
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                {itensFaltantesEstoque.map((item: any, idx: number) => (
+                                                    <div key={idx} className="bg-white border border-yellow-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                                        <p className="font-semibold text-gray-900 text-sm mb-2">{item.nome}</p>
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+                                                                📦 Estoque Insuficiente
+                                                            </span>
+                                                            <span className="text-sm font-bold text-yellow-700">
+                                                                {item.quantidadeFaltante || item.quantidade} un necessária(s)
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                
+                                return null;
+                            })()}
                         </div>
 
                         {/* Footer fixo com botão de fechar */}
-                        <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50 flex-shrink-0">
+                        <div className="flex justify-end p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
                             <button
                                 onClick={handleCloseViewModal}
                                 className="px-8 py-3 bg-gradient-to-r from-gray-600 to-gray-500 text-white rounded-xl hover:from-gray-700 hover:to-gray-600 transition-all shadow-md font-semibold"
@@ -1202,7 +1345,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                         <div className="flex justify-end gap-3">
                             <button
                                 onClick={() => setItemToDelete(null)}
-                                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 font-semibold"
+                                className="px-6 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 font-semibold"
                             >
                                 Cancelar
                             </button>

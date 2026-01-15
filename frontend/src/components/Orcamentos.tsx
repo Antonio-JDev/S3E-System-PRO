@@ -28,7 +28,7 @@ import { generateOrcamentoPDF, type OrcamentoPDFData as OrcamentoPDFDataOld } fr
 import NovoOrcamentoPage from '../pages/NovoOrcamentoPage';
 import PDFCustomizationModal from './PDFCustomization/PDFCustomizationModalWrapper';
 import { OrcamentoPDFData } from '../types/pdfCustomization';
-import { identificarTipoMaterial, TipoMaterial } from '../utils/unitConverter';
+import { identificarTipoMaterial, TipoMaterial, podeVenderEmMetroOuCm } from '../utils/unitConverter';
 import { matchCrossSearch } from '../utils/searchUtils';
 
 // ==================== ICONS ====================
@@ -505,6 +505,16 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             document.removeEventListener('keydown', handleEscapeKey);
         };
     }, [orcamentoToView]);
+
+    // Expandir modal automaticamente quando houver texto na busca global
+    useEffect(() => {
+        if (showItemModal && buscaGlobal.trim()) {
+            setModalExpandido(true);
+        } else if (showItemModal && !buscaGlobal.trim() && modalExpandido && modoAdicao !== 'comparacao') {
+            // Não colapsar automaticamente se estiver em modo comparação manual
+            // setModalExpandido(false);
+        }
+    }, [buscaGlobal, showItemModal]);
 
     // Filtrar materiais para seleção
     const filteredMaterials = useMemo(() => {
@@ -1158,13 +1168,19 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
     const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVenda?: string) => {
-        // Identificar tipo de material para conversão de unidades
-        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
-        const unidadeVendaFinal = unidadeVenda || 'UN';
+        const unidadeVendaFinal = unidadeVenda || cotacao.unidadeMedida || 'UN';
         
-        // Usar valorVenda se disponível, senão calcular 40% acima do valorUnitario
-        const valorVenda = cotacao.valorVenda || cotacao.valorUnitario * 1.4;
-        const precoBase = valorVenda; // Base para recalcular quando BDI mudar
+        // Calcular custo baseado na unidade de venda
+        let custoUnitario = cotacao.valorUnitario || 0;
+        // Se a unidade de medida da cotação permitir venda em M/cm e estiver vendendo em cm, ajustar o preço
+        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeVendaFinal === 'cm') {
+            // Se vender em cm, dividir o preço por metro por 100
+            custoUnitario = cotacao.valorUnitario / 100;
+        }
+        
+        // Calcular preço de venda: usar valorVenda se disponível, senão aplicar o mesmo BDI usado para materiais
+        const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+        const precoBase = valorVendaBase; // Base para recalcular quando BDI mudar
         
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
@@ -1172,13 +1188,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             nome: cotacao.nome,
             descricao: cotacao.nome, // ✅ Apenas o nome do material (não mostrar fornecedor)
             dataAtualizacaoCotacao: cotacao.dataAtualizacao,
-            unidadeMedida: 'UN', // Unidade de estoque
+            unidadeMedida: unidadeVendaFinal,
             unidadeVenda: unidadeVendaFinal, // Unidade de venda
             tipoMaterial: tipoMaterial,
             quantidade: 1,
-            custoUnit: cotacao.valorUnitario, // Custo é sempre o valor da cotação
-            precoBase: precoBase, // Base do preço de venda (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda
+            custoUnit: custoUnitario, // Custo é sempre o valor da cotação (valorUnitario)
+            precoBase: precoBase, // Base do preço de venda (sem BDI adicional, já que valorVenda já pode ter margem)
+            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário com BDI aplicado
             subtotal: precoBase * (1 + formState.bdi / 100)
         };
 
@@ -1243,12 +1259,24 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 return;
             }
             
-            // Identificar tipo de material para conversão de unidades
-            const tipoMaterial = identificarTipoMaterial(material.nome);
             const unidadeVendaFinal = unidadeVenda || material.unidadeMedida;
             
-            // Usar handleAddItem existente
-            const precoVenda = material.valorVenda || material.preco;
+            // Determinar preço de venda baseado na unidade
+            let precoVenda = material.preco || 0;
+            
+            // Se a unidade de medida permitir venda em M/cm, usar valores específicos
+            if (podeVenderEmMetroOuCm(material.unidadeMedida)) {
+                if (unidadeVendaFinal === 'm') {
+                    precoVenda = (material as any).valorVendaM || material.valorVenda || material.preco || 0;
+                } else if (unidadeVendaFinal === 'cm') {
+                    precoVenda = (material as any).valorVendaCM || 
+                                ((material as any).valorVendaM ? (material as any).valorVendaM / 100 : 
+                                (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
+                }
+            } else {
+                precoVenda = material.valorVenda || material.preco || 0;
+            }
+            
             const precoBase = precoVenda;
             
             const newItem: OrcamentoItem = {
@@ -1258,7 +1286,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 descricao: material.nome,
                 unidadeMedida: material.unidadeMedida, // Unidade de estoque
                 unidadeVenda: unidadeVendaFinal, // Unidade de venda (pode ser diferente)
-                tipoMaterial: tipoMaterial,
                 quantidade: qtd,
                 custoUnit: material.preco,
                 precoBase: precoBase,
@@ -1347,14 +1374,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             return sum + (precoVenda * kitItem.quantidade);
         }, 0) || 0;
 
-        // IMPORTANTE: Incluir itens do banco frio no cálculo do preço de venda
+        // IMPORTANTE: Incluir itens do banco frio E serviços no cálculo do preço de venda
         if (kit.itensFaltantes && Array.isArray(kit.itensFaltantes) && kit.itensFaltantes.length > 0) {
-            const precoVendaBancoFrio = kit.itensFaltantes.reduce((sum: number, itemBancoFrio: any) => {
-                const precoUnit = itemBancoFrio.precoUnit || itemBancoFrio.preco || itemBancoFrio.valorUnitario || 0;
-                const quantidade = itemBancoFrio.quantidade || 0;
+            const precoVendaExtras = kit.itensFaltantes.reduce((sum: number, item: any) => {
+                // Incluir tanto cotações quanto serviços
+                const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
+                const quantidade = item.quantidade || 0;
                 return sum + (precoUnit * quantidade);
             }, 0);
-            precoVendaTotalKit += precoVendaBancoFrio;
+            precoVendaTotalKit += precoVendaExtras;
         }
 
         const precoBase = precoVendaTotalKit; // Base para recalcular quando BDI mudar
@@ -3268,21 +3296,20 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             </div>
 
                             {/* Campo de Busca Universal no Header */}
-                            {!modalExpandido && (
-                                <div className="mb-4">
-                                    <div className="relative">
-                                        <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" />
-                                        <input
-                                            type="text"
-                                            value={buscaGlobal}
-                                            onChange={(e) => setBuscaGlobal(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
-                                            placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
-                                            style={{ color: 'white' }}
-                                        />
-                                    </div>
+                            {/* Campo de Busca Universal no Header */}
+                            <div className="mb-4">
+                                <div className="relative">
+                                    <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" />
+                                    <input
+                                        type="text"
+                                        value={buscaGlobal}
+                                        onChange={(e) => setBuscaGlobal(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
+                                        placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
+                                        style={{ color: 'white' }}
+                                    />
                                 </div>
-                            )}
+                            </div>
 
                             {/* Abas */}
                             <div className="flex gap-2 flex-wrap items-center">
@@ -3394,14 +3421,12 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                         {/* Conteúdo do Modal */}
                         <div className="flex-1 overflow-y-auto p-6">
-                            {/* Resultados da Busca Global */}
-                            {!modalExpandido && (
-                                <div className="mb-6">
-                                    {buscaGlobal.trim() && (
-                                        <div className="mt-4 space-y-4">
+                            {/* Resultados da Busca Global - Layout lado a lado quando expandido */}
+                            {buscaGlobal.trim() && (
+                                <div className={`mb-6 ${modalExpandido ? 'grid grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto' : 'space-y-4'}`}>
                                             {/* Materiais */}
                                             {resultadosBuscaGlobal.materiais.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>📦</span> Materiais ({resultadosBuscaGlobal.materiais.length})
                                                     </h4>
@@ -3432,23 +3457,32 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                                             {/* Serviços */}
                                             {resultadosBuscaGlobal.servicos.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>🔧</span> Serviços ({resultadosBuscaGlobal.servicos.length})
                                                     </h4>
                                                     <div className="space-y-2 max-h-48 overflow-y-auto">
                                                         {resultadosBuscaGlobal.servicos.map(servico => (
-                                                            <button
+                                                            <div
                                                                 key={servico.id}
-                                                                type="button"
-                                                                onClick={() => handleAddServico(servico, true)}
                                                                 className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700 transition-all"
                                                             >
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
-                                                                </p>
-                                                            </button>
+                                                                <div className="flex justify-between items-start gap-3">
+                                                                    <div className="flex-1">
+                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
+                                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                            Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddServico(servico, true)}
+                                                                        className="px-3 py-1 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
+                                                                    >
+                                                                        + Inserir
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -3456,7 +3490,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                                             {/* Kits */}
                                             {resultadosBuscaGlobal.kits.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>📦</span> Kits ({resultadosBuscaGlobal.kits.length})
                                                     </h4>
@@ -3504,42 +3538,96 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                                             {/* Cotações */}
                                             {resultadosBuscaGlobal.cotacoes.length > 0 && (
-                                                <div>
+                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
                                                     <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
                                                         <span>🏷️</span> Cotações - Banco Frio ({resultadosBuscaGlobal.cotacoes.length})
                                                     </h4>
                                                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.cotacoes.map(cotacao => (
-                                                            <button
-                                                                key={cotacao.id}
-                                                                type="button"
-                                                                onClick={() => handleAddCotacao(cotacao, true)}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                            >
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                        📦 Banco Frio
-                                                                    </span>
+                                                        {resultadosBuscaGlobal.cotacoes.map(cotacao => {
+                                                            const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
+                                                            
+                                                            // Calcular valores para exibição
+                                                            const custoUnitario = cotacao.valorUnitario || 0;
+                                                            const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+                                                            const porcentagemLucro = custoUnitario > 0 
+                                                                ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
+                                                                : 0;
+                                                            const unidadeMedida = cotacao.unidadeMedida || 'UN';
+                                                            
+                                                            return (
+                                                                <div
+                                                                    key={cotacao.id}
+                                                                    className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
+                                                                >
+                                                                    <div className="flex items-center gap-2 mb-1">
+                                                                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
+                                                                            📦 Banco Frio
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-start gap-3">
+                                                                        <div className="flex-1">
+                                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
+                                                                            <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
+                                                                                <br />
+                                                                                Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
+                                                                                {valorVendaBase > 0 && (
+                                                                                    <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
+                                                                                    {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
+                                                                                    </>
+                                                                                )}
+                                                                            </p>
+                                                                            {temSelecaoUnidade && (
+                                                                                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                                    💡 Metros ou cm
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            {temSelecaoUnidade ? (
+                                                                                <>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'm')}
+                                                                                        className="px-2 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                                        title="Adicionar em metros"
+                                                                                    >
+                                                                                        + m
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'cm')}
+                                                                                        className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
+                                                                                        title="Adicionar em centímetros"
+                                                                                    >
+                                                                                        + cm
+                                                                                    </button>
+                                                                                </>
+                                                                            ) : (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => handleAddCotacao(cotacao, true)}
+                                                                                    className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                                >
+                                                                                    + Inserir
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'} • Valor: R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                                </p>
-                                                            </button>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             )}
 
                                             {/* Nenhum resultado */}
                                             {Object.values(resultadosBuscaGlobal).every(arr => arr.length === 0) && (
-                                                <div className="text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl">
+                                                <div className={`text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl ${modalExpandido ? 'col-span-2' : ''}`}>
                                                     <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum item encontrado para "{buscaGlobal}"</p>
                                                 </div>
                                             )}
                                         </div>
-                                    )}
-                                </div>
                             )}
 
                             {/* Modo: Comparação Estoque vs Banco Frio (Modal Expandido) */}

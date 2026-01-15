@@ -697,7 +697,7 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
                                             {orcamentoData.projeto.titulo || 'Título do Orçamento'}
                                         </h2>
                                         <p className="text-sm" style={{ color: customization.design.colors.text }}>
-                                            Nº: {orcamentoData.numero} | Validade: {orcamentoData.validade}
+                                            ORÇAMENTO {orcamentoData.numero} | Validade: {orcamentoData.validade}
                                         </p>
                                     </div>
 

@@ -14,11 +14,14 @@ export interface KitInput {
     preco: number;
     items: KitItemInput[];
     itensBancoFrio?: Array<{
-        cotacaoId: string;
+        cotacaoId?: string;
+        servicoId?: string;
         nome: string;
         quantidade: number;
         precoUnit: number;
         dataUltimaCotacao?: string;
+        unidade?: string;
+        tipo: 'COTACAO' | 'SERVICO'; // Tipo do item: cotação ou serviço
     }>;
     temItensCotacao?: boolean;
 }
@@ -31,11 +34,14 @@ export interface KitUpdateInput {
     items?: KitItemInput[];
     ativo?: boolean;
     itensBancoFrio?: Array<{
-        cotacaoId: string;
+        cotacaoId?: string;
+        servicoId?: string;
         nome: string;
         quantidade: number;
         precoUnit: number;
         dataUltimaCotacao?: string;
+        unidade?: string;
+        tipo: 'COTACAO' | 'SERVICO'; // Tipo do item: cotação ou serviço
     }>;
     temItensCotacao?: boolean;
 }
@@ -174,15 +180,36 @@ export class KitsService {
 
         console.log(`📦 Criando kit: ${nome}`);
         console.log(`   - Itens estoque real: ${items.length}`);
-        console.log(`   - Itens banco frio: ${itensBancoFrio?.length || 0}`);
+        console.log(`   - Itens extras (banco frio + serviços): ${itensBancoFrio?.length || 0}`);
         if (itensBancoFrio && itensBancoFrio.length > 0) {
-            console.log(`   - Itens banco frio:`, itensBancoFrio);
+            const cotacoes = itensBancoFrio.filter(i => i.tipo === 'COTACAO').length;
+            const servicos = itensBancoFrio.filter(i => i.tipo === 'SERVICO').length;
+            console.log(`   - Itens banco frio: ${cotacoes}`);
+            console.log(`   - Serviços: ${servicos}`);
+            console.log(`   - Detalhes:`, itensBancoFrio);
         }
 
-        // IMPORTANTE: statusEstoque 'PENDENTE' é apenas informativo para kits com itens do banco frio
-        // Não deve impedir a criação/edição do kit. A validação de estoque só deve ocorrer ao iniciar obra.
-        const temItensBancoFrio = itensBancoFrio && itensBancoFrio.length > 0;
-        const statusEstoque = temItensBancoFrio ? 'PENDENTE' : 'COMPLETO';
+        // IMPORTANTE: statusEstoque deve ser calculado apenas baseado em itens de estoque real
+        // Cotações não afetam o statusEstoque - serão validadas apenas na ordem de serviço quando vinculadas
+        // Serviços não afetam o status de estoque - não provêm de estoque
+        const temItensBancoFrio = itensBancoFrio && itensBancoFrio.some(i => i.tipo === 'COTACAO');
+        const temServicos = itensBancoFrio && itensBancoFrio.some(i => i.tipo === 'SERVICO');
+        
+        // Validar estoque apenas para itens de estoque real (não cotações, não serviços)
+        // Por enquanto, não validamos estoque ao criar kit - apenas salvamos
+        // A validação acontecerá na ordem de serviço quando for iniciar obra
+        // statusEstoque 'COMPLETO' por padrão - será revalidado quando necessário
+        const statusEstoque = 'COMPLETO';
+        
+        // Combinar cotações e serviços no campo itensFaltantes
+        // O campo itensFaltantes armazena tanto cotações quanto serviços
+        const todosItensExtras = itensBancoFrio || [];
+        
+        console.log(`📦 Salvando kit com ${todosItensExtras.length} itens extras (cotações + serviços)`);
+        if (temServicos) {
+            const servicosCount = todosItensExtras.filter(i => i.tipo === 'SERVICO').length;
+            console.log(`   - Serviços incluídos: ${servicosCount}`);
+        }
         
         const kit = await prisma.kit.create({
             data: {
@@ -191,9 +218,9 @@ export class KitsService {
                 tipo,
                 preco,
                 temItensCotacao: temItensCotacao || false,
-                // Salvar itens do banco frio como JSON para referência
-                // Estes itens NÃO são "faltantes" no sentido de erro, são apenas do banco frio
-                itensFaltantes: temItensBancoFrio ? JSON.parse(JSON.stringify(itensBancoFrio)) : null,
+                // Salvar itens do banco frio E serviços como JSON para referência
+                // Estes itens NÃO são "faltantes" no sentido de erro, são apenas do banco frio/serviços
+                itensFaltantes: todosItensExtras.length > 0 ? JSON.parse(JSON.stringify(todosItensExtras)) : null,
                 statusEstoque: statusEstoque, // Apenas informativo, não bloqueia criação
                 items: {
                     create: items.map(item => ({
@@ -225,7 +252,9 @@ export class KitsService {
         });
 
         const totalItens = kit.items.length + (itensBancoFrio?.length || 0);
-        console.log(`✅ Kit criado: ${kit.nome} (${kit.items.length} em estoque, ${itensBancoFrio?.length || 0} banco frio, total: ${totalItens})`);
+        const cotacoes = itensBancoFrio?.filter(i => i.tipo === 'COTACAO').length || 0;
+        const servicos = itensBancoFrio?.filter(i => i.tipo === 'SERVICO').length || 0;
+        console.log(`✅ Kit criado: ${kit.nome} (${kit.items.length} em estoque, ${cotacoes} banco frio, ${servicos} serviços, total: ${totalItens})`);
         return kit;
     }
 
@@ -237,7 +266,14 @@ export class KitsService {
 
         console.log(`📝 Atualizando kit: ${id}`);
         console.log(`   - Novos itens estoque real: ${items?.length || 0}`);
-        console.log(`   - Novos itens banco frio: ${itensBancoFrio?.length || 0}`);
+        if (itensBancoFrio && itensBancoFrio.length > 0) {
+            const cotacoes = itensBancoFrio.filter(i => i.tipo === 'COTACAO').length;
+            const servicos = itensBancoFrio.filter(i => i.tipo === 'SERVICO').length;
+            console.log(`   - Novos itens banco frio: ${cotacoes}`);
+            console.log(`   - Novos serviços: ${servicos}`);
+        } else {
+            console.log(`   - Novos itens extras: 0`);
+        }
 
         // Se items foi fornecido, deletar os itens existentes e recriar
         if (items !== undefined) {
@@ -256,14 +292,16 @@ export class KitsService {
                 ...(ativo !== undefined && { ativo }),
                 ...(temItensCotacao !== undefined && { temItensCotacao }),
                 ...(itensBancoFrio !== undefined && { 
-                    // IMPORTANTE: itensFaltantes aqui armazena itens do banco frio
-                    // Não são "faltantes" no sentido de erro, são apenas do banco frio
+                    // IMPORTANTE: itensFaltantes aqui armazena itens do banco frio E serviços
+                    // Não são "faltantes" no sentido de erro, são apenas do banco frio/serviços
                     itensFaltantes: itensBancoFrio.length > 0 ? JSON.parse(JSON.stringify(itensBancoFrio)) : null 
                 }),
                 ...((itensBancoFrio !== undefined || items !== undefined) && {
-                    // statusEstoque 'PENDENTE' é apenas informativo para kits com itens do banco frio
-                    // Não deve impedir a atualização do kit. A validação de estoque só deve ocorrer ao iniciar obra.
-                    statusEstoque: (itensBancoFrio && itensBancoFrio.length > 0) ? 'PENDENTE' : 'COMPLETO'
+                    // statusEstoque deve ser calculado apenas baseado em itens de estoque real
+                    // Cotações não afetam o statusEstoque - serão validadas apenas na ordem de serviço
+                    // Serviços não afetam o status de estoque - não provêm de estoque
+                    // Por padrão, mantemos 'COMPLETO' - será revalidado quando necessário na ordem de serviço
+                    statusEstoque: 'COMPLETO'
                 }),
                 ...(items !== undefined && {
                     items: {
@@ -297,7 +335,9 @@ export class KitsService {
         });
 
         const totalItens = kit.items.length + (itensBancoFrio?.length || 0);
-        console.log(`✅ Kit atualizado: ${kit.nome} (${kit.items.length} em estoque, ${itensBancoFrio?.length || 0} banco frio, total: ${totalItens})`);
+        const cotacoes = itensBancoFrio?.filter(i => i.tipo === 'COTACAO').length || 0;
+        const servicos = itensBancoFrio?.filter(i => i.tipo === 'SERVICO').length || 0;
+        console.log(`✅ Kit atualizado: ${kit.nome} (${kit.items.length} em estoque, ${cotacoes} banco frio, ${servicos} serviços, total: ${totalItens})`);
         return kit;
     }
 

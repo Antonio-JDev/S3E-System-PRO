@@ -92,7 +92,7 @@ export const buscarCotacao = async (req: Request, res: Response): Promise<void> 
  */
 export const criarCotacao = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { nome, ncm, valorUnitario, valorVenda, fornecedorId, fornecedorNome, observacoes } = req.body;
+    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes } = req.body;
 
     // Validações
     if (!nome || valorUnitario === undefined) {
@@ -114,6 +114,7 @@ export const criarCotacao = async (req: Request, res: Response): Promise<void> =
         ncm,
         valorUnitario: parseFloat(valorUnitario),
         valorVenda: valorVendaCalculado,
+        unidadeMedida: unidadeMedida || 'un',
         fornecedorId,
         fornecedorNome,
         observacoes,
@@ -144,12 +145,13 @@ export const criarCotacao = async (req: Request, res: Response): Promise<void> =
 export const atualizarCotacao = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { nome, ncm, valorUnitario, valorVenda, fornecedorId, fornecedorNome, observacoes, ativo, atualizarDataCotacao } = req.body;
+    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes, ativo, atualizarDataCotacao } = req.body;
 
     // Se atualizarDataCotacao for false, não atualizar dataAtualizacao (usado quando apenas valorVenda muda)
     const updateData: any = {
       ...(nome && { nome }),
       ...(ncm !== undefined && { ncm }),
+      ...(unidadeMedida !== undefined && { unidadeMedida }),
       ...(fornecedorId !== undefined && { fornecedorId }),
       ...(fornecedorNome !== undefined && { fornecedorNome }),
       ...(observacoes !== undefined && { observacoes }),
@@ -463,6 +465,7 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
               data: {
                 valorUnitario,
                 valorVenda,
+                unidadeMedida: cotacao.unidadeMedida || 'un',
                 ncm: cotacao.ncm,
                 observacoes: cotacao.observacoes,
                 dataAtualizacao: new Date()
@@ -493,6 +496,7 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
               ncm: cotacao.ncm,
               valorUnitario,
               valorVenda,
+              unidadeMedida: cotacao.unidadeMedida || 'un',
               fornecedorId: cotacao.fornecedorId,
               fornecedorNome: cotacao.fornecedorNome,
               observacoes: cotacao.observacoes,

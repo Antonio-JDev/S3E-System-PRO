@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "materiais" ADD COLUMN IF NOT EXISTS "custoCM" DOUBLE PRECISION;
