@@ -1139,6 +1139,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const valorVenda = cotacao.valorVenda || (custoUnitario * 1.4);
         const precoBase = valorVenda; // Base para aplicar BDI
         
+        // Identificar tipo de material baseado no nome da cotação
+        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
+        
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
             cotacaoId: cotacao.id,

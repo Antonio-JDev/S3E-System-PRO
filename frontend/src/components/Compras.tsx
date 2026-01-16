@@ -13,6 +13,7 @@ import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { axiosApiService } from '../services/axiosApi';
+import { empresaFiscalService } from '../services/empresaFiscalService';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -164,6 +165,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     // Campos fiscais/ERP adicionais
     const [destinatarioCNPJ, setDestinatarioCNPJ] = useState<string>('');
     const [statusImportacao, setStatusImportacao] = useState<'MANUAL' | 'XML'>('MANUAL');
+    // ✅ NOVO: Empresa compradora (para identificar qual CNPJ está sendo usado)
+    const [empresasFiscais, setEmpresasFiscais] = useState<any[]>([]);
+    const [empresaCompradoraId, setEmpresaCompradoraId] = useState<string>('');
+    const [empresaCompradoraNome, setEmpresaCompradoraNome] = useState<string>('');
+    const [empresaCompradoraCNPJ, setEmpresaCompradoraCNPJ] = useState<string>('');
     const [valorIPI, setValorIPI] = useState<string>('0');
     const [valorTotalProdutos, setValorTotalProdutos] = useState<string>('0');
     const [valorTotalNota, setValorTotalNota] = useState<string>('0');
@@ -353,6 +359,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setSupplierAddress('');
         setIsCompraAvulsa(false); // ✅ NOVO: Resetar modo compra avulsa
         setObraId(''); // ✅ NOVO: Resetar obra selecionada
+        // ✅ NOVO: Resetar empresa compradora
+        setEmpresaCompradoraId('');
+        setEmpresaCompradoraNome('');
+        setEmpresaCompradoraCNPJ('');
     };
 
     const handleOpenReceivingModal = () => {
@@ -430,6 +440,36 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const handleCloseModal = () => {
         setIsModalOpen(false);
         resetForm();
+    };
+
+    // ✅ NOVO: Carregar empresas fiscais quando o modal abrir
+    useEffect(() => {
+        if (isModalOpen) {
+            loadEmpresasFiscais();
+        }
+    }, [isModalOpen]);
+
+    const loadEmpresasFiscais = async () => {
+        try {
+            const response = await empresaFiscalService.listar();
+            if (response.data) {
+                setEmpresasFiscais(response.data);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar empresas fiscais:', error);
+        }
+    };
+
+    const handleEmpresaCompradoraChange = (empresaId: string) => {
+        setEmpresaCompradoraId(empresaId);
+        const empresa = empresasFiscais.find(e => e.id === empresaId);
+        if (empresa) {
+            setEmpresaCompradoraNome(empresa.razaoSocial || empresa.nomeFantasia || '');
+            setEmpresaCompradoraCNPJ(empresa.cnpj || '');
+        } else {
+            setEmpresaCompradoraNome('');
+            setEmpresaCompradoraCNPJ('');
+        }
     };
 
 
@@ -548,7 +588,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 valorTotalProdutos: parseFloat(valorTotalProdutos || '0') || 0,
                 valorTotalNota: valorTotalNotaCalculado,
                 duplicatas,
-                obraId: isCompraAvulsa && obraId ? obraId : undefined // ✅ NOVO: Incluir obraId se for compra avulsa
+                obraId: isCompraAvulsa && obraId ? obraId : undefined, // ✅ NOVO: Incluir obraId se for compra avulsa
+                empresaCompradoraNome: empresaCompradoraNome || undefined, // ✅ NOVO: Nome da empresa compradora
+                empresaCompradoraCNPJ: empresaCompradoraCNPJ || undefined // ✅ NOVO: CNPJ da empresa compradora
             };
 
             console.log('📤 Criando nova compra:', payload);
@@ -1362,6 +1404,62 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
 
+                                {/* ✅ NOVO: Empresa Compradora */}
+                                <div className="mt-6">
+                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">🏢</span>
+                                        Empresa Compradora
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <div className="md:col-span-1">
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Selecionar Empresa
+                                            </label>
+                                            <select
+                                                value={empresaCompradoraId}
+                                                onChange={(e) => handleEmpresaCompradoraChange(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 bg-white"
+                                            >
+                                                <option value="">Selecione uma empresa...</option>
+                                                {empresasFiscais.map((empresa) => (
+                                                    <option key={empresa.id} value={empresa.id}>
+                                                        {empresa.razaoSocial || empresa.nomeFantasia} - {empresa.cnpj}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="md:col-span-1">
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Nome da Empresa
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={empresaCompradoraNome}
+                                                onChange={(e) => setEmpresaCompradoraNome(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                                placeholder="Nome/Razão Social"
+                                                readOnly
+                                            />
+                                        </div>
+                                        <div className="md:col-span-1">
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                CNPJ da Empresa
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={empresaCompradoraCNPJ}
+                                                onChange={(e) => setEmpresaCompradoraCNPJ(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                                placeholder="00.000.000/0000-00"
+                                                readOnly
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-blue-600 mt-2">
+                                        💡 Selecione a empresa compradora para identificar qual CNPJ está sendo usado nesta compra
+                                    </p>
+                                </div>
+
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-4">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Status de Importação</label>
@@ -1451,7 +1549,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <div>
                                             <input
                                                 type="text"
-                                                value={productToAdd.ncm || ''}
+                                                value={productToAdd.ncm ?? ''}
                                                 onChange={(e) => setProductToAdd({...productToAdd, ncm: e.target.value})}
                                                 placeholder="NCM"
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
@@ -1460,7 +1558,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <div>
                                             <input
                                                 type="text"
-                                                value={productToAdd.sku || ''}
+                                                value={productToAdd.sku ?? ''}
                                                 onChange={(e) => setProductToAdd({...productToAdd, sku: e.target.value})}
                                                 placeholder="SKU (opcional)"
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
@@ -1644,7 +1742,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                                                                             <input
                                                                                 type="text"
-                                                                                value={buscaMaterialPorItem[index] || ''}
+                                                                                value={buscaMaterialPorItem[index] ?? ''}
                                                                                 onChange={(e) => setBuscaMaterialPorItem(prev => ({ ...prev, [index]: e.target.value }))}
                                                                                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white text-sm"
                                                                                 placeholder="Buscar material do estoque por nome ou SKU..."
@@ -2098,6 +2196,20 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <p className="text-gray-900 font-medium">{(purchaseToView as any).destinatarioCNPJ}</p>
                                         </div>
                                     )}
+                                    {/* ✅ NOVO: Empresa Compradora */}
+                                    {((purchaseToView as any).empresaCompradoraNome || (purchaseToView as any).empresaCompradoraCNPJ) && (
+                                        <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
+                                            <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1 flex items-center gap-1">
+                                                🏢 Empresa Compradora
+                                            </h4>
+                                            {(purchaseToView as any).empresaCompradoraNome && (
+                                                <p className="text-blue-900 font-bold text-base">{(purchaseToView as any).empresaCompradoraNome}</p>
+                                            )}
+                                            {(purchaseToView as any).empresaCompradoraCNPJ && (
+                                                <p className="text-blue-700 font-medium text-sm mt-1">CNPJ: {(purchaseToView as any).empresaCompradoraCNPJ}</p>
+                                            )}
+                                        </div>
+                                    )}
                                     {(purchaseToView as any).statusImportacao && (
                                         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Tipo de Importação</h4>
@@ -2145,15 +2257,38 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
-                                                    {purchaseToView.items.map((item, index) => (
+                                                    {purchaseToView.items.map((item, index) => {
+                                                        const materialVinculado = (item as any).materialVinculado || (item as any).material;
+                                                        const imagemUrl = materialVinculado?.imagemUrl;
+                                                        
+                                                        return (
                                                         <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                             <td className="px-6 py-4">
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
-                                                                {(item as any).quantidadeFracionada && (
-                                                                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                                                        📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
-                                                                    </p>
-                                                                )}
+                                                                <div className="flex items-center gap-3">
+                                                                    {/* Imagem do produto */}
+                                                                    {imagemUrl ? (
+                                                                        <img 
+                                                                            src={imagemUrl} 
+                                                                            alt={item.productName}
+                                                                            className="w-16 h-16 object-cover rounded-lg border border-gray-200 dark:border-dark-border"
+                                                                            onError={(e) => {
+                                                                                (e.target as HTMLImageElement).style.display = 'none';
+                                                                            }}
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-dark-border flex items-center justify-center">
+                                                                            <span className="text-gray-400 dark:text-gray-500 text-2xl">📦</span>
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="flex-1">
+                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
+                                                                        {(item as any).quantidadeFracionada && (
+                                                                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                                                📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">
@@ -2247,7 +2382,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                 </div>
                                                             </td>
                                                         </tr>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>

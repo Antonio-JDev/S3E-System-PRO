@@ -566,6 +566,8 @@ model Compra {
   xmlData          String? // JSON string com dados completos do XML
   observacoes      String?
   obraId           String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
+  empresaCompradoraNome String? // ✅ Nome da empresa compradora (para identificar qual CNPJ está sendo usado)
+  empresaCompradoraCNPJ String? // ✅ CNPJ da empresa compradora
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

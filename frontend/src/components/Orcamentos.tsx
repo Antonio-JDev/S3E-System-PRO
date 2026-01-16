@@ -1182,6 +1182,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
         const precoBase = valorVendaBase; // Base para recalcular quando BDI mudar
         
+        // Identificar tipo de material baseado no nome da cotação
+        const tipoMaterial = identificarTipoMaterial(cotacao.nome);
+        
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
             cotacaoId: cotacao.id,

@@ -102,7 +102,10 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       parcelas: req.body.parcelas,
       dataPrimeiroVencimento: req.body.dataPrimeiroVencimento ? new Date(req.body.dataPrimeiroVencimento) : undefined,
       // ✅ NOVO: Obra vinculada (para compras avulsas)
-      obraId: req.body.obraId || undefined
+      obraId: req.body.obraId || undefined,
+      // ✅ NOVO: Empresa compradora (para identificar qual CNPJ está sendo usado)
+      empresaCompradoraNome: req.body.empresaCompradoraNome || undefined,
+      empresaCompradoraCNPJ: req.body.empresaCompradoraCNPJ || undefined
     };
 
     // Validar dados obrigatórios
@@ -196,7 +199,8 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         estoque: true,
         categoria: true,
         ncm: true,
-        descricao: true
+        descricao: true,
+        imagemUrl: true // ✅ Incluir imagem para aparecer no match automático
       }
     });
     console.log(`🔍 Buscando match automático para ${todosMateriais.length} materiais existentes...`);

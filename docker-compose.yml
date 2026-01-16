@@ -73,15 +73,19 @@ services:
       - ./backend/tsconfig.build.json:/app/tsconfig.build.json
       - backend_uploads:/app/uploads  # Uploads persistentes
       - backend_logs:/app/logs        # Logs da aplicação
-      - backend_node_modules:/app/node_modules  # node_modules isolado
+      # node_modules usa os da imagem (já instalados durante o build)
+      # Não montamos volume para evitar sobrescrever dependências instaladas
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - s3e-network
-    # ✅ Comando de desenvolvimento: tsx watch monitora mudanças e reinicia automaticamente
-    # Resolve migrações falhadas antes de aplicar novas migrações (migrações agora são idempotentes)
-    command: sh -c "npx prisma generate && (npx prisma migrate resolve --applied 20250115000000_add_audit_logs_hash_fields 2>/dev/null || true) && npx prisma migrate deploy && npm run dev"
+    # ✅ Comando de desenvolvimento: aplica migrações automaticamente e inicia em modo watch
+    # 1. Gera Prisma Client
+    # 2. Resolve migrações falhadas conhecidas (marca como aplicadas)
+    # 3. Aplica todas as migrações pendentes (se falhar, resolve e tenta novamente)
+    # 4. Inicia servidor em modo watch (tsx watch) para hot reload
+    command: sh -c "npx prisma generate && (npx prisma migrate resolve --applied 20250115000000_add_audit_logs_hash_fields 2>/dev/null || true) && (npx prisma migrate resolve --applied 20251210182632_add_ncm_orcamento_and_agendamento_pagamento 2>/dev/null || true) && (npx prisma migrate deploy || (npx prisma migrate resolve --applied 20251210182632_add_ncm_orcamento_and_agendamento_pagamento 2>/dev/null && npx prisma migrate deploy)) && npm run dev"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s
@@ -147,9 +151,6 @@ volumes:
     driver: local
   backend_logs:
     driver: local
-  backend_node_modules:
-    driver: local
-    # ✅ Volume isolado para node_modules do backend (evita conflitos com host)
   frontend_node_modules:
     driver: local
     # ✅ Volume isolado para node_modules do frontend (evita conflitos com host)

@@ -46,6 +46,9 @@ export interface CompraPayload {
     dataPrimeiroVencimento?: Date;
     // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
     obraId?: string;
+    // ✅ NOVO: Empresa compradora (para identificar qual CNPJ está sendo usado)
+    empresaCompradoraNome?: string;
+    empresaCompradoraCNPJ?: string;
 }
 
 export class ComprasService {
@@ -378,6 +381,8 @@ export class ComprasService {
                     observacoes,
                     xmlData: JSON.stringify(xmlMeta),
                     obraId: obraId || null, // ✅ NOVO: Vincular obra se fornecida
+                    empresaCompradoraNome: data.empresaCompradoraNome || null, // ✅ NOVO: Nome da empresa compradora
+                    empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null, // ✅ NOVO: CNPJ da empresa compradora
                     items: {
                         create: itemsComMaterialId.map(item => ({
                             materialId: item.materialId,
@@ -551,7 +556,8 @@ export class ComprasService {
                                     preco: true,
                                     valorVenda: true,
                                     estoque: true,
-                                    descricao: true
+                                    descricao: true,
+                                    imagemUrl: true // ✅ Incluir imagem do material
                                 }
                             }
                         }

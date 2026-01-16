@@ -6,6 +6,7 @@ import { comprasService } from '../services/comprasService';
 import { readFileAsText } from '../utils/xmlParser';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { axiosApiService } from '../services/axiosApi';
+import { getUploadUrl } from '../config/api';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 
 // ==================== ICONS ====================
@@ -1040,6 +1041,26 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                         <div className="flex justify-between items-start gap-4">
                                             <div className="flex-1">
                                                 <div className="flex items-start gap-3 mb-2">
+                                                    {/* Coluna de Foto */}
+                                                    <div className="flex-shrink-0">
+                                                        {item.materialVinculado?.imagemUrl ? (
+                                                            <img
+                                                                src={getUploadUrl(item.materialVinculado.imagemUrl)}
+                                                                alt={item.materialVinculado.nome || item.productName}
+                                                                className="w-16 h-16 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
+                                                                onError={(e) => {
+                                                                    const imgElement = e.target as HTMLImageElement;
+                                                                    imgElement.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
+                                                                }}
+                                                            />
+                                                        ) : (
+                                                            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center border border-gray-300 dark:border-gray-600">
+                                                                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                                                </svg>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                     <div className="flex-1">
                                                         <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
                                                         <p className="text-sm text-gray-600 dark:text-gray-400">
