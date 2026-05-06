@@ -4,43 +4,69 @@ import { ENDPOINTS } from '../config/api';
 export interface Orcamento {
   id: string;
   numeroSequencial?: number;
+  numero?: number;
   clienteId: string;
   titulo: string;
   descricao?: string;
   descricaoProjeto?: string;
   validade?: string;
   bdi: number;
+  custoTotal?: number;
+  precoVenda?: number;
+  valorTotal?: number;
+  descontoValor?: number;
+  impostoPercentual?: number;
+  condicaoPagamento?: string;
   observacoes?: string;
   status: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado';
-  valorTotal: number;
   items?: OrcamentoItem[];
   cliente?: any;
   empresaCNPJ?: string;
+  empresaFiscalId?: string;
   enderecoObra?: string;
+  numeroObra?: string;
   cidade?: string;
   bairro?: string;
   cep?: string;
   responsavelObra?: string;
   previsaoInicio?: string;
   previsaoTermino?: string;
+  orcamentistaNome?: string;
+  aprovedAt?: string;
+  pedidoFaturado?: boolean;
+  venda?: {
+    id: string;
+    numeroSequencial?: number;
+    numeroVenda?: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface OrcamentoItem {
   id?: string;
+  tipo?: string;
   materialId?: string;
   kitId?: string;
   servicoId?: string;
-  descricao: string;
+  cotacaoId?: string;
+  descricao?: string;
+  nome?: string;
   quantidade: number;
-  unidadeMedida: string;
-  valorUnitario: number;
-  valorTotal: number;
+  unidadeMedida?: string;
+  valorUnitario?: number;
+  valorTotal?: number;
+  custoUnit?: number;
+  custoAgregadoUnit?: number;
+  precoUnit?: number;
+  subtotal?: number;
   material?: any;
   kit?: any;
   servico?: any;
+  cotacao?: any;
   ncm?: string;
+  /** Venda direta do fornecedor para o cliente: não gera contas a receber, estoque nem NF-e */
+  vendaDiretaFornecedor?: boolean;
 }
 
 export interface CreateOrcamentoData {
@@ -53,13 +79,17 @@ export interface CreateOrcamentoData {
   observacoes?: string;
   items: OrcamentoItem[];
   empresaCNPJ?: string;
+  empresaFiscalId?: string;
   enderecoObra?: string;
+  numeroObra?: string;
   cidade?: string;
   bairro?: string;
   cep?: string;
   responsavelObra?: string;
   previsaoInicio?: string;
   previsaoTermino?: string;
+  /** ID do lead no Funil de Atendimento (CRM), quando a proposta nasceu dali */
+  contatoLeadId?: string | null;
 }
 
 export interface UpdateOrcamentoData extends Partial<CreateOrcamentoData> {
@@ -67,6 +97,28 @@ export interface UpdateOrcamentoData extends Partial<CreateOrcamentoData> {
 }
 
 class OrcamentosService {
+  async gerarPdfItensKit(
+    nomeKit: string,
+    itens: Array<{ nome?: string; tipo?: string; quantidade?: number; unidadeMedida?: string }>,
+    numeroOrcamento?: number | string,
+    usuarioGerador?: string
+  ) {
+    try {
+      const blob = await axiosApiService.postBlob('/api/orcamentos/pdf/itens-kit', {
+        nomeKit,
+        itens,
+        numeroOrcamento,
+        usuarioGerador
+      });
+      return { success: true, data: blob };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error?.message || 'Erro ao gerar PDF dos itens do kit'
+      };
+    }
+  }
+
   /**
    * Lista todos os orçamentos
    * @param filters - Filtros opcionais (status, clienteId, etc.)

@@ -3,6 +3,7 @@
 ## 🔍 **PROBLEMAS IDENTIFICADOS:**
 
 ### **1. Erro HTML: `<p>` não pode conter `<div>` ou `<ul>`**
+
 ```
 ❌ <p> cannot contain <div>
 ❌ <p> cannot contain <ul>
@@ -11,6 +12,7 @@
 **Causa:** `AlertDialogDescription` renderiza um `<p>` por padrão
 
 ### **2. Alert "Nenhum material para atualizar"**
+
 ```
 ❌ Alert aparece mesmo havendo 2 materiais
 ```
@@ -18,6 +20,7 @@
 **Causa:** `materiaisParaAtualizar` estava vazio quando clicava no botão
 
 ### **3. Modal antigo aparecia**
+
 ```
 ❌ Modal "Detalhes da Comparação" ainda abria
 ```
@@ -31,6 +34,7 @@
 ### **1. Erro HTML Resolvido** (`PreviewAtualizacaoModal.tsx`)
 
 **ANTES:**
+
 ```tsx
 <AlertDialogDescription className="space-y-3 ...">
   <div className="...">  ← ❌ <p> não pode ter <div>
@@ -41,6 +45,7 @@
 ```
 
 **DEPOIS:**
+
 ```tsx
 <AlertDialogDescription asChild>  ← ✅ Usa asChild
   <div className="space-y-3 ...">  ← ✅ Agora <div> é o root
@@ -50,13 +55,15 @@
 </AlertDialogDescription>
 ```
 
-**Explicação:** O prop `asChild` faz com que o componente **não crie** o `<p>` padrão, permitindo usar qualquer elemento como root.
+**Explicação:** O prop `asChild` faz com que o componente **não crie** o `<p>`
+padrão, permitindo usar qualquer elemento como root.
 
 ---
 
 ### **2. Dados Corretos Sendo Enviados** (`AtualizacaoPrecos.tsx`)
 
 O código já estava correto! O sistema:
+
 - ✅ Usa `materiaisParaAtualizar` (dados do preview)
 - ✅ Cria JSON no formato correto
 - ✅ Backend aceita e processa
@@ -68,11 +75,13 @@ O código já estava correto! O sistema:
 ## 🚀 **TESTE AGORA (SEM ERROS):**
 
 ### **1. Limpe Console**
+
 ```
 F12 → Console → Ctrl+L
 ```
 
 ### **2. Importe JSON**
+
 ```
 Menu → Atualização de Preços
 Importar JSON (com preços editados)
@@ -80,6 +89,7 @@ Processar
 ```
 
 ### **3. Modal de Preview Abre**
+
 ```
 ✅ Veja os 2 materiais:
    - ABRACADEIRA: R$ 18,14 → R$ 70,14 (+286%)
@@ -89,6 +99,7 @@ Processar
 ```
 
 ### **4. AlertDialog Aparece (SEM ERROS HTML)**
+
 ```
 ✅ Sem erros no console!
 ✅ "Confirmar Atualização de Preços?"
@@ -97,6 +108,7 @@ Processar
 ```
 
 ### **5. Sistema Processa**
+
 ```
 Console Frontend:
 📤 Enviando materiais: [2 items]
@@ -115,6 +127,7 @@ POST /api/materiais/importar-precos 200
 ```
 
 ### **6. Sucesso**
+
 ```
 ✅ Alert: "Preços atualizados com sucesso! 2 itens foram atualizados."
 ✅ Modal fecha
@@ -126,18 +139,21 @@ POST /api/materiais/importar-precos 200
 ## 📋 **VERIFICAÇÕES:**
 
 ### **Sem Erros HTML:**
+
 ```
 ❌ ANTES: <p> cannot contain <div/ul>
 ✅ AGORA: Sem erros no console
 ```
 
 ### **Dados Corretos:**
+
 ```
 ❌ ANTES: "Nenhum material para atualizar"
 ✅ AGORA: 2 materiais enviados e atualizados
 ```
 
 ### **Fluxo Correto:**
+
 ```
 1. ✅ Preview abre com materiais
 2. ✅ Clica "Confirmar"
@@ -155,6 +171,7 @@ POST /api/materiais/importar-precos 200
 ### **Arquivo: `PreviewAtualizacaoModal.tsx`**
 
 **Linha ~206:**
+
 ```tsx
 // ANTES
 <AlertDialogDescription className="...">
@@ -165,6 +182,7 @@ POST /api/materiais/importar-precos 200
 ```
 
 **O que isso faz:**
+
 - `asChild`: Remove o `<p>` padrão do componente
 - Agora o `<div>` é o elemento root
 - Podemos colocar `<ul>`, `<div>`, qualquer coisa dentro
@@ -217,4 +235,3 @@ Sempre que um componente shadcn/ui te der erro de HTML nesting, use `asChild`:
 **DATA:** 12/11/2025  
 **STATUS:** ✅ TODOS OS BUGS CORRIGIDOS  
 **PRÓXIMO PASSO:** TESTAR E APROVEITAR! 🎉
-

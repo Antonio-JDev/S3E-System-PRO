@@ -2,7 +2,9 @@
 
 ## 🔧 **PROBLEMA:**
 
-Quando o backend retornava os itens do orçamento, **NÃO** incluía os dados da cotação (relação `cotacao`). Por isso, no frontend não tinha acesso a:
+Quando o backend retornava os itens do orçamento, **NÃO** incluía os dados da
+cotação (relação `cotacao`). Por isso, no frontend não tinha acesso a:
+
 - `item.cotacao.dataAtualizacao` (para exibir a flag)
 - `item.tipo` (para saber se é cotação)
 
@@ -15,6 +17,7 @@ Quando o backend retornava os itens do orçamento, **NÃO** incluía os dados da
 ### **1. Listar Orçamentos (linha ~15-29):**
 
 **ANTES:**
+
 ```typescript
 items: {
   include: {
@@ -26,13 +29,14 @@ items: {
 ```
 
 **DEPOIS:**
+
 ```typescript
 items: {
   include: {
     material: { select: { id, nome, sku } },
     kit: { select: { id, nome } },
     cotacao: {  // ✅ NOVO
-      select: { 
+      select: {
         id: true,
         nome: true,
         dataAtualizacao: true,
@@ -46,6 +50,7 @@ items: {
 ### **2. Buscar Orçamento por ID (linha ~43-61):**
 
 **ANTES:**
+
 ```typescript
 items: {
   include: {
@@ -57,6 +62,7 @@ items: {
 ```
 
 **DEPOIS:**
+
 ```typescript
 items: {
   include: {
@@ -72,6 +78,7 @@ items: {
 ## 🎯 **RESULTADO:**
 
 Agora o backend retorna:
+
 ```json
 {
   "items": [
@@ -99,14 +106,16 @@ Agora o backend retorna:
 
 ```tsx
 // Agora funciona!
-{item.cotacao && (
-  <div>
-    📦 Banco Frio • {new Date(item.cotacao.dataAtualizacao).toLocaleDateString()}
-  </div>
-)}
+{
+  item.cotacao && (
+    <div>
+      📦 Banco Frio •{" "}
+      {new Date(item.cotacao.dataAtualizacao).toLocaleDateString()}
+    </div>
+  );
+}
 ```
 
 ---
 
 **Status:** ✅ BACKEND CORRIGIDO
-

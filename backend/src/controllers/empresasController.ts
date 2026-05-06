@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export class EmpresasController {
   static async listarEmpresas(req: Request, res: Response): Promise<void> {
@@ -68,7 +66,9 @@ export class EmpresasController {
         regimeTributario,
         certificadoPath,
         certificadoSenha,
-        certificadoValidade
+        certificadoValidade,
+        aliquotaMaterial,
+        aliquotaServico
       } = req.body;
 
       // Validação básica
@@ -118,7 +118,9 @@ export class EmpresasController {
           regimeTributario,
           certificadoPath,
           certificadoSenha,
-          certificadoValidade: certificadoValidade ? new Date(certificadoValidade) : null
+          certificadoValidade: certificadoValidade ? new Date(certificadoValidade) : null,
+          aliquotaMaterial: aliquotaMaterial != null ? Number(aliquotaMaterial) : 8,
+          aliquotaServico: aliquotaServico != null ? Number(aliquotaServico) : 8
         }
       });
 
@@ -150,7 +152,9 @@ export class EmpresasController {
         certificadoPath,
         certificadoSenha,
         certificadoValidade,
-        ativo
+        ativo,
+        aliquotaMaterial,
+        aliquotaServico
       } = req.body;
 
       // Verificar se empresa existe
@@ -205,7 +209,9 @@ export class EmpresasController {
           certificadoPath,
           certificadoSenha,
           certificadoValidade: certificadoValidade ? new Date(certificadoValidade) : undefined,
-          ativo
+          ativo,
+          aliquotaMaterial: aliquotaMaterial != null ? Number(aliquotaMaterial) : undefined,
+          aliquotaServico: aliquotaServico != null ? Number(aliquotaServico) : undefined
         }
       });
 
@@ -228,6 +234,49 @@ export class EmpresasController {
     } catch (error: any) {
       console.error('Erro ao desativar empresa:', error);
       res.status(500).json({ success: false, message: 'Erro ao desativar empresa', error: error.message });
+    }
+  }
+
+  /**
+   * PATCH /api/empresas/:id/numero-nfe
+   * Atualiza último número NF-e e série para a empresa (sincronização manual)
+   * Body: { ultimoNumeroNFe?: number, serieNFe?: string }
+   * Acesso: admin
+   */
+  static async configurarNumeracaoNFe(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { ultimoNumeroNFe, serieNFe } = req.body as { ultimoNumeroNFe?: number; serieNFe?: string };
+
+      if (ultimoNumeroNFe !== undefined && (!Number.isInteger(Number(ultimoNumeroNFe)) || Number(ultimoNumeroNFe) < 0)) {
+        res.status(400).json({ success: false, message: 'ultimoNumeroNFe deve ser inteiro não-negativo' });
+        return;
+      }
+
+      const empresa = await prisma.empresaFiscal.findUnique({ where: { id } });
+      if (!empresa) {
+        res.status(404).json({ success: false, message: 'Empresa não encontrada' });
+        return;
+      }
+
+      const dataToUpdate: any = {};
+      if (ultimoNumeroNFe !== undefined) dataToUpdate.ultimoNumeroNFe = Number(ultimoNumeroNFe);
+      if (serieNFe !== undefined) dataToUpdate.serieNFe = (serieNFe || '').toString();
+
+      if (Object.keys(dataToUpdate).length === 0) {
+        res.status(200).json({ success: true, message: 'Nada a atualizar' });
+        return;
+      }
+
+      const updated = await prisma.empresaFiscal.update({
+        where: { id },
+        data: dataToUpdate
+      });
+
+      res.status(200).json({ success: true, data: updated });
+    } catch (error: any) {
+      console.error('Erro ao configurar numeração NF-e da empresa:', error);
+      res.status(500).json({ success: false, message: 'Erro ao configurar numeração NF-e', error: error.message });
     }
   }
 }

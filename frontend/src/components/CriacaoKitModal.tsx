@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
 import { identificarTipoMaterial, podeVenderEmMetroOuCm } from '../utils/unitConverter';
 import { servicosService, Servico } from '../services/servicosService';
+import { matchCrossSearch } from '../utils/searchUtils';
+import { roundMoney } from '../utils/currency';
 
 // Icons
 const XMarkIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -42,6 +44,7 @@ interface Material {
     preco: number;
     estoque: number;
     unidadeMedida: string;
+    ativo?: boolean;
     _isCotacao?: boolean;
     _cotacaoId?: string;
     _itemCotacaoId?: string;
@@ -98,16 +101,15 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 setDescricaoKit(kitParaEditar.descricao || '');
                 setTipoKit(kitParaEditar.tipo || 'medidores');
                 
-                // Carregar itens do estoque real - usar valorVenda se disponível
+                // Carregar itens do estoque real - usar valorVenda se disponível (sempre 2 decimais)
                 const itensEstoque: ItemKit[] = (kitParaEditar.items || []).map((item: any) => {
-                    // Usar valorVenda do material se disponível, senão usar preco
-                    const precoVenda = item.material?.valorVenda || item.material?.preco || 0;
+                    const precoVenda = roundMoney(item.material?.valorVenda || item.material?.preco || 0);
                     return {
                         materialId: item.material?.id || item.materialId,
                         nome: item.material?.nome || 'Material',
                         quantidade: item.quantidade,
                         precoUnit: precoVenda,
-                        subtotal: item.quantidade * precoVenda,
+                        subtotal: roundMoney(item.quantidade * precoVenda),
                         unidadeMedida: item.material?.unidadeMedida || 'un',
                         isCotacao: false
                     };
@@ -146,24 +148,28 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 itensFaltantesArray.forEach((item: any) => {
                     // Se tem tipo 'SERVICO', é um serviço
                     if (item.tipo === 'SERVICO') {
+                        const pu = roundMoney(item.precoUnit || item.preco || 0);
+                        const q = item.quantidade || 0;
                         itensServicos.push({
                             materialId: `servico_${item.servicoId || item.id || ''}`,
                             nome: item.nome || item.servicoNome || 'Serviço',
-                            quantidade: item.quantidade || 0,
-                            precoUnit: item.precoUnit || item.preco || 0,
-                            subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                            quantidade: q,
+                            precoUnit: pu,
+                            subtotal: roundMoney(q * pu),
                             unidadeMedida: item.unidadeMedida || item.unidade || 'un',
                             isCotacao: false,
                             isServico: true
                         });
                     } else {
-                        // É um item do banco frio (cotação)
+                        // É um item do banco frio (cotação) - sempre 2 decimais
+                        const pu = roundMoney(item.precoUnit || item.preco || 0);
+                        const q = item.quantidade || 0;
                         itensBancoFrio.push({
                             materialId: `cotacao_${item.cotacaoId || item.id || ''}`,
                             nome: item.nome || item.materialNome || 'Item do Banco Frio',
-                            quantidade: item.quantidade || 0,
-                            precoUnit: item.precoUnit || item.preco || 0,
-                            subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                            quantidade: q,
+                            precoUnit: pu,
+                            subtotal: roundMoney(q * pu),
                             unidadeMedida: item.unidadeMedida || 'un',
                             isCotacao: true,
                             dataUltimaCotacao: item.dataUltimaCotacao || item.dataAtualizacao
@@ -194,12 +200,11 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 // Buscar material atualizado
                 const materialAtualizado = materiais.find(m => m.id === item.materialId);
                 if (materialAtualizado) {
-                    // Usar valorVenda se disponível, senão usar preco
-                    const novoPreco = (materialAtualizado as any).valorVenda || materialAtualizado.preco || item.precoUnit;
+                    const novoPreco = roundMoney((materialAtualizado as any).valorVenda || materialAtualizado.preco || item.precoUnit);
                     return {
                         ...item,
                         precoUnit: novoPreco,
-                        subtotal: item.quantidade * novoPreco
+                        subtotal: roundMoney(item.quantidade * novoPreco)
                     };
                 }
                 return item;
@@ -222,7 +227,8 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     valorVendaM: m.valorVendaM || null, // Valor de venda em metros
                     valorVendaCM: m.valorVendaCM || null, // Valor de venda em centímetros
                     estoque: m.estoque || 0,
-                    unidadeMedida: m.unidadeMedida || m.unidade || 'un'
+                    unidadeMedida: m.unidadeMedida || m.unidade || 'un',
+                    ativo: m.ativo !== false // Incluir materiais do estoque na busca (default ativo se não informado)
                 })));
             }
         } catch (error) {
@@ -247,8 +253,8 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     .filter((cotacao: any) => cotacao.ativo) // Só cotações ativas
                     .map((cotacao: any) => {
                         console.log(`📄 Cotação ${cotacao.id}:`, cotacao);
-                        const valorVenda = cotacao.valorVenda || (cotacao.valorUnitario || 0) * 1.4;
-                        
+                        // Valor de venda: usar o salvo (já com coeficiente 1.55 do sistema) ou fallback compra × 1.55
+                        const valorVenda = cotacao.valorVenda ?? Math.round((cotacao.valorUnitario || 0) * 1.55 * 100) / 100;
                         return {
                             id: `cotacao_${cotacao.id}`,
                             nome: cotacao.nome || 'Item da Cotação',
@@ -296,6 +302,38 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         }
     };
 
+    // Resultados combinados de busca cruzada (Estoque, Banco Frio e Serviços) — igual à página de orçamentos
+    const resultadosBuscaUniversal = useMemo(() => {
+        const termo = searchTerm.trim();
+        if (!termo) return [];
+
+        const termoLower = termo.toLowerCase();
+        const list: any[] = [];
+
+        // Materiais do estoque real — busca cruzada (palavra * ou % segunda palavra)
+        (materiais || []).filter(m => m && (m as any).ativo !== false).forEach(m => {
+            if (matchCrossSearch(termo, m.nome || '') || (m.descricao || '').toLowerCase().includes(termoLower) || (m.id || '').toLowerCase().includes(termoLower)) {
+                list.push({ tipo: 'MATERIAL', raw: m, id: m.id, descricao: m.nome });
+            }
+        });
+
+        // Cotações (banco frio)
+        (cotacoes || []).forEach(c => {
+            if (matchCrossSearch(termo, c.nome || '') || (c.descricao || '').toLowerCase().includes(termoLower) || (c.id || '').toLowerCase().includes(termoLower)) {
+                list.push({ tipo: 'COTACAO', raw: c, id: c.id, descricao: c.nome });
+            }
+        });
+
+        // Serviços
+        (servicos || []).forEach(s => {
+            if (matchCrossSearch(termo, s.nome || '') || (s.descricao || '').toLowerCase().includes(termoLower) || (s.codigo || '').toLowerCase().includes(termoLower)) {
+                list.push({ tipo: 'SERVICO', raw: s, id: s.id, descricao: s.nome });
+            }
+        });
+
+        return list;
+    }, [materiais, cotacoes, servicos, searchTerm]);
+
     const materiaisFiltrados = useMemo(() => {
         if (fonteDados === 'SERVICOS') {
             if (!searchTerm) {
@@ -311,22 +349,19 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
         const fonte = fonteDados === 'ESTOQUE' ? materiais : cotacoes;
         
         if (!searchTerm) {
-            return fonteDados === 'ESTOQUE' 
-                ? fonte.filter(m => m.estoque > 0) 
-                : fonte;
+            // Não filtrar por estoque aqui — permitir selecionar materiais esgotados também
+            return fonte;
         }
         
         return fonte.filter(m => {
-            const temEstoque = fonteDados === 'COTACOES' || m.estoque > 0;
-            return temEstoque &&
-                (m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            return (m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
                  (m.descricao?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
                  m.id.toLowerCase().includes(searchTerm.toLowerCase()));
         });
     }, [materiais, cotacoes, servicos, fonteDados, searchTerm]);
 
     const valorTotal = useMemo(() => {
-        return itensKit.reduce((total, item) => total + item.subtotal, 0);
+        return roundMoney(itensKit.reduce((total, item) => total + item.subtotal, 0));
     }, [itensKit]);
 
     const handleAdicionarItem = (material: Material, unidadeVendaParam?: string) => {
@@ -360,6 +395,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 // Para outras unidades, usar valorVenda padrão se disponível
                 precoVenda = (material as any).valorVenda || material.preco || 0;
             }
+            precoVenda = roundMoney(precoVenda);
             
             const novoItem: ItemKit = {
                 materialId: material.id,
@@ -396,12 +432,13 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
             return;
         }
 
+        const precoServico = roundMoney(servico.preco || 0);
         const novoItem: ItemKit = {
             materialId: `servico_${servico.id}`,
             nome: servico.nome,
             quantidade: 1,
-            precoUnit: servico.preco || 0,
-            subtotal: servico.preco || 0,
+            precoUnit: precoServico,
+            subtotal: precoServico,
             unidadeMedida: servico.unidade || 'un',
             isCotacao: false,
             isServico: true
@@ -420,14 +457,16 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
     };
 
     const handleAlterarQuantidade = (index: number, quantidade: number) => {
-        if (quantidade < 1) return;
-        
+        // Permitir quantidades decimais menores que 1 (ex: 0.5, 0.2, 0.7)
+        // Apenas bloquear valores não-positivos
+        if (quantidade <= 0) return;
+
         setItensKit(prev => prev.map((item, i) => {
             if (i === index) {
                 return {
                     ...item,
                     quantidade,
-                    subtotal: quantidade * item.precoUnit
+                    subtotal: roundMoney(quantidade * item.precoUnit)
                 };
             }
             return item;
@@ -461,25 +500,25 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
             // Combinar banco frio e serviços em um único array para o backend
             const itensExtras: any[] = [];
             
-            // Adicionar itens do banco frio
+            // Adicionar itens do banco frio (precoUnit sempre 2 decimais)
             if (itensBancoFrio.length > 0) {
                 itensExtras.push(...itensBancoFrio.map(item => ({
                     cotacaoId: item.materialId.replace('cotacao_', ''), // Remove prefixo
                     nome: item.nome,
                     quantidade: item.quantidade,
-                    precoUnit: item.precoUnit,
+                    precoUnit: roundMoney(item.precoUnit),
                     dataUltimaCotacao: item.dataUltimaCotacao,
                     tipo: 'COTACAO' as const
                 })));
             }
             
-            // Adicionar serviços
+            // Adicionar serviços (precoUnit sempre 2 decimais)
             if (itensServicos.length > 0) {
                 itensExtras.push(...itensServicos.map(item => ({
                     servicoId: item.materialId.replace('servico_', ''), // Remove prefixo
                     nome: item.nome,
                     quantidade: item.quantidade,
-                    precoUnit: item.precoUnit,
+                    precoUnit: roundMoney(item.precoUnit),
                     tipo: 'SERVICO' as const
                 })));
             }
@@ -488,7 +527,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                 nome: nomeKit,
                 descricao: descricaoKit,
                 tipo: tipoKit,
-                preco: valorTotal,
+                preco: valorTotal, // já roundMoney no useMemo
                 items: itensEstoqueReal.map(item => ({
                     materialId: item.materialId,
                     quantidade: item.quantidade
@@ -568,7 +607,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                                 {modoEdicao 
                                     ? 'Atualize a composição e informações do kit'
-                                    : 'Monte um kit personalizado com materiais do estoque ou cotações'}
+                                    : 'Monte um kit com materiais cadastrados, cotações ou serviços — pode incluir itens mesmo com estoque zerado'}
                             </p>
                         </div>
                     </div>
@@ -615,7 +654,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                             Descrição (Opcional)
                         </label>
                         <textarea
@@ -623,7 +662,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                             onChange={(e) => setDescricaoKit(e.target.value)}
                             placeholder="Descreva os componentes e finalidade deste kit..."
                             rows={3}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         />
                     </div>
 
@@ -633,17 +672,22 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                             <div>
                                 <h3 className="font-semibold text-gray-800 dark:text-white">Fonte de Dados</h3>
                                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                    {fonteDados === 'ESTOQUE' && 'Usando materiais do estoque real'}
+                                    {fonteDados === 'ESTOQUE' && 'Materiais cadastrados no sistema (independente da quantidade em estoque)'}
                                     {fonteDados === 'COTACOES' && 'Usando materiais do banco frio (cotações)'}
                                     {fonteDados === 'SERVICOS' && 'Usando serviços disponíveis'}
                                 </p>
+                                {fonteDados === 'ESTOQUE' && (
+                                    <p className="text-xs text-green-700 dark:text-green-300 mt-2 font-medium">
+                                        ✓ Qualquer material cadastrado pode ser adicionado ao kit, mesmo com estoque zerado.
+                                    </p>
+                                )}
                                 {fonteDados === 'COTACOES' && (
                                     <p className="text-xs text-blue-700 mt-2 font-medium">
                                         ℹ️ Itens do banco frio podem ser adicionados ao kit. Eles devem ser comprados antes de usar em obras.
                                     </p>
                                 )}
                                 {fonteDados === 'SERVICOS' && (
-                                    <p className="text-xs text-purple-700 mt-2 font-medium">
+                                    <p className="text-xs text-purple-700 dark:text-purple-300 mt-2 font-medium">
                                         ℹ️ Serviços podem ser adicionados ao kit para criar kits personalizados completos.
                                     </p>
                                 )}
@@ -657,7 +701,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                     className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
                                         fonteDados === 'ESTOQUE'
                                             ? 'bg-green-600 text-white shadow-md'
-                                            : 'bg-white text-gray-700 hover:bg-gray-50'
+                                            : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
                                     }`}
                                 >
                                     <span>📦</span>
@@ -698,13 +742,13 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     {/* Layout em 2 colunas: Lista de materiais disponíveis + Itens do Kit */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Coluna 1: Materiais Disponíveis */}
-                        <div className="border border-gray-200 rounded-xl p-4">
+                        <div className="border border-gray-200 dark:border-gray-600 rounded-xl p-4">
                             <div className="flex justify-between items-center mb-3">
-                                <h3 className="font-semibold text-gray-800">
-                                    {fonteDados === 'SERVICOS' ? 'Serviços Disponíveis' : 'Materiais Disponíveis'}
+                                <h3 className="font-semibold text-gray-800 dark:text-white">
+                                    {fonteDados === 'SERVICOS' ? 'Serviços Disponíveis' : 'Materiais Cadastrados'}
                                 </h3>
-                                <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                                    {fonteDados === 'ESTOQUE' ? materiais.length : fonteDados === 'COTACOES' ? cotacoes.length : servicos.length} disponíveis
+                                <span className="text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
+                                    {searchTerm.trim() ? resultadosBuscaUniversal.length : (fonteDados === 'ESTOQUE' ? materiais.length : fonteDados === 'COTACOES' ? cotacoes.length : servicos.length)} disponíveis
                                 </span>
                             </div>
                             
@@ -713,7 +757,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                 <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder={fonteDados === 'SERVICOS' ? 'Buscar serviço...' : 'Buscar material...'}
+                                    placeholder={fonteDados === 'SERVICOS' ? 'Buscar serviço (ex: palavra * outra)...' : 'Buscar material (ex: palavra * ou % outra)...'}
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-white rounded-lg focus:ring-2 focus:ring-teal-500"
@@ -724,16 +768,65 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                             <div className="max-h-96 overflow-y-auto space-y-2">
                                 {loading ? (
                                     <div className="text-center py-8">
-                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600 mx-auto"></div>
-                                        <p className="text-sm text-gray-600 mt-2">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600 dark:border-teal-400 mx-auto"></div>
+                                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                                             {fonteDados === 'SERVICOS' ? 'Carregando serviços...' : 'Carregando materiais...'}
                                         </p>
                                     </div>
+                                ) : (searchTerm.trim() ? (
+                                    // Resultado da busca universal (Materiais, Cotações, Serviços)
+                                    resultadosBuscaUniversal.length === 0 ? (
+                                        <div className="text-center py-8">
+                                            <p className="text-gray-500 dark:text-gray-400 font-medium">
+                                                Nenhum item encontrado
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        resultadosBuscaUniversal.map((linha: any) => (
+                                            <div
+                                                key={linha.id}
+                                                className={`p-3 rounded-lg border ${linha.tipo === 'SERVICO' ? 'bg-purple-50 border-purple-200 dark:bg-purple-900/20 dark:border-purple-700' : linha.tipo === 'COTACAO' ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-700' : 'bg-white border-gray-200 dark:bg-gray-700 dark:border-gray-600'}`}
+                                            >
+                                                <div className="flex justify-between items-start gap-2">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            {linha.tipo === 'SERVICO' && <span className="text-lg">⚙️</span>}
+                                                            {linha.tipo === 'COTACAO' && <span className="text-lg">❄️</span>}
+                                                            <p className={`font-medium text-sm truncate ${linha.tipo === 'SERVICO' ? 'text-purple-900' : linha.tipo === 'COTACAO' ? 'text-blue-900' : 'text-gray-900'}`}>
+                                                                {linha.descricao}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                                            {linha.tipo === 'MATERIAL' && (
+                                                                <span className="text-xs text-gray-600">
+                                                                    Estoque: {(linha.raw as any).estoque ?? 0} {(linha.raw as any).unidadeMedida || 'un'}
+                                                                </span>
+                                                            )}
+                                                            <span className="text-xs font-semibold text-teal-700">
+                                                                R$ {(((linha.raw as any).valorVenda || (linha.raw as any).preco) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {linha.tipo === 'SERVICO' ? (
+                                                            <button onClick={() => handleAdicionarServico(linha.raw)} className="p-2 text-purple-600 hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-lg transition-colors">
+                                                                <PlusIcon className="w-5 h-5" />
+                                                            </button>
+                                                        ) : (
+                                                            <button onClick={() => handleAdicionarItem(linha.raw)} className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors">
+                                                                <PlusIcon className="w-5 h-5" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )
                                 ) : materiaisFiltrados.length === 0 ? (
                                     <div className="text-center py-8">
-                                        <p className="text-gray-500 font-medium">
+                                        <p className="text-gray-500 dark:text-gray-400 font-medium">
                                             {fonteDados === 'ESTOQUE' 
-                                                ? 'Nenhum material em estoque encontrado' 
+                                                ? 'Nenhum material cadastrado encontrado' 
                                                 : fonteDados === 'COTACOES'
                                                 ? 'Nenhum item de cotação encontrado'
                                                 : 'Nenhum serviço encontrado'}
@@ -754,7 +847,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                     (materiaisFiltrados as any[]).map((servico: Servico) => (
                                         <div
                                             key={servico.id}
-                                            className="bg-purple-50 p-3 rounded-lg hover:bg-purple-100 transition-colors border border-purple-200"
+                                            className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors border border-purple-200 dark:border-purple-700"
                                         >
                                             <div className="flex justify-between items-start gap-2">
                                                 <div className="flex-1 min-w-0">
@@ -762,30 +855,30 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                         {servico.nome}
                                                     </p>
                                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                                        <span className="text-xs text-gray-600">
+                                                        <span className="text-xs text-gray-600 dark:text-gray-400">
                                                             Código: {servico.codigo}
                                                         </span>
-                                                        <span className="text-xs font-semibold text-purple-700">
-                                                            R$ {(servico.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+                                                            R$ {(servico.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
-                                                        <span className="text-xs text-gray-600">
+                                                        <span className="text-xs text-gray-600 dark:text-gray-400">
                                                             Unidade: {servico.unidade || 'un'}
                                                         </span>
                                                         {servico.tipoServico && (
-                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300">
                                                                 {servico.tipoServico}
                                                             </span>
                                                         )}
                                                     </div>
                                                     {servico.descricao && (
-                                                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
                                                             {servico.descricao}
                                                         </p>
                                                     )}
                                                 </div>
                                                 <button
                                                     onClick={() => handleAdicionarServico(servico)}
-                                                    className="p-2 text-purple-600 hover:bg-purple-200 rounded-lg transition-colors flex-shrink-0"
+                                                    className="p-2 text-purple-600 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50 rounded-lg transition-colors flex-shrink-0"
                                                     title="Adicionar serviço ao kit"
                                                 >
                                                     <PlusIcon className="w-5 h-5" />
@@ -812,7 +905,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                             </span>
                                                         )}
                                                         <span className="text-xs font-semibold text-teal-700">
-                                                            R$ {((material as any).valorVenda || material.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            R$ {((material as any).valorVenda || material.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                         </span>
                                                         {!((material as any).valorVenda) && (
                                                             <span className="text-xs text-orange-600">
@@ -838,40 +931,17 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                         )}
                                                     </div>
                                                 </div>
-                                                {(() => {
-                                                    const temSelecaoUnidade = podeVenderEmMetroOuCm(material.unidadeMedida);
-                                                    
-                                                    return temSelecaoUnidade ? (
-                                                        <div className="flex gap-1 flex-shrink-0">
-                                                            <button
-                                                                onClick={() => handleAdicionarItem(material, 'm')}
-                                                                className="px-2 py-1.5 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors font-medium"
-                                                                title="Adicionar em metros"
-                                                            >
-                                                                + m
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleAdicionarItem(material, 'cm')}
-                                                                className="px-2 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-                                                                title="Adicionar em centímetros"
-                                                            >
-                                                                + cm
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => handleAdicionarItem(material)}
-                                                            className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors flex-shrink-0"
-                                                            title="Adicionar ao kit"
-                                                        >
-                                                            <PlusIcon className="w-5 h-5" />
-                                                        </button>
-                                                    );
-                                                })()}
+                                                <button
+                                                    onClick={() => handleAdicionarItem(material)}
+                                                    className="p-2 text-teal-600 hover:bg-teal-100 rounded-lg transition-colors flex-shrink-0"
+                                                    title="Adicionar ao kit"
+                                                >
+                                                    <PlusIcon className="w-5 h-5" />
+                                                </button>
                                             </div>
                                         </div>
                                     ))
-                                )}
+                                ))}
                             </div>
                         </div>
 
@@ -953,20 +1023,21 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                                     <label className="text-xs text-gray-600 font-medium">Qtd:</label>
                                                     <input
                                                         type="number"
-                                                        min="1"
+                                                        min="0.1"
+                                                        step="0.1"
                                                         value={item.quantidade}
-                                                        onChange={(e) => handleAlterarQuantidade(index, parseInt(e.target.value) || 1)}
-                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-teal-500"
+                                                        onChange={(e) => handleAlterarQuantidade(index, parseFloat(e.target.value) || 1)}
+                                                        className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-teal-500"
                                                     />
                                                     <span className="text-xs text-gray-600">{item.unidadeMedida}</span>
                                                 </div>
                                                 <div className="text-right flex-1">
-                                                    <p className="text-xs text-gray-600 dark:text-gray-400">Unit.: R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400">Unit.: R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                                     <p className={`text-sm font-bold ${
                                                         item.isServico ? 'text-purple-700' :
                                                         item.isCotacao ? 'text-blue-700' : 'text-teal-700'
                                                     }`}>
-                                                        Subtotal: R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        Subtotal: R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </p>
                                                 </div>
                                             </div>
@@ -982,7 +1053,7 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                                         <div className="flex justify-between items-center">
                                             <span className="text-sm font-semibold text-gray-700">VALOR TOTAL DO KIT:</span>
                                             <span className="text-2xl font-bold text-teal-700">
-                                                R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </span>
                                         </div>
                                     </div>

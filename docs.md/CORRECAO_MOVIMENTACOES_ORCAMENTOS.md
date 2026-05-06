@@ -5,14 +5,17 @@
 ### **🔧 Página de Movimentações**
 
 #### **Problemas Identificados:**
+
 - ❌ **Erro**: Componente usando dados mock (`catalogData`)
-- ❌ **Erro**: Referências a tipos incorretos (`Product` em vez de `MaterialItem`)
+- ❌ **Erro**: Referências a tipos incorretos (`Product` em vez de
+  `MaterialItem`)
 - ❌ **Erro**: Falta de integração com API
 
 #### **Correções Implementadas:**
+
 - ✅ **Migração para Axios**: Substituído dados mock por chamadas à API
 - ✅ **Tipos Corretos**: Usando `MaterialItem` em vez de `Product`
-- ✅ **Endpoints Corretos**: 
+- ✅ **Endpoints Corretos**:
   - `ENDPOINTS.MOVIMENTACOES` para movimentações
   - `ENDPOINTS.MATERIAIS` para materiais
 - ✅ **Funcionalidades Completas**:
@@ -24,6 +27,7 @@
   - Estados de loading e erro
 
 #### **Funcionalidades da Página:**
+
 1. **Listagem de Movimentações**: Mostra todas as entradas e saídas
 2. **Registro de Entrada**: Modal para registrar entrada de materiais
 3. **Registro de Saída**: Modal para registrar saída de materiais
@@ -36,14 +40,19 @@
 ### **🔧 Página de Orçamentos**
 
 #### **Problemas Identificados:**
+
 - ❌ **Erro**: Componente muito complexo causando erro 500
-- ❌ **Erro**: Tipos incorretos (`BudgetStatus.Reprovado`, `BudgetStatus.Expirado`)
-- ❌ **Erro**: Propriedades inexistentes (`budget.client`, `budget.validUntil`, `budget.notes`)
+- ❌ **Erro**: Tipos incorretos (`BudgetStatus.Reprovado`,
+  `BudgetStatus.Expirado`)
+- ❌ **Erro**: Propriedades inexistentes (`budget.client`, `budget.validUntil`,
+  `budget.notes`)
 - ❌ **Erro**: Método `patch` não existe no `axiosApiService`
 
 #### **Correções Implementadas:**
-- ✅ **Simplificação**: Versão simplificada focada nas funcionalidades essenciais
-- ✅ **Tipos Corretos**: 
+
+- ✅ **Simplificação**: Versão simplificada focada nas funcionalidades
+  essenciais
+- ✅ **Tipos Corretos**:
   - `BudgetStatus.Recusado` em vez de `Reprovado`
   - Removido `BudgetStatus.Expirado` (não existe)
 - ✅ **Propriedades Corretas**:
@@ -54,6 +63,7 @@
 - ✅ **Integração com API**: Carregamento de dados via Axios
 
 #### **Funcionalidades da Página:**
+
 1. **Listagem de Orçamentos**: Cards com informações principais
 2. **Criação de Orçamentos**: Modal para criar novos orçamentos
 3. **Edição de Orçamentos**: Modal para editar orçamentos existentes
@@ -67,11 +77,13 @@
 ## **📊 ENDPOINTS UTILIZADOS**
 
 ### **Movimentações:**
+
 - `GET /api/movimentacoes` - Listar movimentações
 - `POST /api/movimentacoes` - Criar movimentação
 - `GET /api/materiais` - Listar materiais
 
 ### **Orçamentos:**
+
 - `GET /api/orcamentos` - Listar orçamentos
 - `POST /api/orcamentos` - Criar orçamento
 - `PUT /api/orcamentos/:id` - Atualizar orçamento
@@ -84,6 +96,7 @@
 ## **🔧 ESTRUTURA DOS DADOS**
 
 ### **Movimentação:**
+
 ```typescript
 interface StockMovement {
   id: string;
@@ -102,6 +115,7 @@ interface StockMovement {
 ```
 
 ### **Orçamento:**
+
 ```typescript
 interface Budget {
   id: string;
@@ -123,12 +137,14 @@ interface Budget {
 ## **✅ STATUS FINAL**
 
 ### **Página de Movimentações:**
+
 - ✅ **Funcionando**: Carregamento de dados da API
 - ✅ **Funcionando**: Registro de entrada/saída
 - ✅ **Funcionando**: Filtros e busca
 - ✅ **Funcionando**: Estados de loading/erro
 
 ### **Página de Orçamentos:**
+
 - ✅ **Funcionando**: Carregamento de dados da API
 - ✅ **Funcionando**: CRUD completo
 - ✅ **Funcionando**: Controle de status
@@ -140,6 +156,7 @@ interface Budget {
 ## **🎯 FUNCIONALIDADES IMPLEMENTADAS**
 
 ### **Movimentações:**
+
 1. **Controle de Estoque**: Entrada e saída de materiais
 2. **Rastreabilidade**: Histórico completo de movimentações
 3. **Validação**: Verificação de estoque disponível
@@ -147,6 +164,7 @@ interface Budget {
 5. **Busca**: Por material ou SKU
 
 ### **Orçamentos:**
+
 1. **Gestão Comercial**: Criação e edição de orçamentos
 2. **Controle de Status**: Aprovação/recusa de propostas
 3. **Integração**: Com clientes e materiais
@@ -157,9 +175,11 @@ interface Budget {
 
 ## **🚀 RESULTADO**
 
-**AMBAS AS PÁGINAS AGORA ESTÃO FUNCIONANDO CORRETAMENTE COM INTEGRAÇÃO COMPLETA AO BACKEND VIA AXIOS!**
+**AMBAS AS PÁGINAS AGORA ESTÃO FUNCIONANDO CORRETAMENTE COM INTEGRAÇÃO COMPLETA
+AO BACKEND VIA AXIOS!**
 
 ### **Próximos Passos:**
+
 1. **Testar** as funcionalidades de movimentação
 2. **Testar** o CRUD de orçamentos
 3. **Verificar** se os dados são carregados corretamente

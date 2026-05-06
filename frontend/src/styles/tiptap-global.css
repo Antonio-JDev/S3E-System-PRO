@@ -1,0 +1,401 @@
+/* ========================================
+   ESTILOS GLOBAIS PARA TIPTAP E PAGED.JS
+   ======================================== */
+
+/* Reset para elementos do TipTap - Simulação de folha A4 */
+.ProseMirror {
+  outline: none;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1f2937;
+  
+  /* Simula folha A4 */
+  width: 210mm;
+  max-width: 210mm;
+  min-height: 297mm;
+  background: white;
+  padding: 25mm; /* Margens típicas de documento */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin: 0 auto;
+}
+
+.ProseMirror p {
+  margin: 0 0 1rem 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  margin: 1.5rem 0 0.75rem 0;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.ProseMirror h1 { font-size: 24px; }
+.ProseMirror h2 { font-size: 20px; }
+.ProseMirror h3 { font-size: 18px; }
+.ProseMirror h4 { font-size: 16px; }
+.ProseMirror h5 { font-size: 14px; }
+.ProseMirror h6 { font-size: 12px; }
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 1rem 0;
+  padding-left: 2rem;
+}
+
+.ProseMirror li {
+  margin: 0.25rem 0;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  border: 1px solid #d1d5db;
+}
+
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid #d1d5db;
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ProseMirror table th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+  margin: 1rem 0;
+}
+
+.ProseMirror hr {
+  border: none;
+  border-top: 2px solid #e5e7eb;
+  margin: 2rem 0;
+}
+
+.ProseMirror blockquote {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid #e5e7eb;
+  background: #f9fafb;
+  font-style: italic;
+}
+
+.ProseMirror code {
+  background: #f3f4f6;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.875em;
+}
+
+.ProseMirror pre {
+  background: #f3f4f6;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Alinhamentos de texto */
+.ProseMirror [data-text-align="left"] {
+  text-align: left;
+}
+
+.ProseMirror [data-text-align="center"] {
+  text-align: center;
+}
+
+.ProseMirror [data-text-align="right"] {
+  text-align: right;
+}
+
+.ProseMirror [data-text-align="justify"] {
+  text-align: justify;
+}
+
+/* Seleção de tabela */
+.ProseMirror .selectedCell {
+  background: rgba(139, 92, 246, 0.1);
+  position: relative;
+}
+
+.ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(139, 92, 246, 0.2);
+  pointer-events: none;
+}
+
+/* Placeholder */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9ca3af;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Dark mode: área de edição como "folha branca" para o texto sempre visível (fundo claro + texto escuro) */
+.dark .ProseMirror {
+  background: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+.dark .ProseMirror h1,
+.dark .ProseMirror h2,
+.dark .ProseMirror h3,
+.dark .ProseMirror h4,
+.dark .ProseMirror h5,
+.dark .ProseMirror h6 {
+  color: #1f2937 !important;
+}
+
+.dark .ProseMirror table th {
+  background: #f3f4f6 !important;
+  color: #1f2937 !important;
+}
+
+.dark .ProseMirror table td,
+.dark .ProseMirror table th {
+  border-color: #d1d5db;
+}
+
+.dark .ProseMirror hr {
+  border-top-color: #e5e7eb;
+}
+
+.dark .ProseMirror blockquote {
+  background: #f9fafb;
+  border-left-color: #e5e7eb;
+  color: #374151;
+}
+
+.dark .ProseMirror code {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.dark .ProseMirror pre {
+  background: #f3f4f6;
+}
+
+.dark .ProseMirror pre code {
+  background: none;
+  color: inherit;
+}
+
+/* Placeholder visível no tema escuro (cinza escuro sobre fundo branco) */
+.dark .ProseMirror p.is-editor-empty:first-child::before {
+  color: #9ca3af !important;
+}
+
+/* ========================================
+   ESTILOS PARA SIMULAÇÃO A4
+   ======================================== */
+
+.a4-simulation {
+  background: #f5f5f5;
+  padding: 2rem;
+  min-height: 100vh;
+}
+
+.a4-page-container {
+  max-width: 210mm;
+  margin: 0 auto;
+  background: white;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.a4-page {
+  width: 210mm;
+  min-height: 297mm;
+  background: white;
+  margin: 0 auto;
+  padding: 20mm;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #333;
+  position: relative;
+}
+
+.a4-page-break {
+  page-break-before: always;
+  break-before: page;
+}
+
+/* ========================================
+   ESTILOS PARA IMPRESSÃO
+   ======================================== */
+
+@media print {
+  body {
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  .a4-simulation {
+    background: white;
+    padding: 0;
+  }
+
+  .a4-page-container {
+    box-shadow: none;
+    border-radius: 0;
+    max-width: none;
+  }
+
+  .a4-page {
+    box-shadow: none;
+    margin: 0;
+    padding: 20mm;
+    width: 100%;
+    min-height: 100vh;
+  }
+
+  .a4-page-break {
+    page-break-before: always;
+  }
+
+  /* Ocultar elementos não imprimíveis */
+  .no-print,
+  .toolbar,
+  .technical-editor-toolbar,
+  .loading-overlay {
+    display: none !important;
+  }
+
+  /* Ajustar cores para impressão */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Evitar quebras indesejadas */
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  table {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  img {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  blockquote {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Ajustar fontes para impressão */
+  body, .ProseMirror {
+    font-size: 11px !important;
+    line-height: 1.6 !important;
+  }
+
+  .a4-page {
+    font-size: 11px !important;
+  }
+}
+
+/* ========================================
+   ESTILOS PARA PAGED.JS
+   ======================================== */
+
+/* Paged.js removed - using browser native pagination and print CSS */
+
+/* ========================================
+   UTILITÁRIOS
+   ======================================== */
+
+.text-justify {
+  text-align: justify;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.no-break {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.page-break {
+  break-before: page;
+  page-break-before: always;
+}
+
+.section {
+  margin: 2rem 0;
+}
+
+.section h2 {
+  color: #1f2937;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+/* Dark mode para simulação */
+.dark .a4-simulation {
+  background: #111827;
+}
+
+.dark .a4-page {
+  background: white;
+  color: #333;
+}
+
+.dark .a4-simulation {
+  background: #111827;
+}
+
+.dark .section h2 {
+  color: #1f2937;
+}

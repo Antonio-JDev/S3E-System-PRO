@@ -53,12 +53,21 @@ export class EquipesController {
   async listarEquipes(req: Request, res: Response) {
     try {
       console.log('📋 [Controller] GET /api/equipes - Iniciando...');
-      const { ativa } = req.query;
-      console.log('🔍 [Controller] Query params:', { ativa });
-      
-      const equipes = await equipesService.listarEquipes(
-        ativa ? ativa === 'true' : undefined
-      );
+      const { ativa, todas } = req.query;
+      console.log('🔍 [Controller] Query params:', { ativa, todas });
+
+      let filtroAtiva: boolean | undefined;
+      if (todas === 'true') {
+        filtroAtiva = undefined;
+      } else if (ativa === 'true') {
+        filtroAtiva = true;
+      } else if (ativa === 'false') {
+        filtroAtiva = false;
+      } else {
+        filtroAtiva = true;
+      }
+
+      const equipes = await equipesService.listarEquipes(filtroAtiva);
 
       console.log(`✅ [Controller] ${equipes.length} equipes retornadas com sucesso`);
 

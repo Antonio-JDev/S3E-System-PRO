@@ -2,7 +2,7 @@ import * as forge from 'node-forge';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { SignedXml } from 'xml-crypto';
-import { DOMParser } from '@xmldom/xmldom';
+import { XMLSerializer } from '@xmldom/xmldom';
 
 /**
  * Serviço de Assinatura Digital para NF-e
@@ -14,19 +14,27 @@ export class NFeSignatureService {
    */
   static carregarCertificado(pfxPath: string, senha: string): { key: string; cert: string } {
     try {
+      console.log('🔐 [Certificado] Caminho PFX:', pfxPath);
+      console.log('🔐 [Certificado] Senha recebida:', senha ? `${senha.length} caracteres` : 'VAZIA');
+
       if (!fs.existsSync(pfxPath)) {
         throw new Error(`Certificado não encontrado em: ${pfxPath}`);
       }
 
       // Ler arquivo PFX (binário)
       const pfxBuffer = fs.readFileSync(pfxPath);
-      
+      console.log('🔐 [Certificado] Buffer lido:', pfxBuffer.length, 'bytes');
+
+      if (pfxBuffer.length === 0) {
+        throw new Error('Arquivo PFX está vazio. Verifique o volume/caminho no container.');
+      }
+
       // Converter buffer para binary string
       const pfxBinary = pfxBuffer.toString('binary');
-      
+
       // Converter DER para ASN1
       const asn1 = forge.asn1.fromDer(pfxBinary);
-      
+
       // Extrair PKCS12
       const pfx = forge.pkcs12.pkcs12FromAsn1(asn1, false, senha);
 
@@ -55,12 +63,15 @@ export class NFeSignatureService {
       }
 
       if (!privateKey || !certificate) {
+        console.error('🔐 [Certificado] Chave privada extraída:', !!privateKey, '| Certificado extraído:', !!certificate);
         throw new Error('Não foi possível extrair chave privada ou certificado do PFX. Verifique a senha.');
       }
 
       // Converter para PEM
       const keyPem = forge.pki.privateKeyToPem(privateKey);
       const certPem = forge.pki.certificateToPem(certificate);
+
+      console.log('🔐 [Certificado] Carregado com sucesso. keyPem:', keyPem.length, 'chars | certPem:', certPem.length, 'chars');
 
       return {
         key: keyPem,
@@ -76,64 +87,105 @@ export class NFeSignatureService {
 
   /**
    * Assina XML da NF-e usando XML-DSig
+   * IMPLEMENTA CORREÇÕES RIGOROSAS PARA RESOLVER REJEIÇÃO 297
    */
   static assinarXML(xml: string, keyPem: string, certPem: string): string {
     try {
-      // Criar assinatura XML-DSig
-      const signedXml = new SignedXml();
+      console.log('🔐 [Assinatura] Iniciando assinatura rigorosa contra Rejeição 297');
+      console.log('🔐 [Assinatura] keyPem length:', keyPem?.length ?? 0, '| certPem length:', certPem?.length ?? 0);
       
-      // Configurar referência ao elemento infNFe
-      // xml-crypto 6.x: addReference aceita objeto com propriedades
-      (signedXml as any).addReference({
-        xpath: "//*[local-name()='infNFe']",
-        transforms: [
-          "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
-          "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
-        ],
-        digestAlgorithm: "http://www.w3.org/2000/09/xmldsig#sha1"
-      });
+      if (!keyPem || keyPem.length < 100) {
+        throw new Error('Chave privada PEM inválida ou vazia (carregamento do certificado falhou?).');
+      }
+      if (!certPem || certPem.length < 100) {
+        throw new Error('Certificado PEM inválido ou vazio.');
+      }
 
-      // Converter chave PEM para formato que xml-crypto aceita
-      // xml-crypto espera uma chave privada em formato que possa ser usada com crypto
-      const signingKey = crypto.createPrivateKey({
-        key: keyPem,
+      // ========== XML PARA ASSINATURA (normalizar + remover BOM) ==========
+      const xmlParaAssinar = xml
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/^\uFEFF/, '')
+        .trim();
+      console.log('🔧 [Assinatura] XML para assinar:', xmlParaAssinar.length, 'caracteres');
+
+      if (!xmlParaAssinar.includes('<infNFe') && !xmlParaAssinar.includes('</infNFe>')) {
+        throw new Error('XML não contém o elemento infNFe necessário para a referência de assinatura.');
+      }
+
+      // Normalizar PEM
+      const keyPemNormalizado = keyPem.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      const certPemNormalizado = certPem.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      const privateKeyObj = crypto.createPrivateKey({
+        key: keyPemNormalizado,
         format: 'pem'
       });
 
-      // Configurar chave de assinatura (usando any para compatibilidade com xml-crypto 6.x)
-      // @ts-ignore - xml-crypto 6.x tem API diferente
-      signedXml.signingKey = signingKey;
+      // ========== SignedXml: C14N e referência SEM URI (só XPath simples) ==========
+      console.log('🔧 [Assinatura] Configurando SignedXml com referência XPath (sem URI)...');
+      const signedXml = new SignedXml({
+        privateKey: privateKeyObj,
+        publicCert: certPemNormalizado,
+        signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+        canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
+      });
+      (signedXml as any).idAttributes = ['Id'];
 
-      // Configurar KeyInfo com certificado
-      // @ts-ignore - xml-crypto 6.x tem API diferente
-      signedXml.keyInfoProvider = {
-        getKeyInfo: (key: any, prefix: string) => {
-          // Extrair certificado em Base64 (remover headers PEM)
-          const certLines = certPem.split('\n');
-          const certBase64 = certLines
-            .filter(line => !line.includes('BEGIN') && !line.includes('END') && line.trim())
-            .join('')
-            .trim();
-          
-          return `<X509Data><X509Certificate>${certBase64}</X509Certificate></X509Data>`;
-        }
-      };
+      // Referência apenas por XPath (evita createReferences com URI que gera XPath quebrado no parser).
+      // Forma explícita: seletor que ignora namespace (local-name) sem ponto, compatível com xpath/xmldom.
+      const xpathRef = "//*[local-name()='infNFe']";
+      const transforms = [
+        'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+        'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'
+      ];
+      const digestAlgo = 'http://www.w3.org/2000/09/xmldsig#sha1';
+      (signedXml as any).addReference({ xpath: xpathRef, transforms, digestAlgorithm: digestAlgo });
 
-      // Assinar XML
-      // @ts-ignore - xml-crypto 6.x tem API diferente
-      signedXml.computeSignature(xml, {
+      // Passar string para computeSignature: xml-crypto faz o parse internamente e evita "invalid doc source" / nodeType.
+      console.log('🔧 [Assinatura] Executando computeSignature (string, location after infNFe)...');
+      (signedXml as any).computeSignature(xmlParaAssinar, {
+        prefix: 'ds',
         location: {
           reference: "//*[local-name()='infNFe']",
-          action: "after"
+          action: 'after'
         }
       });
-
-      // Obter XML assinado
-      const xmlAssinado = signedXml.getSignedXml();
+      let out = signedXml.getSignedXml();
+      let xmlAssinado: string = typeof out === 'string' ? out : new XMLSerializer().serializeToString(out as Document);
+      // A. Garantir cabeçalho único (evita 215): algumas versões do xml-crypto omitem ou duplicam a declaração.
+      const declaracao = '<?xml version="1.0" encoding="UTF-8"?>';
+      if (!xmlAssinado.trimStart().startsWith('<?xml')) {
+        xmlAssinado = declaracao + xmlAssinado.trimStart();
+        console.log('🔧 [Assinatura] Declaração <?xml adicionada ao XML assinado.');
+      }
+      const multiplasDeclaracoes = (xmlAssinado.match(/<\?xml\s+version=/g) || []).length;
+      if (multiplasDeclaracoes > 1) {
+        xmlAssinado = xmlAssinado.replace(/<\?xml\s+version="[^"]*"\s+encoding="[^"]*"\s*\?>\s*/g, '').trimStart();
+        xmlAssinado = declaracao + xmlAssinado;
+        console.log('🔧 [Assinatura] Duplicidade de declaração XML removida.');
+      }
+      // Sem location, a lib pode colocar Signature após </NFe>. Mover para dentro de NFe (após </infNFe>).
+      if (xmlAssinado.includes('</infNFe>') && xmlAssinado.includes('<Signature')) {
+        const sigMatch = xmlAssinado.match(/<Signature[^>]*>[\s\S]*?<\/Signature>/);
+        if (sigMatch) {
+          const sigBlock = sigMatch[0];
+          const withoutSig = xmlAssinado.replace(sigMatch[0], '');
+          const afterInf = '</infNFe>';
+          if (!withoutSig.includes(afterInf + sigBlock)) {
+            const idx = withoutSig.indexOf(afterInf);
+            if (idx !== -1) {
+              xmlAssinado =
+                withoutSig.slice(0, idx + afterInf.length) + sigBlock + withoutSig.slice(idx + afterInf.length);
+            }
+          }
+        }
+      }
+      console.log('🔧 [Assinatura] XML assinado obtido:', xmlAssinado.length, 'caracteres');
+      console.log('✅ [Assinatura] Assinatura concluída. Tamanho final:', xmlAssinado.length, 'caracteres');
 
       return xmlAssinado;
     } catch (error: any) {
-      console.error('Erro ao assinar XML:', error);
+      console.error('❌ [Erro Assinatura]', error);
       throw new Error(`Erro ao assinar XML: ${error.message}`);
     }
   }

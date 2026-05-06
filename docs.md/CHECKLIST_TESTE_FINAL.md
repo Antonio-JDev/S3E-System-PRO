@@ -22,6 +22,7 @@ npm run dev
 ```
 
 **Aguarde ver:**
+
 ```
 ✅ Servidor rodando na porta 3000
 ```
@@ -48,6 +49,7 @@ npm run dev
 ```
 
 **✅ Console Frontend DEVE mostrar:**
+
 ```
 ✅ Dados extraídos com sucesso: { totalMateriais: XX }
 🧹 Dados limpos (sem wrappers): { temVersao: true, ... }
@@ -55,6 +57,7 @@ npm run dev
 ```
 
 **❌ NÃO PODE APARECER:**
+
 ```
 ❌ "Cannot read properties of undefined"
 ❌ "status code 400"
@@ -70,6 +73,7 @@ npm run dev
 ```
 
 **✅ DEVE COMEÇAR ASSIM:**
+
 ```json
 {
   "versao": "1.0",
@@ -87,6 +91,7 @@ npm run dev
 ```
 
 **❌ NÃO PODE TER:**
+
 ```json
 {
   "success": true,     ← ❌ NÃO!
@@ -106,13 +111,14 @@ npm run dev
 ```
 
 **✅ Backend Console DEVE mostrar:**
+
 ```
 🔐 Token encontrado: ...
 ✅ Token válido
 📥 Preview - Recebendo arquivo...
 📂 Lendo arquivo JSON: ...
 📝 Conteúdo do arquivo (primeiros 200 chars): { "versao": "1.0", ...
-📄 JSON parseado: { 
+📄 JSON parseado: {
   versao: '1.0',
   empresa: 'S3E Engenharia',
   totalMateriais: XX,
@@ -122,6 +128,7 @@ npm run dev
 ```
 
 **✅ Frontend DEVE mostrar:**
+
 ```
 ℹ️ Nenhuma alteração detectada
 
@@ -132,6 +139,7 @@ npm run dev
 ```
 
 **❌ NÃO PODE APARECER:**
+
 ```
 ❌ POST /api/materiais/preview-importacao 400
 ❌ versao: undefined
@@ -151,6 +159,7 @@ npm run dev
 ```
 
 **✅ DEVE mostrar:**
+
 ```
 ✅ 1 material COM alteração:
    • Material X: R$ 100 → R$ 150 (+50%)
@@ -168,6 +177,7 @@ npm run dev
 ```
 
 **✅ Backend DEVE logar:**
+
 ```
 💾 Atualizando preços...
 ✅ Preço atualizado: Material X
@@ -176,8 +186,9 @@ npm run dev
 ```
 
 **✅ Frontend DEVE mostrar:**
+
 ```
-✅ Preços atualizados com sucesso! 
+✅ Preços atualizados com sucesso!
 1 itens foram atualizados.
 ```
 
@@ -190,6 +201,7 @@ npm run dev
 ```
 
 **✅ DEVE:**
+
 - Abrir nova aba
 - Mostrar lista de materiais formatada
 - Ter botões: "🖨️ Imprimir" e "💾 Salvar PDF"
@@ -222,6 +234,7 @@ npm run dev
 ## 🔥 **SE DER ERRO:**
 
 ### **Erro 400:**
+
 ```
 1. Verifique o JSON baixado (Passo 5)
 2. Não deve ter "success" ou "data" na raiz
@@ -229,6 +242,7 @@ npm run dev
 ```
 
 ### **JSON Vazio:**
+
 ```
 1. Console Frontend: deve mostrar "totalMateriais: XX"
 2. Se mostrar 0, problema na extração dos dados
@@ -236,6 +250,7 @@ npm run dev
 ```
 
 ### **Preview Vazio:**
+
 ```
 1. Backend deve logar "JSON parseado: { versao: '1.0', ... }"
 2. Se mostrar "versao: undefined", JSON está mal formado
@@ -255,4 +270,3 @@ npm run dev
 **TESTE AGORA E MARQUE OS CHECKBOXES! 🚀**
 
 **BOA SORTE! 🎊**
-

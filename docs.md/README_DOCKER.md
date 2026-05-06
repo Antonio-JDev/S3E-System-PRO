@@ -48,14 +48,14 @@ docker-compose ps                   # Status
 
 ## 🏗️ Serviços Incluídos
 
-| Serviço | Porta | Descrição |
-|---------|-------|-----------|
-| Frontend | 5173 | React App |
-| Backend  | 3000 | API Node.js |
-| PostgreSQL | 5432 | Banco de dados |
-| Redis    | 6379 | Cache |
-| PgAdmin  | 5050 | Admin DB (dev) |
-| Nginx    |  80  | Proxy (prod) |
+| Serviço    | Porta | Descrição      |
+| ---------- | ----- | -------------- |
+| Frontend   | 5173  | React App      |
+| Backend    | 3000  | API Node.js    |
+| PostgreSQL | 5432  | Banco de dados |
+| Redis      | 6379  | Cache          |
+| PgAdmin    | 5050  | Admin DB (dev) |
+| Nginx      | 80    | Proxy (prod)   |
 
 ## 📚 Documentação
 

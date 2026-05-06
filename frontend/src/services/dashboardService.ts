@@ -323,6 +323,36 @@ class DashboardService {
     }
 
     /**
+     * Gráficos executivo: evoluções, comparativo mensal, categorias de venda (forma de pagamento)
+     */
+    async getGraficosExecutivo(periodo: 'monthly' | 'semester' | 'annual' = 'monthly'): Promise<{
+        success: boolean;
+        data?: {
+            periodo: string;
+            evolucaoOrcamentos: any[];
+            evolucaoOrdensServico: any[];
+            evolucaoObrasKanban: any[];
+            evolucaoPedidosVendas: any[];
+            comparativoMensal: any[];
+            categoriasVendas: { name: string; value: number }[];
+        };
+        error?: string;
+    }> {
+        try {
+            const response = await axiosApiService.get(
+                `/api/dashboard/graficos-executivo?periodo=${periodo}`
+            );
+            if (response.success && response.data) {
+                return { success: true, data: response.data as any };
+            }
+            return { success: false, error: 'Dados inválidos' };
+        } catch (error) {
+            console.error('Erro ao carregar gráficos executivo:', error);
+            return { success: false, error: 'Erro de conexão' };
+        }
+    }
+
+    /**
      * Carrega evolução de obras com filtro de período
      */
     async getEvolucaoObras(periodo: 'monthly' | 'semester' | 'annual' = 'monthly'): Promise<{ success: boolean; data?: any[]; error?: string }> {

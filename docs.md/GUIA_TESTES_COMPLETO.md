@@ -9,24 +9,31 @@
 ## 🚀 Preparação do Ambiente
 
 ### Passo 1: Iniciar Backend
+
 ```bash
 cd backend
 npm run dev
 ```
-**Esperado:** Servidor rodando em http://localhost:3000
+
+**Esperado:** Servidor rodando em <http://localhost:3000>
 
 ### Passo 2: Iniciar Frontend
+
 ```bash
 cd frontend
 npm run dev
 ```
-**Esperado:** Aplicação rodando em http://localhost:5174
+
+**Esperado:** Aplicação rodando em <http://localhost:5174>
 
 ### Passo 3: Verificar Saúde da API
+
 ```bash
 curl http://localhost:3000/health
 ```
+
 **Esperado:**
+
 ```json
 {
   "status": "ok",
@@ -41,10 +48,12 @@ curl http://localhost:3000/health
 ### ✅ Módulo 1: Autenticação
 
 #### Teste 1.1: Login (Mock)
-1. Acesse http://localhost:5174
+
+1. Acesse <http://localhost:5174>
 2. **Esperado:** Sistema carrega normalmente com dados mock
 
 #### Teste 1.2: Login (API) - Se Backend Integrado
+
 ```bash
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
@@ -53,7 +62,9 @@ curl -X POST http://localhost:3000/api/auth/login \
     "password": "senha123"
   }'
 ```
+
 **Esperado:**
+
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIs...",
@@ -71,13 +82,15 @@ curl -X POST http://localhost:3000/api/auth/login \
 ### ✅ Módulo 2: Catálogo e Kits
 
 #### Teste 2.1: Visualizar Catálogo
+
 1. Clique em "Catálogo" no menu
-2. **Esperado:** 
+2. **Esperado:**
    - Cards sem imagens ✅
    - Headers com gradientes ✅
    - Botões "Criar Kit" e "Criar Quadros" ✅
 
 #### Teste 2.2: Criar Kit Personalizado
+
 1. Clique em "Criar Kit"
 2. Preencha:
    - Nome: "Kit Teste"
@@ -95,6 +108,7 @@ curl -X POST http://localhost:3000/api/auth/login \
 7. **Esperado:** Novo kit aparece na listagem ✅
 
 #### Teste 2.3: Kit Subestações
+
 1. Clique em "Kit Subestações"
 2. Etapa 1: Selecione "Subestação Aérea"
 3. Etapa 2: Preencha:
@@ -104,7 +118,7 @@ curl -X POST http://localhost:3000/api/auth/login \
    - Posto de Transformação: Adicione transformador
    - Aterramento: Adicione hastes
    - Iluminação: Adicione luminárias
-5. **Esperado:** 
+5. **Esperado:**
    - Materiais listados por tópico ✅
    - Total calculado ✅
 6. Clique em "Salvar como Rascunho"
@@ -117,6 +131,7 @@ curl -X POST http://localhost:3000/api/auth/login \
 ### ✅ Módulo 3: Materiais
 
 #### Teste 3.1: Visualizar Lista de Materiais
+
 1. Clique em "Materiais" no menu
 2. **Esperado:**
    - Cards com informações visíveis ✅
@@ -124,6 +139,7 @@ curl -X POST http://localhost:3000/api/auth/login \
    - Sem imagens ✅
 
 #### Teste 3.2: Modal de Visualização
+
 1. Clique em qualquer material
 2. **Esperado:**
    - Modal moderno com gradiente verde ✅
@@ -132,6 +148,7 @@ curl -X POST http://localhost:3000/api/auth/login \
    - Valor total em estoque calculado ✅
 
 #### Teste 3.3: Adicionar Material (Se Backend Integrado)
+
 ```bash
 curl -X POST http://localhost:3000/api/materiais \
   -H "Content-Type: application/json" \
@@ -152,6 +169,7 @@ curl -X POST http://localhost:3000/api/materiais \
 ### ✅ Módulo 4: Compras
 
 #### Teste 4.1: Visualizar Modal de Compras
+
 1. Clique em "Compras" no menu
 2. Clique em "Nova Compra"
 3. **Esperado:**
@@ -163,6 +181,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Total calculado no footer ✅
 
 #### Teste 4.2: Importar XML (Simular)
+
 1. No modal de compras
 2. Clique em "Importar XML"
 3. Selecione um arquivo XML de NF-e
@@ -172,6 +191,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Totais calculados ✅
 
 #### Teste 4.3: Adicionar Itens Manualmente
+
 1. Preencha:
    - Nome: "Material Teste"
    - NCM: "8544.42.00"
@@ -183,6 +203,7 @@ curl -X POST http://localhost:3000/api/materiais \
 4. **Esperado:** Item aparece na tabela ✅
 
 #### Teste 4.4: Despesas Adicionais
+
 1. Preencha:
    - Valor de Frete: 50.00
    - Outras Despesas: 20.00
@@ -196,6 +217,7 @@ curl -X POST http://localhost:3000/api/materiais \
 ### ✅ Módulo 5: Financeiro
 
 #### Teste 5.1: Acessar Módulo Financeiro
+
 1. Clique em "Financeiro" no menu
 2. **Esperado:**
    - 4 cards de resumo no topo ✅
@@ -203,6 +225,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - 5 abas de navegação ✅
 
 #### Teste 5.2: Aba Vendas
+
 1. Clique na aba "Vendas"
 2. **Esperado:**
    - Lista de orçamentos aprovados ✅
@@ -210,6 +233,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Status coloridos ✅
 
 #### Teste 5.3: Contas a Receber
+
 1. Clique na aba "Contas a Receber"
 2. **Esperado:**
    - Lista de parcelas pendentes ✅
@@ -217,12 +241,14 @@ curl -X POST http://localhost:3000/api/materiais \
    - Total a receber calculado ✅
 
 #### Teste 5.4: Contas a Pagar
+
 1. Clique na aba "Contas a Pagar"
 2. **Esperado:**
    - Lista de fornecedores a pagar ✅
    - Status visuais ✅
 
 #### Teste 5.5: Faturamento
+
 1. Clique na aba "Faturamento"
 2. **Esperado:**
    - Resumo mensal ✅
@@ -230,6 +256,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Margem % calculada ✅
 
 #### Teste 5.6: Status de Cobranças
+
 1. Clique na aba "Status de Cobranças"
 2. **Esperado:**
    - Dashboard visual ✅
@@ -240,6 +267,7 @@ curl -X POST http://localhost:3000/api/materiais \
 ### ✅ Módulo 6: Emissão de NF-e
 
 #### Teste 6.1: Navegação entre Seções
+
 1. Clique em "Emissão NF-e" no menu
 2. **Esperado:**
    - 2 botões de navegação no topo ✅
@@ -250,6 +278,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Botão azul fica ativo ✅
 
 #### Teste 6.2: Adicionar Configuração Fiscal (Mock)
+
 1. Na aba "Configurar Empresas"
 2. Clique em "Adicionar Empresa"
 3. Preencha **Seção 1 - Dados da Empresa:**
@@ -279,6 +308,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Status do certificado mostrado ✅
 
 #### Teste 6.3: Visualizar Card de Empresa
+
 1. **Esperado no card:**
    - Header azul com nome da empresa ✅
    - Grid 2x2 com CNPJ, IE, Regime, Certificado ✅
@@ -286,6 +316,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Botão "Excluir Configuração" ✅
 
 #### Teste 6.4: Excluir Configuração
+
 1. Clique em "Excluir Configuração"
 2. **Esperado:**
    - Confirmação aparece ✅
@@ -295,6 +326,7 @@ curl -X POST http://localhost:3000/api/materiais \
    - Volta ao estado vazio ✅
 
 #### Teste 6.5: Wizard de Emissão
+
 1. Vá para aba "Emitir NF-e"
 2. **Etapa 1 - Selecionar Projeto:**
    - Selecione um projeto
@@ -313,6 +345,7 @@ curl -X POST http://localhost:3000/api/materiais \
 ### ✅ Módulo 7: Configuração Fiscal (API)
 
 #### Teste 7.1: Criar Configuração via API
+
 ```bash
 # 1. Fazer login e obter token
 TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
@@ -348,6 +381,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
 ```
 
 **Esperado:**
+
 ```json
 {
   "id": "uuid",
@@ -358,12 +392,14 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
 ```
 
 #### Teste 7.2: Listar Configurações
+
 ```bash
 curl http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 **Esperado:**
+
 ```json
 [
   {
@@ -379,13 +415,17 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ```
 
 #### Teste 7.3: Verificar Segurança
+
 1. Tente acessar sem token:
+
 ```bash
 curl http://localhost:3000/api/configuracoes-fiscais
 ```
+
 **Esperado:** `401 Unauthorized` ✅
 
 2. Tente criar com role não-admin:
+
 ```bash
 # Fazer login como comprador
 TOKEN_COMPRAS=$(curl -s -X POST http://localhost:3000/api/auth/login \
@@ -397,6 +437,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer $TOKEN_COMPRAS" \
   -d '{...}'
 ```
+
 **Esperado:** `403 Forbidden` ✅
 
 ---
@@ -404,6 +445,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
 ## 🎨 Testes de UI/UX
 
 ### Teste de Responsividade
+
 1. Redimensione o navegador
 2. Teste em:
    - Desktop (1920x1080) ✅
@@ -412,6 +454,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
    - Mobile (375x667) ✅
 
 ### Teste de Acessibilidade
+
 1. Navegue usando apenas Tab
 2. **Esperado:**
    - Todos os botões acessíveis ✅
@@ -419,6 +462,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
    - Contraste adequado ✅
 
 ### Teste de Animações
+
 1. Abra modais
 2. **Esperado:**
    - Fade-in suave ✅
@@ -430,35 +474,44 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
 ## 🔒 Testes de Segurança
 
 ### Teste 1: Proteção de Rotas
+
 ```bash
 # Tentar acessar rota protegida sem token
 curl http://localhost:3000/api/configuracoes-fiscais
 ```
+
 **Esperado:** `401 Unauthorized` ✅
 
 ### Teste 2: RBAC
+
 ```bash
 # Usuário 'compras' tentando criar config fiscal
 curl -X POST http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer TOKEN_COMPRAS"
 ```
+
 **Esperado:** `403 Forbidden` ✅
 
 ### Teste 3: Validação de Entrada
+
 ```bash
 # CNPJ duplicado
 curl -X POST http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer TOKEN_ADMIN" \
   -d '{"cnpj": "12.345.678/0001-90", ...}'
 ```
+
 **Esperado:** `400 Bad Request - CNPJ já cadastrado` ✅
 
 ### Teste 4: Dados Sensíveis Não Expostos
+
 ```bash
 curl http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer TOKEN_ADMIN" | jq
 ```
+
 **Verificar:**
+
 - ❌ `certificadoPath` NÃO aparece
 - ❌ `certificadoSenha` NÃO aparece
 - ✅ `certificadoValidade` aparece
@@ -468,6 +521,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ## 📊 Testes de Performance
 
 ### Teste 1: Tempo de Carregamento
+
 1. Abra DevTools (F12)
 2. Acesse cada página
 3. **Esperado:**
@@ -477,6 +531,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    - Compras: < 1s ✅
 
 ### Teste 2: Responsividade de Busca
+
 1. Digite no campo de busca de materiais
 2. **Esperado:**
    - Filtro instantâneo (< 100ms) ✅
@@ -487,6 +542,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ## 🐛 Testes de Erro
 
 ### Teste 1: Erro de Rede
+
 1. Pare o backend
 2. Tente salvar algo
 3. **Esperado:**
@@ -494,12 +550,14 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    - Sem crash do frontend ✅
 
 ### Teste 2: Campos Obrigatórios
+
 1. Tente salvar sem preencher campos obrigatórios
 2. **Esperado:**
    - Botão desabilitado ✅
    - Ou mensagem de validação ✅
 
 ### Teste 3: Arquivo Inválido
+
 1. Tente fazer upload de arquivo não-.pfx
 2. **Esperado:**
    - Validação bloqueia ✅
@@ -510,6 +568,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ## ✅ Checklist Final de Validação
 
 ### Backend
+
 - [ ] Servidor inicia sem erros
 - [ ] Health check responde
 - [ ] Login funciona
@@ -522,6 +581,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 - [ ] Dados sensíveis não expostos na API
 
 ### Frontend
+
 - [ ] Aplicação carrega sem erros
 - [ ] Navegação entre páginas funciona
 - [ ] Modais abrem e fecham corretamente
@@ -534,6 +594,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 - [ ] Sem erros no console
 
 ### Integração (Se Conectado)
+
 - [ ] Login via API funciona
 - [ ] Dados salvos persistem
 - [ ] Refresh atualiza dados
@@ -576,6 +637,7 @@ Erros no console (se houver)
 ## 🎉 Critérios de Sucesso
 
 ### ✅ Aprovado se:
+
 - [ ] 100% dos testes funcionais passam
 - [ ] Zero erros de compilação
 - [ ] Zero erros críticos no console
@@ -584,11 +646,13 @@ Erros no console (se houver)
 - [ ] Dados persistem corretamente
 
 ### ⚠️ Com ressalvas se:
+
 - [ ] Alguns testes visuais falharam (não-bloqueante)
 - [ ] Performance aceitável mas não ideal
 - [ ] Pequenos bugs de UX (não afeta funcionalidade)
 
 ### ❌ Reprovado se:
+
 - [ ] Erro crítico bloqueia funcionalidade
 - [ ] Dados são perdidos
 - [ ] Segurança comprometida
@@ -629,4 +693,3 @@ R: Verifique se está em Base64 correto
 ---
 
 **Bons Testes!** 🧪🚀
-

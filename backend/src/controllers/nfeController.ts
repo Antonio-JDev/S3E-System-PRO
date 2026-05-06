@@ -1,12 +1,13 @@
+import * as fs from 'fs';
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import nfeService from '../services/nfe.service';
 import NFeDanfeService from '../services/nfe-danfe.service';
 import { CryptoUtil } from '../utils/crypto.util';
+import { resolveCertificadoPath } from '../utils/certificadoPath.util';
 import { NFeSignatureService } from '../services/nfe-signature.service';
 import { NFeSoapService } from '../services/nfe-soap.service';
-
-const prisma = new PrismaClient();
+import { sendDocumentEmail } from '../services/email.service';
 
 export class NFeController {
   /**
@@ -189,6 +190,48 @@ export class NFeController {
       res.status(500).json({
         success: false,
         message: error.message || 'Erro ao emitir NF-e',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * POST /api/nfe/emitir-fracionado
+   * Emitir N NF-es (uma por fração) para um pedido de venda, com clientes e valores distintos.
+   */
+  static async emitirFracionado(req: Request, res: Response): Promise<void> {
+    try {
+      const { vendaId, empresaId, ambiente, cfop, naturezaOperacao, serie, fracoes } = req.body;
+
+      if (!vendaId || !empresaId || !Array.isArray(fracoes) || fracoes.length === 0) {
+        res.status(400).json({
+          success: false,
+          message: 'vendaId, empresaId e fracoes (array de { clienteId, valor, dataVencimento }) são obrigatórios'
+        });
+        return;
+      }
+
+      const ambienteNorm = ambiente === '1' ? '1' : '2';
+      const resultado = await nfeService.processarEmissaoFracionada(
+        vendaId,
+        empresaId,
+        ambienteNorm,
+        cfop || '5101',
+        naturezaOperacao || 'Venda de Mercadoria',
+        serie || '1',
+        fracoes
+      );
+
+      res.status(200).json({
+        success: true,
+        data: resultado,
+        message: `Faturamento fracionado concluído: ${resultado.notas.length} NF-e(s) emitida(s). Valor faturado: R$ ${resultado.valorFaturado.toFixed(2)}`
+      });
+    } catch (error: any) {
+      console.error('❌ Erro ao emitir NF-e fracionado:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Erro ao emitir faturamento fracionado',
         error: error.message
       });
     }
@@ -458,7 +501,8 @@ export class NFeController {
       const pdfBuffer = await NFeDanfeService.gerarDanfe(procNFe);
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline; filename="danfe-preview.pdf"');
+      res.setHeader('Content-Length', String(pdfBuffer.length));
+      res.setHeader('Content-Disposition', 'inline; filename="Nota_Fiscl_Preview.pdf"');
       res.send(pdfBuffer);
     } catch (error: any) {
       console.error('❌ Erro ao gerar DANFE:', error);
@@ -492,10 +536,11 @@ export class NFeController {
 
       console.log(`\n🧾 Gerando DANFE para NotaFiscal: ${id}`);
 
-      const pdfBuffer = await NFeDanfeService.gerarDanfe(nota.xmlNFe);
+      const numero = nota.numero || id;
+      const pdfBuffer = await NFeDanfeService.gerarDanfe(nota.xmlNFe, String(numero));
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="danfe-${id}.pdf"`);
+      res.setHeader('Content-Disposition', `inline; filename="NF-e_${numero}.pdf"`);
       res.send(pdfBuffer);
     } catch (error: any) {
       console.error('❌ Erro ao gerar DANFE por nota:', error);
@@ -504,6 +549,205 @@ export class NFeController {
         message: error.message || 'Erro ao gerar DANFE da nota fiscal',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * GET /api/nfe/notas/:id/xml
+   * Retorna o XML da NF-e para download.
+   */
+  static async getXmlNota(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const nota = await prisma.notaFiscal.findUnique({
+        where: { id },
+        select: { xmlNFe: true, numero: true, chaveAcesso: true }
+      });
+      if (!nota || !nota.xmlNFe) {
+        res.status(404).json({
+          success: false,
+          message: 'Nota fiscal não encontrada ou sem XML associado'
+        });
+        return;
+      }
+      // Nome do arquivo: NFe-{chave_de_acesso}.xml (padrão SEFAZ)
+      let chave = nota.chaveAcesso ?? null;
+      if (!chave && nota.xmlNFe) {
+        const match = nota.xmlNFe.match(/Id="NFe(\d{44})"/) ?? nota.xmlNFe.match(/<chNFe>(\d{44})<\/chNFe>/);
+        if (match) chave = match[1];
+      }
+      const filename = chave ? `NFe-${chave}.xml` : `NFe-${nota.numero ?? id}.xml`;
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(nota.xmlNFe);
+    } catch (error: any) {
+      console.error('❌ Erro ao obter XML da nota:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Erro ao obter XML da NF-e',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * POST /api/nfe/notas/:id/enviar-email
+   * Envia NF-e (DANFE PDF e XML) por email ao destinatário. Body: { to: string }.
+   */
+  static async enviarEmailNota(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { to } = req.body as { to?: string };
+      if (!to || typeof to !== 'string') {
+        res.status(400).json({
+          success: false,
+          message: 'E-mail do destinatário (to) é obrigatório'
+        });
+        return;
+      }
+
+      const nota = await prisma.notaFiscal.findUnique({
+        where: { id },
+        select: { xmlNFe: true, numero: true, valorTotal: true, chaveAcesso: true }
+      });
+      if (!nota || !nota.xmlNFe) {
+        res.status(404).json({
+          success: false,
+          message: 'Nota fiscal não encontrada ou sem XML associado'
+        });
+        return;
+      }
+
+      const numero = nota.numero || id;
+      let chaveAcesso = nota.chaveAcesso ?? null;
+      if (!chaveAcesso && nota.xmlNFe) {
+        const m = nota.xmlNFe.match(/Id="NFe(\d{44})"/) ?? nota.xmlNFe.match(/<chNFe>(\d{44})<\/chNFe>/);
+        if (m) chaveAcesso = m[1];
+      }
+      const nomeXml = chaveAcesso ? `NFe-${chaveAcesso}.xml` : `Nota_Fiscl_No_${numero}.xml`;
+
+      let pdfBuffer: Buffer;
+      try {
+        pdfBuffer = await NFeDanfeService.gerarDanfe(nota.xmlNFe, String(numero));
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error('Falha ao gerar DANFE (PDFKit):', errMsg, err);
+        res.status(500).json({ success: false, message: `Falha ao gerar DANFE: ${errMsg}` });
+        return;
+      }
+      const attachments: Array<{ filename: string; content: Buffer }> = [
+        { filename: `Nota_Fiscl_No_${numero}.pdf`, content: pdfBuffer },
+        { filename: nomeXml, content: Buffer.from(nota.xmlNFe, 'utf-8') }
+      ];
+
+      const bodyHtml = `
+        <p>Prezado(a),</p>
+        <p>Segue em anexo a NF-e ${numero}.</p>
+        <p>Valor: R$ ${nota.valorTotal != null ? Number(nota.valorTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '-'}</p>
+        <p>Att.,<br/>S3E Engenharia - Setor Fiscal | Telefone: (47) 3083-8361</p>
+      `;
+      await sendDocumentEmail(
+        to,
+        `NF-e Nº ${numero} - S3E Engenharia`,
+        bodyHtml,
+        attachments
+      );
+
+      res.status(200).json({ success: true, message: 'E-mail enviado com sucesso' });
+    } catch (error: any) {
+      console.error('❌ Erro ao enviar NF-e por email:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Erro ao enviar NF-e por email',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * GET /api/nfe/notas/:id/eventos
+   * Listar eventos (logs) vinculados a uma nota fiscal
+   */
+  static async listarEventosNota(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      // Verificar existência da nota
+      const nota = await prisma.notaFiscal.findUnique({ where: { id } });
+      if (!nota) {
+        res.status(404).json({ success: false, message: 'Nota fiscal não encontrada' });
+        return;
+      }
+
+      const eventos = await prisma.nfeEvento.findMany({
+        where: { notaFiscalId: id },
+        orderBy: { createdAt: 'asc' }
+      });
+      res.status(200).json({ success: true, data: eventos });
+    } catch (error: any) {
+      console.error('❌ Erro ao listar eventos da nota:', error);
+      res.status(500).json({ success: false, message: error.message || 'Erro ao listar eventos' });
+    }
+  }
+
+  /**
+   * POST /api/nfe/notas/:id/reprocessar
+   * Enfileira e tenta reprocessar imediatamente a nota indicada
+   */
+  static async reprocessarNota(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      // Buscar nota
+      const nota = await prisma.notaFiscal.findUnique({ where: { id } });
+      if (!nota) {
+        res.status(404).json({ success: false, message: 'Nota fiscal não encontrada' });
+        return;
+      }
+
+      // Enfileirar usando xmlNFe (assumindo que o XML assinado esteja disponível)
+      const xmlAssinado = nota.xmlNFe || null;
+      if (!xmlAssinado) {
+        res.status(400).json({ success: false, message: 'XML assinado da nota não disponível para reenvio' });
+        return;
+      }
+
+      // Enfileirar item para reenvio (modo NORMAL)
+      const filaRegistro = await (await import('../services/nfe-fila.service')).default.enfileirar({
+        notaFiscalId: nota.id,
+        empresaFiscalId: nota.empresaFiscalId || undefined,
+        ambiente: nota.ambiente === 'PRODUCAO' || nota.ambiente === '1' ? '1' : '2',
+        modo: 'NORMAL',
+        xmlAssinado,
+        motivo: 'Reenvio manual solicitado pelo usuário'
+      });
+
+      // Registrar evento de reenvio manual
+      try {
+        await prisma.nfeEvento.create({
+          data: {
+            notaFiscalId: nota.id,
+            tipo: 'INFO',
+            descricao: 'Reenvio manual solicitado pelo usuário'
+          }
+        });
+      } catch (logErr) {
+        console.warn('⚠️ Falha ao registrar evento NFe (reenvio manual):', logErr);
+      }
+
+      // Tentar processar imediatamente (rodar worker para 1 item)
+      try {
+        const worker = await import('../workers/nfe-fila.worker');
+        // executar em background (não bloquear)
+        worker.processarFilaNFe(1).catch((e) => {
+          console.warn('⚠️ Erro ao processar fila imediatamente após reenvio manual:', e);
+        });
+      } catch (e) {
+        console.warn('⚠️ Não foi possível acionar worker para reprocessar imediatamente:', e);
+      }
+
+      res.status(200).json({ success: true, message: 'Reenvio agendado e tentativa iniciada', data: { filaId: filaRegistro?.id } });
+    } catch (error: any) {
+      console.error('❌ Erro ao solicitar reprocessamento manual da nota:', error);
+      res.status(500).json({ success: false, message: error.message || 'Erro ao reprocessar nota' });
     }
   }
 
@@ -591,6 +835,15 @@ export class NFeController {
         return;
       }
 
+      const pfxPathResolvido = resolveCertificadoPath(empresa.certificadoPath);
+      if (!pfxPathResolvido || !fs.existsSync(pfxPathResolvido)) {
+        res.status(400).json({
+          success: false,
+          message: 'Arquivo de certificado não encontrado. Reenvie o certificado pela interface.'
+        });
+        return;
+      }
+
       // Descriptografar senha
       let senhaDescriptografada: string;
       try {
@@ -605,7 +858,7 @@ export class NFeController {
       }
 
       const { key, cert } = NFeSignatureService.carregarCertificado(
-        empresa.certificadoPath,
+        pfxPathResolvido,
         senhaDescriptografada
       );
 

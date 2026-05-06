@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
+import { getUploadUrl } from '../config/api';
 import { AuthContext } from '../contexts/AuthContext';
 import { equipeService, type EquipeDTO } from '../services/EquipeService';
 import { alocacaoService, type AlocacaoEquipeDTO } from '../services/alocacaoService';
-import CalendarioAlocacoes from './CalendarioAlocacoes';
 import ModalEquipesDeObra from './Obras/ModalEquipesDeObra';
+import UserSearchMultiSelect from './ui/UserSearchMultiSelect';
 
 // Types
 interface Obra {
@@ -23,6 +24,7 @@ interface TarefaObra {
   id: string;
   descricao: string;
   atribuidoA?: string;
+  atribuidosIds?: string[];
   atribuidoNome?: string;
   equipeId?: string;
   equipeNome?: string;
@@ -134,6 +136,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
   const [formTarefa, setFormTarefa] = useState({
     descricao: '',
     atribuidoA: '',
+    atribuidosIds: [] as string[],
     equipeId: '',
     dataPrevista: '',
     dataPrevistaFim: '',
@@ -218,10 +221,12 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
   const carregarEletricistas = async () => {
     try {
-      const response = await axiosApiService.get('/api/configuracoes/usuarios?role=eletricista');
-      setEletricistas(response.data?.data || response.data || []);
+      const response = await axiosApiService.get('/api/configuracoes/usuarios');
+      const list = response.data?.data ?? response.data ?? [];
+      const arr = Array.isArray(list) ? list : [];
+      setEletricistas(arr);
     } catch (error: any) {
-      console.error('Erro ao carregar eletricistas:', error);
+      console.error('Erro ao carregar usuários:', error);
     }
   };
 
@@ -357,8 +362,9 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
       if (tipoAtribuicao === 'equipe' && formTarefa.equipeId) {
         tarefaData.equipeId = formTarefa.equipeId;
-      } else if (tipoAtribuicao === 'individual' && formTarefa.atribuidoA) {
-        tarefaData.atribuidoA = formTarefa.atribuidoA;
+      } else if (tipoAtribuicao === 'individual') {
+        const ids = formTarefa.atribuidosIds?.length ? formTarefa.atribuidosIds : (formTarefa.atribuidoA ? [formTarefa.atribuidoA] : []);
+        if (ids.length) tarefaData.atribuidosIds = ids;
       }
 
       const tarefaRes = await axiosApiService.post('/api/obras/tarefas', tarefaData);
@@ -394,7 +400,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
       }
       
       setModalNovaTarefa(false);
-      setFormTarefa({ descricao: '', atribuidoA: '', equipeId: '', dataPrevista: '', dataPrevistaFim: '', observacoes: '' });
+      setFormTarefa({ descricao: '', atribuidoA: '', atribuidosIds: [], equipeId: '', dataPrevista: '', dataPrevistaFim: '', observacoes: '' });
       carregarTarefas();
       carregarAlocacoes();
     } catch (error: any) {
@@ -409,9 +415,11 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
     if (!tarefaEditando) return;
 
     try {
+      const ids = tarefaEditando.atribuidosIds?.length ? tarefaEditando.atribuidosIds : (tarefaEditando.atribuidoA ? [tarefaEditando.atribuidoA] : []);
       await axiosApiService.put(`/api/obras/tarefas/${tarefaEditando.id}`, {
         descricao: tarefaEditando.descricao,
         atribuidoA: tarefaEditando.atribuidoA || null,
+        atribuidosIds: ids.length ? ids : undefined,
         dataPrevista: tarefaEditando.dataPrevista || null,
         observacoes: tarefaEditando.observacoes || null,
         progresso: tarefaEditando.progresso
@@ -495,11 +503,11 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
         <div className="bg-white dark:bg-dark-bg rounded-2xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-hidden my-4">
           {/* Header */}
-          <div className="bg-gradient-to-r from-orange-600 to-orange-500 px-8 py-6">
+          <div className="bg-gradient-to-r from-blue-600 to-blue-500 px-8 py-6">
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <h2 className="text-2xl font-bold text-white mb-2">{obra.nomeObra}</h2>
-                <div className="space-y-1 text-orange-50">
+                <div className="space-y-1 text-blue-50">
                   <p className="flex items-center gap-2">
                     <UserIcon className="w-4 h-4" />
                     <span className="font-medium">Cliente:</span> {obra.clienteNome}
@@ -633,11 +641,13 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
                               👥 {tarefa.equipeNome}
                             </span>
                           )}
-                          {/* Mostrar eletricista individual */}
-                          {!tarefa.equipeNome && tarefa.atribuidoNome && (
+                          {/* Mostrar usuário(s) atribuído(s) */}
+                          {!tarefa.equipeNome && (tarefa.atribuidosIds?.length || tarefa.atribuidoNome) && (
                             <span className="flex items-center gap-1">
                               <UserIcon className="w-4 h-4" />
-                              {tarefa.atribuidoNome}
+                              {tarefa.atribuidosIds?.length
+                                ? tarefa.atribuidosIds.map(id => eletricistas.find(u => u.id === id)?.name || id).filter(Boolean).join(', ')
+                                : tarefa.atribuidoNome}
                             </span>
                           )}
                           {/* Datas - mostrar período se tiver data fim */}
@@ -696,7 +706,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
                       </div>
                       <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                         <div
-                          className="bg-gradient-to-r from-orange-600 to-orange-500 h-2 rounded-full transition-all"
+                          className="bg-gradient-to-r from-blue-600 to-blue-500 h-2 rounded-full transition-all"
                           style={{ width: `${tarefa.progresso}%` }}
                         />
                       </div>
@@ -755,22 +765,6 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
               </div>
             )}
 
-                {/* Calendário de Alocações */}
-                <div className="mt-8 pt-8 border-t-2 border-gray-200 dark:border-dark-border">
-                  <div className="mb-6">
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text flex items-center gap-2">
-                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      Calendário de Alocações de Equipes
-                    </h3>
-                    <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
-                      Visualize quando cada equipe está alocada nesta obra
-                    </p>
-                  </div>
-                  
-                  <CalendarioAlocacoes obraId={obraId} />
-                </div>
               </>
             )}
 
@@ -862,7 +856,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
       {modalNovaTarefa && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
           <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-gradient-to-r from-orange-600 to-orange-500 px-6 py-4 flex justify-between items-center">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-500 px-6 py-4 flex justify-between items-center">
               <h3 className="text-xl font-bold text-white">Nova Tarefa</h3>
               <button
                 onClick={() => setModalNovaTarefa(false)}
@@ -986,21 +980,13 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
               {/* Seletor Individual de Eletricista */}
               {tipoAtribuicao === 'individual' && (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                    Atribuir a Eletricista
-                  </label>
-                  <select
-                    value={formTarefa.atribuidoA}
-                    onChange={(e) => setFormTarefa({ ...formTarefa, atribuidoA: e.target.value })}
-                    className="select-field"
-                  >
-                    <option value="">Não atribuído</option>
-                    {eletricistas.map((eletricista) => (
-                      <option key={eletricista.id} value={eletricista.id}>
-                        {eletricista.name} ({eletricista.email})
-                      </option>
-                    ))}
-                  </select>
+                  <UserSearchMultiSelect
+                    label="Atribuir a (um ou mais usuários)"
+                    users={eletricistas.map(u => ({ id: u.id, name: u.name, email: u.email }))}
+                    value={formTarefa.atribuidosIds}
+                    onChange={(ids) => setFormTarefa({ ...formTarefa, atribuidosIds: ids, atribuidoA: ids[0] || '' })}
+                    placeholder="Buscar por nome e selecionar..."
+                  />
                 </div>
               )}
 
@@ -1104,21 +1090,13 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                  Atribuir a Eletricista
-                </label>
-                <select
-                  value={tarefaEditando.atribuidoA || ''}
-                  onChange={(e) => setTarefaEditando({ ...tarefaEditando, atribuidoA: e.target.value })}
-                  className="select-field"
-                >
-                  <option value="">Não atribuído</option>
-                  {eletricistas.map((eletricista) => (
-                    <option key={eletricista.id} value={eletricista.id}>
-                      {eletricista.name} ({eletricista.email})
-                    </option>
-                  ))}
-                </select>
+                <UserSearchMultiSelect
+                  label="Atribuir a (um ou mais usuários)"
+                  users={eletricistas.map(u => ({ id: u.id, name: u.name, email: u.email }))}
+                  value={tarefaEditando.atribuidosIds ?? (tarefaEditando.atribuidoA ? [tarefaEditando.atribuidoA] : [])}
+                  onChange={(ids) => setTarefaEditando({ ...tarefaEditando, atribuidosIds: ids, atribuidoA: ids[0] || '' })}
+                  placeholder="Buscar por nome e selecionar..."
+                />
               </div>
 
               <div>
@@ -1246,7 +1224,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
                         onClick={() => abrirModalImagens(registroSelecionado.imagens)}
                       >
                         <img
-                          src={`${import.meta.env.VITE_API_URL || ''}${imagem}`}
+                          src={getUploadUrl(imagem)}
                           alt={`Foto ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
@@ -1305,7 +1283,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
           <div className="max-w-6xl max-h-[90vh] flex flex-col items-center">
             <img
-              src={`${import.meta.env.VITE_API_URL || ''}${imagensVisualizacao[imagemAtual]}`}
+              src={getUploadUrl(imagensVisualizacao[imagemAtual])}
               alt={`Imagem ${imagemAtual + 1}`}
               className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
             />

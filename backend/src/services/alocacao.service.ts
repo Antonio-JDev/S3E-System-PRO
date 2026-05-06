@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Interface para criar uma nova equipe
@@ -194,7 +192,6 @@ export class AlocacaoService {
    * Desativa uma equipe (soft delete)
    */
   async desativarEquipe(id: string) {
-    // Verificar se há alocações ativas
     const alocacoesAtivas = await prisma.alocacaoObra.count({
       where: {
         equipeId: id,
@@ -206,12 +203,27 @@ export class AlocacaoService {
       throw new Error('Não é possível desativar uma equipe com alocações ativas');
     }
 
-    const equipe = await prisma.equipe.update({
-      where: { id },
-      data: { ativa: false }
-    });
+    return prisma.$transaction(async (tx) => {
+      const existe = await tx.equipe.findUnique({ where: { id } });
+      if (!existe) {
+        throw new Error('Equipe não encontrada');
+      }
 
-    return equipe;
+      await tx.tarefaObra.updateMany({
+        where: { equipeId: id },
+        data: { equipeId: null }
+      });
+
+      await tx.alocacaoEquipe.updateMany({
+        where: { equipeId: id },
+        data: { status: 'CANCELADA' }
+      });
+
+      return tx.equipe.update({
+        where: { id },
+        data: { ativa: false, membros: [] }
+      });
+    });
   }
 
   /**

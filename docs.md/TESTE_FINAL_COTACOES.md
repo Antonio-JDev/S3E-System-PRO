@@ -9,6 +9,7 @@ O botão "Cotações" agora está no array `navLinks` na posição correta!
 ## 🚀 **TESTE AGORA:**
 
 ### **1. Recarregue o Frontend:**
+
 ```
 Ctrl + Shift + R (hard reload)
 ```
@@ -26,6 +27,7 @@ Ctrl + Shift + R (hard reload)
 ### **3. Clique em "Cotações":**
 
 **Deve abrir:**
+
 ```
 ╔═══════════════════════════════════════════════╗
 ║  🏷️ Cotações de Fornecedores                  ║
@@ -49,6 +51,7 @@ Ctrl + Shift + R (hard reload)
 ## 📝 **TESTE COMPLETO:**
 
 ### **Passo 1: Baixar Template**
+
 ```
 Clique: "📄 Template"
 Toast: "✅ Template baixado com sucesso!"
@@ -56,6 +59,7 @@ Arquivo: template-cotacoes-2025-11-12.json
 ```
 
 ### **Passo 2: Editar Template**
+
 ```json
 {
   "versao": "1.0",
@@ -63,7 +67,7 @@ Arquivo: template-cotacoes-2025-11-12.json
     {
       "nome": "Cabo de Cobre 2,5mm",
       "ncm": "85444200",
-      "valorUnitario": 100.50,
+      "valorUnitario": 100.5,
       "fornecedorNome": "Eletromar",
       "observacoes": "Válido por 30 dias"
     }
@@ -72,6 +76,7 @@ Arquivo: template-cotacoes-2025-11-12.json
 ```
 
 ### **Passo 3: Importar**
+
 ```
 1. Clique: "📥 Importar JSON"
 2. Modal abre
@@ -82,6 +87,7 @@ Toast: "✅ Importação concluída: 1 criados, 0 atualizados"
 ```
 
 ### **Passo 4: Ver na Tabela**
+
 ```
 ┌──────────────────────────────────────────────────────┐
 │ Material        │ NCM   │ Valor    │ Forn.  │ Data  │
@@ -94,6 +100,7 @@ Toast: "✅ Importação concluída: 1 criados, 0 atualizados"
 ### **Passo 5: Testar Ações**
 
 **Visualizar 👁️:**
+
 ```
 Modal abre com:
 - Material: Cabo de Cobre 2,5mm
@@ -105,6 +112,7 @@ Modal abre com:
 ```
 
 **Editar ✏️:**
+
 ```
 1. Modal abre com formulário
 2. Altere valor: 100.50 → 110.00
@@ -115,6 +123,7 @@ Tabela atualiza: R$ 110,00
 ```
 
 **Excluir 🗑️:**
+
 ```
 1. AlertDialog: "Confirmar Exclusão"
 2. "Tem certeza que deseja excluir Cabo de Cobre?"
@@ -125,6 +134,7 @@ Linha some da tabela
 ```
 
 ### **Passo 6: Teste Busca**
+
 ```
 Digite: "cabo"
 Filtro mostra apenas itens com "cabo" no nome
@@ -141,6 +151,7 @@ Filtro mostra apenas itens do fornecedor Eletromar
 ## ✅ **VERIFICAÇÕES:**
 
 ### **Backend:**
+
 ```
 ✓ POST /api/cotacoes/importar 200
 ✓ GET  /api/cotacoes 200
@@ -150,6 +161,7 @@ Filtro mostra apenas itens do fornecedor Eletromar
 ```
 
 ### **Frontend:**
+
 ```
 ✓ Menu aparece na sidebar
 ✓ Página carrega sem erros
@@ -189,4 +201,3 @@ Filtro mostra apenas itens do fornecedor Eletromar
 
 **Data:** 12/11/2025  
 **Status:** ✅ CORRIGIDO
-

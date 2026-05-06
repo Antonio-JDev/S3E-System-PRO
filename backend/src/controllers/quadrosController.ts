@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { QuadrosService } from '../services/quadros.service';
-
-const prisma = new PrismaClient();
 
 export class QuadrosController {
   static async criarQuadro(req: Request, res: Response) {

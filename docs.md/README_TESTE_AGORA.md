@@ -3,6 +3,7 @@
 ## ⚡ **CORREÇÃO APLICADA EM 2 LUGARES:**
 
 ### **🔧 Backend: Detecta e Remove Wrapper**
+
 ```
 Arquivo: backend/src/controllers/materiaisController.ts
 Linha: ~1089-1095
@@ -11,6 +12,7 @@ Linha: ~1089-1095
 ```
 
 ### **🔧 Frontend: Extrai Dados Corretamente**
+
 ```
 Arquivo: frontend/src/components/AtualizacaoPrecos.tsx
 Linha: ~312-321
@@ -46,6 +48,7 @@ Clique: 📄 JSON
 ```
 
 **Console DEVE mostrar:**
+
 ```
 ✅ Template extraído: { totalMateriais: 66 }
 🧹 Dados limpos
@@ -53,6 +56,7 @@ Clique: 📄 JSON
 ```
 
 **Arquivo DEVE começar com:**
+
 ```json
 {
   "versao": "1.0",    ← ✅ SEM "success"!
@@ -69,6 +73,7 @@ Clique: 📄 JSON
 ```
 
 **Backend logs:**
+
 ```
 🧹 Detectado wrapper - Extraindo...  ← ✅ Remove wrapper!
 📄 JSON parseado: {
@@ -79,6 +84,7 @@ POST .../preview-importacao 200     ← ✅ 200, não 400!
 ```
 
 **Frontend mostra:**
+
 ```
 ℹ️ Nenhuma alteração detectada
 📊 66 materiais processados
@@ -128,4 +134,3 @@ POST .../preview-importacao 200     ← ✅ 200, não 400!
 
 **Data:** 12/11/2025  
 **Status:** ✅ CORRIGIDO
-

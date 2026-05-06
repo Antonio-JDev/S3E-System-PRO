@@ -19,13 +19,13 @@ interface ViewToggleProps {
 
 const ViewToggle: React.FC<ViewToggleProps> = ({ view, onViewChange }) => {
     return (
-        <div className="inline-flex items-center bg-gray-100 rounded-lg p-1">
+        <div className="inline-flex items-center bg-gray-100 dark:bg-dark-card rounded-lg p-1 border border-transparent dark:border-dark-border">
             <button
                 onClick={() => onViewChange('grid')}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition-all ${
                     view === 'grid'
-                        ? 'bg-white text-purple-700 shadow-sm font-semibold'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-white dark:bg-dark-bg text-purple-700 dark:text-purple-300 shadow-sm font-semibold'
+                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text'
                 }`}
                 title="Visualizar em cards"
             >
@@ -36,8 +36,8 @@ const ViewToggle: React.FC<ViewToggleProps> = ({ view, onViewChange }) => {
                 onClick={() => onViewChange('list')}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition-all ${
                     view === 'list'
-                        ? 'bg-white text-purple-700 shadow-sm font-semibold'
-                        : 'text-gray-600 hover:text-gray-900'
+                        ? 'bg-white dark:bg-dark-bg text-purple-700 dark:text-purple-300 shadow-sm font-semibold'
+                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text'
                 }`}
                 title="Visualizar em lista"
             >

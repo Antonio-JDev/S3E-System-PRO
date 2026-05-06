@@ -25,7 +25,8 @@
 
 ❌ **DELETADO:** `frontend/src/services/api.ts`
 
-**Motivo:** Tinha bug crítico onde o token era armazenado como propriedade da classe e nunca atualizava após o login.
+**Motivo:** Tinha bug crítico onde o token era armazenado como propriedade da
+classe e nunca atualizava após o login.
 
 ---
 
@@ -34,24 +35,26 @@
 ```typescript
 // api.ts (DELETADO):
 class ApiService {
-  private token: string | null = null;  // ❌ Propriedade
+  private token: string | null = null; // ❌ Propriedade
 
   constructor() {
-    this.token = localStorage.getItem('token');  // ❌ null na inicialização
+    this.token = localStorage.getItem("token"); // ❌ null na inicialização
   }
 
   request() {
-    if (this.token) {  // ❌ Sempre null!
+    if (this.token) {
+      // ❌ Sempre null!
       headers.Authorization = `Bearer ${this.token}`;
     }
   }
 }
 
 // Criado na inicialização do app (ANTES do login):
-export const apiService = new ApiService();  // ← token = null
+export const apiService = new ApiService(); // ← token = null
 ```
 
 **Problema:**
+
 1. App inicia → `apiService.token = null`
 2. Login acontece → Token no localStorage ✅
 3. `apiService.token` continua `null` ❌
@@ -67,11 +70,11 @@ export const apiService = new ApiService();  // ← token = null
 // axiosApi.ts (ÚNICO AGORA):
 class AxiosApiService {
   // ✅ SEM propriedade token
-  
+
   request(config) {
     // ✅ SEMPRE pega do localStorage
-    const currentToken = localStorage.getItem('token');
-    
+    const currentToken = localStorage.getItem("token");
+
     if (currentToken) {
       config.headers.Authorization = `Bearer ${currentToken}`;
     }
@@ -80,6 +83,7 @@ class AxiosApiService {
 ```
 
 **Resultado:**
+
 1. App inicia
 2. Login acontece → Token no localStorage
 3. Qualquer requisição pega token do localStorage
@@ -91,14 +95,16 @@ class AxiosApiService {
 ## 🚀 TESTE FINAL COMPLETO
 
 ### **1. Limpe Tudo:**
+
 ```javascript
 // Console (F12):
-localStorage.clear()
-sessionStorage.clear()
+localStorage.clear();
+sessionStorage.clear();
 // F5
 ```
 
 ### **2. Faça Login:**
+
 - Email: `admin@s3e.com.br`
 - Senha: `123456`
 
@@ -122,12 +128,14 @@ sessionStorage.clear()
 ### **4. Em CADA navegação, observe:**
 
 **Console do navegador:**
+
 ```
 ✅ 🔐 [AxiosApi] Token enviado para: /api/...
 ✅ Dados carregados
 ```
 
 **Backend:**
+
 ```
 ✅ 🔐 Middleware auth - Headers: Bearer eyJhbGciOi...
 ✅ ✅ Token válido
@@ -135,6 +143,7 @@ sessionStorage.clear()
 ```
 
 **❌ NÃO deve aparecer:**
+
 ```
 ❌ Token atual: null
 ❌ Headers: undefined
@@ -146,16 +155,16 @@ sessionStorage.clear()
 
 ## 📊 ANTES vs DEPOIS
 
-| Aspecto | ANTES (2 APIs) | DEPOIS (1 API) |
-|---------|----------------|----------------|
-| **Serviços de API** | api.ts + axiosApi.ts | Apenas axiosApi.ts |
-| **Token** | Propriedade (bug) | localStorage sempre |
-| **Fornecedores** | ❌ Erro 401 | ✅ Funciona |
-| **Clientes** | ✅ Funciona | ✅ Funciona |
-| **Dashboard** | ✅ Funciona | ✅ Funciona |
-| **Todas as páginas** | ❌ Algumas falham | ✅ Todas funcionam |
-| **Navegação** | ❌ Instável | ✅ Estável |
-| **Manutenção** | ❌ Confuso | ✅ Simples |
+| Aspecto              | ANTES (2 APIs)       | DEPOIS (1 API)      |
+| -------------------- | -------------------- | ------------------- |
+| **Serviços de API**  | api.ts + axiosApi.ts | Apenas axiosApi.ts  |
+| **Token**            | Propriedade (bug)    | localStorage sempre |
+| **Fornecedores**     | ❌ Erro 401          | ✅ Funciona         |
+| **Clientes**         | ✅ Funciona          | ✅ Funciona         |
+| **Dashboard**        | ✅ Funciona          | ✅ Funciona         |
+| **Todas as páginas** | ❌ Algumas falham    | ✅ Todas funcionam  |
+| **Navegação**        | ❌ Instável          | ✅ Estável          |
+| **Manutenção**       | ❌ Confuso           | ✅ Simples          |
 
 ---
 
@@ -170,13 +179,14 @@ Com esta migração, você tem **GARANTIA ABSOLUTA** que:
 ✅ **Um único padrão** de API  
 ✅ **Código limpo** e profissional  
 ✅ **Manutenção fácil** (apenas um arquivo para gerenciar)  
-✅ **Debugging simples** (um lugar para procurar)  
+✅ **Debugging simples** (um lugar para procurar)
 
 ---
 
 ## 🔍 VERIFICAÇÃO DE SEGURANÇA JWT
 
 **Configuração do Token (Backend):**
+
 ```
 Expiração: 7 dias (604800 segundos)
 Algoritmo: HS256
@@ -184,12 +194,14 @@ Validação: Middleware em todas as rotas protegidas
 ```
 
 **Logs do Backend Confirmam:**
+
 ```
 iat: 1762449865  (Criado em: data/hora)
 exp: 1763054665  (Expira em: 7 dias depois)
 ```
 
 **Cálculo:**
+
 ```
 exp - iat = 1763054665 - 1762449865 = 604800 segundos
 604800 ÷ 60 ÷ 60 ÷ 24 = 7 dias ✅ CORRETO!
@@ -236,7 +248,7 @@ frontend/src/services/
 ✅ **Navegação 100% estável**  
 ✅ **Um único serviço de API**  
 ✅ **Sem mais erros 401 inesperados**  
-✅ **Pronto para produção**  
+✅ **Pronto para produção**
 
 ---
 
@@ -245,6 +257,7 @@ frontend/src/services/
 **Navegue livremente entre todas as páginas sem medo!**
 
 O token vai funcionar perfeitamente em:
+
 - Dashboard ✅
 - Clientes ✅
 - Orçamentos ✅
@@ -259,4 +272,3 @@ O token vai funcionar perfeitamente em:
 **Sistema finalmente ESTÁVEL e CONFIÁVEL!** 🎉🚀
 
 **Me confirme se agora está tudo funcionando perfeitamente!**
-

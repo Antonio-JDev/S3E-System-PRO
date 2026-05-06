@@ -2,28 +2,35 @@
 
 ## ✅ Implementação Completa
 
-Sistema agora possui **baixa automática de estoque** ao realizar vendas, com suporte total a **materiais diretos** e **kits expandidos**.
+Sistema agora possui **baixa automática de estoque** ao realizar vendas, com
+suporte total a **materiais diretos** e **kits expandidos**.
 
 ---
 
 ## 🎯 Funcionalidades Implementadas
 
 ### 1. ✅ Baixa Automática de Estoque
+
 Ao realizar venda, sistema dá baixa automaticamente nos materiais.
 
 ### 2. ✅ Expansão de Kits
+
 Kits são expandidos e cada componente tem baixa individual.
 
 ### 3. ✅ Verificação Prévia
+
 Antes de vender, verifica se há estoque suficiente.
 
 ### 4. ✅ Agrupamento Inteligente
+
 Materiais repetidos são somados (ex: mesmo material em 2 kits diferentes).
 
 ### 5. ✅ Transação Atômica
+
 Venda, contas e baixa de estoque acontecem juntas ou nada acontece.
 
 ### 6. ✅ Registro de Movimentação
+
 Cada baixa gera registro em `movimentacoes_estoque`.
 
 ---
@@ -35,14 +42,14 @@ Cada baixa gera registro em `movimentacoes_estoque`.
 ```
 1. Frontend chama:
    GET /api/vendas/estoque/:orcamentoId
-   
+
 2. Backend:
    a) Busca orçamento
    b) Lista todos os itens
    c) Expande kits em componentes
    d) Verifica estoque de cada material
    e) Retorna: disponível ou não
-   
+
 3. Frontend exibe:
    ✅ "Estoque OK - Pode vender"
    ❌ "Faltam 50 unidades de Disjuntor 20A"
@@ -61,42 +68,42 @@ Cada baixa gera registro em `movimentacoes_estoque`.
      "valorTotal": 75000.00,
      "parcelas": 3
    }
-   
+
 2. Backend (em TRANSAÇÃO):
-   
+
    a) ✅ Cria venda
       VND-123456789
-   
+
    b) ✅ Gera 3 contas a receber
       CR-001, CR-002, CR-003
-   
+
    c) ✅ Busca itens do orçamento
       - Material MAT-001: 200 unidades
       - Kit KIT-001: 5 unidades
-   
+
    d) ✅ Expande kits
       KIT-001 contém:
         - MAT-002: 10 unidades (cada)
         - MAT-003: 5 unidades (cada)
-      
+
       5x KIT-001 precisa:
         - MAT-002: 50 unidades
         - MAT-003: 25 unidades
-   
+
    e) ✅ Agrupa materiais
       Total necessário:
         - MAT-001: 200 unidades (direto)
         - MAT-002: 50 unidades (do kit)
         - MAT-003: 25 unidades (do kit)
-   
+
    f) ✅ Verifica estoque
       MAT-001: 150 disponível ❌ Falta 50!
-      
+
    g) ❌ ERRO! Rollback automático
       → Venda NÃO criada
       → Contas NÃO criadas
       → Estoque NÃO alterado
-   
+
 3. Frontend recebe erro:
    "Estoque insuficiente:
     Disjuntor 20A: faltam 50 unidades"
@@ -108,23 +115,23 @@ Cada baixa gera registro em `movimentacoes_estoque`.
 
 ```
 2. Backend (em TRANSAÇÃO):
-   
+
    a) ✅ Cria venda
    b) ✅ Gera contas a receber
    c) ✅ Expande kits
    d) ✅ Agrupa materiais
    e) ✅ Verifica estoque (OK!)
-   
+
    f) ✅ Dá baixa no estoque:
       MAT-001: 200 → 0    (-200)
       MAT-002: 100 → 50   (-50)
       MAT-003: 80 → 55    (-25)
-   
+
    g) ✅ Registra movimentações:
       MOV-001: SAIDA 200 MAT-001 (VENDA VND-123)
       MOV-002: SAIDA 50 MAT-002 (VENDA VND-123)
       MOV-003: SAIDA 25 MAT-003 (VENDA VND-123)
-   
+
 3. Frontend recebe sucesso:
    {
      "venda": { ... },
@@ -143,6 +150,7 @@ Cada baixa gera registro em `movimentacoes_estoque`.
 ### Exemplo 1: Orçamento com Materiais Diretos
 
 **Orçamento ORC-2025-001:**
+
 ```json
 {
   "items": [
@@ -161,6 +169,7 @@ Cada baixa gera registro em `movimentacoes_estoque`.
 ```
 
 **Baixa de Estoque:**
+
 ```
 MAT-001: -100 unidades
 MAT-002: -50 unidades
@@ -175,30 +184,33 @@ Movimentações:
 ### Exemplo 2: Orçamento com Kits
 
 **Orçamento ORC-2025-002:**
+
 ```json
 {
   "items": [
     {
       "tipo": "KIT",
       "kitId": "KIT-MEDICAO-01",
-      "quantidade": 10  // 10 kits
+      "quantidade": 10 // 10 kits
     }
   ]
 }
 ```
 
 **Composição do Kit (KIT-MEDICAO-01):**
+
 ```json
 {
   "items": [
-    { "materialId": "MAT-010", "quantidade": 1 },  // Quadro
-    { "materialId": "MAT-011", "quantidade": 3 },  // Disjuntores
-    { "materialId": "MAT-012", "quantidade": 10 }  // Cabos
+    { "materialId": "MAT-010", "quantidade": 1 }, // Quadro
+    { "materialId": "MAT-011", "quantidade": 3 }, // Disjuntores
+    { "materialId": "MAT-012", "quantidade": 10 } // Cabos
   ]
 }
 ```
 
 **Sistema Expande:**
+
 ```
 10x Kit precisam:
 - MAT-010: 10 unidades (10 x 1)
@@ -207,6 +219,7 @@ Movimentações:
 ```
 
 **Baixa de Estoque:**
+
 ```
 MAT-010 (Quadro): -10 unidades
 MAT-011 (Disjuntor): -30 unidades
@@ -223,6 +236,7 @@ Movimentações:
 ### Exemplo 3: Orçamento Misto (Materiais + Kits)
 
 **Orçamento ORC-2025-003:**
+
 ```json
 {
   "items": [
@@ -249,6 +263,7 @@ Movimentações:
 ```
 
 **Sistema Processa:**
+
 ```
 1. Material MAT-001: 50 unidades (direto)
 
@@ -267,7 +282,7 @@ Movimentações:
    - MAT-001: -80 unidades
    - MAT-005: -6 unidades
    - MAT-006: -15 unidades
-   
+
 5. Serviço: Ignorado (não afeta estoque)
 ```
 
@@ -282,6 +297,7 @@ GET /api/vendas/estoque/:orcamentoId
 ```
 
 **Resposta (quando há estoque):**
+
 ```json
 {
   "success": true,
@@ -320,6 +336,7 @@ GET /api/vendas/estoque/:orcamentoId
 ```
 
 **Resposta (quando FALTA estoque):**
+
 ```json
 {
   "success": true,
@@ -358,111 +375,107 @@ GET /api/vendas/estoque/:orcamentoId
 
 ```tsx
 const FormularioVenda = () => {
-    const [orcamentoSelecionado, setOrcamentoSelecionado] = useState(null);
-    const [verificacaoEstoque, setVerificacaoEstoque] = useState(null);
-    const [verificando, setVerificando] = useState(false);
-    
-    // Quando seleciona orçamento, verifica estoque
-    const handleSelecionarOrcamento = async (orcamentoId) => {
-        setOrcamentoSelecionado(orcamentoId);
-        setVerificando(true);
-        
-        try {
-            const response = await fetch(
-                `/api/vendas/estoque/${orcamentoId}`,
-                {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }
-            );
-            
-            const { data } = await response.json();
-            setVerificacaoEstoque(data);
-            
-        } catch (error) {
-            console.error('Erro ao verificar estoque:', error);
-        } finally {
-            setVerificando(false);
-        }
-    };
-    
-    return (
-        <form>
-            {/* Seletor de Orçamento */}
-            <select onChange={(e) => handleSelecionarOrcamento(e.target.value)}>
-                <option value="">Selecione um orçamento...</option>
-                {orcamentosAprovados.map(orc => (
-                    <option key={orc.id} value={orc.id}>
-                        {orc.id} - {orc.clientName} - R$ {orc.total}
-                    </option>
+  const [orcamentoSelecionado, setOrcamentoSelecionado] = useState(null);
+  const [verificacaoEstoque, setVerificacaoEstoque] = useState(null);
+  const [verificando, setVerificando] = useState(false);
+
+  // Quando seleciona orçamento, verifica estoque
+  const handleSelecionarOrcamento = async (orcamentoId) => {
+    setOrcamentoSelecionado(orcamentoId);
+    setVerificando(true);
+
+    try {
+      const response = await fetch(`/api/vendas/estoque/${orcamentoId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const { data } = await response.json();
+      setVerificacaoEstoque(data);
+    } catch (error) {
+      console.error("Erro ao verificar estoque:", error);
+    } finally {
+      setVerificando(false);
+    }
+  };
+
+  return (
+    <form>
+      {/* Seletor de Orçamento */}
+      <select onChange={(e) => handleSelecionarOrcamento(e.target.value)}>
+        <option value="">Selecione um orçamento...</option>
+        {orcamentosAprovados.map((orc) => (
+          <option key={orc.id} value={orc.id}>
+            {orc.id} - {orc.clientName} - R$ {orc.total}
+          </option>
+        ))}
+      </select>
+
+      {/* Status de Verificação */}
+      {verificando && (
+        <div className="bg-blue-50 border border-blue-200 p-3">
+          <p>🔍 Verificando disponibilidade de estoque...</p>
+        </div>
+      )}
+
+      {/* Resultado da Verificação */}
+      {verificacaoEstoque && (
+        <div>
+          {verificacaoEstoque.disponivel ? (
+            <div className="bg-green-50 border border-green-200 p-4">
+              <h4 className="font-semibold text-green-900 mb-2">
+                ✅ Estoque Disponível
+              </h4>
+              <p className="text-sm text-green-700">
+                Todos os {verificacaoEstoque.resumo.totalItens} itens estão
+                disponíveis em estoque.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-red-50 border border-red-200 p-4">
+              <h4 className="font-semibold text-red-900 mb-2">
+                ❌ Estoque Insuficiente
+              </h4>
+              <p className="text-sm text-red-700 mb-3">
+                {verificacaoEstoque.itensSemEstoque.length} item(ns) sem estoque
+                suficiente:
+              </p>
+              <ul className="space-y-2">
+                {verificacaoEstoque.itensSemEstoque.map((item) => (
+                  <li key={item.materialId} className="text-sm">
+                    <span className="font-semibold">{item.nome}</span>
+                    <br />
+                    <span className="text-red-600">
+                      Faltam: {item.falta} unidades
+                    </span>
+                    <br />
+                    <span className="text-gray-600">
+                      Disponível: {item.quantidadeDisponivel} | Necessário:{" "}
+                      {item.quantidadeNecessaria}
+                    </span>
+                  </li>
                 ))}
-            </select>
-            
-            {/* Status de Verificação */}
-            {verificando && (
-                <div className="bg-blue-50 border border-blue-200 p-3">
-                    <p>🔍 Verificando disponibilidade de estoque...</p>
-                </div>
-            )}
-            
-            {/* Resultado da Verificação */}
-            {verificacaoEstoque && (
-                <div>
-                    {verificacaoEstoque.disponivel ? (
-                        <div className="bg-green-50 border border-green-200 p-4">
-                            <h4 className="font-semibold text-green-900 mb-2">
-                                ✅ Estoque Disponível
-                            </h4>
-                            <p className="text-sm text-green-700">
-                                Todos os {verificacaoEstoque.resumo.totalItens} itens 
-                                estão disponíveis em estoque.
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="bg-red-50 border border-red-200 p-4">
-                            <h4 className="font-semibold text-red-900 mb-2">
-                                ❌ Estoque Insuficiente
-                            </h4>
-                            <p className="text-sm text-red-700 mb-3">
-                                {verificacaoEstoque.itensSemEstoque.length} item(ns) 
-                                sem estoque suficiente:
-                            </p>
-                            <ul className="space-y-2">
-                                {verificacaoEstoque.itensSemEstoque.map(item => (
-                                    <li key={item.materialId} className="text-sm">
-                                        <span className="font-semibold">{item.nome}</span>
-                                        <br />
-                                        <span className="text-red-600">
-                                            Faltam: {item.falta} unidades
-                                        </span>
-                                        <br />
-                                        <span className="text-gray-600">
-                                            Disponível: {item.quantidadeDisponivel} | 
-                                            Necessário: {item.quantidadeNecessaria}
-                                        </span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    )}
-                </div>
-            )}
-            
-            {/* Botão de Venda (desabilitado se sem estoque) */}
-            <button 
-                type="submit"
-                disabled={!verificacaoEstoque?.disponivel}
-                className={`px-6 py-2 rounded-lg ${
-                    verificacaoEstoque?.disponivel
-                        ? 'bg-brand-blue text-white hover:bg-blue-700'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-            >
-                {verificacaoEstoque?.disponivel 
-                    ? '💰 Realizar Venda' 
-                    : '❌ Estoque Insuficiente'}
-            </button>
-        </form>
-    );
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Botão de Venda (desabilitado se sem estoque) */}
+      <button
+        type="submit"
+        disabled={!verificacaoEstoque?.disponivel}
+        className={`px-6 py-2 rounded-lg ${
+          verificacaoEstoque?.disponivel
+            ? "bg-brand-blue text-white hover:bg-blue-700"
+            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+        }`}
+      >
+        {verificacaoEstoque?.disponivel
+          ? "💰 Realizar Venda"
+          : "❌ Estoque Insuficiente"}
+      </button>
+    </form>
+  );
 };
 ```
 
@@ -481,13 +494,14 @@ const FormularioVenda = () => {
     {
       "tipo": "KIT",
       "kitId": "KIT-QUADRO-MEDICAO",
-      "quantidade": 3  // 3 kits
+      "quantidade": 3 // 3 kits
     }
   ]
 }
 ```
 
 **Composição do Kit:**
+
 ```json
 {
   "id": "KIT-QUADRO-MEDICAO",
@@ -511,6 +525,7 @@ GET /api/vendas/estoque/ORC-2025-100
 ```
 
 **Resposta:**
+
 ```json
 {
   "disponivel": true,
@@ -604,6 +619,7 @@ POST /api/compras
 ```
 
 **Estoque atualizado:**
+
 ```
 MAT-104 (Cabo 10mm²): 10 → 110  (+100)
 ```
@@ -623,6 +639,7 @@ POST /api/vendas/realizar
 ```
 
 **Sistema processa:**
+
 ```
 1. ✅ Cria venda VND-1729500000000
 
@@ -648,6 +665,7 @@ POST /api/vendas/realizar
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -673,13 +691,13 @@ POST /api/vendas/realizar
 await prisma.$transaction(async (tx) => {
     // 1. Criar venda
     const venda = await tx.venda.create(...);
-    
+
     // 2. Gerar contas a receber
     const contas = await Promise.all(...);
-    
+
     // 3. Processar estoque
     const estoque = await EstoqueService.processarBaixa(...);
-    
+
     // Se QUALQUER etapa falhar:
     // - TUDO é revertido (rollback)
     // - Venda não é criada
@@ -689,6 +707,7 @@ await prisma.$transaction(async (tx) => {
 ```
 
 **Cenários de rollback:**
+
 - ❌ Estoque insuficiente → Rollback total
 - ❌ Erro ao criar conta → Rollback total
 - ❌ Erro de banco de dados → Rollback total
@@ -702,12 +721,13 @@ await prisma.$transaction(async (tx) => {
 ### Rastreamento Completo
 
 ```sql
-SELECT * FROM movimentacoes_estoque 
-WHERE motivo = 'VENDA' 
+SELECT * FROM movimentacoes_estoque
+WHERE motivo = 'VENDA'
 ORDER BY data DESC;
 ```
 
 **Resultado:**
+
 ```
 id  | materialId | tipo   | quantidade | motivo | referencia  | data
 ----|------------|--------|------------|--------|-------------|-----
@@ -717,6 +737,7 @@ M3  | MAT-102    | SAIDA  | 12         | VENDA  | VND-123456  | 2025-10-20
 ```
 
 **Auditoria completa:**
+
 - ✅ Quando saiu
 - ✅ Quanto saiu
 - ✅ Por que saiu (VENDA)
@@ -729,13 +750,13 @@ M3  | MAT-102    | SAIDA  | 12         | VENDA  | VND-123456  | 2025-10-20
 
 ### Vendas
 
-| Método | Endpoint | Descrição | Novo? |
-|--------|----------|-----------|-------|
-| `POST` | `/realizar` | Criar venda **+ baixa estoque** | 🔄 Atualizado |
-| `GET` | `/estoque/:orcamentoId` | Verificar disponibilidade | ✨ NOVO |
-| `GET` | `/` | Listar vendas | ⚪ Mantido |
-| `GET` | `/:id` | Buscar venda | ⚪ Mantido |
-| `PUT` | `/contas/:id/pagar` | Pagar conta receber | ⚪ Mantido |
+| Método | Endpoint                | Descrição                       | Novo?         |
+| ------ | ----------------------- | ------------------------------- | ------------- |
+| `POST` | `/realizar`             | Criar venda **+ baixa estoque** | 🔄 Atualizado |
+| `GET`  | `/estoque/:orcamentoId` | Verificar disponibilidade       | ✨ NOVO       |
+| `GET`  | `/`                     | Listar vendas                   | ⚪ Mantido    |
+| `GET`  | `/:id`                  | Buscar venda                    | ⚪ Mantido    |
+| `PUT`  | `/contas/:id/pagar`     | Pagar conta receber             | ⚪ Mantido    |
 
 ---
 
@@ -813,62 +834,66 @@ model MovimentacaoEstoque {
   referencia  String?  // ID da venda, compra, projeto
   observacoes String?
   data        DateTime @default(now())
-  
+
   material Material @relation(fields: [materialId], references: [id])
 }
 ```
 
 ### Tipos de Movimentação
 
-| Tipo | Motivo | Quando | Referência |
-|------|--------|--------|------------|
-| ENTRADA | COMPRA | Recebe materiais | ID da compra |
-| SAIDA | **VENDA** | Realiza venda | **ID da venda** ← NOVO! |
-| SAIDA | PROJETO | Aloca para obra | ID do projeto |
-| SAIDA | AJUSTE | Perda/avaria | - |
-| ENTRADA | DEVOLUCAO | Cliente devolve | ID da venda |
+| Tipo    | Motivo    | Quando           | Referência              |
+| ------- | --------- | ---------------- | ----------------------- |
+| ENTRADA | COMPRA    | Recebe materiais | ID da compra            |
+| SAIDA   | **VENDA** | Realiza venda    | **ID da venda** ← NOVO! |
+| SAIDA   | PROJETO   | Aloca para obra  | ID do projeto           |
+| SAIDA   | AJUSTE    | Perda/avaria     | -                       |
+| ENTRADA | DEVOLUCAO | Cliente devolve  | ID da venda             |
 
 ---
 
 ## 🎓 Boas Práticas Aplicadas
 
 ### 1. Verificação Antes de Executar
+
 ```typescript
 // Sempre verificar estoque ANTES de vender
 const verificacao = await verificarEstoque(orcamentoId);
 
 if (!verificacao.disponivel) {
-    throw new Error('Estoque insuficiente');
+  throw new Error("Estoque insuficiente");
 }
 ```
 
 ### 2. Expansão de Kits
+
 ```typescript
 // Kits são expandidos em componentes
 const componentes = await expandirKit(kitId);
 
 // Cada componente tem baixa individual
-componentes.forEach(c => darBaixa(c.materialId, c.quantidade));
+componentes.forEach((c) => darBaixa(c.materialId, c.quantidade));
 ```
 
 ### 3. Agrupamento de Materiais
+
 ```typescript
 // Se mesmo material aparece várias vezes, agrupar
 const agrupados = new Map();
 
-materiais.forEach(m => {
-    const qtdAtual = agrupados.get(m.id) || 0;
-    agrupados.set(m.id, qtdAtual + m.quantidade);
+materiais.forEach((m) => {
+  const qtdAtual = agrupados.get(m.id) || 0;
+  agrupados.set(m.id, qtdAtual + m.quantidade);
 });
 ```
 
 ### 4. Transação Atômica
+
 ```typescript
 // Tudo ou nada
 await prisma.$transaction(async (tx) => {
-    await criarVenda();
-    await gerarContas();
-    await darBaixaEstoque();  // Se falhar, TUDO é revertido
+  await criarVenda();
+  await gerarContas();
+  await darBaixaEstoque(); // Se falhar, TUDO é revertido
 });
 ```
 
@@ -877,14 +902,17 @@ await prisma.$transaction(async (tx) => {
 ## 🚀 Arquivos Criados/Modificados
 
 ### Criados
+
 1. **backend/src/services/estoque.service.ts** - Lógica de estoque
 
 ### Modificados
+
 2. **backend/src/services/vendas.service.ts** - Integração com estoque
 3. **backend/src/controllers/vendasController.ts** - Endpoint de verificação
 4. **backend/src/routes/vendas.routes.ts** - Rota de verificação
 
 ### Documentação
+
 5. **INTEGRACAO_VENDAS_ESTOQUE.md** (este arquivo)
 
 ---
@@ -919,4 +947,3 @@ await prisma.$transaction(async (tx) => {
 
 **Implementado em 20/10/2025** 📦  
 **Sistema S3E Engenharia Elétrica** ⚡
-

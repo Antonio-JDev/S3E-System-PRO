@@ -105,21 +105,30 @@ export interface SavedPDFTemplate {
 export interface OrcamentoPDFData {
     // Informações básicas
     numero: string;
-    data: string;
+    numeroSequencial?: number; // Número sequencial do orçamento (1, 2, 3...)
+    data?: string;
+    emissao: string;
     validade: string;
+    orcamentistaNome?: string; // Primeiro nome do usuário que criou o orçamento
     
     // Cliente
     cliente: {
         nome: string;
-        cpfCnpj: string;
+        cpfCnpj?: string;
         endereco?: string;
         telefone?: string;
         email?: string;
     };
     
+    // Endereços
+    enderecos: {
+        cobranca?: string;
+        obra?: string;
+    };
+    
     // Projeto
     projeto: {
-        titulo: string;
+        titulo?: string;
         descricao?: string;
         enderecoObra?: string;
         cidade?: string;
@@ -140,7 +149,7 @@ export interface OrcamentoPDFData {
         codigo?: string;
         nome: string;
         descricao?: string;
-        unidade: string;
+        unidade?: string;
         quantidade: number;
         valorUnitario: number;
         valorTotal: number;
@@ -150,16 +159,20 @@ export interface OrcamentoPDFData {
     // Cálculos financeiros
     financeiro: {
         subtotal: number;
-        bdi: number;
-        valorComBDI: number;
+        bdi?: number;
+        valorComBDI?: number;
         desconto: number;
         impostos: number;
         valorTotal: number;
-        condicaoPagamento: string;
+        condicaoPagamento?: string;
     };
+    
+    // Pagamento
+    pagamento?: string;
     
     // Observações e termos
     observacoes?: string;
+    descricaoGeral?: string;
     descricaoTecnica?: string;
     fotos?: {
         url: string;

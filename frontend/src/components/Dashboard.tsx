@@ -182,26 +182,26 @@ const Dashboard: React.FC<DashboardProps> = ({ toggleSidebar, onNavigate, projec
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando dashboard...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando dashboard...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header Modernizado */}
             <header className="flex justify-between items-start mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200" aria-label="Open sidebar">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200" aria-label="Open sidebar">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Dashboard Executivo</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Visão geral do sistema de gestão S3E</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Dashboard Executivo</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Visão geral do sistema de gestão S3E</p>
                     </div>
                 </div>
                  <div className="flex items-center gap-3 sm:gap-4">

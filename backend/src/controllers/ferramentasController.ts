@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from '../services/auditoria.service';
 
-const prisma = new PrismaClient();
 
 /**
  * GET /api/ferramentas
@@ -120,25 +120,22 @@ export const criarFerramenta = async (req: Request, res: Response): Promise<void
         quantidade: quantidade !== undefined && quantidade !== null ? parseInt(quantidade) || 0 : 0,
         imagemUrl: imagemUrl || null,
         ativo: true
-      }
+      } as any
     });
 
-    // Audit log (apenas se userId estiver disponível)
+    // Audit log (desativado) — usa stub de auditoria
     if (userId) {
       try {
-        await prisma.auditLog.create({
-          data: {
-            userId: userId,
-            action: 'CREATE',
-            entity: 'Ferramenta',
-            entityId: ferramenta.id,
-            description: `Ferramenta "${nome}" cadastrada`,
-            metadata: { codigo, categoria }
-          }
+        await AuditoriaService.registrarEvento({
+          userId: userId,
+          action: 'CREATE',
+          entity: 'Ferramenta',
+          entityId: ferramenta.id,
+          description: `Ferramenta "${nome}" cadastrada`,
+          metadata: { codigo, categoria }
         });
       } catch (logError) {
-        console.error('❌ Erro ao criar audit log:', logError);
-        // Não interromper o fluxo se o log falhar
+        console.error('❌ Erro ao criar audit log (stub):', logError);
       }
     }
 
@@ -219,27 +216,24 @@ export const atualizarFerramenta = async (req: Request, res: Response): Promise<
         modelo: modelo !== undefined ? modelo : ferramenta.modelo,
         descricao: descricao !== undefined ? descricao : ferramenta.descricao,
         valorCompra: valorCompra !== undefined ? (valorCompra ? parseFloat(valorCompra) : null) : ferramenta.valorCompra,
-        quantidade: quantidade !== undefined ? parseInt(quantidade) || 0 : ferramenta.quantidade,
+        quantidade: quantidade !== undefined ? parseInt(quantidade) || 0 : (ferramenta as any).quantidade,
         imagemUrl: imagemUrl !== undefined ? imagemUrl : ferramenta.imagemUrl
-      }
+      } as any
     });
 
-    // Audit log (apenas se userId estiver disponível)
+    // Audit log (desativado) — usa stub de auditoria
     if (userId) {
       try {
-        await prisma.auditLog.create({
-          data: {
-            userId: userId,
-            action: 'UPDATE',
-            entity: 'Ferramenta',
-            entityId: id,
-            description: `Ferramenta "${ferramentaAtualizada.nome}" atualizada`,
-            metadata: req.body
-          }
+        await AuditoriaService.registrarEvento({
+          userId: userId,
+          action: 'UPDATE',
+          entity: 'Ferramenta',
+          entityId: id,
+          description: `Ferramenta "${ferramentaAtualizada.nome}" atualizada`,
+          metadata: req.body
         });
       } catch (logError) {
-        console.error('❌ Erro ao criar audit log:', logError);
-        // Não interromper o fluxo se o log falhar
+        console.error('❌ Erro ao criar audit log (stub):', logError);
       }
     }
 
@@ -286,22 +280,19 @@ export const deletarFerramenta = async (req: Request, res: Response): Promise<vo
       data: { ativo: false }
     });
 
-    // Audit log (apenas se userId estiver disponível)
+    // Audit log (desativado) — usa stub de auditoria
     if (userId) {
       try {
-        await prisma.auditLog.create({
-          data: {
-            userId: userId,
-            action: 'DELETE',
-            entity: 'Ferramenta',
-            entityId: id,
-            description: `Ferramenta "${ferramenta.nome}" desativada`,
-            metadata: { codigo: ferramenta.codigo }
-          }
+        await AuditoriaService.registrarEvento({
+          userId: userId,
+          action: 'DELETE',
+          entity: 'Ferramenta',
+          entityId: id,
+          description: `Ferramenta "${ferramenta.nome}" desativada`,
+          metadata: { codigo: ferramenta.codigo }
         });
       } catch (logError) {
-        console.error('❌ Erro ao criar audit log:', logError);
-        // Não interromper o fluxo se o log falhar
+        console.error('❌ Erro ao criar audit log (stub):', logError);
       }
     }
 
@@ -348,7 +339,7 @@ export const getEstatisticas = async (req: Request, res: Response): Promise<void
 
     // Calcular estatísticas
     const totalFerramentas = ferramentas.length;
-    const totalEmEstoque = ferramentas.reduce((sum, f) => sum + (f.quantidade || 0), 0);
+    const totalEmEstoque = ferramentas.reduce((sum, f) => sum + ((f as any).quantidade || 0), 0);
     const totalKits = kits.length;
     
     // Calcular ferramentas em uso (em kits)
@@ -362,7 +353,7 @@ export const getEstatisticas = async (req: Request, res: Response): Promise<void
     
     // Calcular valor total do estoque
     const valorTotalEstoque = ferramentas.reduce((sum, f) => {
-      const quantidade = f.quantidade || 0;
+      const quantidade = (f as any).quantidade || 0;
       const valor = f.valorCompra || 0;
       return sum + (quantidade * valor);
     }, 0);
@@ -375,7 +366,7 @@ export const getEstatisticas = async (req: Request, res: Response): Promise<void
     }, {} as Record<string, number>);
 
     // Ferramentas com estoque baixo (menos de 5 unidades)
-    const estoqueBaixo = ferramentas.filter(f => (f.quantidade || 0) < 5).length;
+    const estoqueBaixo = ferramentas.filter(f => ((f as any).quantidade || 0) < 5).length;
 
     const estatisticas = {
       totalFerramentas,

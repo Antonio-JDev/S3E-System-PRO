@@ -60,11 +60,11 @@ router.get(
   getTarefaById
 );
 
-// POST /api/obras/tarefas - Criar nova tarefa (gerente/engenheiro/admin/desenvolvedor)
+// POST /api/obras/tarefas - Criar nova tarefa
+// Alterado para permitir que qualquer usuário autenticado crie tarefas (fallback operacional)
 router.post(
   '/tarefas',
-  authenticate,
-  checkPermission('create_obra', 'update_obra'),
+  authenticate, // agora apenas autenticado é suficiente
   criarTarefa
 );
 

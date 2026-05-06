@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import multer from 'multer';
@@ -7,36 +7,39 @@ import path from 'path';
 import fs from 'fs';
 import { classificarMaterialPorNome, normalizarCategoria, isCategoriaValida } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
+import { recalcularCustoUnitarioMaterial, listarCandidatosRecalculo } from '../services/recalculoCustoUnitario.service';
+import {
+  combinaFamiliaEBitola,
+  isCableFamilia,
+  type CableFamilia
+} from '../utils/cableBitolaMatcher';
 
-const prisma = new PrismaClient();
+
+/** Arredonda para 2 casas decimais (valores monetários). */
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Calcula valor de venda, imposto (DAS) e custo agregado conforme Simples Nacional.
+ * Imposto = valor de venda × (alíquota/100). Custo agregado = preço compra + valor imposto.
+ */
+function calcularPrecificacaoSimplesNacional(
+  precoCompra: number,
+  valorVendaInformado: number | null | undefined,
+  markup: number,
+  aliquotaPercentual: number
+): { valorVenda: number; valorImposto: number; custoAgregado: number } {
+  const valorVenda = valorVendaInformado != null && valorVendaInformado > 0
+    ? valorVendaInformado
+    : roundMoney(precoCompra * markup);
+  const aliquotaDecimal = aliquotaPercentual / 100;
+  const valorImposto = roundMoney(valorVenda * aliquotaDecimal);
+  const custoAgregado = roundMoney(precoCompra + valorImposto);
+  return { valorVenda, valorImposto, custoAgregado };
+}
 
 // No CommonJS, __dirname já está disponível automaticamente
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../uploads/temp');
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, `import-${uniqueSuffix}${path.extname(file.originalname)}`);
-  }
-});
-
-export const uploadImportFile = multer({
-  storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /xlsx|csv|json/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    
-    if (extname) {
-      return cb(null, true);
-    } else {
-      cb(new Error('Apenas arquivos JSON, XLSX ou CSV são permitidos'));
-    }
-  }
-}).single('arquivo');
 
 // Configuração de upload para imagens de materiais
 const imageStorage = multer.diskStorage({
@@ -93,7 +96,7 @@ export const getMateriais = async (req: Request, res: Response): Promise<void> =
       where,
       include: {
         fornecedor: {
-          select: { id: true, nome: true }
+          select: { id: true, nome: true, classificacao: true }
         }
       },
       orderBy: { nome: 'asc' }
@@ -137,7 +140,12 @@ export const getMaterialById = async (req: Request, res: Response): Promise<void
 // Criar material
 export const createMaterial = async (req: Request, res: Response): Promise<void> => {
   try {
-    let { categoria, nome, sku, ncm, unidadeMedida, ...rest } = req.body;
+    // codigo e unidade vêm do front mas não existem no modelo Material (Prisma); não incluir em rest
+    let { categoria, nome, sku, ncm, unidadeMedida, tipo, codigo, unidade, ...rest } = req.body;
+    
+    // Schema exige "nome" e "tipo": usar fallbacks quando o front não envia (ex: formulário com descricao/codigo)
+    const nomeFinal = (nome && String(nome).trim()) || rest.descricao || codigo || 'Material sem nome';
+    const tipoFinal = (tipo && String(tipo).trim()) || categoria || 'Insumo';
     
     // Normalizar categoria se fornecida
     if (categoria) {
@@ -146,8 +154,8 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
     
     // Se categoria não fornecida ou inválida, classificar automaticamente
     if (!categoria || !isCategoriaValida(categoria)) {
-      categoria = classificarMaterialPorNome(nome || '');
-      console.log(`🔍 Categoria auto-classificada: "${categoria}" para "${nome}"`);
+      categoria = classificarMaterialPorNome(nomeFinal || '');
+      console.log(`🔍 Categoria auto-classificada: "${categoria}" para "${nomeFinal}"`);
     }
     
     // Gerar SKU único e aleatório se não fornecido
@@ -159,19 +167,44 @@ export const createMaterial = async (req: Request, res: Response): Promise<void>
     }
     
     // Usar unidade de medida fornecida ou padrão 'un' se não especificada
-    // ✅ Removida lógica automática que forçava unidade baseada no nome
-    // Agora o usuário tem controle total sobre a unidade de medida
     const unidadeMedidaFinal = unidadeMedida || 'un';
-    
+
+    // Precificação Simples Nacional: config + markup por fornecedor
+    const config = await prisma.configuracaoSistema.findUnique({
+      where: { id: 'sistema-config' },
+      select: { aliquotaImpostoPadrao: true, markupFabricante: true, markupRevendedor: true, percentualImpostoPadrao: true, multiplicadorVenda: true }
+    }).catch(() => null);
+    const aliquota = config?.aliquotaImpostoPadrao ?? config?.percentualImpostoPadrao ?? 8;
+    let markup = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+    if (rest.fornecedorId) {
+      const forn = await prisma.fornecedor.findUnique({
+        where: { id: rest.fornecedorId },
+        select: { classificacao: true }
+      });
+      if (forn?.classificacao === 'Representante_Vendedor') markup = config?.markupRevendedor ?? 1.10;
+    }
+    const precoNum = typeof rest.preco === 'number' ? rest.preco : parseFloat(rest.preco) || 0;
+    const aliquotaMaterial = rest.percentualImposto != null ? Number(rest.percentualImposto) : aliquota;
+    const precificacao = precoNum > 0 || rest.valorVenda != null
+      ? calcularPrecificacaoSimplesNacional(precoNum, rest.valorVenda, markup, aliquotaMaterial)
+      : null;
+    const dataCreate: any = {
+      ...rest,
+      nome: nomeFinal,
+      tipo: tipoFinal,
+      categoria,
+      sku: skuFinal,
+      ncm: ncm || null,
+      unidadeMedida: unidadeMedidaFinal
+    };
+    if (precificacao) {
+      dataCreate.valorVenda = precificacao.valorVenda;
+      dataCreate.valorImposto = precificacao.valorImposto;
+      dataCreate.custoAgregado = precificacao.custoAgregado;
+    }
+
     const material = await prisma.material.create({
-      data: {
-        ...rest,
-        nome,
-        categoria,
-        sku: skuFinal,
-        ncm: ncm || null,
-        unidadeMedida: unidadeMedidaFinal
-      }
+      data: dataCreate
     });
 
     res.status(201).json(material);
@@ -217,17 +250,51 @@ export const updateMaterial = async (req: Request, res: Response): Promise<void>
       });
       unidadeMedidaFinal = materialAtual?.unidadeMedida || 'un';
     }
-    // ✅ Removida lógica automática que forçava unidade baseada no nome
-    // Agora o usuário tem controle total sobre a unidade de medida
+
+    // Precificação Simples Nacional: recalcular valorImposto e custoAgregado a partir de preco/valorVenda
+    const materialAtual = await prisma.material.findUnique({
+      where: { id },
+      select: { preco: true, valorVenda: true, fornecedorId: true, percentualImposto: true }
+    });
+    const precoAtual = materialAtual?.preco ?? 0;
+    const precoNum = rest.preco != null ? (typeof rest.preco === 'number' ? rest.preco : parseFloat(rest.preco) || 0) : precoAtual;
+    // Só usar valorVenda do body se foi enviado; senão recalcular valorVenda = preco * markup
+    const valorVendaEnviado = rest.hasOwnProperty('valorVenda')
+      ? (typeof rest.valorVenda === 'number' ? rest.valorVenda : parseFloat(rest.valorVenda))
+      : undefined;
+    const config = await prisma.configuracaoSistema.findUnique({
+      where: { id: 'sistema-config' },
+      select: { aliquotaImpostoPadrao: true, markupFabricante: true, markupRevendedor: true, percentualImpostoPadrao: true, multiplicadorVenda: true }
+    }).catch(() => null);
+    const aliquota = config?.aliquotaImpostoPadrao ?? config?.percentualImpostoPadrao ?? 8;
+    let markup = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+    const fornecedorId = rest.fornecedorId ?? materialAtual?.fornecedorId;
+    if (fornecedorId) {
+      const forn = await prisma.fornecedor.findUnique({
+        where: { id: fornecedorId },
+        select: { classificacao: true }
+      });
+      if (forn?.classificacao === 'Representante_Vendedor') markup = config?.markupRevendedor ?? 1.10;
+    }
+    const aliquotaMaterial = rest.percentualImposto != null ? Number(rest.percentualImposto) : (materialAtual?.percentualImposto ?? aliquota);
+    const precificacao = precoNum > 0 || valorVendaEnviado != null || materialAtual?.valorVenda != null
+      ? calcularPrecificacaoSimplesNacional(precoNum, valorVendaEnviado, markup, aliquotaMaterial)
+      : null;
+    const dataUpdate: any = {
+      ...rest,
+      ...(nomeFinal && { nome: nomeFinal }),
+      unidadeMedida: unidadeMedidaFinal,
+      categoria
+    };
+    if (precificacao) {
+      dataUpdate.valorVenda = precificacao.valorVenda;
+      dataUpdate.valorImposto = precificacao.valorImposto;
+      dataUpdate.custoAgregado = precificacao.custoAgregado;
+    }
 
     const material = await prisma.material.update({
       where: { id },
-      data: {
-        ...rest,
-        ...(nomeFinal && { nome: nomeFinal }),
-        unidadeMedida: unidadeMedidaFinal, // ✅ Sempre atualizar a unidade
-        categoria
-      }
+      data: dataUpdate
     });
 
     res.json(material);
@@ -466,9 +533,9 @@ export const getHistoricoCompras = async (req: Request, res: Response): Promise<
       status: item.compra.status,
       nomeProduto: item.nomeProduto, // Incluir nome do produto da compra
       // ✅ Campos de fracionamento
-      quantidadeFracionada: item.quantidadeFracionada,
-      tipoEmbalagem: item.tipoEmbalagem,
-      unidadeEmbalagem: item.unidadeEmbalagem
+      quantidadeFracionada: (item as any).quantidadeFracionada,
+      tipoEmbalagem: (item as any).tipoEmbalagem,
+      unidadeEmbalagem: (item as any).unidadeEmbalagem
     }));
 
     res.json(historico);
@@ -875,220 +942,6 @@ async function gerarPDFCotacao(res: Response, materiais: any[]) {
 }
 
 /**
- * Importar preços atualizados do fornecedor
- * POST /api/materiais/importar-precos
- */
-export const importarPrecos = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const file = req.file;
-
-    if (!file) {
-      res.status(400).json({
-        success: false,
-        error: 'Nenhum arquivo foi enviado'
-      });
-      return;
-    }
-
-    console.log(`📥 Importando preços do arquivo: ${file.filename}`);
-
-    const ext = path.extname(file.filename).toLowerCase();
-    let dadosImportados: any[] = [];
-
-    if (ext === '.xlsx') {
-      dadosImportados = await processarExcel(file.path);
-    } else if (ext === '.csv') {
-      dadosImportados = await processarCSV(file.path);
-    } else {
-      res.status(400).json({
-        success: false,
-        error: 'Formato de arquivo inválido'
-      });
-      return;
-    }
-
-    // Processar atualizações
-    let atualizados = 0;
-    let erros = 0;
-    const detalhes: any[] = [];
-
-    for (const item of dadosImportados) {
-      try {
-        const { sku, precoFornecedor } = item;
-
-        // Validar dados
-        if (!sku || !precoFornecedor || isNaN(parseFloat(precoFornecedor)) || parseFloat(precoFornecedor) <= 0) {
-          erros++;
-          detalhes.push({
-            sku,
-            erro: 'Preço inválido ou não informado'
-          });
-          continue;
-        }
-
-        // Buscar material pelo SKU
-        const material = await prisma.material.findUnique({
-          where: { sku }
-        });
-
-        if (!material) {
-          erros++;
-          detalhes.push({
-            sku,
-            erro: 'Material não encontrado'
-          });
-          continue;
-        }
-
-        const valorVendaNovo = parseFloat(precoFornecedor);
-        const valorVendaAntigo = material.valorVenda || 0;
-        
-        // Atualizar apenas valorVenda (preço de venda), não o preço de compra
-        // O preço de compra deve ser único a cada compra e não deve ser alterado
-        await prisma.material.update({
-          where: { id: material.id },
-          data: {
-            valorVenda: valorVendaNovo,
-            // Calcular porcentagem de lucro se tiver preço de compra
-            porcentagemLucro: material.preco && material.preco > 0 
-              ? ((valorVendaNovo - material.preco) / material.preco) * 100 
-              : null,
-            updatedAt: new Date()
-          }
-        });
-
-        atualizados++;
-        detalhes.push({
-          sku,
-          nome: material.nome,
-          valorVendaAntigo: valorVendaAntigo,
-          valorVendaNovo: valorVendaNovo,
-          sucesso: true
-        });
-
-        console.log(`✅ Material ${sku} - Valor de venda atualizado: R$ ${valorVendaAntigo} → R$ ${valorVendaNovo}`);
-
-      } catch (error) {
-        erros++;
-        detalhes.push({
-          sku: item.sku,
-          erro: 'Erro ao atualizar'
-        });
-        console.error(`❌ Erro ao processar material ${item.sku}:`, error);
-      }
-    }
-
-    // Limpar arquivo temporário
-    try {
-      const fs = await import('fs');
-      fs.unlinkSync(file.path);
-    } catch (err) {
-      console.warn('Erro ao limpar arquivo temporário:', err);
-    }
-
-    const resultado = {
-      success: true,
-      message: `${atualizados} preços atualizados com sucesso`,
-      data: {
-        atualizados,
-        erros,
-        total: dadosImportados.length,
-        detalhes
-      }
-    };
-
-    console.log(`✅ Importação concluída: ${atualizados} atualizados, ${erros} erros`);
-    
-    res.json(resultado);
-
-  } catch (error) {
-    console.error('Erro ao importar preços:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Erro ao importar preços',
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
-    });
-  }
-};
-
-/**
- * Processar arquivo Excel
- */
-async function processarExcel(filePath: string): Promise<any[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
-
-  const sheet = workbook.getWorksheet(1);
-  const dados: any[] = [];
-
-  if (!sheet) {
-    throw new Error('Planilha não encontrada no arquivo');
-  }
-
-  // Encontrar linha do header (linha 6 conforme template)
-  const headerRowNum = 6;
-  
-  sheet.eachRow((row, rowNumber) => {
-    if (rowNumber > headerRowNum) {
-      const sku = row.getCell(1).value?.toString().trim();
-      const nome = row.getCell(2).value?.toString().trim();
-      const precoFornecedor = row.getCell(7).value;
-
-      if (sku) {
-        dados.push({
-          sku,
-          nome,
-          precoFornecedor: precoFornecedor?.toString().replace(',', '.')
-        });
-      }
-    }
-  });
-
-  console.log(`📊 ${dados.length} linhas processadas do Excel`);
-  return dados;
-}
-
-/**
- * Processar arquivo CSV
- */
-async function processarCSV(filePath: string): Promise<any[]> {
-  const fs = await import('fs');
-  const csv = fs.readFileSync(filePath, 'utf-8');
-  
-  const linhas = csv.split('\n');
-  const dados: any[] = [];
-
-  // Pular header (primeira linha)
-  for (let i = 1; i < linhas.length; i++) {
-    const linha = linhas[i].trim();
-    if (!linha) continue;
-
-    const colunas = linha.split(';');
-    
-    if (colunas.length >= 7) {
-      const sku = colunas[0]?.trim();
-      const nome = colunas[1]?.trim();
-      const precoFornecedor = colunas[6]?.trim();
-
-      if (sku) {
-        dados.push({
-          sku,
-          nome,
-          precoFornecedor: precoFornecedor?.replace(',', '.')
-        });
-      }
-    }
-  }
-
-  console.log(`📊 ${dados.length} linhas processadas do CSV`);
-  return dados;
-}
-
-/**
- * Gerar template de importação de preços em JSON
- * GET /api/materiais/template-importacao?formato=json
- */
-/**
  * Buscar histórico de preços de um material
  * GET /api/materiais/:id/historico-precos
  */
@@ -1128,366 +981,64 @@ export const getHistoricoPrecos = async (req: Request, res: Response): Promise<v
   }
 };
 
-export const gerarTemplateImportacao = async (req: Request, res: Response): Promise<void> => {
+/**
+ * POST /api/materiais/:id/recalcular-custo
+ * Recalcula custo unitário quando compra veio em KM mas material está em M (corrige DRE).
+ * Body opcional: { force: true } para forçar recálculo mesmo sem critério automático.
+ */
+export const recalcularCustoUnitario = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { tipo = 'todos', formato = 'json' } = req.query;
-    
-    // Buscar materiais para o template
-    let materiais;
-    if (tipo === 'criticos') {
-      // Buscar apenas materiais com estoque crítico
-      const todosMateriais = await prisma.material.findMany({
-        where: { ativo: true },
-        include: {
-          fornecedor: {
-            select: { id: true, nome: true }
-          }
-        },
-        orderBy: [
-          { estoque: 'asc' },
-          { nome: 'asc' }
-        ]
-      });
-      materiais = todosMateriais.filter(m => m.estoque === 0 || m.estoque <= m.estoqueMinimo);
-    } else {
-      // Buscar todos os materiais ativos (limitar para evitar arquivos muito grandes)
-      materiais = await prisma.material.findMany({
-        where: { ativo: true },
-        include: {
-          fornecedor: {
-            select: { id: true, nome: true }
-          }
-        },
-        orderBy: { nome: 'asc' },
-        take: 1000 // Limitar a 1000 materiais para evitar arquivo muito grande
-      });
-    }
+    const { id: materialId } = req.params;
+    const force = Boolean((req.body && typeof req.body === 'object' && req.body.force) || req.query.force === 'true');
 
-    console.log(`📋 Gerando template ${formato} com ${materiais.length} materiais`);
+    const resultado = await recalcularCustoUnitarioMaterial(materialId, { force });
 
-    if (materiais.length === 0) {
-      res.status(404).json({
+    if (!resultado.aplicado) {
+      res.status(400).json({
         success: false,
-        error: 'Nenhum material encontrado para gerar template'
+        message: resultado.motivo,
+        aplicado: false,
+        materialId: resultado.materialId,
+        materialNome: resultado.materialNome
       });
       return;
     }
 
-    // Preparar dados dos materiais
-    const materiaisData = materiais.map(m => ({
-      id: m.id,
-      sku: m.sku,
-      nome: m.nome,
-      descricao: m.descricao || '',
-      categoria: m.categoria,
-      tipo: m.tipo,
-      unidadeMedida: m.unidadeMedida,
-      estoque: m.estoque,
-      estoqueMinimo: m.estoqueMinimo,
-      precoAtual: m.preco || 0,
-      precoNovo: m.preco || 0, // Campo a ser atualizado pelo fornecedor
-      ultimaAtualizacao: m.ultimaAtualizacaoPreco || m.updatedAt,
-      fornecedor: m.fornecedor?.nome || 'N/A',
-      localizacao: m.localizacao || '',
-      preco: m.preco || 0 // Alias para compatibilidade
-    }));
-
-    // Gerar JSON
-    if (formato === 'json') {
-      const templateData = {
-        versao: '1.0',
-        geradoEm: new Date().toISOString(),
-        empresa: 'S3E Engenharia Elétrica',
-        instrucoes: 'Atualize apenas o campo "precoNovo" de cada material. Não altere os demais campos!',
-        materiais: materiaisData
-      };
-
-      console.log('✅ Gerando template JSON:', {
-        totalMateriais: materiaisData.length,
-        primeiroMaterial: materiaisData[0]?.sku || 'N/A'
-      });
-
-      // NÃO usar Content-Disposition (deixar frontend controlar download)
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.json(templateData);
-      return;
-    }
-
-    // Gerar PDF (retornar dados para frontend renderizar em HTML)
-    if (formato === 'pdf') {
-      res.json({
-        success: true,
-        materiais: materiaisData,
-        geradoEm: new Date().toISOString()
-      });
-      return;
-    }
-
-    // Se não for JSON nem PDF, retorna erro
-    res.status(400).json({
-      success: false,
-      error: 'Formato inválido. Use: json ou pdf'
+    res.json({
+      success: true,
+      message: resultado.motivo,
+      aplicado: true,
+      data: {
+        materialId: resultado.materialId,
+        materialNome: resultado.materialNome,
+        valorUnitarioAnterior: resultado.valorUnitarioAnterior,
+        valorUnitarioNovo: resultado.valorUnitarioNovo,
+        numeroNF: resultado.numeroNF
+      }
     });
   } catch (error) {
-    console.error('❌ Erro ao gerar template:', error);
+    console.error('Erro ao recalcular custo unitário:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao gerar template de importação',
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
+      message: 'Erro ao recalcular custo unitário',
+      aplicado: false
     });
   }
 };
 
-
 /**
- * Fazer preview das alterações antes de importar (JSON, XLSX ou CSV)
- * POST /api/materiais/preview-importacao
+ * GET /api/materiais/candidatos-recalculo-custo
+ * Lista materiais em metros com custo muito alto (candidatos a correção KM→M).
  */
-export const previewImportacao = async (req: Request, res: Response): Promise<void> => {
+export const getCandidatosRecalculoCusto = async (_req: Request, res: Response): Promise<void> => {
   try {
-    console.log('📥 Preview - Recebendo arquivo...');
-    console.log('📄 Body:', req.body);
-    console.log('📄 File:', req.file ? {
-      fieldname: req.file.fieldname,
-      originalname: req.file.originalname,
-      filename: req.file.filename,
-      size: req.file.size,
-      path: req.file.path
-    } : 'Nenhum arquivo');
-    
-    const file = req.file;
-
-    if (!file) {
-      console.error('❌ Nenhum arquivo foi enviado!');
-      res.status(400).json({
-        success: false,
-        error: 'Nenhum arquivo foi enviado'
-      });
-      return;
-    }
-
-    console.log(`📥 Preview de importação: ${file.filename}`);
-
-    const ext = path.extname(file.filename).toLowerCase();
-    let dadosImportados: any[] = [];
-
-    if (ext === '.json') {
-      // Processar JSON
-      try {
-        console.log('📂 Lendo arquivo JSON do disco:', file.path);
-        
-        // Verificar se arquivo existe
-        if (!fs.existsSync(file.path)) {
-          console.error('❌ Arquivo não encontrado no disco:', file.path);
-          res.status(400).json({
-            success: false,
-            error: 'Arquivo não encontrado no servidor'
-          });
-          return;
-        }
-        
-        const jsonContent = fs.readFileSync(file.path, 'utf-8');
-        console.log('📝 Conteúdo do arquivo (primeiros 200 chars):', jsonContent.substring(0, 200));
-        
-        let jsonData = JSON.parse(jsonContent);
-        
-        // ✨ CORREÇÃO: Remover wrapper { success, data } se existir
-        if (jsonData.success && jsonData.data) {
-          console.log('🧹 Detectado wrapper Axios { success, data } - Extraindo data...');
-          jsonData = jsonData.data;
-        }
-        
-        console.log('📄 JSON parseado (após limpeza):', {
-          versao: jsonData.versao,
-          empresa: jsonData.empresa,
-          totalMateriais: jsonData.materiais?.length || 0,
-          primeiroMaterial: jsonData.materiais?.[0]?.sku || 'N/A'
-        });
-        
-        if (!jsonData.materiais || !Array.isArray(jsonData.materiais)) {
-          res.status(400).json({
-            success: false,
-            error: 'Formato JSON inválido. Deve conter array "materiais"'
-          });
-          return;
-        }
-        
-        // ✨ VALIDAÇÃO INTELIGENTE: Apenas materiais com preço diferente
-        dadosImportados = jsonData.materiais
-          .filter((m: any) => {
-            // Verificar se precoNovo é diferente de precoAtual
-            const precoAtual = parseFloat(m.precoAtual) || 0;
-            const precoNovo = parseFloat(m.precoNovo) || 0;
-            
-            // Apenas incluir se houver mudança real (diferença > 0.01)
-            const mudou = Math.abs(precoNovo - precoAtual) > 0.01;
-            
-            if (!mudou) {
-              console.log(`⏭️ Pulando ${m.sku} - Preço não mudou (${precoAtual})`);
-            }
-            
-            return mudou;
-          })
-          .map((m: any) => ({
-            sku: m.sku,
-            nome: m.nome,
-            precoFornecedor: m.precoNovo,
-            id: m.id // Manter ID para referência
-          }));
-        
-        console.log(`✅ ${dadosImportados.length} materiais com alteração de preço detectados`);
-      } catch (jsonError) {
-        console.error('❌ Erro ao processar JSON:', jsonError);
-        res.status(400).json({
-          success: false,
-          error: 'Erro ao processar JSON: ' + (jsonError instanceof Error ? jsonError.message : 'Formato inválido')
-        });
-        return;
-      }
-    } else if (ext === '.xlsx') {
-      dadosImportados = await processarExcel(file.path);
-    } else if (ext === '.csv') {
-      dadosImportados = await processarCSV(file.path);
-    } else {
-      res.status(400).json({
-        success: false,
-        error: 'Formato de arquivo inválido. Use JSON, XLSX ou CSV.'
-      });
-      return;
-    }
-
-    // ✨ VALIDAÇÃO: Se nenhum item foi alterado
-    if (dadosImportados.length === 0) {
-      res.json({
-        success: true,
-        data: {
-          totalItens: 0,
-          totalAlteracoes: 0,
-          totalErros: 0,
-          preview: [],
-          mensagem: '✅ Nenhuma alteração detectada. Todos os preços já estão atualizados ou são iguais aos valores no sistema.'
-        }
-      });
-      
-      // Limpar arquivo temporário
-      try {
-        fs.unlinkSync(file.path);
-      } catch (err) {
-        console.warn('Erro ao limpar arquivo:', err);
-      }
-      
-      return;
-    }
-
-    // Processar preview (sem salvar)
-    const preview: any[] = [];
-    let totalAlteracoes = 0;
-    let totalErros = 0;
-    let totalIgnorados = 0;
-
-    for (const item of dadosImportados) {
-      try {
-        const { sku, precoFornecedor } = item;
-
-        // Validar dados
-        if (!sku || !precoFornecedor || isNaN(parseFloat(precoFornecedor)) || parseFloat(precoFornecedor) <= 0) {
-          totalErros++;
-          preview.push({
-            sku,
-            nome: item.nome || 'N/A',
-            precoAtual: null,
-            precoNovo: precoFornecedor,
-            status: 'erro',
-            mensagem: 'Preço inválido ou não informado'
-          });
-          continue;
-        }
-
-        // Buscar material pelo SKU
-        const material = await prisma.material.findUnique({
-          where: { sku },
-          include: {
-            fornecedor: {
-              select: { nome: true }
-            }
-          }
-        });
-
-        if (!material) {
-          totalErros++;
-          preview.push({
-            sku,
-            nome: item.nome || 'N/A',
-            precoAtual: null,
-            precoNovo: parseFloat(precoFornecedor),
-            status: 'erro',
-            mensagem: 'Material não encontrado no sistema'
-          });
-          continue;
-        }
-
-        const precoNovo = parseFloat(precoFornecedor);
-        const precoAtual = material.preco || 0;
-        const diferenca = precoAtual > 0 ? ((precoNovo - precoAtual) / precoAtual) * 100 : 0;
-
-        totalAlteracoes++;
-        preview.push({
-          sku: material.sku,
-          nome: material.nome,
-          unidade: material.unidadeMedida,
-          estoque: material.estoque,
-          precoAtual: precoAtual,
-          precoNovo: precoNovo,
-          diferenca: diferenca,
-          fornecedor: material.fornecedor?.nome || 'N/A',
-          status: precoNovo < precoAtual ? 'reducao' : (precoNovo > precoAtual ? 'aumento' : 'igual'),
-          mensagem: 'Pronto para atualizar'
-        });
-
-      } catch (error) {
-        totalErros++;
-        preview.push({
-          sku: item.sku,
-          nome: item.nome || 'N/A',
-          status: 'erro',
-          mensagem: 'Erro ao processar item'
-        });
-        console.error(`❌ Erro ao processar material ${item.sku}:`, error);
-      }
-    }
-
-    // Limpar arquivo temporário
-    try {
-      const fs = await import('fs');
-      fs.unlinkSync(file.path);
-    } catch (err) {
-      console.warn('Erro ao limpar arquivo temporário:', err);
-    }
-
-    const resultado = {
-      success: true,
-      data: {
-        totalItens: dadosImportados.length,
-        totalAlteracoes,
-        totalErros,
-        totalIgnorados,
-        preview: preview,
-        mensagem: totalAlteracoes > 0 
-          ? `✅ ${totalAlteracoes} alteração(ões) detectada(s). Revise antes de confirmar.`
-          : '✅ Nenhuma alteração necessária. Todos os preços já estão corretos.'
-      }
-    };
-
-    console.log(`✅ Preview gerado: ${totalAlteracoes} alterações, ${totalErros} erros, ${totalIgnorados} ignorados`);
-    
-    res.json(resultado);
-
+    const candidatos = await listarCandidatosRecalculo();
+    res.json({ success: true, data: candidatos });
   } catch (error) {
-    console.error('Erro ao fazer preview de importação:', error);
+    console.error('Erro ao listar candidatos ao recálculo:', error);
     res.status(500).json({
       success: false,
-      error: 'Erro ao processar preview',
-      message: error instanceof Error ? error.message : 'Erro desconhecido'
+      message: 'Erro ao listar candidatos ao recálculo de custo'
     });
   }
 };
@@ -1748,5 +1299,486 @@ export const servirImagemMaterial = async (req: Request, res: Response): Promise
       message: 'Erro ao servir imagem',
       error: error.message
     });
+  }
+};
+
+/**
+ * POST /api/materiais/atualizar-valores-venda
+ * Atualiza valores de venda de todos os materiais baseado na configuração de markup
+ * Acesso: admin, desenvolvedor
+ */
+export const atualizarValoresVenda = async (req: Request, res: Response) => {
+  console.log('🔧 [API] Iniciando atualização de valores de venda dos materiais...');
+  
+  try {
+    // 1. Buscar configuração atual do markup
+    const configuracao = await prisma.configuracaoSistema.findFirst({
+      select: {
+        markupFabricante: true,
+        multiplicadorVenda: true // fallback para versão legada
+      }
+    });
+
+    const markup = configuracao?.markupFabricante || configuracao?.multiplicadorVenda || 1.55;
+    console.log(`📊 [Valores] Usando markup: ${markup}x (${((markup - 1) * 100).toFixed(1)}% de lucro)`);
+
+    // 2. Buscar materiais que têm preço de custo definido
+    const materiaisComCusto = await prisma.material.findMany({
+      where: {
+        preco: {
+          not: null,
+          gt: 0
+        }
+      },
+      select: {
+        id: true,
+        nome: true,
+        sku: true,
+        preco: true,
+        valorVenda: true,
+        unidadeMedida: true
+      }
+    });
+
+    console.log(`📦 [Materiais] Encontrados ${materiaisComCusto.length} materiais com preço de custo`);
+
+    if (materiaisComCusto.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Nenhum material com preço de custo encontrado',
+        data: {
+          totalMateriais: 0,
+          materiaisAtualizados: 0,
+          markup: markup,
+          cobertura: 0
+        }
+      });
+    }
+
+    // 3. Atualizar materiais em lotes para performance
+    let sucessos = 0;
+    let erros = 0;
+    const LOTE_SIZE = 20;
+
+    for (let i = 0; i < materiaisComCusto.length; i += LOTE_SIZE) {
+      const lote = materiaisComCusto.slice(i, i + LOTE_SIZE);
+      
+      console.log(`📦 [Lote] Processando ${Math.floor(i / LOTE_SIZE) + 1}/${Math.ceil(materiaisComCusto.length / LOTE_SIZE)}`);
+      
+      // Processar lote em paralelo
+      const promises = lote.map(async (material) => {
+        try {
+          if (!material.preco || material.preco <= 0) {
+            return { sucesso: false, erro: 'Preço inválido' };
+          }
+
+          // Calcular novo valor de venda
+          const novoValorVenda = roundMoney(material.preco * markup);
+          
+          // Calcular custos específicos por unidade de medida
+          let valorVendaM = null;
+          let valorVendaCM = null;
+          let custoCM = null;
+
+          if (material.unidadeMedida === 'M' || material.unidadeMedida === 'KG/M') {
+            valorVendaM = novoValorVenda;
+            valorVendaCM = roundMoney(novoValorVenda / 100);
+            custoCM = roundMoney(material.preco / 100);
+          }
+
+          // Calcular porcentagem de lucro
+          const porcentagemLucro = ((novoValorVenda - material.preco) / material.preco) * 100;
+
+          // Atualizar material
+          await prisma.material.update({
+            where: { id: material.id },
+            data: {
+              valorVenda: novoValorVenda,
+              valorVendaM: valorVendaM,
+              valorVendaCM: valorVendaCM,
+              custoCM: custoCM,
+              porcentagemLucro: roundMoney(porcentagemLucro)
+            }
+          });
+
+          console.log(`✅ [${material.sku}] ${material.nome}: R$ ${material.preco?.toFixed(2)} → R$ ${novoValorVenda.toFixed(2)} (+${porcentagemLucro.toFixed(1)}%)`);
+          
+          return { sucesso: true, material: material.sku };
+
+        } catch (error: any) {
+          console.error(`❌ [${material.sku}] Erro ao atualizar:`, error.message);
+          return { sucesso: false, erro: error.message };
+        }
+      });
+
+      // Aguardar conclusão do lote
+      const resultados = await Promise.all(promises);
+      
+      // Contar resultados
+      sucessos += resultados.filter(r => r.sucesso).length;
+      erros += resultados.filter(r => !r.sucesso).length;
+      
+      // Pequena pausa entre lotes para não sobrecarregar
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // 4. Calcular estatísticas finais
+    const cobertura = materiaisComCusto.length > 0 ? ((sucessos / materiaisComCusto.length) * 100) : 0;
+
+    console.log(`\n🎉 [Resultado] Atualização concluída:`);
+    console.log(`   ✅ Sucessos: ${sucessos}`);
+    console.log(`   ❌ Erros: ${erros}`);
+    console.log(`   📊 Cobertura: ${cobertura.toFixed(1)}%`);
+    console.log(`   💰 Markup aplicado: ${markup}x`);
+
+    res.status(200).json({
+      success: true,
+      message: `Valores de venda atualizados com sucesso!`,
+      data: {
+        totalMateriais: materiaisComCusto.length,
+        materiaisAtualizados: sucessos,
+        erros: erros,
+        markup: markup,
+        cobertura: Math.round(cobertura * 10) / 10, // 1 casa decimal
+        porcentagemLucro: ((markup - 1) * 100).toFixed(1)
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('❌ [API] Erro ao atualizar valores de venda:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao atualizar valores de venda dos materiais',
+      message: error.message || 'Erro interno do servidor'
+    });
+  }
+};
+
+/**
+ * GET /api/materiais/import/template
+ * Retorna template JSON para importação em lote (chaves aceitas pelo sistema).
+ */
+export const exportarTemplateMateriais = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const template = {
+      version: '1.0.0',
+      exportDate: new Date().toISOString(),
+      _instrucoes: 'Preencha o array "materiais". Por item: nome (ou descricao) é obrigatório. Opcionais: tipo, categoria, unidadeMedida, preco, estoque, estoqueMinimo, sku, ncm, fornecedorId.',
+      materiais: [
+        {
+          nome: 'Exemplo Material 1',
+          descricao: 'Descrição opcional',
+          tipo: 'Insumo',
+          categoria: 'Material Elétrico',
+          unidadeMedida: 'un',
+          preco: 100,
+          estoque: 50,
+          estoqueMinimo: 10,
+          sku: '',
+          ncm: '',
+          fornecedorId: null,
+          ativo: true
+        },
+        {
+          nome: 'Exemplo Material 2',
+          tipo: 'Material Elétrico',
+          categoria: 'Material Elétrico',
+          unidadeMedida: 'm',
+          preco: 25.5,
+          estoque: 0,
+          estoqueMinimo: 5,
+          ativo: true
+        }
+      ]
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="template_materiais_${Date.now()}.json"`);
+    res.json(template);
+  } catch (error) {
+    console.error('Erro ao exportar template de materiais:', error);
+    res.status(500).json({ error: 'Erro ao exportar template' });
+  }
+};
+
+/**
+ * POST /api/materiais/import
+ * Importa vários materiais de uma vez via JSON (body: { materiais: [...] }).
+ */
+export const importarMateriais = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { materiais: itens } = req.body as { materiais?: any[] };
+    if (!Array.isArray(itens) || itens.length === 0) {
+      res.status(400).json({ error: 'Envie um objeto com array "materiais" contendo os itens' });
+      return;
+    }
+
+    const resultados = { criados: 0, erros: 0 as number, mensagens: [] as string[] };
+
+    for (let i = 0; i < itens.length; i++) {
+      const item = itens[i];
+      try {
+        let { categoria, nome, sku, ncm, unidadeMedida, tipo, codigo, unidade, ...rest } = item;
+        const nomeFinal = (nome && String(nome).trim()) || item.descricao || item.codigo || 'Material sem nome';
+        const tipoFinal = (tipo && String(tipo).trim()) || categoria || 'Insumo';
+        if (categoria) categoria = normalizarCategoria(categoria);
+        if (!categoria || !isCategoriaValida(categoria)) {
+          categoria = classificarMaterialPorNome(nomeFinal || '');
+        }
+        let skuFinal = sku;
+        if (!skuFinal || String(skuFinal).trim() === '') {
+          skuFinal = await gerarSKUUnico(prisma, ncm || null);
+        }
+        const unidadeMedidaFinal = unidadeMedida || unidade || 'un';
+
+        const config = await prisma.configuracaoSistema.findUnique({
+          where: { id: 'sistema-config' },
+          select: { aliquotaImpostoPadrao: true, markupFabricante: true, markupRevendedor: true, percentualImpostoPadrao: true, multiplicadorVenda: true }
+        }).catch(() => null);
+        const aliquota = config?.aliquotaImpostoPadrao ?? config?.percentualImpostoPadrao ?? 8;
+        let markup = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+        if (rest.fornecedorId) {
+          const forn = await prisma.fornecedor.findUnique({ where: { id: rest.fornecedorId }, select: { classificacao: true } });
+          if (forn?.classificacao === 'Representante_Vendedor') markup = config?.markupRevendedor ?? 1.10;
+        }
+        const precoNum = typeof rest.preco === 'number' ? rest.preco : parseFloat(rest.preco) || 0;
+        const aliquotaMaterial = rest.percentualImposto != null ? Number(rest.percentualImposto) : aliquota;
+        const precificacao = precoNum > 0 || rest.valorVenda != null
+          ? calcularPrecificacaoSimplesNacional(precoNum, rest.valorVenda, markup, aliquotaMaterial)
+          : null;
+
+        const dataCreate: any = {
+          nome: nomeFinal,
+          tipo: tipoFinal,
+          categoria,
+          sku: skuFinal,
+          descricao: rest.descricao ?? nomeFinal,
+          ncm: ncm || null,
+          unidadeMedida: unidadeMedidaFinal,
+          estoque: rest.estoque != null ? Number(rest.estoque) : 0,
+          estoqueMinimo: rest.estoqueMinimo != null ? Number(rest.estoqueMinimo) : 5,
+          preco: rest.preco != null ? Number(rest.preco) : null,
+          fornecedorId: rest.fornecedorId || null,
+          ativo: rest.ativo !== false,
+          localizacao: rest.localizacao ?? null,
+          imagemUrl: rest.imagemUrl ?? null,
+          quantidadePorEmbalagem: rest.quantidadePorEmbalagem ?? null,
+          tipoEmbalagem: rest.tipoEmbalagem ?? null,
+          precoEmbalagem: rest.precoEmbalagem ?? null,
+          precoUnitario: rest.precoUnitario ?? null,
+          percentualImposto: rest.percentualImposto ?? null,
+        };
+        if (precificacao) {
+          dataCreate.valorVenda = precificacao.valorVenda;
+          dataCreate.valorImposto = precificacao.valorImposto;
+          dataCreate.custoAgregado = precificacao.custoAgregado;
+          dataCreate.porcentagemLucro = precoNum > 0 ? roundMoney(((precificacao.valorVenda - precoNum) / precoNum) * 100) : null;
+        }
+
+        await prisma.material.create({ data: dataCreate });
+        resultados.criados++;
+      } catch (err: any) {
+        resultados.erros++;
+        resultados.mensagens.push(`Item ${i + 1} (${item.nome || item.descricao || '?'}): ${err?.message || 'erro'}`);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `${resultados.criados} material(is) criado(s). ${resultados.erros} erro(s).`,
+      data: resultados
+    });
+  } catch (error) {
+    console.error('Erro ao importar materiais:', error);
+    res.status(500).json({ error: 'Erro ao importar materiais' });
+  }
+};
+
+type MaterialCabosPrecoRow = {
+  id: string;
+  nome: string;
+  preco: number | null;
+  valorVenda: number | null;
+  fornecedorId: string | null;
+  percentualImposto: number | null;
+  unidadeMedida: string;
+};
+
+/** Mesma regra de `updateMaterial` (SN + markup por fornecedor) + campos por metro para unidade M/KG-M. */
+async function buildMaterialDataUpdateNovoPrecoCusto(
+  material: MaterialCabosPrecoRow,
+  novoPreco: number
+): Promise<Record<string, unknown>> {
+  const config = await prisma.configuracaoSistema
+    .findUnique({
+      where: { id: 'sistema-config' },
+      select: {
+        aliquotaImpostoPadrao: true,
+        markupFabricante: true,
+        markupRevendedor: true,
+        percentualImpostoPadrao: true,
+        multiplicadorVenda: true
+      }
+    })
+    .catch(() => null);
+  const aliquota = config?.aliquotaImpostoPadrao ?? config?.percentualImpostoPadrao ?? 8;
+  let markup = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+  if (material.fornecedorId) {
+    const forn = await prisma.fornecedor.findUnique({
+      where: { id: material.fornecedorId },
+      select: { classificacao: true }
+    });
+    if (forn?.classificacao === 'Representante_Vendedor') markup = config?.markupRevendedor ?? 1.10;
+  }
+  const aliquotaMaterial =
+    material.percentualImposto != null ? Number(material.percentualImposto) : aliquota;
+  const precificacao =
+    novoPreco > 0 || material.valorVenda != null
+      ? calcularPrecificacaoSimplesNacional(novoPreco, undefined, markup, aliquotaMaterial)
+      : null;
+
+  const data: Record<string, unknown> = {
+    preco: novoPreco,
+    ultimaAtualizacaoPreco: new Date()
+  };
+
+  if (precificacao) {
+    data.valorVenda = precificacao.valorVenda;
+    data.valorImposto = precificacao.valorImposto;
+    data.custoAgregado = precificacao.custoAgregado;
+  }
+
+  const um = (material.unidadeMedida || 'un').toLowerCase();
+  if ((um === 'm' || um === 'kg/m') && precificacao && novoPreco > 0) {
+    data.valorVendaM = precificacao.valorVenda;
+    data.valorVendaCM = roundMoney(precificacao.valorVenda / 100);
+    data.custoCM = roundMoney(novoPreco / 100);
+    data.porcentagemLucro = roundMoney(
+      ((precificacao.valorVenda - novoPreco) / novoPreco) * 100
+    );
+  }
+
+  return data;
+}
+
+async function listarMateriaisCabosFamiliaBitola(
+  familia: CableFamilia,
+  bitolaMm2: number
+): Promise<MaterialCabosPrecoRow[]> {
+  const todos = await prisma.material.findMany({
+    where: {
+      ativo: true,
+      nome: { contains: 'CABO', mode: 'insensitive' }
+    },
+    select: {
+      id: true,
+      nome: true,
+      preco: true,
+      valorVenda: true,
+      fornecedorId: true,
+      percentualImposto: true,
+      unidadeMedida: true
+    }
+  });
+
+  return todos.filter((m) => combinaFamiliaEBitola(m.nome, familia, bitolaMm2));
+}
+
+/**
+ * POST /api/materiais/cabos/preview-preco-bitola
+ * Body: { familia, bitolaMm2 }
+ */
+export const previewPrecoBitolaCabo = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { familia, bitolaMm2 } = req.body as { familia?: string; bitolaMm2?: unknown };
+    if (!familia || !isCableFamilia(familia)) {
+      res.status(400).json({ error: 'Informe familia: FLEX_750V | FLEX_1KV | RIGIDO_1KV' });
+      return;
+    }
+    const bitola =
+      typeof bitolaMm2 === 'number' ? bitolaMm2 : parseFloat(String(bitolaMm2 ?? ''));
+    if (!Number.isFinite(bitola) || bitola <= 0) {
+      res.status(400).json({ error: 'bitolaMm2 inválida' });
+      return;
+    }
+
+    const lista = await listarMateriaisCabosFamiliaBitola(familia, bitola);
+    res.json({
+      success: true,
+      total: lista.length,
+      materiais: lista.map((m) => ({
+        id: m.id,
+        nome: m.nome,
+        precoAtual: m.preco
+      }))
+    });
+  } catch (error) {
+    console.error('previewPrecoBitolaCabo:', error);
+    res.status(500).json({ error: 'Erro ao pré-visualizar materiais' });
+  }
+};
+
+/**
+ * POST /api/materiais/cabos/aplicar-preco-bitola
+ * Body: { familia, bitolaMm2, preco }
+ */
+export const aplicarPrecoBitolaCabo = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { familia, bitolaMm2, preco } = req.body as {
+      familia?: string;
+      bitolaMm2?: unknown;
+      preco?: unknown;
+    };
+    if (!familia || !isCableFamilia(familia)) {
+      res.status(400).json({ error: 'Informe familia: FLEX_750V | FLEX_1KV | RIGIDO_1KV' });
+      return;
+    }
+    const bitola =
+      typeof bitolaMm2 === 'number' ? bitolaMm2 : parseFloat(String(bitolaMm2 ?? ''));
+    if (!Number.isFinite(bitola) || bitola <= 0) {
+      res.status(400).json({ error: 'bitolaMm2 inválida' });
+      return;
+    }
+    const novoPreco = typeof preco === 'number' ? preco : parseFloat(String(preco ?? ''));
+    if (!Number.isFinite(novoPreco) || novoPreco < 0) {
+      res.status(400).json({ error: 'preço inválido' });
+      return;
+    }
+
+    const lista = await listarMateriaisCabosFamiliaBitola(familia, bitola);
+    if (lista.length === 0) {
+      res.status(200).json({
+        success: false,
+        error: 'Nenhum material encontrado para esta família e bitola',
+        atualizados: 0,
+        ids: [] as string[]
+      });
+      return;
+    }
+
+    const ids: string[] = [];
+    const LOTE = 15;
+    for (let i = 0; i < lista.length; i += LOTE) {
+      const lote = lista.slice(i, i + LOTE);
+      await Promise.all(
+        lote.map(async (m) => {
+          const data = await buildMaterialDataUpdateNovoPrecoCusto(m, novoPreco);
+          await prisma.material.update({
+            where: { id: m.id },
+            data: data as any
+          });
+          ids.push(m.id);
+        })
+      );
+    }
+
+    res.json({
+      success: true,
+      atualizados: ids.length,
+      ids
+    });
+  } catch (error) {
+    console.error('aplicarPrecoBitolaCabo:', error);
+    res.status(500).json({ error: 'Erro ao aplicar preços' });
   }
 };

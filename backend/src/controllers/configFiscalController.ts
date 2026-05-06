@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import fs from 'fs/promises';
 import path from 'path';
 import { CryptoUtil } from '../utils/crypto.util';
 
-const prisma = new PrismaClient();
 const CERTIFICADOS_DIR = path.join(process.cwd(), 'data', 'certificados');
 
 // Garantir que o diretório existe
@@ -24,6 +23,7 @@ export const getConfiguracoes = async (_req: Request, res: Response): Promise<vo
         id: true,
         cnpj: true,
         inscricaoEstadual: true,
+        inscricaoMunicipal: true,
         razaoSocial: true,
         nomeFantasia: true,
         endereco: true,
@@ -62,6 +62,7 @@ export const getConfiguracaoById = async (req: Request, res: Response): Promise<
         id: true,
         cnpj: true,
         inscricaoEstadual: true,
+        inscricaoMunicipal: true,
         razaoSocial: true,
         nomeFantasia: true,
         endereco: true,
@@ -97,6 +98,7 @@ export const createConfiguracao = async (req: Request, res: Response): Promise<v
     const {
       cnpj,
       inscricaoEstadual,
+      inscricaoMunicipal,
       razaoSocial,
       nomeFantasia,
       endereco,
@@ -123,35 +125,38 @@ export const createConfiguracao = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    let certificadoPath = null;
-    let certificadoSenhaCriptografada = null;
-    let certificadoValidade = null;
+    let certificadoPath: string | null = null;
+    let certificadoSenhaCriptografada: string | null = null;
+    let certificadoValidade: Date | null = null;
 
     // Processar certificado se fornecido
     if (certificadoBase64 && certificadoSenha) {
       await ensureCertificadosDir();
 
-      // Criar nome único para o arquivo
+      // Criar nome único para o arquivo (salvar só o nome no banco = path portável dev/Docker)
       const fileName = `${cnpj.replace(/\D/g, '')}_${Date.now()}.pfx`;
-      certificadoPath = path.join(CERTIFICADOS_DIR, fileName);
+      const fullPath = path.join(CERTIFICADOS_DIR, fileName);
+      certificadoPath = fileName;
 
       // Decodificar base64 e salvar arquivo
       const buffer = Buffer.from(certificadoBase64, 'base64');
-      await fs.writeFile(certificadoPath, buffer);
+      await fs.writeFile(fullPath, buffer);
 
       // Criptografar senha do certificado usando AES (reversível)
       certificadoSenhaCriptografada = CryptoUtil.encrypt(certificadoSenha);
 
       // TODO: Extrair data de validade do certificado usando node-forge ou similar
       // Por enquanto, definir validade padrão de 1 ano
-      certificadoValidade = new Date();
-      certificadoValidade.setFullYear(certificadoValidade.getFullYear() + 1);
+      const validade = new Date();
+      validade.setFullYear(validade.getFullYear() + 1);
+      certificadoValidade = validade;
     }
 
     const config = await prisma.empresaFiscal.create({
       data: {
         cnpj,
         inscricaoEstadual,
+        inscricaoMunicipal: inscricaoMunicipal || undefined,
         razaoSocial,
         nomeFantasia,
         endereco,
@@ -185,6 +190,7 @@ export const updateConfiguracao = async (req: Request, res: Response): Promise<v
     const { id } = req.params;
     const {
       inscricaoEstadual,
+      inscricaoMunicipal,
       razaoSocial,
       nomeFantasia,
       endereco,
@@ -204,6 +210,7 @@ export const updateConfiguracao = async (req: Request, res: Response): Promise<v
 
     const dataToUpdate: any = {
       inscricaoEstadual,
+      inscricaoMunicipal,
       razaoSocial,
       nomeFantasia,
       endereco,
@@ -229,22 +236,28 @@ export const updateConfiguracao = async (req: Request, res: Response): Promise<v
         return;
       }
 
-      // Deletar certificado antigo se existir
+      // Deletar certificado antigo se existir (resolver path para compatibilidade com registros antigos)
       if (config.certificadoPath) {
-        try {
-          await fs.unlink(config.certificadoPath);
-        } catch (error) {
-          console.error('Erro ao deletar certificado antigo:', error);
+        const { resolveCertificadoPath } = await import('../utils/certificadoPath.util');
+        const pathToDelete = resolveCertificadoPath(config.certificadoPath);
+        if (pathToDelete) {
+          try {
+            await fs.unlink(pathToDelete);
+          } catch (error: any) {
+            if (error?.code !== 'ENOENT') {
+              console.error('Erro ao deletar certificado antigo:', error);
+            }
+          }
         }
       }
 
-      // Salvar novo certificado
+      // Salvar novo certificado (só nome no banco = path portável)
       const fileName = `${config.cnpj.replace(/\D/g, '')}_${Date.now()}.pfx`;
-      const certificadoPath = path.join(CERTIFICADOS_DIR, fileName);
+      const fullPath = path.join(CERTIFICADOS_DIR, fileName);
       const buffer = Buffer.from(certificadoBase64, 'base64');
-      await fs.writeFile(certificadoPath, buffer);
+      await fs.writeFile(fullPath, buffer);
 
-      dataToUpdate.certificadoPath = certificadoPath;
+      dataToUpdate.certificadoPath = fileName;
       dataToUpdate.certificadoSenha = CryptoUtil.encrypt(certificadoSenha);
       
       // Atualizar validade
@@ -277,12 +290,16 @@ export const deleteConfiguracao = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Deletar arquivo do certificado se existir
+    // Deletar arquivo do certificado se existir (resolver path para compatibilidade)
     if (config.certificadoPath) {
-      try {
-        await fs.unlink(config.certificadoPath);
-      } catch (error) {
-        console.error('Erro ao deletar certificado:', error);
+      const { resolveCertificadoPath } = await import('../utils/certificadoPath.util');
+      const pathToDelete = resolveCertificadoPath(config.certificadoPath);
+      if (pathToDelete) {
+        try {
+          await fs.unlink(pathToDelete);
+        } catch (error) {
+          console.error('Erro ao deletar certificado:', error);
+        }
       }
     }
 

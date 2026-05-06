@@ -19,12 +19,14 @@ ANTES:                      DEPOIS:
 **Quando usar**: Materiais que **já estão no estoque**
 
 ### Recursos
+
 - Busca por nome ou SKU
 - Lista materiais disponíveis
 - Mostra estoque atual
 - 1 clique para adicionar
 
 ### Visual
+
 ```
 🔍 [Buscar material...]
 
@@ -42,6 +44,7 @@ ANTES:                      DEPOIS:
 **Quando usar**: Materiais **ainda não comprados** (cotações)
 
 ### Campos do Formulário
+
 1. **Tipo** - Material, Serviço, Kit, Custo Extra
 2. **Nome** - Nome do item (obrigatório)
 3. **Descrição Técnica** - Detalhes (opcional)
@@ -50,6 +53,7 @@ ANTES:                      DEPOIS:
 6. **Custo Unitário** - Valor da cotação (obrigatório)
 
 ### Preview Automático
+
 ```
 ┌────────────────────────────────────┐
 │ 💡 Preview do Cálculo              │
@@ -99,6 +103,7 @@ ANTES:                      DEPOIS:
 ### Orçamento: Reforma Elétrica Comercial
 
 #### Materiais do Estoque (já tenho)
+
 ```
 📦 Do Estoque:
 1. Cabo 2,5mm² Flexível      - 50M  - R$ 175,00
@@ -109,6 +114,7 @@ Subtotal Estoque: R$ 390,00
 ```
 
 #### Materiais Manuais (vou comprar se aprovar)
+
 ```
 ✏️ Criar Manualmente:
 1. Disjuntor Geral 63A Schneider   - 1UN   - R$ 250,00
@@ -127,6 +133,7 @@ Subtotal Manual: R$ 2.370,00
 ```
 
 #### Cálculo Final
+
 ```
 Subtotal Itens:    R$ 2.760,00
 BDI (20%):         R$   552,00
@@ -141,6 +148,7 @@ TOTAL FINAL:       R$ 3.312,00
 ## 🎨 Interface Implementada
 
 ### Header do Modal
+
 ```
 ┌──────────────────────────────────────────────┐
 │  Adicionar Item ao Orçamento            ❌   │
@@ -152,6 +160,7 @@ TOTAL FINAL:       R$ 3.312,00
 ```
 
 ### Conteúdo (Aba Manual)
+
 ```
 ┌──────────────────────────────────────────────┐
 │ 💡 Use para materiais cotados               │
@@ -200,6 +209,7 @@ TOTAL FINAL:       R$ 3.312,00
 ## 🚀 Resultado Final
 
 ### Sistema Flexível e Completo
+
 ```
 Criar Orçamento
     ↓
@@ -232,6 +242,7 @@ Se aprovado:
 ### Items Manuais vs Estoque
 
 **Item Manual**:
+
 - ✅ Aparece no orçamento
 - ✅ Entra no cálculo de totais
 - ✅ Vai para o PDF
@@ -239,6 +250,7 @@ Se aprovado:
 - ❌ NÃO tem vínculo com material
 
 **Item do Estoque**:
+
 - ✅ Aparece no orçamento
 - ✅ Entra no cálculo de totais
 - ✅ Vai para o PDF
@@ -262,4 +274,3 @@ Se aprovado:
 **Data**: 07/11/2024  
 **Status**: ✅ **FUNCIONAL E TESTADO**  
 **Impacto**: 🌟🌟🌟🌟🌟 Muito Alto
-

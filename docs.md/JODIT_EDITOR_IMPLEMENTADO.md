@@ -9,7 +9,9 @@
 
 ## 🎯 OBJETIVO ALCANÇADO
 
-Substituir o campo simples de "Descrição Técnica" e o botão "ABRIR EDITOR AVANÇADO..." por um **Editor WYSIWYG profissional (Jodit React)** integrado diretamente na página de criação de orçamento.
+Substituir o campo simples de "Descrição Técnica" e o botão "ABRIR EDITOR
+AVANÇADO..." por um **Editor WYSIWYG profissional (Jodit React)** integrado
+diretamente na página de criação de orçamento.
 
 ---
 
@@ -20,6 +22,7 @@ npm install jodit jodit-react
 ```
 
 **Versões:**
+
 - `jodit`: ^4.x
 - `jodit-react`: ^2.x
 
@@ -30,9 +33,12 @@ npm install jodit jodit-react
 ### ✅ Arquivos Criados:
 
 #### 1. `frontend/src/components/JoditEditor.tsx`
-**Descrição**: Componente wrapper customizado do Jodit React para Engenharia Elétrica.
+
+**Descrição**: Componente wrapper customizado do Jodit React para Engenharia
+Elétrica.
 
 **Funcionalidades:**
+
 - ✅ Editor WYSIWYG completo
 - ✅ Toolbar customizada
 - ✅ Upload de imagens (Base64 inline)
@@ -45,12 +51,13 @@ npm install jodit jodit-react
 - ✅ Internacionalização (pt_br)
 
 **Props:**
+
 ```typescript
 interface JoditEditorProps {
-    value: string;           // Conteúdo HTML
-    onChange: (content: string) => void;  // Callback de mudança
-    placeholder?: string;    // Texto placeholder
-    height?: number;         // Altura do editor (default: 500px)
+  value: string; // Conteúdo HTML
+  onChange: (content: string) => void; // Callback de mudança
+  placeholder?: string; // Texto placeholder
+  height?: number; // Altura do editor (default: 500px)
 }
 ```
 
@@ -59,10 +66,12 @@ interface JoditEditorProps {
 ### ✅ Arquivos Modificados:
 
 #### 1. `frontend/src/App.tsx`
+
 **Mudança:**
+
 ```typescript
 // Adicionado import do CSS global do Jodit
-import 'jodit/es2021/jodit.min.css';
+import "jodit/es2021/jodit.min.css";
 ```
 
 #### 2. `frontend/src/pages/NovoOrcamentoPage.tsx` (Página de Criação)
@@ -70,15 +79,17 @@ import 'jodit/es2021/jodit.min.css';
 **Mudanças:**
 
 1. ✅ **Import alterado:**
+
    ```typescript
    // Removido
    - import EditorDescricaoAvancada from '../components/EditorDescricaoAvancada';
-   
+
    // Adicionado
    + import JoditEditorComponent from '../components/JoditEditor';
    ```
 
 2. ✅ **Estado removido:**
+
    ```typescript
    - const [showEditorAvancado, setShowEditorAvancado] = useState(false);
    - const [fotos, setFotos] = useState<Foto[]>([]);
@@ -97,15 +108,17 @@ import 'jodit/es2021/jodit.min.css';
 **Mudanças:**
 
 1. ✅ **Import alterado:**
+
    ```typescript
    // Removido
    - import EditorDescricaoAvancada from './EditorDescricaoAvancada';
-   
+
    // Adicionado
    + import JoditEditorComponent from './JoditEditor';
    ```
 
 2. ✅ **Estado removido:**
+
    ```typescript
    - const [showEditorAvancado, setShowEditorAvancado] = useState(false);
    - const [fotos, setFotos] = useState<Foto[]>([]);
@@ -132,31 +145,43 @@ import 'jodit/es2021/jodit.min.css';
 
 ```typescript
 buttons: [
-    'source',                    // Editar HTML direto
-    'bold', 'italic',            // Formatação básica
-    'underline', 'strikethrough',
-    'fontsize', 'brush',         // Tamanho e cor
-    'paragraph',                 // Parágrafos e títulos
-    'ul', 'ol',                  // Listas
-    'outdent', 'indent',         // Indentação
-    'align',                     // Alinhamento
-    'image',                     // ⭐ Inserir imagens
-    'table', 'link',             // Tabelas e links
-    'hr', 'symbols',             // Linha horizontal e símbolos
-    'undo', 'redo',              // Desfazer/refazer
-    'preview', 'fullsize', 'print' // Visualização
-]
+  "source", // Editar HTML direto
+  "bold",
+  "italic", // Formatação básica
+  "underline",
+  "strikethrough",
+  "fontsize",
+  "brush", // Tamanho e cor
+  "paragraph", // Parágrafos e títulos
+  "ul",
+  "ol", // Listas
+  "outdent",
+  "indent", // Indentação
+  "align", // Alinhamento
+  "image", // ⭐ Inserir imagens
+  "table",
+  "link", // Tabelas e links
+  "hr",
+  "symbols", // Linha horizontal e símbolos
+  "undo",
+  "redo", // Desfazer/refazer
+  "preview",
+  "fullsize",
+  "print", // Visualização
+];
 ```
 
 ### Upload de Imagens:
 
 **Método Atual**: Base64 URI inline
+
 - ✅ Imagens convertidas para Base64 e inseridas direto no HTML
 - ✅ Não requer servidor de upload (por enquanto)
 - ✅ Facilita preview e edição
 - ⚠️ Pode aumentar tamanho do HTML para muitas imagens grandes
 
 **Migração Futura para Upload Server**:
+
 - Endpoint sugerido: `POST /api/upload/orcamento-imagem`
 - Usar `multer` no backend
 - Retornar URL pública da imagem
@@ -203,6 +228,7 @@ buttons: [
 ## 💡 FUNCIONALIDADES PRINCIPAIS
 
 ### ✨ Formatação de Texto:
+
 - ✅ Negrito, itálico, sublinhado, tachado
 - ✅ Tamanhos de fonte variados
 - ✅ Cores de texto e fundo
@@ -210,12 +236,14 @@ buttons: [
 - ✅ Títulos e parágrafos (H1-H6, P)
 
 ### ✨ Listas e Estruturas:
+
 - ✅ Listas numeradas e com marcadores
 - ✅ Indentação de blocos
 - ✅ Linhas horizontais
 - ✅ Símbolos especiais
 
 ### ✨ Mídia e Tabelas:
+
 - ✅ **Inserir imagens** (arrastar e soltar ou selecionar)
 - ✅ **Editar propriedades** de imagens (tamanho, alt, título)
 - ✅ **Redimensionar** imagens inline
@@ -223,6 +251,7 @@ buttons: [
 - ✅ **Links** personalizados
 
 ### ✨ Recursos Avançados:
+
 - ✅ **Edição de código HTML** (modo source)
 - ✅ **Preview** do resultado final
 - ✅ **Fullscreen** para edição imersiva
@@ -269,10 +298,11 @@ buttons: [
 ### Formato do Campo:
 
 ```typescript
-descricaoProjeto: string  // HTML completo formatado
+descricaoProjeto: string; // HTML completo formatado
 ```
 
 **Exemplo de conteúdo salvo:**
+
 ```html
 <h2>ESPECIFICAÇÕES TÉCNICAS</h2>
 <p>Instalação elétrica completa para edifício residencial...</p>
@@ -340,17 +370,21 @@ descricaoProjeto: string  // HTML completo formatado
 ## ⚙️ CONFIGURAÇÃO TÉCNICA
 
 ### Idioma:
+
 - ✅ Português (pt_br)
 - ✅ Traduções customizadas para termos técnicos
 
 ### Modo de Enter:
+
 - ✅ Cria parágrafos `<p>` ao pressionar Enter
 
 ### Paste:
+
 - ✅ Limpa formatação automática do Word/Excel
 - ✅ Mantém estrutura básica (listas, tabelas)
 
 ### Imagens:
+
 - ✅ Extensões permitidas: jpg, png, jpeg, gif, webp
 - ✅ Redimensionamento visual com handles
 - ✅ Edição de propriedades (alt, title, class)
@@ -361,6 +395,7 @@ descricaoProjeto: string  // HTML completo formatado
 ## 🚀 BENEFÍCIOS DA IMPLEMENTAÇÃO
 
 ### Experiência do Usuário (UX):
+
 - ✅ **Inline**: Editor diretamente na página (sem modal)
 - ✅ **Visual**: WYSIWYG verdadeiro (What You See Is What You Get)
 - ✅ **Intuitivo**: Similar ao Microsoft Word
@@ -369,6 +404,7 @@ descricaoProjeto: string  // HTML completo formatado
 - ✅ **Tabelas**: Criar especificações técnicas organizadas
 
 ### Desenvolvimento:
+
 - ✅ **Componente reutilizável**: Pode ser usado em outros módulos
 - ✅ **TypeScript**: Tipagem forte
 - ✅ **Sem dependências extras**: Usa apenas Jodit
@@ -376,6 +412,7 @@ descricaoProjeto: string  // HTML completo formatado
 - ✅ **Performático**: Carrega apenas quando necessário
 
 ### Negócio:
+
 - ✅ **Profissional**: Orçamentos com descrições técnicas ricas
 - ✅ **Completo**: Imagens inline documentam o trabalho
 - ✅ **Claro**: Tabelas organizam especificações
@@ -388,17 +425,19 @@ descricaoProjeto: string  // HTML completo formatado
 ### Para Desenvolvedores:
 
 **Importar o componente:**
+
 ```typescript
-import JoditEditorComponent from '../components/JoditEditor';
+import JoditEditorComponent from "../components/JoditEditor";
 ```
 
 **Usar no formulário:**
+
 ```typescript
 <JoditEditorComponent
     value={formState.descricaoProjeto}
-    onChange={(content) => setFormState(prev => ({ 
-        ...prev, 
-        descricaoProjeto: content 
+    onChange={(content) => setFormState(prev => ({
+        ...prev,
+        descricaoProjeto: content
     }))}
     placeholder="Digite a descrição..."
     height={500}
@@ -434,37 +473,38 @@ import JoditEditorComponent from '../components/JoditEditor';
 
 ### Toolbar Botões Principais:
 
-| Ícone | Função | Descrição |
-|-------|--------|-----------|
-| `</>` | Source | Editar HTML direto |
-| **B** | Bold | Negrito |
-| *I* | Italic | Itálico |
-| U | Underline | Sublinhado |
-| S | Strikethrough | Tachado |
-| Aa | Font Size | Tamanho da fonte |
-| 🎨 | Brush | Cor de texto/fundo |
-| ¶ | Paragraph | Estilos de parágrafo |
-| • | UL | Lista não ordenada |
-| 1. | OL | Lista numerada |
-| ← | Outdent | Diminuir indentação |
-| → | Indent | Aumentar indentação |
-| ≡ | Align | Alinhar texto |
-| 🖼️ | Image | **Inserir imagem** |
-| 📊 | Table | **Criar tabela** |
-| 🔗 | Link | Adicionar link |
-| ━ | HR | Linha horizontal |
-| Ω | Symbols | Símbolos especiais |
-| ↶ | Undo | Desfazer |
-| ↷ | Redo | Refazer |
-| 👁️ | Preview | **Visualizar** |
-| ⛶ | Fullsize | Tela cheia |
-| 🖨️ | Print | Imprimir |
+| Ícone | Função        | Descrição            |
+| ----- | ------------- | -------------------- |
+| `</>` | Source        | Editar HTML direto   |
+| **B** | Bold          | Negrito              |
+| _I_   | Italic        | Itálico              |
+| U     | Underline     | Sublinhado           |
+| S     | Strikethrough | Tachado              |
+| Aa    | Font Size     | Tamanho da fonte     |
+| 🎨    | Brush         | Cor de texto/fundo   |
+| ¶     | Paragraph     | Estilos de parágrafo |
+| •     | UL            | Lista não ordenada   |
+| 1.    | OL            | Lista numerada       |
+| ←     | Outdent       | Diminuir indentação  |
+| →     | Indent        | Aumentar indentação  |
+| ≡     | Align         | Alinhar texto        |
+| 🖼️    | Image         | **Inserir imagem**   |
+| 📊    | Table         | **Criar tabela**     |
+| 🔗    | Link          | Adicionar link       |
+| ━     | HR            | Linha horizontal     |
+| Ω     | Symbols       | Símbolos especiais   |
+| ↶     | Undo          | Desfazer             |
+| ↷     | Redo          | Refazer              |
+| 👁️    | Preview       | **Visualizar**       |
+| ⛶     | Fullsize      | Tela cheia           |
+| 🖨️    | Print         | Imprimir             |
 
 ---
 
 ## 🌙 DARK MODE
 
 ✅ **Totalmente compatível com dark mode:**
+
 - Toolbar escura
 - Editor com fundo escuro (`#1f2937`)
 - Texto claro
@@ -475,16 +515,16 @@ import JoditEditorComponent from '../components/JoditEditor';
 
 ## 📊 ANTES vs DEPOIS
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| **Interface** | Botão → Modal separado | Editor inline na página |
-| **UX** | Abrir/fechar modal | Edição direta |
-| **Imagens** | Upload separado + galeria | Inline no texto (WYSIWYG) |
-| **Formatação** | Limitada | Rica (Word-like) |
-| **Tabelas** | Não disponível | Criar e editar facilmente |
-| **Preview** | Não tinha | Botão de preview |
-| **Observações** | Campo separado | Integrado na descrição |
-| **Manutenção** | Complexa (2 componentes) | Simples (1 componente) |
+| Aspecto         | Antes                     | Depois                    |
+| --------------- | ------------------------- | ------------------------- |
+| **Interface**   | Botão → Modal separado    | Editor inline na página   |
+| **UX**          | Abrir/fechar modal        | Edição direta             |
+| **Imagens**     | Upload separado + galeria | Inline no texto (WYSIWYG) |
+| **Formatação**  | Limitada                  | Rica (Word-like)          |
+| **Tabelas**     | Não disponível            | Criar e editar facilmente |
+| **Preview**     | Não tinha                 | Botão de preview          |
+| **Observações** | Campo separado            | Integrado na descrição    |
+| **Manutenção**  | Complexa (2 componentes)  | Simples (1 componente)    |
 
 ---
 
@@ -508,18 +548,21 @@ import JoditEditorComponent from '../components/JoditEditor';
 ## ⚠️ NOTAS IMPORTANTES
 
 ### 1. Upload de Imagens (Base64):
-**Atual**: Imagens convertidas para Base64
-**Prós**: 
+
+**Atual**: Imagens convertidas para Base64 **Prós**:
+
 - Não requer backend
 - Funciona imediatamente
 - Preview instantâneo
 
 **Contras**:
+
 - Aumenta tamanho do HTML
 - Não ideal para muitas imagens grandes
 
-**Migração Futura**:
-Para migrar para upload server, altere no `JoditEditor.tsx`:
+**Migração Futura**: Para migrar para upload server, altere no
+`JoditEditor.tsx`:
+
 ```typescript
 uploader: {
     insertImageAsBase64URI: false,  // Mudar para false
@@ -531,9 +574,11 @@ uploader: {
 ```
 
 ### 2. Interface Foto Removida:
+
 A interface `Foto[]` não é mais necessária pois as imagens estão inline no HTML.
 
 ### 3. Compatibilidade:
+
 - ✅ Chrome, Firefox, Edge, Safari
 - ✅ Mobile (toolbar adaptativa)
 - ✅ Tablets
@@ -620,9 +665,10 @@ A interface `Foto[]` não é mais necessária pois as imagens estão inline no H
 ## 📞 SUPORTE
 
 Para dúvidas sobre o Jodit:
-- Documentação oficial: https://xdsoft.net/jodit/docs/
-- GitHub: https://github.com/jodit/jodit
-- Exemplos React: https://github.com/jodit/jodit-react
+
+- Documentação oficial: <https://xdsoft.net/jodit/docs/>
+- GitHub: <https://github.com/jodit/jodit>
+- Exemplos React: <https://github.com/jodit/jodit-react>
 
 ---
 
@@ -630,4 +676,3 @@ Para dúvidas sobre o Jodit:
 **Última atualização**: 07/11/2025  
 **Versão do Jodit**: 4.x  
 **Versão do Jodit-React**: 2.x
-

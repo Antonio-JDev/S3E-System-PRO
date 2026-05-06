@@ -18,6 +18,13 @@ router.get('/markup-itens', BIController.getMarkupItens);
 router.get('/evolucao-orcamentos-servicos', BIController.getEvolucaoOrcamentosServicos);
 router.get('/gastos-fixos', BIController.getGastosFixos);
 router.get('/resumo-geral', BIController.getResumoGeral);
+// Novos endpoints para melhorias do BI
+router.get('/orcamentos-por-status', BIController.getOrcamentosPorStatus);
+router.get('/orcamentos-por-tipo-servico-classificado', BIController.getOrcamentosPorTipoServicoClassificado);
+router.get('/markup-vendas-por-servico', BIController.getMarkupVendasPorServico);
+router.get('/servicos-rentaveis', BIController.getServicosRentaveis);
+router.get('/vendas-compras-classificacao', BIController.getVendasEComprasPorClassificacao);
+router.get('/materiais-mais-comprados-periodo', BIController.getMateriaisMaisCompradosPeriodo);
 
 export default router;
 

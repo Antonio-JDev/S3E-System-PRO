@@ -5,32 +5,35 @@
 Para cada arquivo `.tsx`, aplique as seguintes substituições:
 
 ### **1. Backgrounds de Página**
+
 ```tsx
 // ANTES:
-className="min-h-screen bg-gray-50"
-className="bg-gray-50"
-className="p-4 bg-gray-50"
+className = "min-h-screen bg-gray-50";
+className = "bg-gray-50";
+className = "p-4 bg-gray-50";
 
 // DEPOIS:
-className="min-h-screen bg-gray-50 dark:bg-dark-bg"
-className="bg-gray-50 dark:bg-dark-bg"
-className="p-4 bg-gray-50 dark:bg-dark-bg"
+className = "min-h-screen bg-gray-50 dark:bg-dark-bg";
+className = "bg-gray-50 dark:bg-dark-bg";
+className = "p-4 bg-gray-50 dark:bg-dark-bg";
 ```
 
 ### **2. Cards e Containers**
+
 ```tsx
 // ANTES:
-className="bg-white"
-className="bg-white rounded"
-className="bg-white shadow"
+className = "bg-white";
+className = "bg-white rounded";
+className = "bg-white shadow";
 
 // DEPOIS:
-className="bg-white dark:bg-dark-card"
-className="bg-white dark:bg-dark-card rounded"
-className="bg-white dark:bg-dark-card shadow"
+className = "bg-white dark:bg-dark-card";
+className = "bg-white dark:bg-dark-card rounded";
+className = "bg-white dark:bg-dark-card shadow";
 ```
 
 ### **3. Bordas**
+
 ```tsx
 // ANTES:
 border-gray-200
@@ -42,6 +45,7 @@ border-gray-300 dark:border-dark-border
 ```
 
 ### **4. Títulos**
+
 ```tsx
 // ANTES:
 text-gray-900
@@ -55,6 +59,7 @@ text-brand-gray-800 dark:text-dark-text
 ```
 
 ### **5. Subtítulos e Texto Secundário**
+
 ```tsx
 // ANTES:
 text-gray-600
@@ -68,15 +73,18 @@ text-brand-gray-500 dark:text-dark-text-secondary
 ```
 
 ### **6. Inputs e Formulários**
+
 ```tsx
 // ANTES:
-className="border border-gray-300 px-4 py-2"
+className = "border border-gray-300 px-4 py-2";
 
 // DEPOIS:
-className="bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary px-4 py-2"
+className =
+  "bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary px-4 py-2";
 ```
 
 ### **7. Modais**
+
 ```tsx
 // ANTES:
 <div className="fixed inset-0 bg-black/50">
@@ -88,6 +96,7 @@ className="bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-bord
 ```
 
 ### **8. Badges de Status**
+
 ```tsx
 // Verde (Ativo):
 className="bg-green-100 text-green-800"
@@ -153,13 +162,13 @@ Ctrl + Shift + H (Find & Replace in Files)
 
 1. Find: bg-white(?! dark:)
    Replace: bg-white dark:bg-dark-card
-   
+
 2. Find: text-gray-900(?! dark:)
    Replace: text-gray-900 dark:text-dark-text
-   
+
 3. Find: text-gray-500(?! dark:)
    Replace: text-gray-500 dark:text-dark-text-secondary
-   
+
 4. Find: border-gray-200(?! dark:)
    Replace: border-gray-200 dark:border-dark-border
 ```
@@ -171,14 +180,15 @@ Ctrl + Shift + H (Find & Replace in Files)
 ## 📝 EXEMPLO COMPLETO
 
 ### ANTES (ClientesAPI.tsx):
+
 ```tsx
 <div className="min-h-screen bg-gray-50">
   <div className="bg-white shadow">
     <h1 className="text-gray-900">Clientes</h1>
     <p className="text-gray-500">Gerencie seus clientes</p>
-    
+
     <div className="bg-white border border-gray-200 rounded-lg p-4">
-      <input 
+      <input
         type="text"
         placeholder="Nome..."
         className="border border-gray-300 px-4 py-2"
@@ -189,14 +199,17 @@ Ctrl + Shift + H (Find & Replace in Files)
 ```
 
 ### DEPOIS (Com Dark Mode):
+
 ```tsx
 <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
   <div className="bg-white dark:bg-dark-card shadow">
     <h1 className="text-gray-900 dark:text-dark-text">Clientes</h1>
-    <p className="text-gray-500 dark:text-dark-text-secondary">Gerencie seus clientes</p>
-    
+    <p className="text-gray-500 dark:text-dark-text-secondary">
+      Gerencie seus clientes
+    </p>
+
     <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg p-4">
-      <input 
+      <input
         type="text"
         placeholder="Nome..."
         className="bg-white dark:bg-dark-bg border border-gray-300 dark:border-dark-border text-gray-900 dark:text-dark-text placeholder-gray-400 dark:placeholder-dark-text-secondary px-4 py-2"
@@ -209,4 +222,3 @@ Ctrl + Shift + H (Find & Replace in Files)
 ---
 
 Isso é muito trabalhoso manualmente. Vou aplicar automaticamente nos principais.
-

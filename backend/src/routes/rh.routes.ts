@@ -1,0 +1,32 @@
+import { Router } from 'express';
+import { RhController } from '../controllers/rhController';
+import { LancamentoFolhaController } from '../controllers/lancamentoFolhaController';
+import { ConfiguracaoPontoController } from '../controllers/configuracaoPontoController';
+import { authenticate } from '../middlewares/auth';
+
+const router = Router();
+
+router.use(authenticate);
+
+router.get('/folha/:funcionarioId/:mes', RhController.folhaMes);
+router.get('/folha/:funcionarioId/:mes/pdf', RhController.folhaPdf);
+router.post('/sincronizar-parcela', RhController.sincronizarParcela);
+router.put('/registro-ponto/:id', RhController.atualizarRegistroPonto);
+router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarIntervaloAlmoco);
+router.post('/banco-horas/converter-folga', RhController.converterFolga);
+router.post('/banco-horas/incluir-folha', RhController.incluirBancoFolha);
+router.get('/work-shifts', RhController.listarWorkShifts);
+router.post('/falta-justificada', RhController.registrarFaltaJustificada);
+router.post('/divida-horas/propor', RhController.proporDividaHoras);
+router.get('/divida-horas/:funcionarioId/:mes', RhController.listarDividaHoras);
+router.post('/divida-horas/dia/:diaId/aprovar', RhController.aprovarDiaDivida);
+
+router.get('/config-ponto/:funcionarioId', ConfiguracaoPontoController.buscar);
+router.put('/config-ponto/:funcionarioId', ConfiguracaoPontoController.salvar);
+
+router.get('/lancamentos', LancamentoFolhaController.listar);
+router.post('/lancamentos', LancamentoFolhaController.criar);
+router.delete('/lancamentos/:id', LancamentoFolhaController.excluir);
+
+export default router;
+

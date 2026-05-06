@@ -107,6 +107,7 @@
 ```
 
 **Características:**
+
 - Tokens válidos por 7 dias
 - Usa `JWT_SECRET` do `.env`
 - Tratamento de erros detalhado
@@ -123,6 +124,7 @@
 ```
 
 **Características:**
+
 - Extrai token do header `Authorization`
 - Valida e decodifica JWT
 - Injeta `req.user = { userId, role }`
@@ -139,6 +141,7 @@
 ```
 
 **Características:**
+
 - Usa interface `AuthRequest`
 - Acessa `req.user` injetado pelo middleware
 - Retorna dados personalizados por role
@@ -154,6 +157,7 @@
 ```
 
 **Características:**
+
 - Usa middlewares `authenticate` e `authorize`
 - Documentação inline completa
 - Exemplos de requisição/resposta
@@ -174,28 +178,29 @@
 
 ### **Públicos (Sem Autenticação)**
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/health` | Health check da API |
-| GET | `/api` | Listagem de endpoints |
-| POST | `/api/auth/login` | Login (retorna JWT) |
+| Método | Endpoint          | Descrição             |
+| ------ | ----------------- | --------------------- |
+| GET    | `/health`         | Health check da API   |
+| GET    | `/api`            | Listagem de endpoints |
+| POST   | `/api/auth/login` | Login (retorna JWT)   |
 
 ### **Protegidos (Requer Token)**
 
-| Método | Endpoint | Middleware | Descrição |
-|--------|----------|------------|-----------|
-| GET | `/api/protected/data` | `authenticate` | Dados do usuário autenticado |
-| GET | `/api/protected/admin-only` | `authenticate` + `authorize('admin')` | Dados apenas para admins |
+| Método | Endpoint                    | Middleware                            | Descrição                    |
+| ------ | --------------------------- | ------------------------------------- | ---------------------------- |
+| GET    | `/api/protected/data`       | `authenticate`                        | Dados do usuário autenticado |
+| GET    | `/api/protected/admin-only` | `authenticate` + `authorize('admin')` | Dados apenas para admins     |
 
 ---
 
 ## 🔐 Fluxo de Autenticação
 
 ### **Login:**
+
 ```
 1. POST /api/auth/login
    Body: { email, password }
-   
+
 2. Retorna:
    {
      "token": "eyJhbGciOi...",
@@ -209,12 +214,13 @@
 ```
 
 ### **Acessar Rota Protegida:**
+
 ```
 1. GET /api/protected/data
    Header: Authorization: Bearer eyJhbGciOi...
-   
+
 2. Middleware valida token
-   
+
 3. Retorna:
    {
      "success": true,
@@ -231,6 +237,7 @@
 ## ⚙️ Configuração de Ambiente
 
 ### **`.env.development`**
+
 ```env
 DATABASE_URL="postgresql://postgres:senha@localhost:5432/s3e_portfolio_dev"
 JWT_SECRET="sua_chave_secreta_super_segura_aqui"
@@ -239,6 +246,7 @@ NODE_ENV=development
 ```
 
 ### **`.env.production`**
+
 ```env
 DATABASE_URL="postgresql://s3e_prod:senha@servidor:5432/s3e_producao"
 JWT_SECRET="chave_producao_diferente_e_segura"
@@ -250,22 +258,23 @@ NODE_ENV=production
 
 ## 📊 Segurança Implementada
 
-| Recurso | Status | Descrição |
-|---------|--------|-----------|
-| **Hashing de Senhas** | ✅ | bcryptjs com salt |
-| **JWT Assinado** | ✅ | HMAC SHA256 |
-| **Expiração de Token** | ✅ | 7 dias |
-| **Validação de Entrada** | ✅ | Zod schemas |
-| **Controle de Acesso** | ✅ | Role-based (admin, user) |
-| **CORS** | ✅ | Configurado no Express |
-| **Helmet** | ✅ | Headers de segurança |
-| **Rate Limiting** | ⏳ | Futuro (opcional) |
+| Recurso                  | Status | Descrição                |
+| ------------------------ | ------ | ------------------------ |
+| **Hashing de Senhas**    | ✅     | bcryptjs com salt        |
+| **JWT Assinado**         | ✅     | HMAC SHA256              |
+| **Expiração de Token**   | ✅     | 7 dias                   |
+| **Validação de Entrada** | ✅     | Zod schemas              |
+| **Controle de Acesso**   | ✅     | Role-based (admin, user) |
+| **CORS**                 | ✅     | Configurado no Express   |
+| **Helmet**               | ✅     | Headers de segurança     |
+| **Rate Limiting**        | ⏳     | Futuro (opcional)        |
 
 ---
 
 ## 🧪 Testes Recomendados
 
 ### **1. Teste Manual (cURL)**
+
 ```bash
 # Login
 TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
@@ -278,6 +287,7 @@ curl -X GET http://localhost:3000/api/protected/data \
 ```
 
 ### **2. Teste Automatizado**
+
 Ver arquivo: `GUIA_TESTE_ROTAS_PROTEGIDAS.md`
 
 Script bash completo: `test-auth.sh`
@@ -287,6 +297,7 @@ Script bash completo: `test-auth.sh`
 ## 🚀 Próximos Passos (Opcional)
 
 ### **Backend:**
+
 - [ ] Implementar refresh tokens
 - [ ] Adicionar rate limiting (express-rate-limit)
 - [ ] Criar logs de auditoria de login
@@ -294,6 +305,7 @@ Script bash completo: `test-auth.sh`
 - [ ] Adicionar autenticação de 2 fatores (2FA)
 
 ### **Frontend:**
+
 - [x] Context de autenticação (AuthContext)
 - [x] Página de login
 - [x] Protected Routes
@@ -337,6 +349,7 @@ Script bash completo: `test-auth.sh`
 - ✅ Documentação completa
 
 **Para testar:**
+
 ```bash
 # 1. Iniciar backend
 cd backend
@@ -348,7 +361,4 @@ npm run dev
 
 ---
 
-**Desenvolvido para S3E System PRO** 🚀
-**Versão:** 1.0.0
-**Data:** Outubro 2025
-
+**Desenvolvido para S3E System PRO** 🚀 **Versão:** 1.0.0 **Data:** Outubro 2025

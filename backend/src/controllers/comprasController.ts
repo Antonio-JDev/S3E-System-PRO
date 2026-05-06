@@ -1,16 +1,53 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { XMLParser } from 'fast-xml-parser';
 import { ComprasService, CompraPayload } from '../services/compras.service';
 import { compararNomesProdutos } from '../utils/stringUtils';
+const xmlParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_'
+});
 
-const prisma = new PrismaClient();
-const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+/**
+ * Detecta se um produto é um cabo/fio de 750V ou 1kV com bitola de 1,00mm até 120,00mm
+ * @param nomeProduto Nome do produto
+ * @returns true se for um cabo/fio específico que deve ser convertido de KM para metros
+ */
+function isCaboFioEspecifico(nomeProduto: string): boolean {
+  if (!nomeProduto) return false;
+  
+  const nomeLower = nomeProduto.toLowerCase();
+  
+  // Verificar se contém palavras-chave de cabo/fio
+  const temCaboFio = nomeLower.includes('cabo') || nomeLower.includes('fio');
+  if (!temCaboFio) return false;
+  
+  // Verificar se contém tensão 750V ou 1kV
+  const temTensao = nomeLower.includes('750') || 
+                    nomeLower.includes('1kv') || 
+                    nomeLower.includes('1 kv') ||
+                    nomeLower.includes('1000v');
+  if (!temTensao) return false;
+  
+  // Verificar se contém bitola entre 1,00mm e 120,00mm
+  // Padrões: 1mm, 1,00mm, 1.00mm, 1,5mm, 2,5mm, 10mm, 25mm, 50mm, 95mm, 120mm, etc.
+  const bitolaPattern = /(\d+[,.]?\d*)\s*mm/i;
+  const match = nomeLower.match(bitolaPattern);
+  
+  if (match) {
+    const bitola = parseFloat(match[1].replace(',', '.'));
+    // Verificar se está entre 1,00mm e 120,00mm
+    return bitola >= 1.0 && bitola <= 120.0;
+  }
+  
+  return false;
+}
 
 // Listar compras
 export const getCompras = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { status, fornecedorId, page = 1, limit = 100 } = req.query; // Aumentado de 10 para 100
+    // ✅ CORREÇÃO CRÍTICA: Aumentar limit padrão de 100 para 1000 para evitar perda de dados em auditoria
+    const { status, fornecedorId, page = 1, limit = 1000 } = req.query;
 
     const resultado = await ComprasService.listarCompras(
       status as string,
@@ -84,11 +121,20 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       numeroNF: req.body.numeroNF,
       serieNF: req.body.serieNF || req.body.serie || null,
       dataEmissaoNF: new Date(req.body.dataEmissaoNF),
-      dataCompra: new Date(req.body.dataCompra),
+      // Evitar timezone: data só YYYY-MM-DD → usar meio-dia UTC para exibir o dia correto em qualquer fuso
+      dataCompra: (() => {
+        const raw = req.body.dataCompra;
+        if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          return new Date(raw + 'T12:00:00.000Z');
+        }
+        return new Date(raw);
+      })(),
       dataRecebimento: req.body.dataRecebimento ? new Date(req.body.dataRecebimento) : undefined,
       valorFrete: req.body.valorFrete || 0,
       outrasDespesas: req.body.outrasDespesas || 0,
+      valorDesconto: req.body.valorDesconto ?? 0,
       status: req.body.status,
+      classificacao: req.body.classificacao || 'COMPOSICAO_ESTOQUE', // ✅ NOVO: Classificação da compra
       items: req.body.items,
       observacoes: req.body.observacoes,
       // Campos adicionais vindos do frontend / XML
@@ -142,6 +188,182 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
   } catch (error) {
     console.error('Erro ao criar compra:', error);
     res.status(500).json({ error: 'Erro ao criar compra' });
+  }
+};
+
+// Editar compra existente
+export const updateCompra = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: 'ID da compra é obrigatório'
+      });
+      return;
+    }
+
+    // Verificar se a compra existe
+    const compraExistente = await prisma.compra.findUnique({
+      where: { id },
+      include: { items: true, fornecedor: true }
+    });
+
+    if (!compraExistente) {
+      res.status(404).json({
+        success: false,
+        error: 'Compra não encontrada'
+      });
+      return;
+    }
+
+    const isRecebido = compraExistente.status === 'Recebido';
+
+    console.log('✏️ Atualizando compra:', id, isRecebido ? '(compra já recebida — permite correção de cadastro/parcelas)' : '');
+
+    const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+
+    // Processar data da compra
+    const processarData = (raw: any): Date | undefined => {
+      if (!raw) return undefined;
+      if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return new Date(raw + 'T12:00:00.000Z');
+      }
+      return new Date(raw);
+    };
+
+    // Preparar dados para atualização
+    const updateData: any = {};
+
+    // Correção de cadastro: NF, fornecedor e status também em compras já recebidas (não altera itens pelo body)
+    if (req.body.fornecedorNome !== undefined) updateData.fornecedorNome = req.body.fornecedorNome;
+    if (req.body.numeroNF !== undefined) updateData.numeroNF = req.body.numeroNF;
+    if (req.body.serieNF !== undefined) updateData.serieNF = req.body.serieNF;
+    if (req.body.status !== undefined) updateData.status = req.body.status;
+    if (req.body.classificacao !== undefined) updateData.classificacao = req.body.classificacao;
+
+    const novoCnpjDigits = req.body.fornecedorCNPJ ? digits(req.body.fornecedorCNPJ) : '';
+    const cnpjAtualDigits = digits(compraExistente.fornecedor?.cnpj);
+
+    if (novoCnpjDigits.length >= 14 && novoCnpjDigits !== cnpjAtualDigits) {
+      const todos = await prisma.fornecedor.findMany({
+        select: { id: true, cnpj: true, nome: true }
+      });
+      let fornecedor = todos.find((f) => digits(f.cnpj) === novoCnpjDigits) || null;
+
+      if (!fornecedor) {
+        fornecedor = await prisma.fornecedor.create({
+          data: {
+            nome: req.body.fornecedorNome || compraExistente.fornecedorNome || 'Fornecedor',
+            cnpj: novoCnpjDigits,
+            telefone: req.body.fornecedorTel || null
+          }
+        });
+      }
+
+      updateData.fornecedorId = fornecedor.id;
+      if (req.body.fornecedorNome !== undefined) {
+        updateData.fornecedorNome = req.body.fornecedorNome || fornecedor.nome;
+      }
+    }
+
+    // Sempre permitir: datas, frete, despesas, observações, condições, valor total, empresa compradora (e duplicatas abaixo)
+    if (req.body.dataEmissaoNF !== undefined) updateData.dataEmissaoNF = processarData(req.body.dataEmissaoNF);
+    if (req.body.dataCompra !== undefined) updateData.dataCompra = processarData(req.body.dataCompra);
+    if (req.body.empresaCompradoraNome !== undefined) updateData.empresaCompradoraNome = req.body.empresaCompradoraNome || null;
+    if (req.body.empresaCompradoraCNPJ !== undefined) updateData.empresaCompradoraCNPJ = req.body.empresaCompradoraCNPJ || null;
+    if (req.body.dataRecebimento !== undefined) updateData.dataRecebimento = processarData(req.body.dataRecebimento);
+    if (req.body.valorFrete !== undefined) updateData.valorFrete = parseFloat(req.body.valorFrete) || 0;
+    if (req.body.outrasDespesas !== undefined) updateData.outrasDespesas = parseFloat(req.body.outrasDespesas) || 0;
+    if (req.body.valorDesconto !== undefined) {
+      const vs = compraExistente.valorSubtotal || 0;
+      const vd = parseFloat(req.body.valorDesconto) || 0;
+      updateData.valorDesconto = Math.min(Math.max(0, vd), vs);
+    }
+    if (req.body.observacoes !== undefined) updateData.observacoes = req.body.observacoes;
+    if (req.body.condicoesPagamento !== undefined) updateData.condicoesPagamento = req.body.condicoesPagamento;
+
+    if (req.body.valorTotalNota !== undefined) {
+      updateData.valorTotal = parseFloat(req.body.valorTotalNota) || 0;
+    } else if (
+      req.body.valorFrete !== undefined ||
+      req.body.outrasDespesas !== undefined ||
+      req.body.valorDesconto !== undefined
+    ) {
+      const valorSubtotal = compraExistente.valorSubtotal || 0;
+      const valorFrete = req.body.valorFrete !== undefined ? parseFloat(req.body.valorFrete) || 0 : compraExistente.valorFrete || 0;
+      const outrasDespesas = req.body.outrasDespesas !== undefined ? parseFloat(req.body.outrasDespesas) || 0 : compraExistente.outrasDespesas || 0;
+      const valorDesconto =
+        updateData.valorDesconto !== undefined
+          ? updateData.valorDesconto
+          : compraExistente.valorDesconto ?? 0;
+      updateData.valorTotal = valorSubtotal - valorDesconto + valorFrete + outrasDespesas;
+    }
+
+    // Atualizar a compra
+    const compraAtualizada = await prisma.compra.update({
+      where: { id },
+      data: updateData,
+      include: {
+        fornecedor: true,
+        items: {
+          include: {
+            material: true
+          }
+        }
+      }
+    });
+
+    if (req.body.fornecedorTel !== undefined && compraAtualizada.fornecedorId) {
+      await prisma.fornecedor.update({
+        where: { id: compraAtualizada.fornecedorId },
+        data: { telefone: String(req.body.fornecedorTel).trim() || null }
+      });
+    }
+
+    // Atualizar parcelas/contas a pagar se fornecidas
+    if (req.body.duplicatas && Array.isArray(req.body.duplicatas)) {
+      // Excluir contas a pagar pendentes existentes
+      await prisma.contaPagar.deleteMany({
+        where: {
+          compraId: id,
+          status: 'Pendente'
+        }
+      });
+
+      // Criar novas contas a pagar
+      for (const parcela of req.body.duplicatas) {
+        if (parcela.valor && parcela.valor > 0 && parcela.dataVencimento) {
+          await prisma.contaPagar.create({
+            data: {
+              tipo: 'FORNECEDOR',
+              descricao: `NF ${compraAtualizada.numeroNF} - Parcela ${parcela.numero || '001'}`,
+              valorParcela: parcela.valor,
+              dataVencimento: new Date(parcela.dataVencimento + 'T12:00:00.000Z'),
+              status: 'Pendente',
+              fornecedorId: compraAtualizada.fornecedorId,
+              compraId: id
+            }
+          });
+        }
+      }
+    }
+
+    console.log('✅ Compra atualizada com sucesso:', id);
+
+    res.json({
+      success: true,
+      message: 'Compra atualizada com sucesso',
+      data: compraAtualizada
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar compra:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao atualizar compra',
+      message: error instanceof Error ? error.message : 'Erro desconhecido'
+    });
   }
 };
 
@@ -237,6 +459,41 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
           }
         }
         
+        // Extrair unidade de medida do XML (uCom = unidade comercial, uTrib = unidade tributável)
+        const unidadeMedida = item.prod.uCom || item.prod.uTrib || 'un';
+        
+        // Normalizar unidade de medida para minúsculas e tratar variações comuns
+        let unidadeMedidaNormalizada = unidadeMedida.toLowerCase().trim();
+        
+        // Normalizar variações de quilômetro
+        if (unidadeMedidaNormalizada === 'km' || 
+            unidadeMedidaNormalizada === 'kilometro' || 
+            unidadeMedidaNormalizada === 'quilometro' ||
+            unidadeMedidaNormalizada === 'kilômetro' ||
+            unidadeMedidaNormalizada === 'quilômetro') {
+          unidadeMedidaNormalizada = 'km';
+        }
+        
+        // Normalizar variações de metro
+        if (unidadeMedidaNormalizada === 'm' || 
+            unidadeMedidaNormalizada === 'metro' || 
+            unidadeMedidaNormalizada === 'metros') {
+          unidadeMedidaNormalizada = 'm';
+        }
+        
+        // Normalizar variações de centímetro
+        if (unidadeMedidaNormalizada === 'cm' || 
+            unidadeMedidaNormalizada === 'centimetro' || 
+            unidadeMedidaNormalizada === 'centímetro' ||
+            unidadeMedidaNormalizada === 'centimetros' ||
+            unidadeMedidaNormalizada === 'centímetros') {
+          unidadeMedidaNormalizada = 'cm';
+        }
+        
+        // Verificar se é um cabo/fio específico que precisa de conversão
+        const isCaboEspecifico = isCaboFioEspecifico(nomeProduto);
+        const precisaConversao = isCaboEspecifico && (unidadeMedidaNormalizada === 'km' || unidadeMedidaNormalizada === 'kilometro' || unidadeMedidaNormalizada === 'quilometro');
+        
         const itemData: any = {
           nomeProduto,
           ncm: ncmString,
@@ -244,7 +501,9 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
           valorUnit: parseFloat(item.prod.vUnCom || '0'),
           valorTotal: parseFloat(item.prod.vProd || '0'),
           sku: item.prod.cProd || item.prod.cEAN || item.prod.cEANTrib || undefined,
+          unidadeMedida: unidadeMedidaNormalizada,
           materialId, // ✅ ID do material se match automático encontrado
+          precisaConversao: precisaConversao, // Flag para indicar que precisa conversão KM -> m
         };
         
         // Adicionar campos extras apenas se existirem (para o frontend)
@@ -564,7 +823,7 @@ export const cancelarCompra = async (req: Request, res: Response): Promise<void>
 
     res.json({
       success: true,
-      message: `Compra #${compraCancelada.numeroSequencial} cancelada com sucesso`,
+      message: `Compra #${(compraCancelada as any).numeroSequencial || compraCancelada.id} cancelada com sucesso`,
       data: compraCancelada
     });
   } catch (error) {
@@ -620,7 +879,7 @@ export const atualizarFracionamentoItem = async (req: Request, res: Response): P
         tipoEmbalagem: tipoEmbalagem || null,
         unidadeEmbalagem: unidadeEmbalagem || null,
         fracionamentoAplicado: false // Resetar para permitir reprocessamento
-      }
+      } as any
     });
 
     res.json({

@@ -1,8 +1,6 @@
-import { PrismaClient, StatusObra } from '@prisma/client';
-
+import { StatusObra } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { EstoqueService } from './estoque.service';
-
-const prisma = new PrismaClient();
 
 export interface CreateObraData {
   projetoId: string;
@@ -196,6 +194,107 @@ export class ObraService {
         data: { status: 'EXECUCAO' }
       });
 
+      // ✅ Alocar (dar baixa) automaticamente dos materiais do orçamento ao gerar a obra
+      // Regra: se a baixa já foi feita no Pedido de Venda, não fazer novamente ao Iniciar obra.
+      try {
+        if (projeto.orcamentoId) {
+          const orcamentoParaBaixa = await prisma.orcamento.findUnique({
+            where: { id: projeto.orcamentoId },
+            select: { baixaEstoqueRealizadaEm: true }
+          });
+          if (orcamentoParaBaixa?.baixaEstoqueRealizadaEm === 'VENDA') {
+            console.log(`[Obra] Baixa do orçamento ${projeto.orcamentoId} já foi realizada no Pedido de Venda. Não realizar baixa ao iniciar obra.`);
+          } else {
+          const itensOrcamento = await prisma.orcamentoItem.findMany({
+            where: { orcamentoId: projeto.orcamentoId },
+            include: { kit: true, cotacao: true, material: true }
+          });
+
+          const materiaisAgrupados = new Map<string, number>();
+          const add = (materialId: string, qtd: number) => {
+            if (!materialId || !qtd || qtd <= 0) return;
+            const atual = materiaisAgrupados.get(materialId) || 0;
+            materiaisAgrupados.set(materialId, atual + qtd);
+          };
+
+          for (const item of itensOrcamento as any[]) {
+            if (item?.vendaDiretaFornecedor) continue;
+            const tipo = String(item.tipo || '').toUpperCase();
+            if (tipo === 'SERVICO' || tipo === 'QUADRO_PRONTO' || tipo === 'CUSTO_EXTRA') continue;
+
+            if (tipo === 'MATERIAL' && item.materialId) {
+              add(String(item.materialId), Number(item.quantidade || 0));
+              continue;
+            }
+
+            if (tipo === 'COTACAO' && (item.cotacaoId || item.materialId)) {
+              const materialIdCotacao = await EstoqueService.resolverMaterialIdParaItemCotacao(item);
+              if (materialIdCotacao) {
+                add(String(materialIdCotacao), Number(item.quantidade || 0));
+              }
+              continue;
+            }
+
+            if (tipo === 'KIT' && item.itensDoKit) {
+              const qtdKit = Number(item.quantidade || 1);
+              const arr = Array.isArray(item.itensDoKit) ? item.itensDoKit : [item.itensDoKit];
+              for (const sub of arr) {
+                const tipoSub = String(sub?.tipo || '').toUpperCase();
+                if (tipoSub === 'SERVICO') continue;
+                if (tipoSub === 'MATERIAL' && sub?.materialId) {
+                  add(String(sub.materialId), Number(sub?.quantidade || 1) * qtdKit);
+                  continue;
+                }
+                if (tipoSub === 'COTACAO' && (sub?.materialVinculadoId || sub?.materialId)) {
+                  // Banco frio dentro do kit: baixa apenas se tiver vinculação ao estoque
+                  add(String(sub.materialVinculadoId || sub.materialId), Number(sub?.quantidade || 1) * qtdKit);
+                  continue;
+                }
+                if (tipoSub === 'KIT' && sub?.kitId) {
+                  // Sub-kit catálogo dentro da composição
+                  const componentes = await EstoqueService.expandirKit(String(sub.kitId));
+                  const mult = Number(sub?.quantidade || 1) * qtdKit;
+                  for (const c of componentes) {
+                    add(String(c.materialId), Number(c.quantidade || 1) * mult);
+                  }
+                  continue;
+                }
+              }
+              continue;
+            }
+
+            if (tipo === 'KIT' && item.kitId) {
+              const componentes = await EstoqueService.expandirKit(String(item.kitId));
+              for (const c of componentes) {
+                add(String(c.materialId), Number(c.quantidade || 1) * Number(item.quantidade || 1));
+              }
+              continue;
+            }
+          }
+
+          for (const [materialId, quantidade] of materiaisAgrupados.entries()) {
+            await EstoqueService.darBaixaMaterial(
+              materialId,
+              quantidade,
+              'Alocação para obra',
+              obra.id,
+              `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`
+            );
+          }
+
+          // Marcar orçamento: baixa foi feita na Ordem de Serviço (Iniciar obra) — evita nova baixa no PV
+          await prisma.orcamento.update({
+            where: { id: projeto.orcamentoId },
+            data: { baixaEstoqueRealizadaEm: 'OBRA' }
+          });
+          }
+        }
+      } catch (alocErr) {
+        console.error('Erro ao alocar materiais automaticamente na geração da obra:', alocErr);
+        // Importante: não reverter criação da obra por falha de alocação.
+        // A validação de estoque já ocorreu; caso exista concorrência, a alocação pode ser reprocessada manualmente.
+      }
+
       console.log('✅ Obra criada com sucesso:', obra.id);
 
       return obra;
@@ -284,6 +383,22 @@ export class ObraService {
 
       console.log(`📦 Total de obras encontradas: ${obras.length}`);
 
+      const equipeIds = new Set<string>();
+      for (const obra of obras) {
+        for (const t of obra.tarefas) {
+          if (t.equipeId) equipeIds.add(t.equipeId);
+        }
+      }
+
+      const equipesPorId = new Map<string, { id: string; nome: string }>();
+      if (equipeIds.size > 0) {
+        const equipes = await prisma.equipe.findMany({
+          where: { id: { in: [...equipeIds] } },
+          select: { id: true, nome: true }
+        });
+        equipes.forEach((e) => equipesPorId.set(e.id, { id: e.id, nome: e.nome }));
+      }
+
       // Agrupar por status
       const kanbanData: ObraKanbanData = {
         BACKLOG: [],
@@ -295,6 +410,11 @@ export class ObraService {
       obras.forEach(obra => {
         // ✅ Cliente pode vir de 2 fontes: projeto.cliente OU cliente direto (manutenção)
         const clienteNome = obra.projeto?.cliente?.nome || obra.cliente?.nome || 'Cliente não informado';
+
+        const primeiraTarefaComEquipe = obra.tarefas.find(t => t.equipeId);
+        const equipe = primeiraTarefaComEquipe?.equipeId
+          ? equipesPorId.get(primeiraTarefaComEquipe.equipeId)
+          : undefined;
         
         const obraFormatada = {
           id: obra.id,
@@ -303,7 +423,12 @@ export class ObraService {
           status: obra.status,
           clienteNome, // ✅ Agora funciona para ambos os tipos
           tipoObra: (obra as any).tipoObra || 'PROJETO', // ✅ Identificar tipo
+          createdAt: obra.createdAt,
+          dataPrevistaInicio: obra.dataPrevistaInicio,
+          dataInicioReal: obra.dataInicioReal,
+          dataFimReal: obra.dataFimReal,
           dataPrevistaFim: obra.dataPrevistaFim,
+          equipe,
           totalTarefas: obra.tarefas.length,
           tarefasConcluidas: obra.tarefas.filter(t => t.progresso === 100).length,
           progresso: obra.tarefas.length > 0 

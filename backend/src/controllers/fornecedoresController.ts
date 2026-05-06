@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // Listar todos os fornecedores
 export const getFornecedores = async (req: Request, res: Response): Promise<void> => {
@@ -112,7 +110,7 @@ export const getFornecedorById = async (req: Request, res: Response): Promise<vo
 // Criar fornecedor
 export const createFornecedor = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { nome, cnpj, email, telefone, endereco } = req.body;
+    const { nome, cnpj, email, telefone, endereco, bairro, cidade, estado, cep, cnae_fiscal, codigo_municipio_ibge, situacao_cadastral, classificacao } = req.body;
 
     // Verificar se CNPJ já existe
     const fornecedorExistente = await prisma.fornecedor.findUnique({
@@ -133,7 +131,15 @@ export const createFornecedor = async (req: Request, res: Response): Promise<voi
         cnpj,
         email,
         telefone,
-        endereco
+        endereco,
+        bairro,
+        cidade,
+        estado,
+        cep,
+        cnae_fiscal,
+        codigo_municipio_ibge,
+        situacao_cadastral,
+        classificacao: classificacao && ['Fabricante', 'Representante_Vendedor'].includes(classificacao) ? classificacao : null
       }
     });
 
@@ -155,7 +161,7 @@ export const createFornecedor = async (req: Request, res: Response): Promise<voi
 export const updateFornecedor = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { nome, cnpj, email, telefone, endereco } = req.body;
+    const { nome, cnpj, email, telefone, endereco, bairro, cidade, estado, cep, cnae_fiscal, codigo_municipio_ibge, situacao_cadastral, classificacao } = req.body;
 
     // Verificar se fornecedor existe
     const fornecedorExistente = await prisma.fornecedor.findUnique({
@@ -192,7 +198,15 @@ export const updateFornecedor = async (req: Request, res: Response): Promise<voi
         cnpj,
         email,
         telefone,
-        endereco
+        endereco,
+        bairro,
+        cidade,
+        estado,
+        cep,
+        cnae_fiscal,
+        codigo_municipio_ibge,
+        situacao_cadastral,
+        classificacao: classificacao !== undefined ? (classificacao && ['Fabricante', 'Representante_Vendedor'].includes(classificacao) ? classificacao : null) : undefined
       }
     });
 

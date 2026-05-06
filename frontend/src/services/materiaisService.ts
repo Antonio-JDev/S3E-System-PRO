@@ -29,6 +29,9 @@ export interface Material {
   updatedAt: string;
 }
 
+/** Famílias de cabo para atualização por bitola (alinhado ao backend). */
+export type CableFamilia = 'FLEX_750V' | 'FLEX_1KV' | 'RIGIDO_1KV';
+
 export interface Movimentacao {
   id: string;
   materialId: string;
@@ -116,18 +119,23 @@ class MateriaisService {
 
   /**
    * Criar novo material
+   * Aceita nome, descricao, tipo, categoria, unidadeMedida (ou unidade/codigo para compatibilidade).
    */
   async createMaterial(data: {
-    codigo: string;
-    descricao: string;
-    unidade: string;
-    preco: number;
-
+    nome?: string;
+    descricao?: string;
+    tipo?: string;
+    categoria?: string;
+    unidadeMedida?: string;
+    unidade?: string;
+    codigo?: string;
+    preco?: number;
     valorVenda?: number;
     porcentagemLucro?: number;
-    estoque: number;
-    estoqueMinimo: number;
-    categoria?: string;
+    estoque?: number;
+    estoqueMinimo?: number;
+    sku?: string;
+    ncm?: string;
     fornecedorId?: string;
   }) {
     try {
@@ -157,6 +165,96 @@ class MateriaisService {
         data: null,
         message: 'Erro ao criar material'
       };
+    }
+  }
+
+  /**
+   * Importar vários materiais de uma vez (JSON em lote).
+   * body: { materiais: Array<{ nome?, descricao?, tipo?, categoria?, unidadeMedida?, preco?, estoque?, ... }> }
+   */
+  async importMateriais(materiais: any[]) {
+    try {
+      const response = await axiosApiService.post<{ success: boolean; message: string; data: { criados: number; erros: number; mensagens: string[] } }>(
+        `${ENDPOINTS.MATERIAIS}/import`,
+        { materiais }
+      );
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data as any,
+          message: (response.data as any).message || 'Importação concluída'
+        };
+      }
+      return {
+        success: false,
+        data: null,
+        message: (response as any).error || 'Erro na importação'
+      };
+    } catch (error) {
+      console.error('❌ Erro ao importar materiais:', error);
+      return {
+        success: false,
+        data: null,
+        message: 'Erro ao importar materiais'
+      };
+    }
+  }
+
+  /**
+   * Pré-visualiza materiais que serão atualizados (mesma bitola / todas as cores).
+   */
+  async previewPrecoBitola(familia: CableFamilia, bitolaMm2: number) {
+    try {
+      const res = await axiosApiService.post<{
+        success: boolean;
+        total?: number;
+        materiais?: { id: string; nome: string; precoAtual: number | null }[];
+        error?: string;
+      }>(`${ENDPOINTS.MATERIAIS}/cabos/preview-preco-bitola`, { familia, bitolaMm2 });
+      const anyRes = res as Record<string, unknown>;
+      if (anyRes.success && Array.isArray(anyRes.materiais)) {
+        return {
+          success: true as const,
+          total: Number(anyRes.total ?? 0),
+          materiais: anyRes.materiais as { id: string; nome: string; precoAtual: number | null }[]
+        };
+      }
+      return {
+        success: false as const,
+        message: (anyRes.error as string) || 'Não foi possível pré-visualizar'
+      };
+    } catch (e) {
+      console.error('previewPrecoBitola:', e);
+      return { success: false as const, message: 'Erro ao pré-visualizar' };
+    }
+  }
+
+  /**
+   * Aplica novo preço de custo (R$/m) a todos os materiais da bitola (todas as cores).
+   */
+  async aplicarPrecoBitola(familia: CableFamilia, bitolaMm2: number, preco: number) {
+    try {
+      const res = await axiosApiService.post<{
+        success: boolean;
+        atualizados?: number;
+        ids?: string[];
+        error?: string;
+      }>(`${ENDPOINTS.MATERIAIS}/cabos/aplicar-preco-bitola`, { familia, bitolaMm2, preco });
+      const anyRes = res as Record<string, unknown>;
+      if (anyRes.success === true && typeof anyRes.atualizados === 'number') {
+        return {
+          success: true as const,
+          atualizados: anyRes.atualizados,
+          ids: (anyRes.ids as string[]) || []
+        };
+      }
+      return {
+        success: false as const,
+        message: (anyRes.error as string) || 'Não foi possível aplicar os preços'
+      };
+    } catch (e) {
+      console.error('aplicarPrecoBitola:', e);
+      return { success: false as const, message: 'Erro ao aplicar preços' };
     }
   }
 

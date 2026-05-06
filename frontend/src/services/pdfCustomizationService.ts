@@ -446,6 +446,132 @@ class PDFCustomizationService {
             };
         }
     }
+
+    /**
+     * Baixa PDF personalizado diretamente
+     */
+    async downloadPersonalizedPDF(orcamentoId: string, customization: PDFCustomization): Promise<GeneratePDFResponse> {
+        try {
+            console.log('📥 Baixando PDF personalizado...');
+            
+            const formData = new FormData();
+            formData.append('opacidade', customization.watermark.opacity.toString());
+            
+            // Se tiver logo/marca d'água, converter de base64 para blob
+            if (customization.watermark.type === 'logo' && customization.watermark.content) {
+                try {
+                    if (customization.watermark.content.startsWith('data:')) {
+                        const response = await fetch(customization.watermark.content);
+                        const blob = await response.blob();
+                        formData.append('logo', blob, 'logo.png');
+                    }
+                } catch (err) {
+                    console.warn('Não foi possível converter logo:', err);
+                }
+            }
+
+            // Se tiver folha timbrada (corners), adicionar
+            if (customization.design.corners.enabled && customization.design.corners.image) {
+                try {
+                    let imageUrl = customization.design.corners.image;
+                    
+                    // Se for URL HTTP, buscar a imagem
+                    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('/uploads/')) {
+                        // Se for URL relativa, construir URL completa
+                        if (imageUrl.startsWith('/uploads/')) {
+                            const baseUrl = window.location.origin.replace(':8080', ':3001');
+                            imageUrl = `${baseUrl}${imageUrl}`;
+                        }
+                        const response = await fetch(imageUrl);
+                        const blob = await response.blob();
+                        formData.append('folhaTimbrada', blob, 'folha.png');
+                    } else if (imageUrl.startsWith('data:')) {
+                        // Se for base64, converter para blob
+                        const response = await fetch(imageUrl);
+                        const blob = await response.blob();
+                        formData.append('folhaTimbrada', blob, 'folha.png');
+                    }
+                } catch (err) {
+                    console.warn('Não foi possível converter folha timbrada:', err);
+                }
+            }
+
+            // Usar fetch para poder acessar headers (Content-Disposition com nome do arquivo)
+            const token = localStorage.getItem('token');
+            const apiUrl = (window as any).__API_CONFIG__?.baseURL || '';
+            const baseUrl = apiUrl || window.location.origin.replace(':5173', ':3001').replace(':8080', ':3001');
+            
+            const response = await fetch(
+                `${baseUrl}/api/orcamentos/${orcamentoId}/pdf/download-personalizado`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': token ? `Bearer ${token}` : '',
+                        // Não definir Content-Type - deixar o browser definir com boundary
+                    },
+                    body: formData
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error('Erro ao baixar PDF');
+            }
+
+            // Extrair nome do arquivo do header Content-Disposition
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let nomeArquivo = `Orcamento-${orcamentoId.substring(0, 8)}-Personalizado.pdf`;
+            
+            if (contentDisposition) {
+                console.log('📄 Content-Disposition recebido:', contentDisposition);
+                
+                // Tentar extrair do filename*=UTF-8'' primeiro (mais preciso)
+                const utf8Match = /filename\*=UTF-8''([^;]+)/.exec(contentDisposition);
+                if (utf8Match && utf8Match[1]) {
+                    nomeArquivo = decodeURIComponent(utf8Match[1]);
+                } else {
+                    // Fallback para filename regular
+                    const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(contentDisposition);
+                    if (matches != null && matches[1]) {
+                        nomeArquivo = matches[1].replace(/['"]/g, '');
+                        // Tentar decodificar se estiver codificado
+                        try {
+                            nomeArquivo = decodeURIComponent(nomeArquivo);
+                        } catch (e) {
+                            // Se não conseguir decodificar, usar como está
+                        }
+                    }
+                }
+                
+                console.log('📄 Nome do arquivo extraído:', nomeArquivo);
+            } else {
+                console.warn('⚠️ Content-Disposition não encontrado no header');
+            }
+
+            // Baixar o PDF
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nomeArquivo;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            return {
+                success: true,
+                fileName: nomeArquivo,
+                error: ''
+            };
+        } catch (error: any) {
+            console.error('Erro ao baixar PDF:', error);
+            return {
+                success: false,
+                error: error.message || 'Erro ao baixar PDF personalizado',
+                fileName: ''
+            };
+        }
+    }
 }
 
 export const pdfCustomizationService = new PDFCustomizationService();

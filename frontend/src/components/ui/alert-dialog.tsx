@@ -15,47 +15,47 @@ interface AlertDialogActionProps extends React.ButtonHTMLAttributes<HTMLButtonEl
   children: React.ReactNode
 }
 
-export function AlertDialog({ open, onOpenChange, children }: AlertDialogProps) {
-  if (!open) return null
+export const AlertDialog: React.FC<AlertDialogProps> = ({ open, onOpenChange, children }) => {
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm" 
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      <div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100]"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50">
-        {children}
-      </div>
+      <div className="relative z-[101]">{children}</div>
     </div>
-  )
-}
+  );
+};
 
-export function AlertDialogContent({ children, className = "" }: AlertDialogContentProps) {
+export const AlertDialogContent: React.FC<AlertDialogContentProps> = ({ children, className = "" }) => {
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4 ${className}`}>
+    <div className={`bg-white dark:bg-dark-card dark:border dark:border-dark-border rounded-lg shadow-xl p-6 max-w-md w-full mx-4 ${className}`}>
       {children}
     </div>
-  )
-}
+  );
+};
 
-export function AlertDialogHeader({ children }: { children: React.ReactNode }) {
-  return <div className="mb-4">{children}</div>
-}
+type DialogChildProps = { children: React.ReactNode; className?: string };
 
-export function AlertDialogTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{children}</h2>
-}
+export const AlertDialogHeader: React.FC<DialogChildProps> = ({ children, className = '' }) => {
+  return <div className={`mb-4 ${className}`}>{children}</div>;
+};
 
-export function AlertDialogDescription({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">{children}</p>
-}
+export const AlertDialogTitle: React.FC<DialogChildProps> = ({ children, className = '' }) => {
+  return <h2 className={`text-lg font-semibold text-gray-900 dark:text-white ${className}`}>{children}</h2>;
+};
 
-export function AlertDialogFooter({ children }: { children: React.ReactNode }) {
-  return <div className="mt-6 flex justify-end gap-3">{children}</div>
-}
+export const AlertDialogDescription: React.FC<DialogChildProps> = ({ children, className = '' }) => {
+  return <p className={`text-sm text-gray-600 dark:text-gray-400 mt-2 ${className}`}>{children}</p>;
+};
 
-export function AlertDialogCancel({ children, onClick }: AlertDialogActionProps) {
+export const AlertDialogFooter: React.FC<DialogChildProps> = ({ children, className = '' }) => {
+  return <div className={`mt-6 flex justify-end gap-3 ${className}`}>{children}</div>;
+};
+
+export const AlertDialogCancel: React.FC<AlertDialogActionProps> = ({ children, onClick }) => {
   return (
     <button
       onClick={onClick}
@@ -63,10 +63,10 @@ export function AlertDialogCancel({ children, onClick }: AlertDialogActionProps)
     >
       {children}
     </button>
-  )
-}
+  );
+};
 
-export function AlertDialogAction({ children, onClick, className = "", ...props }: AlertDialogActionProps) {
+export const AlertDialogAction: React.FC<AlertDialogActionProps & { className?: string }> = ({ children, onClick, className = "", ...props }) => {
   return (
     <button
       onClick={onClick}
@@ -75,5 +75,5 @@ export function AlertDialogAction({ children, onClick, className = "", ...props 
     >
       {children}
     </button>
-  )
-}
+  );
+};

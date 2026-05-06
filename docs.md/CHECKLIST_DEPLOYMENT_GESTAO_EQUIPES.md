@@ -3,12 +3,14 @@
 ## 📋 Pré-requisitos
 
 ### Ambiente de Desenvolvimento
+
 - [ ] Node.js instalado (v18+)
 - [ ] PostgreSQL instalado e rodando
 - [ ] Git configurado
 - [ ] Variáveis de ambiente configuradas (.env)
 
 ### Banco de Dados
+
 - [ ] `DATABASE_URL` configurada no `.env`
 - [ ] Conexão com banco testada
 - [ ] Prisma CLI instalado globalmente ou localmente
@@ -33,6 +35,7 @@ npx prisma generate
 ```
 
 **Resultado esperado:**
+
 ```
 ✔ Generated Prisma Client
 ✔ Migration applied successfully
@@ -46,6 +49,7 @@ npx prisma studio
 ```
 
 **Verificar:**
+
 - [ ] Tabela `equipes` criada
 - [ ] Tabela `alocacoes_obra` criada
 - [ ] Relações com `users` e `projetos` funcionando
@@ -62,6 +66,7 @@ npx ts-node prisma/seed-equipes.ts
 ```
 
 **Verificar:**
+
 - [ ] 3 equipes criadas (A, B, C)
 - [ ] Membros atribuídos corretamente
 - [ ] Status `ativa: true`
@@ -73,6 +78,7 @@ npx prisma studio
 ```
 
 **Conferir:**
+
 - [ ] Equipe A (MONTAGEM) - 2 membros
 - [ ] Equipe B (CAMPO) - 2 membros
 - [ ] Equipe C (DISTINTA) - 2 membros
@@ -89,6 +95,7 @@ npm run dev
 ```
 
 **Verificar logs:**
+
 ```
 ✔ Server running on http://localhost:3000
 ✔ Environment: development
@@ -112,6 +119,7 @@ curl http://localhost:3000/health
 ```
 
 **Resposta esperada:**
+
 ```json
 {
   "status": "OK",
@@ -126,6 +134,7 @@ curl http://localhost:3000/api
 ```
 
 **Verificar:**
+
 - [ ] `obras: '/api/obras'` listado nos endpoints
 
 ### 4.3. Autenticação
@@ -146,6 +155,7 @@ curl -X GET http://localhost:3000/api/obras/equipes \
 ```
 
 **Verificar:**
+
 - [ ] 3 equipes retornadas
 - [ ] Estrutura JSON correta
 
@@ -165,6 +175,7 @@ curl -X POST http://localhost:3000/api/obras/alocar \
 ```
 
 **Verificar:**
+
 - [ ] Status 201 Created
 - [ ] `dataFimPrevisto` calculada corretamente
 - [ ] Status inicial: "Planejada"
@@ -177,6 +188,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ```
 
 **Verificar:**
+
 - [ ] Alocação criada aparece
 - [ ] Formato otimizado para calendário
 
@@ -196,6 +208,7 @@ curl -X POST http://localhost:3000/api/obras/alocar \
 ```
 
 **Verificar:**
+
 - [ ] Status 409 Conflict
 - [ ] Mensagem de erro clara
 
@@ -211,6 +224,7 @@ curl -X GET http://localhost:3000/api/obras/equipes
 ```
 
 **Verificar:**
+
 - [ ] Status 401 Unauthorized
 
 ### 5.2. Testar Autorização
@@ -224,6 +238,7 @@ curl -X POST http://localhost:3000/api/obras/equipes \
 ```
 
 **Verificar:**
+
 - [ ] Status 403 Forbidden
 
 ---
@@ -233,11 +248,13 @@ curl -X POST http://localhost:3000/api/obras/equipes \
 ### 6.1. Cálculo de Dias Úteis
 
 **Teste manual:**
+
 - Data início: 01/03/2025 (sábado)
 - Duração: 5 dias úteis
 - Data fim esperada: 07/03/2025 (sexta)
 
 **Verificar:**
+
 - [ ] Finais de semana excluídos
 - [ ] Contagem correta
 
@@ -249,6 +266,7 @@ curl -X GET "http://localhost:3000/api/obras/equipes/disponiveis?dataInicio=2025
 ```
 
 **Verificar:**
+
 - [ ] Equipes ocupadas não aparecem
 - [ ] Equipes disponíveis aparecem
 
@@ -260,6 +278,7 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 ```
 
 **Verificar:**
+
 - [ ] `totalEquipes` correto
 - [ ] `equipesOcupadas` correto
 - [ ] `equipesDisponiveis` correto
@@ -298,6 +317,7 @@ npm run lint
 ```
 
 **Verificar:**
+
 - [ ] Sem erros de TypeScript
 - [ ] Sem erros de linting
 - [ ] Imports corretos
@@ -340,6 +360,7 @@ docker-compose up -d
 ```
 
 **Verificar:**
+
 - [ ] Container backend rodando
 - [ ] Container PostgreSQL rodando
 - [ ] Migrations aplicadas automaticamente
@@ -396,6 +417,7 @@ docker logs -f backend
 ```
 
 **Monitorar:**
+
 - [ ] Erros de conexão com banco
 - [ ] Erros de autenticação
 - [ ] Erros de validação
@@ -413,6 +435,7 @@ docker logs -f backend
 ## ✅ 12. Checklist Final
 
 ### Backend
+
 - [x] Modelos Prisma criados
 - [x] Migrations geradas
 - [ ] Migrations aplicadas no banco
@@ -427,6 +450,7 @@ docker logs -f backend
 - [ ] Segurança validada
 
 ### Documentação
+
 - [x] Documentação técnica completa
 - [x] Guia rápido criado
 - [x] Exemplos de API documentados
@@ -434,6 +458,7 @@ docker logs -f backend
 - [x] Checklist de deployment criado
 
 ### Deployment
+
 - [ ] Servidor rodando
 - [ ] Banco configurado
 - [ ] Dados iniciais populados
@@ -445,7 +470,9 @@ docker logs -f backend
 
 ## 🎉 Conclusão
 
-Quando todos os itens acima estiverem marcados ✅, o módulo de **Gestão Operacional de Equipes** estará **totalmente implementado e pronto para uso em produção**!
+Quando todos os itens acima estiverem marcados ✅, o módulo de **Gestão
+Operacional de Equipes** estará **totalmente implementado e pronto para uso em
+produção**!
 
 ---
 
@@ -454,6 +481,7 @@ Quando todos os itens acima estiverem marcados ✅, o módulo de **Gestão Opera
 ### Em caso de problemas:
 
 1. **Verificar logs do servidor**
+
    ```bash
    docker logs backend
    # ou
@@ -461,21 +489,25 @@ Quando todos os itens acima estiverem marcados ✅, o módulo de **Gestão Opera
    ```
 
 2. **Verificar conexão com banco**
+
    ```bash
    npx prisma studio
    ```
 
 3. **Verificar migrations**
+
    ```bash
    npx prisma migrate status
    ```
 
 4. **Recriar Prisma Client**
+
    ```bash
    npx prisma generate
    ```
 
 5. **Reiniciar servidor**
+
    ```bash
    npm run dev
    # ou
@@ -503,10 +535,10 @@ npx prisma migrate deploy
 ---
 
 **Próximos Passos Recomendados:**
+
 1. ✅ Aplicar migrations
 2. ✅ Executar seed
 3. ✅ Testar endpoints
 4. ✅ Integrar com frontend (futura sprint)
 5. ✅ Treinar usuários
 6. ✅ Monitorar uso em produção
-

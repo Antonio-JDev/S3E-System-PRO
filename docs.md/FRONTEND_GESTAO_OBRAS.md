@@ -2,7 +2,9 @@
 
 ## 📋 Visão Geral
 
-Interface completa para gerenciar alocações de equipes em obras/projetos, com visualização em calendário, sidebar de equipes e modal para criação de novas alocações.
+Interface completa para gerenciar alocações de equipes em obras/projetos, com
+visualização em calendário, sidebar de equipes e modal para criação de novas
+alocações.
 
 ---
 
@@ -45,7 +47,8 @@ frontend/
 
 ## 🎯 Funcionalidades Implementadas
 
-### 1. Hook `useAlocacoes` 
+### 1. Hook `useAlocacoes`
+
 **Localização:** `frontend/src/hooks/useAlocacoes.ts`
 
 #### Funções Disponíveis:
@@ -53,23 +56,23 @@ frontend/
 ```typescript
 // Estados
 const {
-  equipes,              // Lista de equipes
-  alocacoes,            // Alocações do mês atual
-  estatisticas,         // Estatísticas gerais
-  loading,              // Estado de carregamento
-  error,                // Mensagens de erro
-  
+  equipes, // Lista de equipes
+  alocacoes, // Alocações do mês atual
+  estatisticas, // Estatísticas gerais
+  loading, // Estado de carregamento
+  error, // Mensagens de erro
+
   // Funções de busca
   fetchEquipes,
   fetchAlocacoesCalendario,
   fetchEstatisticas,
   fetchEquipesDisponiveis,
-  
+
   // Funções de ação
   criarAlocacao,
   iniciarAlocacao,
   concluirAlocacao,
-  cancelarAlocacao
+  cancelarAlocacao,
 } = useAlocacoes();
 ```
 
@@ -79,7 +82,7 @@ const {
 interface Equipe {
   id: string;
   nome: string;
-  tipo: 'MONTAGEM' | 'CAMPO' | 'DISTINTA';
+  tipo: "MONTAGEM" | "CAMPO" | "DISTINTA";
   membros: string[];
   ativa: boolean;
   createdAt: string;
@@ -91,7 +94,7 @@ interface AlocacaoCalendario {
   equipe: {
     id: string;
     nome: string;
-    tipo: 'MONTAGEM' | 'CAMPO' | 'DISTINTA';
+    tipo: "MONTAGEM" | "CAMPO" | "DISTINTA";
   };
   projeto: {
     id: string;
@@ -101,7 +104,7 @@ interface AlocacaoCalendario {
   dataInicio: string;
   dataFimPrevisto: string;
   dataFimReal?: string;
-  status: 'Planejada' | 'EmAndamento' | 'Concluida' | 'Cancelada';
+  status: "Planejada" | "EmAndamento" | "Concluida" | "Cancelada";
   observacoes?: string;
 }
 
@@ -117,6 +120,7 @@ interface NovaAlocacao {
 ---
 
 ### 2. Página de Gerenciamento
+
 **Localização:** `frontend/src/pages/Obras/Gerenciamento.tsx`
 
 #### Layout Principal:
@@ -184,9 +188,9 @@ interface NovaAlocacao {
 
 ```typescript
 const TIPO_EQUIPE_COLORS = {
-  MONTAGEM: 'bg-blue-500',      // Azul
-  CAMPO: 'bg-green-500',         // Verde
-  DISTINTA: 'bg-purple-500'      // Roxo
+  MONTAGEM: "bg-blue-500", // Azul
+  CAMPO: "bg-green-500", // Verde
+  DISTINTA: "bg-purple-500", // Roxo
 };
 ```
 
@@ -194,10 +198,10 @@ const TIPO_EQUIPE_COLORS = {
 
 ```typescript
 const STATUS_COLORS = {
-  Planejada: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  EmAndamento: 'bg-blue-100 text-blue-800 border-blue-300',
-  Concluida: 'bg-green-100 text-green-800 border-green-300',
-  Cancelada: 'bg-red-100 text-red-800 border-red-300'
+  Planejada: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  EmAndamento: "bg-blue-100 text-blue-800 border-blue-300",
+  Concluida: "bg-green-100 text-green-800 border-green-300",
+  Cancelada: "bg-red-100 text-red-800 border-red-300",
 };
 ```
 
@@ -213,22 +217,23 @@ const STATUS_COLORS = {
 ## 🔌 Integração com API
 
 ### Base URL:
+
 ```typescript
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = "http://localhost:3000/api";
 ```
 
 ### Endpoints Utilizados:
 
-| Método | Endpoint | Uso |
-|--------|----------|-----|
-| GET | `/obras/equipes` | Buscar todas as equipes |
-| GET | `/obras/equipes/disponiveis?dataInicio=...&dataFim=...` | Equipes disponíveis para período |
-| GET | `/obras/alocacoes/calendario?mes=X&ano=YYYY` | Alocações do mês |
-| GET | `/obras/estatisticas` | Dashboard de estatísticas |
-| POST | `/obras/alocar` | Criar nova alocação |
-| PUT | `/obras/alocacoes/:id/iniciar` | Iniciar alocação |
-| PUT | `/obras/alocacoes/:id/concluir` | Concluir alocação |
-| PUT | `/obras/alocacoes/:id/cancelar` | Cancelar alocação |
+| Método | Endpoint                                                | Uso                              |
+| ------ | ------------------------------------------------------- | -------------------------------- |
+| GET    | `/obras/equipes`                                        | Buscar todas as equipes          |
+| GET    | `/obras/equipes/disponiveis?dataInicio=...&dataFim=...` | Equipes disponíveis para período |
+| GET    | `/obras/alocacoes/calendario?mes=X&ano=YYYY`            | Alocações do mês                 |
+| GET    | `/obras/estatisticas`                                   | Dashboard de estatísticas        |
+| POST   | `/obras/alocar`                                         | Criar nova alocação              |
+| PUT    | `/obras/alocacoes/:id/iniciar`                          | Iniciar alocação                 |
+| PUT    | `/obras/alocacoes/:id/concluir`                         | Concluir alocação                |
+| PUT    | `/obras/alocacoes/:id/cancelar`                         | Cancelar alocação                |
 
 ### Autenticação:
 
@@ -252,6 +257,7 @@ No menu lateral, clique em **"Gestão de Obras"** na seção **Operacional**.
 ### 2. Visualizar Equipes
 
 A sidebar mostra:
+
 - Nome da equipe
 - Tipo (MONTAGEM/CAMPO/DISTINTA)
 - Número de membros
@@ -288,16 +294,19 @@ Na lista de alocações, cada card tem botões de ação:
 ## 📱 Responsividade
 
 ### Desktop (> 1024px):
+
 - Sidebar fixa à esquerda
 - Calendário em grid completo
 - Lista em 2 colunas
 
 ### Tablet (768px - 1024px):
+
 - Sidebar recolhível
 - Calendário redimensionado
 - Lista em 2 colunas
 
 ### Mobile (< 768px):
+
 - Sidebar como drawer
 - Calendário scrollável horizontal
 - Lista em 1 coluna
@@ -405,11 +414,13 @@ Na lista de alocações, cada card tem botões de ação:
 ### Erro de Conexão:
 
 ```tsx
-{error && (
-  <div className="mb-4 p-4 bg-red-50 border border-red-300 rounded-lg">
-    {error}
-  </div>
-)}
+{
+  error && (
+    <div className="mb-4 p-4 bg-red-50 border border-red-300 rounded-lg">
+      {error}
+    </div>
+  );
+}
 ```
 
 ### Erro ao Criar Alocação:
@@ -426,6 +437,7 @@ if (!resultado.success) {
 ### Conflito de Alocação:
 
 O backend retorna erro 409 com mensagem:
+
 ```
 "Conflito detectado! A equipe já está alocada no período de 01/03/2025 a 28/03/2025"
 ```
@@ -442,9 +454,9 @@ Edite as constantes em `Gerenciamento.tsx`:
 
 ```typescript
 const TIPO_EQUIPE_COLORS = {
-  MONTAGEM: 'bg-blue-500',    // Mudar para outra cor Tailwind
-  CAMPO: 'bg-green-500',
-  DISTINTA: 'bg-purple-500'
+  MONTAGEM: "bg-blue-500", // Mudar para outra cor Tailwind
+  CAMPO: "bg-green-500",
+  DISTINTA: "bg-purple-500",
 };
 ```
 
@@ -455,13 +467,13 @@ No modal de nova alocação:
 ```typescript
 const handleSubmitAlocacao = async (e: React.FormEvent) => {
   e.preventDefault();
-  
+
   // Adicionar validações customizadas aqui
   if (formData.duracaoDias < 5) {
-    alert('Duração mínima: 5 dias');
+    alert("Duração mínima: 5 dias");
     return;
   }
-  
+
   // ... resto do código
 };
 ```
@@ -470,10 +482,14 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
 
 ```typescript
 // De:
-{new Date(alocacao.dataInicio).toLocaleDateString('pt-BR')}
+{
+  new Date(alocacao.dataInicio).toLocaleDateString("pt-BR");
+}
 
 // Para (ISO):
-{alocacao.dataInicio.split('T')[0]}
+{
+  alocacao.dataInicio.split("T")[0];
+}
 ```
 
 ---
@@ -483,6 +499,7 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
 ### Otimizações Implementadas:
 
 1. **useMemo** para cálculos pesados:
+
    ```typescript
    const diasDoMes = useMemo(() => {
      // Cálculo executado apenas quando mês/ano/alocacoes mudam
@@ -490,6 +507,7 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
    ```
 
 2. **useCallback** para funções de API:
+
    ```typescript
    const fetchEquipes = useCallback(async () => {
      // Evita recriação da função
@@ -501,6 +519,7 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
    - Cache de dados em estado local
 
 4. **Renderização condicional:**
+
    ```typescript
    {loading && <div>Carregando...</div>}
    {!loading && equipes.map(...)}
@@ -534,18 +553,21 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
 ## 🔮 Melhorias Futuras
 
 ### Curto Prazo:
+
 - [ ] Drag & drop para realocar equipes
 - [ ] Filtros avançados (por equipe, por status)
 - [ ] Export para PDF/Excel
 - [ ] Visualização em lista/timeline/kanban
 
 ### Médio Prazo:
+
 - [ ] Notificações em tempo real (WebSocket)
 - [ ] Gráfico de Gantt
 - [ ] Multi-seleção de equipes
 - [ ] Templates de alocação
 
 ### Longo Prazo:
+
 - [ ] IA para sugestão de alocações
 - [ ] App mobile nativo
 - [ ] Integração com Google Calendar
@@ -558,16 +580,19 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
 ### Problemas Comuns:
 
 **"Equipes não aparecem"**
+
 - Verifique se está logado (token JWT válido)
 - Confirme que o backend está rodando
 - Verifique o console do navegador para erros
 
 **"Não consigo criar alocação"**
+
 - Verifique se a equipe está realmente disponível
 - Confirme que o ID do projeto existe
 - Veja se a data de início é válida
 
 **"Calendário vazio"**
+
 - Navegue para um mês com alocações
 - Crie uma nova alocação para testar
 - Verifique se o backend retorna dados
@@ -601,4 +626,3 @@ const handleSubmitAlocacao = async (e: React.FormEvent) => {
 **Status:** ✅ Pronto para Produção  
 **Desenvolvido por:** Cursor AI Assistant  
 **Licença:** Proprietário - S3E System
-

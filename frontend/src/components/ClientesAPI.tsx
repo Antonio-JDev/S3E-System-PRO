@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { clientesService, type Cliente, type CreateClienteData, type UpdateClienteData } from '../services/clientesService';
-import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
 
 // Icons
@@ -64,11 +63,32 @@ const ClientesAPI: React.FC<ClientesProps> = ({ toggleSidebar }) => {
         email: '',
         telefone: '',
         endereco: '',
+        bairro: '',
         cidade: '',
         estado: '',
         cep: '',
         tipo: 'PJ'
     });
+    const [cnpjLoading, setCnpjLoading] = useState(false);
+    const [cnpjError, setCnpjError] = useState<string | null>(null);
+    // Helpers: format CPF/CNPJ and strip digits
+    const onlyDigits = (v: string) => (v || '').replace(/\D/g, '');
+    const formatCPF = (v: string) => {
+      const d = onlyDigits(v).slice(0, 11);
+      if (d.length <= 3) return d;
+      if (d.length <= 6) return `${d.slice(0,3)}.${d.slice(3)}`;
+      if (d.length <= 9) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`;
+      return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)}`;
+    };
+    const formatCNPJ = (v: string) => {
+      const d = onlyDigits(v).slice(0, 14);
+      if (d.length <= 2) return d;
+      if (d.length <= 5) return `${d.slice(0,2)}.${d.slice(2)}`;
+      if (d.length <= 8) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`;
+      if (d.length <= 12) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8)}`;
+      return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12,14)}`;
+    };
+    const formatCpfCnpj = (v: string, tipo: 'PF' | 'PJ') => tipo === 'PF' ? formatCPF(v) : formatCNPJ(v);
 
     // Carregar clientes
     useEffect(() => {
@@ -130,6 +150,7 @@ const ClientesAPI: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                 email: cliente.email,
                 telefone: cliente.telefone,
                 endereco: cliente.endereco,
+                bairro: (cliente as any).bairro || '',
                 cidade: cliente.cidade,
                 estado: cliente.estado,
                 cep: cliente.cep,
@@ -212,7 +233,14 @@ const ClientesAPI: React.FC<ClientesProps> = ({ toggleSidebar }) => {
     };
 
     if (loading) {
-        return <LoadingSpinner size="lg" text="Carregando clientes..." />;
+        return (
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando clientes...</p>
+                </div>
+            </div>
+        );
     }
 
     if (error) {
@@ -407,13 +435,92 @@ const ClientesAPI: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                                     <label className="block text-sm font-medium text-gray-700">
                                         {formState.tipo === 'PF' ? 'CPF' : 'CNPJ'}
                                     </label>
-                                    <input
-                                        type="text"
-                                        value={formState.cpfCnpj}
-                                        onChange={(e) => setFormState(prev => ({ ...prev, cpfCnpj: e.target.value }))}
-                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        required
-                                    />
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={formState.cpfCnpj}
+                                            onChange={(e) => {
+                                                const v = e.target.value;
+                                                const formatted = formatCpfCnpj(v, formState.tipo);
+                                                setFormState(prev => ({ ...prev, cpfCnpj: formatted }));
+                                            }}
+                                            onPaste={(e: React.ClipboardEvent<HTMLInputElement>) => {
+                                                const text = e.clipboardData.getData('text') || '';
+                                                e.preventDefault();
+                                                const formatted = formatCpfCnpj(text, formState.tipo);
+                                                setFormState(prev => ({ ...prev, cpfCnpj: formatted }));
+                                            }}
+                                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            required
+                                        />
+                                        {formState.tipo === 'PJ' && (
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    // Busca dados na API receitaws.com.br pelo CNPJ
+                                                    const raw = (formState.cpfCnpj || '').replace(/\D/g, '');
+                                                    if (raw.length !== 14) {
+                                                        alert('Digite um CNPJ válido (14 dígitos).');
+                                                        return;
+                                                    }
+                                                    try {
+                                                        setCnpjError(null);
+                                                        setCnpjLoading(true);
+                                                        // retry on 429 with exponential backoff
+                                                        const maxRetries = 3;
+                                                        let attempt = 0;
+                                                        let proxyRes: any = null;
+                                                        while (attempt <= maxRetries) {
+                                                        proxyRes = await axiosApiService.get(`/api/external/receita/cnpj/${raw}`);
+                                                            if (proxyRes.success) break;
+                                                            if (proxyRes.status === 429) {
+                                                                attempt++;
+                                                                if (attempt > maxRetries) break;
+                                                                const backoff = 1000 * Math.pow(2, attempt - 1);
+                                                                alert(`Limite atingido, tentando novamente em ${backoff/1000}s... (tentativa ${attempt}/${maxRetries})`);
+                                                                await new Promise(r => setTimeout(r, backoff));
+                                                                continue;
+                                                            } else {
+                                                                break;
+                                                            }
+                                                        }
+
+                                                        if (!proxyRes || !proxyRes.success) {
+                                                            const errMsg = proxyRes?.error || 'Erro ao consultar Receita';
+                                                            alert(errMsg);
+                                                            setCnpjError(errMsg);
+                                                            return;
+                                                        }
+
+                                                        const data = proxyRes.data as any;
+                                                        setFormState(prev => ({
+                                                            ...prev,
+                                                            nome: data.nome || data.razaoSocial || prev.nome,
+                                                            cpfCnpj: data.cnpj || prev.cpfCnpj,
+                                                            email: data.email || prev.email || '',
+                                                            telefone: data.telefone || prev.telefone || '',
+                                                            endereco: [data.logradouro || '', data.numero || '', data.complemento || ''].filter(Boolean).join(', '),
+                                                            bairro: data.bairro || prev.bairro || '',
+                                                            cidade: data.municipio || prev.cidade,
+                                                            estado: data.uf || prev.estado,
+                                                            cep: data.cep || prev.cep
+                                                        }));
+                                                        alert('Dados carregados a partir da Receita (preencha/ajuste campos se necessário).');
+                                                    } catch (err: any) {
+                                                        console.error('Erro ao consultar CNPJ:', err);
+                                                        setCnpjError(err?.message || 'Erro ao consultar CNPJ');
+                                                        alert('Erro ao consultar CNPJ: ' + (err?.message || 'unknown'));
+                                                    } finally {
+                                                        setCnpjLoading(false);
+                                                    }
+                                                }}
+                                                disabled={cnpjLoading}
+                                                className="mt-1 inline-flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md"
+                                            >
+                                                {cnpjLoading ? 'Buscando...' : 'Buscar CNPJ'}
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                                 
                                 <div>
@@ -446,6 +553,16 @@ const ClientesAPI: React.FC<ClientesProps> = ({ toggleSidebar }) => {
                                         onChange={(e) => setFormState(prev => ({ ...prev, endereco: e.target.value }))}
                                         className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         required
+                                    />
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Bairro</label>
+                                    <input
+                                        type="text"
+                                        value={formState.bairro}
+                                        onChange={(e) => setFormState(prev => ({ ...prev, bairro: e.target.value }))}
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 

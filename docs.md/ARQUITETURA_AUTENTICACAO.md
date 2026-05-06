@@ -2,7 +2,8 @@
 
 ## 📋 Visão Geral
 
-Implementação completa de um sistema de autenticação robusto seguindo as melhores práticas de arquitetura em camadas:
+Implementação completa de um sistema de autenticação robusto seguindo as
+melhores práticas de arquitetura em camadas:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -87,22 +88,25 @@ backend/
 **Responsabilidade:** Definir schemas de validação usando Zod
 
 **Schemas disponíveis:**
+
 - `loginSchema` - Valida email e senha no login
 - `registerSchema` - Valida dados de novo usuário
 - `changePasswordSchema` - Valida mudança de senha
 
 **Exemplo:**
+
 ```typescript
-import { loginSchema } from '../validators/auth.validator';
+import { loginSchema } from "../validators/auth.validator";
 
 const result = loginSchema.parse({
-  email: 'user@s3e.com',
-  password: '123456'
+  email: "user@s3e.com",
+  password: "123456",
 });
 // result: { email: 'user@s3e.com', password: '123456' }
 ```
 
 **Validações:**
+
 - ✅ Email: formato válido, lowercase, trim
 - ✅ Password: mínimo 6 caracteres
 - ✅ Name: mínimo 2 caracteres (no registro)
@@ -117,10 +121,11 @@ const result = loginSchema.parse({
 **Funções disponíveis:**
 
 #### `authenticateUser(email, password)`
+
 Autentica um usuário com credenciais.
 
 ```typescript
-const result = await authenticateUser('user@s3e.com', '123456');
+const result = await authenticateUser("user@s3e.com", "123456");
 // {
 //   token: "eyJhbGci...",
 //   user: { id: "...", email: "...", name: "...", role: "..." }
@@ -128,6 +133,7 @@ const result = await authenticateUser('user@s3e.com', '123456');
 ```
 
 **Validações:**
+
 - ✅ Verifica se usuário existe
 - ✅ Verifica se usuário está ativo
 - ✅ Compara senha com hash (bcrypt)
@@ -135,18 +141,20 @@ const result = await authenticateUser('user@s3e.com', '123456');
 - ❌ Lança erro "Credenciais inválidas" se falhar
 
 #### `registerUser(data)`
+
 Registra novo usuário no sistema.
 
 ```typescript
 const result = await registerUser({
-  email: 'novo@s3e.com',
-  password: '123456',
-  name: 'Novo Usuário',
-  role: 'user'
+  email: "novo@s3e.com",
+  password: "123456",
+  name: "Novo Usuário",
+  role: "user",
 });
 ```
 
 **Validações:**
+
 - ✅ Verifica se email já existe
 - ✅ Hash da senha com bcrypt
 - ✅ Cria usuário no banco
@@ -154,25 +162,28 @@ const result = await registerUser({
 - ❌ Lança erro "Email já cadastrado" se existir
 
 #### `getUserById(userId)`
+
 Busca informações de um usuário.
 
 ```typescript
-const user = await getUserById('user-123');
+const user = await getUserById("user-123");
 // { id: "...", email: "...", name: "...", role: "...", active: true, ... }
 ```
 
 #### `updatePassword(userId, currentPassword, newPassword)`
+
 Atualiza senha de um usuário.
 
 ```typescript
-await updatePassword('user-123', 'senhaAtual', 'novaSenha123');
+await updatePassword("user-123", "senhaAtual", "novaSenha123");
 ```
 
 #### `emailExists(email)`
+
 Verifica se um email já está cadastrado.
 
 ```typescript
-const exists = await emailExists('user@s3e.com');
+const exists = await emailExists("user@s3e.com");
 // true ou false
 ```
 
@@ -185,19 +196,22 @@ const exists = await emailExists('user@s3e.com');
 **Funções disponíveis:**
 
 #### `validate(schema)`
+
 Valida `req.body` com um schema Zod.
 
 ```typescript
-router.post('/login', validate(loginSchema), loginController);
+router.post("/login", validate(loginSchema), loginController);
 ```
 
 **Comportamento:**
+
 - ✅ Valida e transforma dados
 - ✅ Substitui `req.body` pelos dados validados
 - ✅ Passa para próximo middleware se válido
 - ❌ Retorna erro 400 com detalhes se inválido
 
 **Exemplo de resposta de erro:**
+
 ```json
 {
   "error": "Erro de validação",
@@ -215,9 +229,11 @@ router.post('/login', validate(loginSchema), loginController);
 ```
 
 #### `validateQuery(schema)`
+
 Valida `req.query` (query params).
 
 #### `validateParams(schema)`
+
 Valida `req.params` (params da URL).
 
 ---
@@ -231,6 +247,7 @@ Valida `req.params` (params da URL).
 **Endpoint:** `POST /api/auth/login`
 
 **Request:**
+
 ```json
 {
   "email": "user@s3e.com",
@@ -239,6 +256,7 @@ Valida `req.params` (params da URL).
 ```
 
 **Response (200):**
+
 ```json
 {
   "message": "Login realizado com sucesso",
@@ -253,6 +271,7 @@ Valida `req.params` (params da URL).
 ```
 
 **Erros:**
+
 - `400` - Erro de validação
 - `401` - Credenciais inválidas
 - `403` - Usuário inativo
@@ -265,6 +284,7 @@ Valida `req.params` (params da URL).
 **Endpoint:** `POST /api/auth/register`
 
 **Request:**
+
 ```json
 {
   "email": "novo@s3e.com",
@@ -275,6 +295,7 @@ Valida `req.params` (params da URL).
 ```
 
 **Response (201):**
+
 ```json
 {
   "message": "Usuário criado com sucesso",
@@ -289,6 +310,7 @@ Valida `req.params` (params da URL).
 ```
 
 **Erros:**
+
 - `400` - Email já cadastrado ou validação falhou
 - `500` - Erro interno
 
@@ -299,11 +321,13 @@ Valida `req.params` (params da URL).
 **Endpoint:** `GET /api/auth/me`
 
 **Headers:**
+
 ```
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Response (200):**
+
 ```json
 {
   "id": "abc-123",
@@ -317,6 +341,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Erros:**
+
 - `401` - Token inválido ou expirado
 - `404` - Usuário não encontrado
 - `500` - Erro interno
@@ -410,6 +435,7 @@ curl -X POST http://localhost:3001/api/auth/login \
 ```
 
 **Resposta:**
+
 ```json
 {
   "message": "Login realizado com sucesso",
@@ -451,6 +477,7 @@ curl -X POST http://localhost:3001/api/auth/login \
 ```
 
 **Resposta esperada:**
+
 ```json
 {
   "error": "Erro de validação",
@@ -474,6 +501,7 @@ curl -X POST http://localhost:3001/api/auth/login \
 ```
 
 **Resposta esperada:**
+
 ```json
 {
   "error": "Erro de validação",
@@ -491,27 +519,32 @@ curl -X POST http://localhost:3001/api/auth/login \
 ## ✅ Benefícios da Arquitetura
 
 ### 1. **Separação de Responsabilidades**
+
 - ✅ Validators: Validação de dados
 - ✅ Services: Lógica de negócio
 - ✅ Controllers: Interface HTTP
 - ✅ Middlewares: Funcionalidades transversais
 
 ### 2. **Testabilidade**
+
 - ✅ Cada camada pode ser testada independentemente
 - ✅ Services são puras (sem dependência de HTTP)
 - ✅ Fácil de mockar dependências
 
 ### 3. **Manutenibilidade**
+
 - ✅ Código organizado e fácil de encontrar
 - ✅ Mudanças isoladas em cada camada
 - ✅ Reutilização de código
 
 ### 4. **Escalabilidade**
+
 - ✅ Fácil adicionar novos endpoints
 - ✅ Fácil adicionar novas validações
 - ✅ Fácil adicionar novos services
 
 ### 5. **Segurança**
+
 - ✅ Validação em todas as entradas
 - ✅ Senhas com hash (bcrypt)
 - ✅ Tokens JWT seguros
@@ -551,15 +584,14 @@ curl -X POST http://localhost:3001/api/auth/login \
 
 ## 📚 Referências
 
-- **Zod:** https://zod.dev/
-- **Prisma:** https://www.prisma.io/
-- **bcryptjs:** https://www.npmjs.com/package/bcryptjs
-- **jsonwebtoken:** https://www.npmjs.com/package/jsonwebtoken
-- **Express:** https://expressjs.com/
+- **Zod:** <https://zod.dev/>
+- **Prisma:** <https://www.prisma.io/>
+- **bcryptjs:** <https://www.npmjs.com/package/bcryptjs>
+- **jsonwebtoken:** <https://www.npmjs.com/package/jsonwebtoken>
+- **Express:** <https://expressjs.com/>
 
 ---
 
 **Data de Implementação:** 16 de Outubro de 2024  
 **Versão:** 1.0.0  
 **Status:** ✅ **IMPLEMENTADO E TESTADO**
-

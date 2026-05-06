@@ -2,31 +2,40 @@
 
 ## ✅ Resumo Executivo
 
-Implementação do **serviço completo de Compras** com integração automática de **Estoque** (entrada de materiais) e **Contas a Pagar** (parcelamentos), utilizando transações atômicas para garantir consistência.
+Implementação do **serviço completo de Compras** com integração automática de
+**Estoque** (entrada de materiais) e **Contas a Pagar** (parcelamentos),
+utilizando transações atômicas para garantir consistência.
 
 ---
 
 ## 🎯 Funcionalidades Implementadas
 
 ### 1. ✅ Registrar Compra Completa
+
 Cria compra, atualiza estoque e gera contas a pagar em uma única transação.
 
 ### 2. ✅ Atualização Automática de Estoque
+
 Ao receber materiais, incrementa estoque automaticamente.
 
 ### 3. ✅ Geração de Contas a Pagar
+
 Se compra for parcelada, gera contas a pagar automaticamente.
 
 ### 4. ✅ Vinculação Inteligente
+
 Tenta vincular itens da NF com materiais do cadastro.
 
 ### 5. ✅ Transação Atômica
+
 Tudo acontece junto ou nada acontece (rollback automático).
 
 ### 6. ✅ Listagem com Filtros
+
 Buscar compras por fornecedor, status, período.
 
 ### 7. ✅ Atualização de Status
+
 Mudar status e atualizar estoque automaticamente.
 
 ---
@@ -127,26 +136,33 @@ Mudar status e atualizar estoque automaticamente.
 
 ```typescript
 export class ComprasService {
-    // Registrar compra completa
-    static async registrarCompra(data: CompraPayload)
-    
-    // Listar com filtros
-    static async listarCompras(status?, fornecedorId?, dataInicio?, dataFim?, page, limit)
-    
-    // Buscar compra específica
-    static async buscarCompra(id: string)
-    
-    // Atualizar status (atualiza estoque se for "Recebido")
-    static async atualizarStatusCompra(id: string, novoStatus: string)
-    
-    // Cancelar compra
-    static async cancelarCompra(id: string)
-    
-    // Compras por fornecedor
-    static async getComprasPorFornecedor(fornecedorId: string)
-    
-    // Total por período
-    static async getTotalComprasPorPeriodo(dataInicio: Date, dataFim: Date)
+  // Registrar compra completa
+  static async registrarCompra(data: CompraPayload);
+
+  // Listar com filtros
+  static async listarCompras(
+    status?,
+    fornecedorId?,
+    dataInicio?,
+    dataFim?,
+    page,
+    limit
+  );
+
+  // Buscar compra específica
+  static async buscarCompra(id: string);
+
+  // Atualizar status (atualiza estoque se for "Recebido")
+  static async atualizarStatusCompra(id: string, novoStatus: string);
+
+  // Cancelar compra
+  static async cancelarCompra(id: string);
+
+  // Compras por fornecedor
+  static async getComprasPorFornecedor(fornecedorId: string);
+
+  // Total por período
+  static async getTotalComprasPorPeriodo(dataInicio: Date, dataFim: Date);
 }
 ```
 
@@ -205,17 +221,14 @@ Vinculadas ao fornecedor ✅
 ```typescript
 // Se item não tem materialId, tentar encontrar
 const material = await prisma.material.findFirst({
-    where: {
-        OR: [
-            { nome: { contains: item.nomeProduto } },
-            { sku: item.ncm }
-        ]
-    }
+  where: {
+    OR: [{ nome: { contains: item.nomeProduto } }, { sku: item.ncm }],
+  },
 });
 
 if (material) {
-    // Vincular e atualizar estoque
-    await incrementarEstoque(material.id, item.quantidade);
+  // Vincular e atualizar estoque
+  await incrementarEstoque(material.id, item.quantidade);
 }
 ```
 
@@ -251,6 +264,7 @@ curl -X POST http://localhost:3001/api/compras \
 ```
 
 **O que acontece:**
+
 ```
 ✅ Compra criada
 ✅ Fornecedor vinculado (ou criado)
@@ -289,6 +303,7 @@ curl -X POST http://localhost:3001/api/compras \
 ```
 
 **O que acontece:**
+
 ```
 ✅ Compra criada (Total: R$ 22.000,00)
 ✅ 100 rolos de cabo adicionados ao estoque
@@ -326,6 +341,7 @@ curl -X POST http://localhost:3001/api/compras \
 ```
 
 **O que acontece:**
+
 ```
 ✅ Compra criada (Status: Pendente)
 ❌ Estoque NÃO é atualizado (ainda não recebeu)
@@ -416,11 +432,11 @@ if (material) {
 
 ### Estados Possíveis
 
-| Status | Descrição | Atualiza Estoque? |
-|--------|-----------|-------------------|
-| **Pendente** | Compra registrada, aguardando recebimento | ❌ Não |
-| **Recebido** | Materiais recebidos | ✅ Sim |
-| **Cancelado** | Compra cancelada | ❌ Não |
+| Status        | Descrição                                 | Atualiza Estoque? |
+| ------------- | ----------------------------------------- | ----------------- |
+| **Pendente**  | Compra registrada, aguardando recebimento | ❌ Não            |
+| **Recebido**  | Materiais recebidos                       | ✅ Sim            |
+| **Cancelado** | Compra cancelada                          | ❌ Não            |
 
 ### Transições
 
@@ -460,21 +476,22 @@ Total:          R$ 14.750,00
 
 ### Permissões
 
-| Ação | admin | compras | financeiro | gerente |
-|------|-------|---------|------------|---------|
-| Criar compra | ✅ | ✅ | ❌ | ❌ |
-| Ver compras | ✅ | ✅ | ✅ | ✅ |
-| Atualizar status | ✅ | ✅ | ❌ | ❌ |
-| Cancelar | ✅ | ✅ | ❌ | ❌ |
+| Ação             | admin | compras | financeiro | gerente |
+| ---------------- | ----- | ------- | ---------- | ------- |
+| Criar compra     | ✅    | ✅      | ❌         | ❌      |
+| Ver compras      | ✅    | ✅      | ✅         | ✅      |
+| Atualizar status | ✅    | ✅      | ❌         | ❌      |
+| Cancelar         | ✅    | ✅      | ❌         | ❌      |
 
 ### Implementação
 
 ```typescript
 // Rotas protegidas
-router.post('/api/compras', 
-    authenticate, 
-    authorize('admin', 'compras'),
-    ComprasController.create
+router.post(
+  "/api/compras",
+  authenticate,
+  authorize("admin", "compras"),
+  ComprasController.create
 );
 ```
 
@@ -483,6 +500,7 @@ router.post('/api/compras',
 ## 📊 Exemplo Real: Compra Grande
 
 ### Cenário
+
 Compra de R$ 50.000 em materiais, parcelada em 5x
 
 ```json
@@ -528,6 +546,7 @@ POST /api/compras
 ```
 
 **Cálculos:**
+
 ```
 Subtotal:
 - 50x Quadro @ R$ 180 = R$ 9.000
@@ -545,6 +564,7 @@ Parcela: R$ 13.250,00
 ```
 
 **Resultado da Transação:**
+
 ```
 ✅ Compra PC-2025-XXX criada
 ✅ 4 itens registrados
@@ -565,89 +585,78 @@ Parcela: R$ 13.250,00
 
 ```tsx
 const NovaCompra = () => {
-    const [compraForm, setCompraForm] = useState({
-        fornecedorCNPJ: '',
-        numeroNF: '',
-        items: [],
-        status: 'Pendente',
-        condicoesPagamento: '',
-        parcelas: 0
-    });
-    
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        
-        try {
-            const response = await fetch('/api/compras', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(compraForm)
-            });
-            
-            const { data } = await response.json();
-            
-            alert(`
+  const [compraForm, setCompraForm] = useState({
+    fornecedorCNPJ: "",
+    numeroNF: "",
+    items: [],
+    status: "Pendente",
+    condicoesPagamento: "",
+    parcelas: 0,
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    try {
+      const response = await fetch("/api/compras", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(compraForm),
+      });
+
+      const { data } = await response.json();
+
+      alert(`
                 ✅ Compra registrada!
                 
-                ${data.estoqueAtualizado ? '✅ Estoque atualizado!' : '⏳ Estoque será atualizado ao receber'}
-                ${data.contasPagar ? `✅ ${data.contasPagar.length} contas a pagar geradas` : ''}
+                ${data.estoqueAtualizado ? "✅ Estoque atualizado!" : "⏳ Estoque será atualizado ao receber"}
+                ${data.contasPagar ? `✅ ${data.contasPagar.length} contas a pagar geradas` : ""}
             `);
-            
-        } catch (error) {
-            alert('Erro ao registrar compra');
-        }
-    };
-    
-    return (
-        <form onSubmit={handleSubmit}>
-            {/* Fornecedor */}
-            <input 
-                name="fornecedorCNPJ"
-                placeholder="CNPJ do Fornecedor"
-                required
-            />
-            
-            {/* NF */}
-            <input 
-                name="numeroNF"
-                placeholder="Número da NF-e"
-                required
-            />
-            
-            {/* Status */}
-            <select name="status">
-                <option value="Pendente">Pendente (Aguardando)</option>
-                <option value="Recebido">Recebido (Atualiza Estoque)</option>
-            </select>
-            
-            {/* Items */}
-            <ItemsCompraList />
-            
-            {/* Parcelamento */}
-            <input 
-                type="number"
-                name="parcelas"
-                placeholder="Parcelas (0 = à vista)"
-                min="0"
-                max="12"
-            />
-            
-            {compraForm.parcelas > 0 && (
-                <input 
-                    type="date"
-                    name="dataPrimeiroVencimento"
-                    placeholder="Primeiro Vencimento"
-                />
-            )}
-            
-            <button type="submit">
-                📦 Registrar Compra
-            </button>
-        </form>
-    );
+    } catch (error) {
+      alert("Erro ao registrar compra");
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Fornecedor */}
+      <input name="fornecedorCNPJ" placeholder="CNPJ do Fornecedor" required />
+
+      {/* NF */}
+      <input name="numeroNF" placeholder="Número da NF-e" required />
+
+      {/* Status */}
+      <select name="status">
+        <option value="Pendente">Pendente (Aguardando)</option>
+        <option value="Recebido">Recebido (Atualiza Estoque)</option>
+      </select>
+
+      {/* Items */}
+      <ItemsCompraList />
+
+      {/* Parcelamento */}
+      <input
+        type="number"
+        name="parcelas"
+        placeholder="Parcelas (0 = à vista)"
+        min="0"
+        max="12"
+      />
+
+      {compraForm.parcelas > 0 && (
+        <input
+          type="date"
+          name="dataPrimeiroVencimento"
+          placeholder="Primeiro Vencimento"
+        />
+      )}
+
+      <button type="submit">📦 Registrar Compra</button>
+    </form>
+  );
 };
 ```
 
@@ -740,22 +749,22 @@ Mar: R$ 48.000 (-7%)
 ```typescript
 // 1. Dados obrigatórios
 if (!fornecedorCNPJ || !numeroNF || !items.length) {
-    throw new Error('Dados obrigatórios ausentes');
+  throw new Error("Dados obrigatórios ausentes");
 }
 
 // 2. Valores positivos
 if (valorUnit <= 0 || quantidade <= 0) {
-    throw new Error('Valores devem ser positivos');
+  throw new Error("Valores devem ser positivos");
 }
 
 // 3. Status válido
-if (!['Pendente', 'Recebido', 'Cancelado'].includes(status)) {
-    throw new Error('Status inválido');
+if (!["Pendente", "Recebido", "Cancelado"].includes(status)) {
+  throw new Error("Status inválido");
 }
 
 // 4. Não cancelar compra recebida
-if (compra.status === 'Recebido' && novoStatus === 'Cancelado') {
-    throw new Error('Não é possível cancelar compra já recebida');
+if (compra.status === "Recebido" && novoStatus === "Cancelado") {
+  throw new Error("Não é possível cancelar compra já recebida");
 }
 ```
 
@@ -800,14 +809,18 @@ Despesas aparecem no gráfico
 ## 📝 Arquivos Criados/Modificados
 
 ### Criados
+
 1. **backend/src/services/compras.service.ts** - Lógica de negócio
 
 ### Modificados
-2. **backend/src/services/estoque.service.ts** - Adicionado `incrementarEstoque()`
+
+2. **backend/src/services/estoque.service.ts** - Adicionado
+   `incrementarEstoque()`
 3. **backend/src/controllers/comprasController.ts** - Usa serviço
 4. **backend/src/services/vendas.service.ts** - Já integrado
 
 ### Documentação
+
 5. **IMPLEMENTACAO_SERVICO_COMPRAS.md** (este arquivo)
 
 ---
@@ -815,6 +828,7 @@ Despesas aparecem no gráfico
 ## ✅ Checklist de Implementação
 
 ### Serviço de Compras
+
 - [x] Registrar compra completa
 - [x] Criar ou buscar fornecedor
 - [x] Calcular valores (subtotal, frete, total)
@@ -830,6 +844,7 @@ Despesas aparecem no gráfico
 - [x] Análises por período
 
 ### Integr ações
+
 - [x] Estoque: incremento automático
 - [x] Contas a Pagar: geração automática
 - [x] Movimentações: registro automático
@@ -837,6 +852,7 @@ Despesas aparecem no gráfico
 - [x] Material: vinculação automática por nome/NCM
 
 ### Validações
+
 - [x] Dados obrigatórios
 - [x] Valores positivos
 - [x] Status válidos
@@ -868,16 +884,18 @@ Despesas aparecem no gráfico
 ## 🎓 Boas Práticas Aplicadas
 
 ### 1. Transação Atômica
+
 ```typescript
 await prisma.$transaction(async (tx) => {
-    await criarCompra();
-    await atualizarEstoque();
-    await gerarContas();
-    // Tudo ou nada!
+  await criarCompra();
+  await atualizarEstoque();
+  await gerarContas();
+  // Tudo ou nada!
 });
 ```
 
 ### 2. Vinculação Inteligente
+
 ```typescript
 // Tenta vincular automaticamente
 // Se não encontrar, apenas avisa
@@ -885,6 +903,7 @@ await prisma.$transaction(async (tx) => {
 ```
 
 ### 3. Separação de Responsabilidades
+
 ```typescript
 ComprasService → Lógica de negócio
 EstoqueService → Gestão de estoque
@@ -892,6 +911,7 @@ ContasPagarService → Gestão financeira
 ```
 
 ### 4. Validação em Camadas
+
 ```typescript
 Controller → Dados obrigatórios
 Service → Regras de negócio
@@ -903,6 +923,7 @@ Prisma → Integridade referencial
 ## 📞 Próximos Passos
 
 ### Frontend
+
 - [ ] Criar página Compras.tsx
 - [ ] Formulário de nova compra
 - [ ] Upload de XML NF-e
@@ -910,6 +931,7 @@ Prisma → Integridade referencial
 - [ ] Indicador de estoque atualizado
 
 ### Melhorias
+
 - [ ] Parse automático de XML completo
 - [ ] OCR para digitação de NF
 - [ ] Integração com SPED
@@ -919,4 +941,3 @@ Prisma → Integridade referencial
 
 **Implementado em 20/10/2025** 📦  
 **Sistema S3E Engenharia Elétrica** ⚡
-

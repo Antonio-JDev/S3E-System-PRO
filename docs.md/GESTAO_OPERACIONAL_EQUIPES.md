@@ -2,7 +2,8 @@
 
 ## 📋 Visão Geral
 
-Este módulo implementa a gestão completa de equipes e suas alocações em projetos/obras, permitindo:
+Este módulo implementa a gestão completa de equipes e suas alocações em
+projetos/obras, permitindo:
 
 - ✅ Criação e gerenciamento de **3 equipes fixas** (2 membros/equipe)
 - ✅ Alocação de equipes a projetos com **controle de conflitos**
@@ -40,6 +41,7 @@ model Equipe {
 ```
 
 **Campos:**
+
 - `id`: Identificador único
 - `nome`: Nome da equipe (único)
 - `tipo`: Tipo da equipe (MONTAGEM, CAMPO, DISTINTA)
@@ -70,6 +72,7 @@ model AlocacaoObra {
 ```
 
 **Campos:**
+
 - `id`: Identificador único
 - `equipeId`: ID da equipe alocada
 - `projetoId`: ID do projeto/obra
@@ -107,6 +110,7 @@ Rotas de criação/atualização/exclusão requerem permissão de **admin**.
 ## 📦 Gestão de Equipes
 
 ### 1. **Criar Equipe**
+
 ```http
 POST /api/obras/equipes
 Authorization: Bearer {token}
@@ -114,20 +118,19 @@ Content-Type: application/json
 ```
 
 **Body:**
+
 ```json
 {
   "nome": "Equipe A",
   "tipo": "MONTAGEM",
-  "membros": [
-    "user-id-1",
-    "user-id-2"
-  ]
+  "membros": ["user-id-1", "user-id-2"]
 }
 ```
 
 **Tipos válidos:** `MONTAGEM`, `CAMPO`, `DISTINTA`
 
 **Resposta (201):**
+
 ```json
 {
   "success": true,
@@ -147,15 +150,18 @@ Content-Type: application/json
 ---
 
 ### 2. **Listar Equipes**
+
 ```http
 GET /api/obras/equipes?todas=false
 Authorization: Bearer {token}
 ```
 
 **Query Params:**
+
 - `todas` (opcional): `true` para incluir equipes inativas
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -174,12 +180,14 @@ Authorization: Bearer {token}
 ---
 
 ### 3. **Buscar Equipe por ID**
+
 ```http
 GET /api/obras/equipes/{id}
 Authorization: Bearer {token}
 ```
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -208,6 +216,7 @@ Authorization: Bearer {token}
 ---
 
 ### 4. **Atualizar Equipe**
+
 ```http
 PUT /api/obras/equipes/{id}
 Authorization: Bearer {token}
@@ -215,6 +224,7 @@ Content-Type: application/json
 ```
 
 **Body (todos os campos são opcionais):**
+
 ```json
 {
   "nome": "Equipe A - Atualizada",
@@ -226,6 +236,7 @@ Content-Type: application/json
 ---
 
 ### 5. **Desativar Equipe**
+
 ```http
 DELETE /api/obras/equipes/{id}
 Authorization: Bearer {token}
@@ -236,16 +247,19 @@ Authorization: Bearer {token}
 ---
 
 ### 6. **Buscar Equipes Disponíveis**
+
 ```http
 GET /api/obras/equipes/disponiveis?dataInicio=2025-02-01&dataFim=2025-02-28
 Authorization: Bearer {token}
 ```
 
 **Query Params:**
+
 - `dataInicio` (obrigatório): Data de início no formato ISO
 - `dataFim` (obrigatório): Data de fim no formato ISO
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -266,6 +280,7 @@ Authorization: Bearer {token}
 ## 🗓️ Gestão de Alocações
 
 ### 7. **Alocar Equipe a Projeto**
+
 ```http
 POST /api/obras/alocar
 Authorization: Bearer {token}
@@ -273,6 +288,7 @@ Content-Type: application/json
 ```
 
 **Body:**
+
 ```json
 {
   "equipeId": "equipe-id",
@@ -284,6 +300,7 @@ Content-Type: application/json
 ```
 
 **Campos:**
+
 - `equipeId`: ID da equipe
 - `projetoId`: ID do projeto/obra
 - `dataInicio`: Data de início
@@ -291,11 +308,15 @@ Content-Type: application/json
 - `observacoes` (opcional): Observações
 
 **Lógica de Cálculo:**
-- O sistema calcula automaticamente a `dataFimPrevisto` somando `duracaoDias` úteis
+
+- O sistema calcula automaticamente a `dataFimPrevisto` somando `duracaoDias`
+  úteis
 - Exclui finais de semana (sábados e domingos)
-- **Verificação de conflito:** Não permite alocar a mesma equipe em períodos sobrepostos
+- **Verificação de conflito:** Não permite alocar a mesma equipe em períodos
+  sobrepostos
 
 **Resposta (201):**
+
 ```json
 {
   "success": true,
@@ -324,6 +345,7 @@ Content-Type: application/json
 ```
 
 **Erro de Conflito (409):**
+
 ```json
 {
   "error": "Erro ao alocar equipe",
@@ -334,12 +356,14 @@ Content-Type: application/json
 ---
 
 ### 8. **Listar Alocações**
+
 ```http
 GET /api/obras/alocacoes?equipeId=xxx&projetoId=xxx&status=EmAndamento
 Authorization: Bearer {token}
 ```
 
 **Query Params (todos opcionais):**
+
 - `equipeId`: Filtrar por equipe
 - `projetoId`: Filtrar por projeto
 - `status`: Filtrar por status (Planejada, EmAndamento, Concluida, Cancelada)
@@ -347,6 +371,7 @@ Authorization: Bearer {token}
 - `dataFim`: Filtrar por data de fim
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -377,16 +402,19 @@ Authorization: Bearer {token}
 ---
 
 ### 9. **Buscar Alocações para Calendário**
+
 ```http
 GET /api/obras/alocacoes/calendario?mes=2&ano=2025
 Authorization: Bearer {token}
 ```
 
 **Query Params:**
+
 - `mes` (obrigatório): Mês (1-12)
 - `ano` (obrigatório): Ano (YYYY)
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -416,6 +444,7 @@ Authorization: Bearer {token}
 ---
 
 ### 10. **Buscar Alocação por ID**
+
 ```http
 GET /api/obras/alocacoes/{id}
 Authorization: Bearer {token}
@@ -424,6 +453,7 @@ Authorization: Bearer {token}
 ---
 
 ### 11. **Atualizar Alocação**
+
 ```http
 PUT /api/obras/alocacoes/{id}
 Authorization: Bearer {token}
@@ -431,6 +461,7 @@ Content-Type: application/json
 ```
 
 **Body (todos os campos são opcionais):**
+
 ```json
 {
   "status": "Concluida",
@@ -442,6 +473,7 @@ Content-Type: application/json
 ---
 
 ### 12. **Iniciar Alocação**
+
 ```http
 PUT /api/obras/alocacoes/{id}/iniciar
 Authorization: Bearer {token}
@@ -452,6 +484,7 @@ Muda o status de `Planejada` para `EmAndamento`.
 ---
 
 ### 13. **Concluir Alocação**
+
 ```http
 PUT /api/obras/alocacoes/{id}/concluir
 Authorization: Bearer {token}
@@ -459,6 +492,7 @@ Content-Type: application/json
 ```
 
 **Body (opcional):**
+
 ```json
 {
   "dataFimReal": "2025-03-01T00:00:00Z"
@@ -470,6 +504,7 @@ Se `dataFimReal` não for fornecida, usa a data atual.
 ---
 
 ### 14. **Cancelar Alocação**
+
 ```http
 PUT /api/obras/alocacoes/{id}/cancelar
 Authorization: Bearer {token}
@@ -477,6 +512,7 @@ Content-Type: application/json
 ```
 
 **Body (opcional):**
+
 ```json
 {
   "motivo": "Cliente adiou o projeto"
@@ -486,12 +522,14 @@ Content-Type: application/json
 ---
 
 ### 15. **Estatísticas**
+
 ```http
 GET /api/obras/estatisticas
 Authorization: Bearer {token}
 ```
 
 **Resposta (200):**
+
 ```json
 {
   "success": true,
@@ -575,19 +613,19 @@ PUT /api/obras/alocacoes/{id}/concluir
 
 ## 🔐 Permissões
 
-| Ação | Autenticação | Permissão |
-|------|-------------|-----------|
-| Listar equipes | ✅ | Qualquer usuário autenticado |
-| Buscar equipes disponíveis | ✅ | Qualquer usuário autenticado |
-| Listar alocações | ✅ | Qualquer usuário autenticado |
-| Ver calendário | ✅ | Qualquer usuário autenticado |
-| Ver estatísticas | ✅ | Qualquer usuário autenticado |
-| Criar equipe | ✅ | **Admin** |
-| Atualizar equipe | ✅ | **Admin** |
-| Desativar equipe | ✅ | **Admin** |
-| Alocar equipe | ✅ | **Admin** |
-| Atualizar alocação | ✅ | **Admin** |
-| Iniciar/Concluir/Cancelar | ✅ | **Admin** |
+| Ação                       | Autenticação | Permissão                    |
+| -------------------------- | ------------ | ---------------------------- |
+| Listar equipes             | ✅           | Qualquer usuário autenticado |
+| Buscar equipes disponíveis | ✅           | Qualquer usuário autenticado |
+| Listar alocações           | ✅           | Qualquer usuário autenticado |
+| Ver calendário             | ✅           | Qualquer usuário autenticado |
+| Ver estatísticas           | ✅           | Qualquer usuário autenticado |
+| Criar equipe               | ✅           | **Admin**                    |
+| Atualizar equipe           | ✅           | **Admin**                    |
+| Desativar equipe           | ✅           | **Admin**                    |
+| Alocar equipe              | ✅           | **Admin**                    |
+| Atualizar alocação         | ✅           | **Admin**                    |
+| Iniciar/Concluir/Cancelar  | ✅           | **Admin**                    |
 
 ---
 
@@ -599,6 +637,7 @@ O sistema usa uma lógica simplificada que:
 2. **Considera 20 dias úteis ≈ 1 mês**
 
 **Exemplo:**
+
 - Data início: 01/02/2025 (sábado)
 - Duração: 20 dias úteis
 - Data fim prevista: ~03/03/2025
@@ -612,7 +651,7 @@ calcularDataFimPrevista(dataInicio, duracaoDias) {
   while (diasAdicionados < duracaoDias) {
     dataFim.setDate(dataFim.getDate() + 1);
     const diaSemana = dataFim.getDay();
-    
+
     // Pular finais de semana (0=Dom, 6=Sáb)
     if (diaSemana !== 0 && diaSemana !== 6) {
       diasAdicionados++;
@@ -623,29 +662,35 @@ calcularDataFimPrevista(dataInicio, duracaoDias) {
 }
 ```
 
-**Nota:** Para uma versão mais robusta, considere integrar com um calendário de feriados nacionais.
+**Nota:** Para uma versão mais robusta, considere integrar com um calendário de
+feriados nacionais.
 
 ---
 
 ## 🚀 Melhorias Futuras
 
 ### 1. **Feriados**
+
 - Integrar com API de feriados nacionais/municipais
 - Permitir cadastro de feriados customizados
 
 ### 2. **Notificações**
+
 - Alertar equipes sobre início de alocação
 - Notificar atrasos
 
 ### 3. **Horas Trabalhadas**
+
 - Registrar horas trabalhadas por dia
 - Relatórios de produtividade
 
 ### 4. **Custo de Equipe**
+
 - Calcular custo de mão de obra por alocação
 - Integrar com módulo financeiro
 
 ### 5. **Dashboard Visual**
+
 - Gráfico de Gantt
 - Calendário interativo
 - Mapa de calor de ocupação
@@ -738,6 +783,7 @@ backend/
 ## 📞 Suporte
 
 Para dúvidas ou problemas:
+
 1. Verifique se as migrations foram aplicadas
 2. Confirme que o usuário tem permissão de admin
 3. Valide os dados enviados conforme os exemplos
@@ -748,4 +794,3 @@ Para dúvidas ou problemas:
 **Implementado em:** 22 de outubro de 2025  
 **Versão:** 1.0.0  
 **Autor:** S3E System Team
-

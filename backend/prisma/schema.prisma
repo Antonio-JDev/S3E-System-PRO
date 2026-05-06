@@ -15,46 +15,102 @@ datasource db {
 // ============================================
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String   @default("user") // admin, orcamentista, compras, gerente, tecnico, desenvolvedor
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  email       String   @unique
+  password    String
+  name        String
+  setor       String?
+  role        String   @default("user") // desenhista_industrial, engenheiro_eletricista, financeiro_faturamento, desenvolvedor, gerente, admin (não alterar valores existentes)
+  isAdmin     Boolean  @default(false) // Se true, acesso a todos os módulos (ex: Financeiro). Definido no gerenciamento de usuários.
+  active      Boolean  @default(true)
+  preferences Json? // Preferências do usuário (ex: orcamentoInsercaoModo: 'check' | 'ocultar')
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Relacionamentos
   pdfTemplates        PDFTemplate[]
-  projetosResponsavel Projeto[]           @relation("ProjetoResponsavel")
+  projetosResponsavel Projeto[]               @relation("ProjetoResponsavel")
   auditLogs           AuditLog[]
-  alocacoes           AlocacaoObra[]      @relation("AlocacaoEletricista")
-  registrosAtividade  RegistroAtividade[] @relation("RegistrosAtividade")
-  kitsFerramentas     KitFerramenta[]     @relation("KitEletricista")
+  alocacoes           AlocacaoObra[]          @relation("AlocacaoEletricista")
+  registrosAtividade  RegistroAtividade[]     @relation("RegistrosAtividade")
+  kitsFerramentas     KitFerramenta[]         @relation("KitEletricista")
+  notificacoes        Notificacao[]           @relation("NotificacoesUsuario")
+  tasksKanbanCriadas Task[]                  @relation("TaskKanbanCriador")
+  tarefasInternas     TarefaInterna[]         @relation("TarefaInternaResponsavel")
+  whatsappReadStates  WhatsappChatReadState[]
 
   @@map("users")
+}
+
+/// Última leitura por usuário e por conversa WhatsApp (contagem de não lidas no CRM).
+model WhatsappChatReadState {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  chatId     String   @map("chat_id")
+  lastReadAt DateTime @map("last_read_at")
+  /** Oculta a conversa na lista do CRM (sincroniza com arquivar no provedor). */
+  archived   Boolean  @default(false) @map("archived")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatId])
+  @@index([userId])
+  @@map("whatsapp_chat_read_states")
+}
+
+/// Nome e foto do contato conforme o provedor WhatsApp (pushname / agenda / grupo), persistidos para a lista do CRM.
+model WhatsappContactCache {
+  id                String   @id @default(uuid())
+  chatId            String   @unique @map("chat_id")
+  displayName       String?  @map("display_name")
+  profilePictureUrl String?  @map("profile_picture_url")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("whatsapp_contact_cache")
+}
+
+// Notificações por usuário (Kanban ordem de serviço, Kanban obras, financeiro)
+model Notificacao {
+  id           String   @id @default(uuid())
+  userId       String // Destinatário (vinculado ao ID do usuário)
+  tipo         String // kanban_ordem_servico | kanban_obras | financeiro
+  titulo       String
+  mensagem     String
+  lida         Boolean  @default(false)
+  emailEnviado Boolean  @default(false) // Se já foi enviado por e-mail
+  metadata     Json? // entityId, entityType, link, etc.
+  createdAt    DateTime @default(now())
+
+  user User @relation("NotificacoesUsuario", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, lida])
+  @@index([createdAt])
+  @@map("notificacoes")
 }
 
 // Log de Auditoria do Sistema
 model AuditLog {
   id          String   @id @default(uuid())
-  userId      String?
-  userName    String?
-  userRole    String?
+  userId      String?  @map("userId")
+  userName    String?  @map("userName")
+  userRole    String?  @map("userRole")
   action      String // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, ACCESS, etc
-  entity      String? // Projeto, Orcamento, Cliente, etc
-  entityId    String?
+  entity      String?  @map("entity")
+  entityId    String?  @map("entityId")
   description String
-  ipAddress   String?
-  userAgent   String?
+  ipAddress   String?  @map("ipAddress")
+  userAgent   String?  @map("userAgent")
   metadata    Json? // Dados adicionais em JSON
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @default(now()) @map("createdAt")
 
   // Campos adicionais para auditoria imutável em cadeia (ex: NF-e)
   hash         String? // Hash SHA-256 deste registro
-  previousHash String? // Hash do registro anterior na mesma cadeia
-  chainId      String? // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
-  sequence     Int? // Ordem dentro da cadeia (1, 2, 3, ...)
+  previousHash String? @map("previousHash") // Hash do registro anterior na mesma cadeia
+  chainId      String? @map("chainId") // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
+  sequence     Int?    @map("sequence") // Ordem dentro da cadeia (1, 2, 3, ...)
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -89,16 +145,29 @@ model PDFTemplate {
 }
 
 model ConfiguracaoSistema {
-  id              String   @id @default("sistema-config") // ID fixo para garantir registro único
-  temaPreferido   String   @default("light") // light, dark, system
-  logoUrl         String? // URL da logo/perfil da empresa (uso geral)
-  logoLoginUrl    String? // URL da logo específica para a página de login
-  logoDanfeUrl    String? // URL da logo específica para impressão na DANFE
-  nomeEmpresa     String   @default("S3E Engenharia")
-  emailContato    String?
-  telefoneContato String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                      String   @id @default("sistema-config") // ID fixo para garantir registro único
+  temaPreferido           String   @default("light") // light, dark, system
+  logoUrl                 String? // URL da logo/perfil da empresa (uso geral)
+  logoLoginUrl            String? // URL da logo específica para a página de login
+  logoDanfeUrl            String? // URL da logo específica para impressão na DANFE
+  nomeEmpresa             String   @default("Eng System Pro")
+  emailContato            String?
+  telefoneContato         String?
+  multiplicadorVenda      Float?   @default(1.55) // legado; preferir markupFabricante
+  percentualImpostoPadrao Float?   @default(8) // legado; preferir aliquotaImpostoPadrao
+  aliquotaImpostoPadrao   Float?   @default(8) // Alíquota % sobre valor de venda (DAS Simples Nacional)
+  markupFabricante        Float?   @default(1.55) // Preço venda = Preço compra × este valor (fornecedor Fabricante)
+  markupRevendedor        Float?   @default(1.10) // Preço venda = Preço compra × este valor (Representante/Vendedor)
+  /**
+   * Meta de faturamento mensal (fallback quando não houver entrada em metasVendasPorMes para o mês)
+   */
+  metaMensalVendas        Decimal  @default(100000) @db.Decimal(18, 2)
+  /**
+   * { "YYYY-MM": number } — meta específica por mês (sobrepõe metaMensalVendas para aquele mês)
+   */
+  metasVendasPorMes       Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   @@map("configuracoes_sistema")
 }
@@ -108,38 +177,127 @@ model ConfiguracaoSistema {
 // ============================================
 
 model Cliente {
-  id        String   @id @default(uuid())
-  nome      String
-  cpfCnpj   String   @unique
-  email     String?
-  telefone  String?
-  endereco  String?
-  cidade    String?
-  estado    String?
-  cep       String?
-  tipo      String   @default("PJ") // PF (Pessoa Física) ou PJ (Pessoa Jurídica)
-  ativo     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id @default(uuid())
+  nome              String
+  cpfCnpj           String   @unique
+  email             String?
+  telefone          String?
+  endereco          String? // Logradouro (nome da rua) - para xLgr na NF-e
+  numero            String? // Número do endereço - para nro na NF-e
+  bairro            String? // Obrigatório para NF-e - para xBairro
+  inscricaoEstadual String? // IE do cliente (indIEDest=1 quando preenchido)
+  indIEDest         Int? // 1=Contribuinte (exige IE), 2=Isento (IE "ISENTO"), 9=Não contribuinte
+  cidade            String?
+  estado            String?
+  cep               String?
+  tipo              String   @default("PJ") // PF (Pessoa Física) ou PJ (Pessoa Jurídica)
+  /**
+   * JSON completo retornado pela API CNPJ.ws (raw) para exibir no modal de detalhes sem nova consulta
+   */
+  dadosCnpjWs       Json?    @map("dados_cnpj_ws")
+  ativo             Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  orcamentos Orcamento[]
-  projetos   Projeto[]
-  vendas     Venda[]
-  obras      Obra[] // ✅ Relação com obras de manutenção
+  orcamentos               Orcamento[]
+  projetos                 Projeto[]
+  vendas                   Venda[]
+  obras                    Obra[] // ✅ Relação com obras de manutenção
+  contasReceberComoPagador ContaReceber[] // Faturamento fracionado: parcelas onde este cliente é o pagador
+  contatoLeads             ContatoLead[]
+  chatMessages             ChatMessage[]
 
   @@map("clientes")
 }
 
+// CRM: Funil de Atendimento (leads/contatos antes de virar orçamento)
+model ContatoLead {
+  id                  String   @id @default(uuid())
+  nome                String
+  whatsapp            String?
+  cpfCnpj             String?
+  necessidade         String?  @db.Text // O que o cliente busca
+  mediaKwhMes         Float? // Média KWh/mês (conta de energia)
+  contaEnergiaUrl     String? // Anexo principal (primeiro arquivo; legado)
+  anexosUrls          Json? // Lista de até 8 paths em /uploads/contato-lead/…
+  observacoesTecnicas String?  @db.Text // Etapa 2: análise técnica
+  viabilidadeTecnica  Boolean? // true = atende, false = não atende
+  condicoesNaoAtender String?  @db.Text // Se não atender, por quê?
+  observacoes         String?  @db.Text // Observações gerais
+  status              String   @default("AGUARDANDO_DOCUMENTO") // AGUARDANDO_DOCUMENTO | EM_ANALISE_TECNICA | PRONTO_PARA_ORCAR | NAO_ATENDE | CONVERTIDO
+  etapa               Int      @default(1) // 1=Qualificação, 2=Diagnóstico, 3=Conversão
+  clienteId           String? // Quando converter: vincular ao cliente cadastrado
+  // Endereço (para preencher orçamento quando cliente ainda não cadastrado)
+  logradouro          String?
+  numero              String?
+  bairro              String?
+  cep                 String?
+  cidade              String?
+  estado              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  cliente      Cliente?      @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  orcamentos   Orcamento[]
+  chatMessages ChatMessage[]
+
+  @@index([status])
+  @@index([etapa])
+  @@index([createdAt])
+  @@map("contato_leads")
+}
+
+/// Histórico de conversas WhatsApp (integração com o provedor / CRM)
+model ChatMessage {
+  id            String   @id @default(uuid())
+  content       String   @db.Text
+  fromMe        Boolean  @map("from_me")
+  timestamp     DateTime
+  chatId        String   @map("chat_id") // ex.: 5511999999999@c.us
+  providerMessageId String?  @unique @map("provider_message_id")
+  /** Em grupos: JID do participante que enviou a mensagem (ex.: 5511...@s.whatsapp.net). */
+  participant   String?  @map("participant")
+  /** Provedor: -1 erro, 0 pendente, 1 servidor, 2 dispositivo, 3 lida, 4 reproduzida */
+  ack           Int?     @map("ack")
+  session       String?
+  hasMedia      Boolean  @default(false) @map("has_media")
+  mediaUrl      String?  @map("media_url")
+  /** image | video | audio | document */
+  mediaType     String?  @map("media_type")
+  mediaMimetype String?  @map("media_mimetype")
+  mediaFilename String?  @map("media_filename")
+  fileSize      Int?     @map("file_size")
+  /** Id de mídia informado pelo provedor no webhook (se distinto do id da mensagem). */
+  providerMediaId   String?  @map("provider_media_id")
+  clienteId     String?  @map("cliente_id")
+  contatoLeadId String?  @map("contato_lead_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  cliente     Cliente?     @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  contatoLead ContatoLead? @relation(fields: [contatoLeadId], references: [id], onDelete: SetNull)
+
+  @@index([chatId, timestamp])
+  @@map("chat_messages")
+}
+
 model Fornecedor {
-  id        String   @id @default(uuid())
-  nome      String
-  cnpj      String   @unique
-  email     String?
-  telefone  String?
-  endereco  String?
-  ativo     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  nome                  String
+  cnpj                  String   @unique
+  email                 String?
+  telefone              String?
+  endereco              String?
+  bairro                String?
+  cidade                String?
+  estado                String?
+  cep                   String?
+  cnae_fiscal           Int?
+  codigo_municipio_ibge Int?
+  situacao_cadastral    Int?
+  classificacao         String? // Fabricante | Representante_Vendedor (regra valor de venda em cotações)
+  ativo                 Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   materiais   Material[]
   compras     Compra[]
@@ -173,6 +331,9 @@ model Material {
   valorVendaM            Float? // Preço de venda em metros (para materiais com unidade M ou KG/M)
   valorVendaCM           Float? // Preço de venda em centímetros (para materiais com unidade M ou KG/M)
   porcentagemLucro       Float? // Porcentagem de lucro ((valorVenda - preco) / preco * 100)
+  percentualImposto      Float? // Override alíquota % por material (null = usar config aliquotaImpostoPadrao)
+  valorImposto           Float? // Valor do imposto DAS sobre valor de venda (R$) - exibição
+  custoAgregado          Float? // Preço compra + valor imposto (Simples Nacional)
   ultimaAtualizacaoPreco DateTime? // Data da última atualização de preço
   fornecedorId           String?
   // Campos de fracionamento (para materiais vendidos em caixas/pacotes)
@@ -213,19 +374,22 @@ model HistoricoPreco {
 
 // Banco de Cotações (materiais cotados - banco frio)
 model Cotacao {
-  id              String   @id @default(uuid())
-  nome            String
-  ncm             String?
-  valorUnitario   Float
-  valorVenda      Float? // Valor de venda (padrão: valorUnitario * 1.4 = 40% de margem)
-  unidadeMedida   String   @default("un") // Unidade de medida: un, m, cm, kg, etc.
-  fornecedorId    String?
-  fornecedorNome  String? // Nome do fornecedor (redundante para performance)
-  dataAtualizacao DateTime @default(now()) // Data da última cotação
-  observacoes     String?
-  ativo           Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                     String   @id @default(uuid())
+  nome                   String
+  sku                    String?  @unique // SKU único para uso em NF-e (código do produto)
+  ncm                    String?
+  valorUnitario          Float
+  valorVenda             Float? // Valor de venda (padrão: valorUnitario * 1.4 = 40% de margem)
+  unidadeMedida          String   @default("un") // Unidade de medida: un, m, cm, kg, etc.
+  fornecedorId           String?
+  fornecedorNome         String? // Nome do fornecedor (redundante para performance)
+  dataAtualizacao        DateTime @default(now()) // Data da última cotação
+  observacoes            String?
+  ativo                  Boolean  @default(true)
+  // Fracionamento: 1 embalagem = quantidadePorEmbalagem unidades (ex: 1 pacote = 100 un)
+  quantidadePorEmbalagem Float? // Unidades por pacote/caixa; se preenchido, valorUnitario/valorVenda são por embalagem
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   fornecedor     Fornecedor?     @relation(fields: [fornecedorId], references: [id])
   itensOrcamento OrcamentoItem[] // Relação com itens de orçamento
@@ -233,6 +397,7 @@ model Cotacao {
   @@index([fornecedorId])
   @@index([dataAtualizacao])
   @@index([ativo])
+  @@index([sku])
   @@map("cotacoes")
 }
 
@@ -244,7 +409,7 @@ model Servico {
   tipo        String // Instalacao, Manutencao, Consultoria, LaudoTecnico
   tipoServico TipoServico @default(MAO_DE_OBRA) // ✅ NOVO: Tipo de serviço para classificação
   preco       Float
-  custo       Float?      // ✅ NOVO: Custo do serviço (opcional)
+  custo       Float? // ✅ NOVO: Custo do serviço (opcional)
   unidade     String      @default("un") // un, hora, m2, etc
   ativo       Boolean     @default(true)
   createdAt   DateTime    @default(now())
@@ -270,6 +435,8 @@ model Kit {
   updatedAt DateTime @updatedAt
 
   items          KitItem[]
+  // Auto-relação: este kit pode ser usado como componente de outros kits
+  usadoComoComponenteEm KitItem[] @relation("KitItemChild")
   orcamentoItems OrcamentoItem[]
 
   @@map("kits")
@@ -278,11 +445,14 @@ model Kit {
 model KitItem {
   id         String @id @default(uuid())
   kitId      String
-  materialId String
+  // Um KitItem pode apontar para um MATERIAL ou para um KIT filho (kit dentro de kit)
+  materialId String?
+  kitFilhoId String?
   quantidade Float
 
   kit      Kit      @relation(fields: [kitId], references: [id], onDelete: Cascade)
-  material Material @relation(fields: [materialId], references: [id])
+  material Material? @relation(fields: [materialId], references: [id])
+  kitFilho Kit?      @relation("KitItemChild", fields: [kitFilhoId], references: [id])
 
   @@map("kit_items")
 }
@@ -303,20 +473,26 @@ model Orcamento {
   bdi              Float    @default(0) // Margem de lucro (%)
   custoTotal       Float    @default(0)
   precoVenda       Float    @default(0)
+  pedidoFaturado   Boolean  @default(false)
   observacoes      String?
 
   // NOVOS CAMPOS - Engenharia Elétrica
-  empresaCNPJ       String? // CNPJ da empresa executora
-  enderecoObra      String? // Endereço completo da obra
-  cidade            String? // Cidade da obra
-  bairro            String? // Bairro da obra
-  cep               String? // CEP da obra
-  responsavelObra   String? // Responsável técnico no local
-  previsaoInicio    DateTime? // Data prevista de início
-  previsaoTermino   DateTime? // Data prevista de término
-  descontoValor     Float     @default(0) // Desconto em R$
-  impostoPercentual Float     @default(0) // Impostos em %
-  condicaoPagamento String? // Ex: "À Vista", "30/60/90 dias"
+  empresaCNPJ             String? // CNPJ da empresa executora (exibição; preferir empresaFiscalId)
+  empresaFiscalId         String? // Empresa executora (prestadora) — Orçamento → PV → NF-e/NFS-e
+  enderecoObra            String? // Logradouro da obra (para xLgr)
+  numeroObra              String? // Número do endereço da obra (para nro)
+  cidade                  String? // Cidade da obra
+  bairro                  String? // Bairro da obra
+  cep                     String? // CEP da obra
+  responsavelObra         String? // Responsável técnico no local
+  previsaoInicio          DateTime? // Data prevista de início
+  previsaoTermino         DateTime? // Data prevista de término
+  descontoValor           Float     @default(0) // Desconto em R$
+  impostoPercentual       Float     @default(0) // Impostos em %
+  condicaoPagamento       String? // Ex: "À Vista", "30/60/90 dias"
+  orcamentistaNome        String? // Primeiro nome do usuário que criou o orçamento
+  // Controle de baixa única: 'OBRA' = baixa feita ao Iniciar obra (OS); 'VENDA' = baixa feita ao Gerar PV. Evita dupla baixa.
+  baixaEstoqueRealizadaEm String? // OBRA | VENDA | null
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -324,29 +500,37 @@ model Orcamento {
   recusadoAt   DateTime?
   motivoRecusa String? // Motivo da recusa (se aplicável)
 
-  cliente Cliente         @relation(fields: [clienteId], references: [id])
-  items   OrcamentoItem[]
-  fotos   OrcamentoFoto[]
-  projeto Projeto?
-  venda   Venda? // Relação 1:1 com venda (quando orçamento é vendido)
+  cliente       Cliente         @relation(fields: [clienteId], references: [id])
+  empresaFiscal EmpresaFiscal?  @relation(fields: [empresaFiscalId], references: [id])
+  /**
+   * Quando a proposta nasceu do Funil de Atendimento (CRM)
+   */
+  contatoLeadId String?
+  contatoLead   ContatoLead?    @relation(fields: [contatoLeadId], references: [id], onDelete: SetNull)
+  items         OrcamentoItem[]
+  fotos         OrcamentoFoto[]
+  projeto       Projeto?
+  venda         Venda? // Relação 1:1 com venda (quando orçamento é vendido)
 
+  @@index([contatoLeadId])
   @@map("orcamentos")
 }
 
 model OrcamentoItem {
-  id          String  @id @default(uuid())
-  orcamentoId String
-  tipo        String // MATERIAL, KIT, SERVICO, QUADRO_PRONTO, CUSTO_EXTRA, COTACAO
-  materialId  String?
-  kitId       String?
-  cotacaoId   String? // Novo: material do banco de cotações (banco frio)
-  servicoNome String? // Para serviços avulsos
-  descricao   String? // Descrição adicional do item
-  quantidade  Float
-  custoUnit   Float
-  precoUnit   Float
-  subtotal    Float
-  ncm         String? // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
+  id                String  @id @default(uuid())
+  orcamentoId       String
+  tipo              String // MATERIAL, KIT, SERVICO, QUADRO_PRONTO, CUSTO_EXTRA, COTACAO
+  materialId        String?
+  kitId             String?
+  cotacaoId         String? // Novo: material do banco de cotações (banco frio)
+  servicoNome       String? // Para serviços avulsos
+  descricao         String? // Descrição adicional do item
+  quantidade        Float
+  custoUnit         Float
+  precoUnit         Float
+  subtotal          Float
+  custoAgregadoUnit Float? // Custo unitário agregado (custo compra + imposto) para cálculo lucro líquido
+  ncm               String? // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
 
   // ✅ NOVOS CAMPOS: Conversão de unidades (OPCIONAIS para compatibilidade)
   unidadeVenda String? // Unidade de venda (ex: 'cm' para barramentos, pode ser diferente da unidade de estoque)
@@ -354,6 +538,11 @@ model OrcamentoItem {
 
   // ✅ Campo para armazenar itens de kits customizados criados no orçamento
   itensDoKit Json? // Array de objetos com {nome, codigo, valorVenda, quantidade, materialId?, cotacaoId?}
+
+  /**
+   * Venda direta do fornecedor para o cliente: não gera contas a receber, nem entrada em estoque, nem vai na NF-e
+   */
+  vendaDiretaFornecedor Boolean @default(false)
 
   orcamento Orcamento @relation(fields: [orcamentoId], references: [id], onDelete: Cascade)
   material  Material? @relation(fields: [materialId], references: [id])
@@ -400,21 +589,29 @@ enum TipoServico {
 }
 
 model Projeto {
-  id            String        @id @default(uuid())
-  orcamentoId   String        @unique
-  clienteId     String
-  responsavelId String?
-  titulo        String
-  descricao     String?
-  tipo          String        @default("Instalacao") // Instalacao, Manutencao, Retrofit, Automacao
-  valorTotal    Float         @default(0)
-  dataInicio    DateTime      @default(now())
-  dataPrevisao  DateTime?
-  dataFim       DateTime?
-  dataConclusao DateTime?
-  status        ProjetoStatus @default(PROPOSTA)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id                   String        @id @default(uuid())
+  orcamentoId          String        @unique
+  clienteId            String
+  responsavelId        String?
+  titulo               String
+  descricao            String?
+  // Informações de obra (opcionais, úteis quando projeto não utiliza orcamento para endereço)
+  enderecoObra         String?
+  cidade               String?
+  estado               String?
+  responsavelObra      String?
+  tipo                 String        @default("Instalacao") // Instalacao, Manutencao, Retrofit, Automacao
+  valorTotal           Float         @default(0)
+  dataInicio           DateTime      @default(now())
+  dataPrevisao         DateTime?
+  dataFim              DateTime?
+  dataConclusao        DateTime?
+  status               ProjetoStatus @default(PROPOSTA)
+  // Indica que esta ordem de serviço não terá obra de campo (ex: desenho técnico, consultoria)
+  semObra              Boolean       @default(false)
+  justificativaSemObra String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
   orcamento    Orcamento          @relation(fields: [orcamentoId], references: [id])
   cliente      Cliente            @relation(fields: [clienteId], references: [id])
@@ -427,8 +624,28 @@ model Projeto {
   tarefasCampo TarefaCampo[]
   obra         Obra? // Relação 1:1 com Obra (quando projeto vai para execução)
   documentos   ProjetoDocumento[]
+  qualidade    ProjetoQualidade? // Aba Qualidade: visita técnica, checklist, inspeções
 
   @@map("projetos")
+}
+
+// Controle de Qualidade da OS (aba Qualidade no modal de detalhes)
+model ProjetoQualidade {
+  id           String    @id @default(uuid())
+  projetoId    String    @unique
+  statusVisita String    @default("pendente") // pendente, agendada, realizada, cancelada
+  dataVisita   DateTime?
+  responsavel  String? // Nome do técnico responsável pela visita
+  checklist    Json? // Array de booleanos [true, false, ...] na ordem: Inspeção do local, Medições, Fotos, Condições elétricas, Requisitos técnicos, Orçamento validado
+  observacoes  String?   @db.Text
+  inspecoes    Json? // Array de { tipo, nome, status, dataAprovacao?, aprovadoPor? } para Inspeção Inicial, Aprovação Cliente, Teste Qualidade, Vistoria Final
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@index([projetoId])
+  @@map("projeto_qualidade")
 }
 
 model EtapaAdmin {
@@ -465,20 +682,26 @@ enum TarefaCampoStatus {
 }
 
 model Task {
-  id          String    @id @default(uuid())
-  projetoId   String
-  titulo      String
-  descricao   String?
-  status      String    @default("ToDo") // ToDo, Doing, Done
-  prioridade  String    @default("Media") // Baixa, Media, Alta
-  prazo       DateTime?
-  responsavel String?
-  ordem       Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  projetoId       String
+  titulo          String
+  descricao       String?
+  status          String    @default("ToDo") // ToDo, Doing, Done
+  prioridade      String    @default("Media") // Baixa, Media, Alta
+  /** Início planejado da tarefa (somente data; armazenado em UTC ~meio-dia para evitar shift de fuso). */
+  dataInicio      DateTime?
+  prazo           DateTime?
+  responsavel     String? // Primeiro responsável (compatibilidade)
+  responsaveisIds Json? // Array de IDs de usuários atribuídos ["id1","id2",...]
+  ordem           Int       @default(0)
+  criadoPorId     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  projeto   Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  criadoPor User?   @relation("TaskKanbanCriador", fields: [criadoPorId], references: [id], onDelete: SetNull)
 
+  @@index([criadoPorId])
   @@map("tasks")
 }
 
@@ -529,6 +752,50 @@ enum FuncaoPessoa {
   AUXILIAR
 }
 
+// Tipo de contrato do funcionário (CLT registrado ou autônomo)
+enum TipoContratoFuncionario {
+  REGISTRADO
+  AUTONOMO
+}
+
+// Consistência das batidas importadas do relógio de ponto
+enum StatusConsistenciaPonto {
+  CONSISTENTE
+  INCONSISTENTE
+}
+
+enum OcorrenciaPontoRhTipo {
+  FALTA_JUSTIFICADA
+  DIVIDA_HORAS
+}
+
+enum StatusAprovacaoRh {
+  PENDENTE
+  APROVADO_RH
+  REPROVADO
+}
+
+enum ModoQuitacaoHorasNegativas {
+  DESCONTAR_SALARIO
+  COMPENSAR_BANCO
+}
+
+enum PeriodoCompensacaoHoras {
+  DIAS_SEMANA
+  FINAL_DE_SEMANA
+}
+
+// Lançamentos manuais da folha (adiantamento, falta, descontos, acréscimos)
+enum LancamentoFolhaCategoria {
+  ADIANTAMENTO
+  FALTA
+  FALTA_JUSTIFICADA
+  DESCONTO_OUTRO
+  ACRESCIMO
+  /// Pagamento monetário de horas do banco (valor = horas × valor hora; baixa de horas ao pagar salário)
+  PAGAMENTO_BANCO_HORAS
+}
+
 model Pessoa {
   id         String       @id @default(uuid())
   nome       String
@@ -546,58 +813,123 @@ model Pessoa {
 // COMPRAS
 // ============================================
 
+enum ClassificacaoCompra {
+  COMPOSICAO_ESTOQUE
+  FERRAMENTAS
+  RECURSOS_HUMANOS
+  LIMPEZA_INSUMOS
+  ESCRITORIO_INSUMOS
+  DESPESAS_VARIADAS
+}
+
 model Compra {
-  id               String    @id @default(uuid())
-  numeroSequencial Int       @unique @default(autoincrement()) // Número sequencial automático
-  fornecedorId     String
-  fornecedorNome   String
-  fornecedorCNPJ   String
-  fornecedorTel    String?
-  numeroNF         String
-  serieNF          String? // Série da Nota Fiscal (ex: "1", "2", etc.)
-  dataEmissaoNF    DateTime
-  dataCompra       DateTime
-  dataRecebimento  DateTime?
-  valorSubtotal    Float
-  valorFrete       Float     @default(0)
-  outrasDespesas   Float     @default(0)
-  valorTotal       Float
-  status           String    @default("Pendente") // Pendente, Recebido, Cancelado
-  xmlData          String? // JSON string com dados completos do XML
-  observacoes      String?
-  obraId           String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
+  id                    String              @id @default(uuid())
+  numeroSequencial      Int                 @unique @default(autoincrement()) // Número sequencial automático
+  fornecedorId          String
+  fornecedorNome        String
+  fornecedorCNPJ        String
+  fornecedorTel         String?
+  numeroNF              String
+  serieNF               String? // Série da Nota Fiscal (ex: "1", "2", etc.)
+  dataEmissaoNF         DateTime
+  dataCompra            DateTime
+  dataRecebimento       DateTime?
+  valorSubtotal         Float
+  valorFrete            Float               @default(0)
+  outrasDespesas        Float               @default(0)
+  valorDesconto         Float               @default(0) // Desconto sobre o valor dos produtos (subtotal)
+  valorTotal            Float
+  status                String              @default("Pendente") // Pendente, Recebido, Cancelado
+  classificacao         ClassificacaoCompra @default(COMPOSICAO_ESTOQUE) // ✅ NOVO: Classificação da compra
+  xmlData               String? // JSON string com dados completos do XML
+  observacoes           String?
+  obraId                String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
   empresaCompradoraNome String? // ✅ Nome da empresa compradora (para identificar qual CNPJ está sendo usado)
   empresaCompradoraCNPJ String? // ✅ CNPJ da empresa compradora
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
-  fornecedor  Fornecedor   @relation(fields: [fornecedorId], references: [id])
-  obra        Obra?        @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
-  items       CompraItem[]
-  contasPagar ContaPagar[] // Relação com contas a pagar
+  fornecedor      Fornecedor             @relation(fields: [fornecedorId], references: [id])
+  obra            Obra?                  @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
+  items           CompraItem[]
+  contasPagar     ContaPagar[] // Relação com contas a pagar
+  recursosHumanos RecursoHumanoEstoque[] // ✅ NOVO: Relação com estoque de recursos humanos
 
   @@map("compras")
 }
 
 model CompraItem {
-  id          String  @id @default(uuid())
-  compraId    String
-  materialId  String?
-  nomeProduto String
-  ncm         String?
-  quantidade  Float // Quantidade de embalagens
-  valorUnit   Float // Preço por embalagem
-  valorTotal  Float
+  id                    String  @id @default(uuid())
+  compraId              String
+  materialId            String?
+  ferramentaId          String? // Quando classificação = FERRAMENTAS, item entra na página Ferramentas (não no estoque)
+  nomeProduto           String
+  ncm                   String?
+  quantidade            Float // Quantidade de embalagens
+  valorUnit             Float // Preço por embalagem
+  valorTotal            Float
   // Campos de fracionamento
-  quantidadeFracionada Float? // Quantidade de unidades individuais dentro do pacote/caixa (ex: 100)
-  tipoEmbalagem       String? // Tipo de embalagem: "CAIXA", "PACOTE", "FARDO", etc.
-  unidadeEmbalagem    String? // Unidade da embalagem: "cx", "pct", "fardo", etc.
+  quantidadeFracionada  Float? // Quantidade de unidades individuais dentro do pacote/caixa (ex: 100)
+  tipoEmbalagem         String? // Tipo de embalagem: "CAIXA", "PACOTE", "FARDO", etc.
+  unidadeEmbalagem      String? // Unidade da embalagem: "cx", "pct", "fardo", etc.
   fracionamentoAplicado Boolean @default(false) // ✅ Marca se o fracionamento já foi aplicado ao estoque
 
-  compra   Compra    @relation(fields: [compraId], references: [id], onDelete: Cascade)
-  material Material? @relation(fields: [materialId], references: [id])
+  compra     Compra      @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  material   Material?   @relation(fields: [materialId], references: [id])
+  ferramenta Ferramenta? @relation(fields: [ferramentaId], references: [id])
 
   @@map("compra_items")
+}
+
+// ============================================
+// ESTOQUE DE RECURSOS HUMANOS
+// ============================================
+
+model RecursoHumanoEstoque {
+  id             String    @id @default(uuid())
+  compraId       String? // Opcional: entrada manual (item já existente na empresa, sem compra cadastrada)
+  compraItemId   String? // Item da compra relacionado (opcional)
+  nomeItem       String // Nome do item de recurso humano (ex: "Uniforme", "EPI", "Ferramenta")
+  quantidade     Float     @default(1)
+  valorUnitario  Float
+  valorTotal     Float
+  funcionarioId  String? // Funcionário vinculado (opcional - pode estar em estoque)
+  dataVinculacao DateTime? // Data em que foi vinculado ao funcionário
+  observacoes    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  compra      Compra?                  @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  funcionario Funcionario?             @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+  historico   HistoricoRecursoHumano[] // Histórico de movimentações
+
+  @@index([compraId])
+  @@index([funcionarioId])
+  @@map("recurso_humano_estoque")
+}
+
+// ============================================
+// HISTÓRICO DE RECURSOS HUMANOS
+// ============================================
+
+model HistoricoRecursoHumano {
+  id               String   @id @default(uuid())
+  recursoHumanoId  String
+  funcionarioId    String? // Funcionário relacionado (pode ser null se for desvinculação)
+  tipoMovimentacao String // VINCULACAO, DESVINCULACAO, RECEBIMENTO, DEVOLUCAO
+  quantidade       Float? // Quantidade movimentada (ex: quantidade entregue ou devolvida)
+  descricao        String? // Descrição da movimentação
+  dataMovimentacao DateTime @default(now())
+  observacoes      String?
+  createdAt        DateTime @default(now())
+
+  recursoHumano RecursoHumanoEstoque @relation(fields: [recursoHumanoId], references: [id], onDelete: Cascade)
+  funcionario   Funcionario?         @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+
+  @@index([recursoHumanoId])
+  @@index([funcionarioId])
+  @@index([dataMovimentacao])
+  @@map("historico_recurso_humano")
 }
 
 // ============================================
@@ -625,72 +957,158 @@ model MovimentacaoEstoque {
 // ============================================
 
 model Venda {
-  id             String   @id @default(uuid())
-  numeroVenda    String   @unique
-  orcamentoId    String   @unique // Vínculo com orçamento aprovado
-  dataVenda      DateTime @default(now())
-  valorTotal     Float
-  status         String   @default("Pendente") // Pendente, Concluida, Cancelada
-  clienteId      String
-  projetoId      String?
-  formaPagamento String   @default("À vista") // À vista, Parcelado, Boleto, PIX
-  parcelas       Int      @default(1)
-  valorEntrada   Float    @default(0)
-  observacoes    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String   @id @default(uuid())
+  numeroSequencial Int      @unique @default(autoincrement()) // Número sequencial automático
+  numeroVenda      String   @unique
+  orcamentoId      String   @unique // Vínculo com orçamento aprovado
+  dataVenda        DateTime @default(now())
+  valorTotal       Float
+  status           String   @default("Pendente") // Pendente, Concluida, Cancelada, Faturado (emitida NF/NFS-e — efetuar cobrança)
+  clienteId        String
+  projetoId        String?
+  formaPagamento   String   @default("À vista") // À vista, Parcelado, Boleto, PIX
+  parcelas         Int      @default(1)
+  valorEntrada     Float    @default(0)
+  observacoes      String?
+  /**
+   * URL ou caminho do PDF do contrato assinado pelo cliente
+   */
+  contratoPdfUrl   String?
+  /**
+   * HTML do contrato editado no Jodit (persistido para reimpressão)
+   */
+  contratoHtml     String?  @db.Text
+  /**
+   * Empresa executora (prestadora) — herdada do orçamento para NF-e/NFS-e
+   */
+  empresaFiscalId  String?
+  /**
+   * Valor já faturado (NF-e fracionada ou integral). Saldo a faturar = valorTotal - valorFaturado
+   */
+  valorFaturado    Float    @default(0)
+  /**
+   * Nome do vendedor/responsável pela venda (herdado do orcamentistaNome do orçamento)
+   */
+  vendedorNome     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   orcamento     Orcamento      @relation(fields: [orcamentoId], references: [id])
   cliente       Cliente        @relation(fields: [clienteId], references: [id])
   projeto       Projeto?       @relation(fields: [projetoId], references: [id])
+  empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id])
   contasReceber ContaReceber[]
+  notasFiscais  NotaFiscal[]
 
   @@map("vendas")
 }
 
 model ContaReceber {
   id             String    @id @default(uuid())
-  vendaId        String
+  vendaId        String? // Opcional: null = receita manual (Entradas / Outras Receitas)
+  /**
+   * Classificação para receitas manuais: ENTRADA, OUTRAS_RECEITAS. Quando vendaId preenchido = VENDA
+   */
+  tipo           String    @default("VENDA") // VENDA, ENTRADA, OUTRAS_RECEITAS
+  /**
+   * Nome do pagador quando conta é manual (sem venda)
+   */
+  pagadorNome    String?
+  /**
+   * Pagador da parcela (faturamento fracionado). Quando null, usa venda.clienteId
+   */
+  clienteId      String?
+  /**
+   * Nota fiscal que originou esta conta (faturamento fracionado)
+   */
+  notaFiscalId   String?
   descricao      String
   valorParcela   Float
   dataVencimento DateTime
   dataPagamento  DateTime?
-  status         String    @default("Pendente") // Pendente, Pago, Atrasado, Cancelado
+  meioPagamento  String? // PIX, CARTAO_CREDITO, CARTAO_DEBITO, BOLETO, TRANSFERENCIA, DINHEIRO
+  valorJuros     Float? // Juros no pagamento (conciliação bancária)
+  valorDesconto  Float? // Desconto no pagamento (conciliação bancária)
+  status         String    @default("Pendente") // Pendente, Recebido Parcial, Pago, Atrasado, Cancelado
+  /**
+   * Soma dos valores já recebidos (pagamentos parciais). Quando >= valorParcela, conta fica Pago
+   */
+  valorRecebido  Float     @default(0)
   numeroParcela  Int?
   totalParcelas  Int?
   observacoes    String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  venda Venda @relation(fields: [vendaId], references: [id], onDelete: Cascade)
+  venda                Venda?               @relation(fields: [vendaId], references: [id], onDelete: Cascade)
+  clientePagador       Cliente?             @relation(fields: [clienteId], references: [id])
+  notaFiscal           NotaFiscal?          @relation(fields: [notaFiscalId], references: [id], onDelete: SetNull)
+  recebimentosParciais RecebimentoParcial[]
 
+  @@index([tipo])
+  @@index([vendaId])
   @@map("contas_receber")
+}
+
+model RecebimentoParcial {
+  id             String   @id @default(uuid())
+  contaReceberId String
+  valorPago      Float
+  dataPagamento  DateTime
+  observacoes    String?
+  meioPagamento  String? // PIX, CARTAO_CREDITO, BOLETO, etc.
+  createdAt      DateTime @default(now())
+
+  contaReceber ContaReceber @relation(fields: [contaReceberId], references: [id], onDelete: Cascade)
+
+  @@index([contaReceberId])
+  @@map("recebimentos_parciais")
 }
 
 model ContaPagar {
   id              String    @id @default(uuid())
   tipo            String    @default("FORNECEDOR") // FORNECEDOR, RH, DESPESA_FIXA
+  subtipo         String? // RH: ADIANTAMENTO, VALE, SALARIO
+  origemCadastro  String? // FORNECEDOR_CADASTRADO, FORNECEDOR_NOVO, RH, DESPESA_FIXA
   fornecedorId    String? // Opcional para permitir despesas sem fornecedor específico
+  credorNome      String? // Nome do credor quando conta é manual (sem compra/fornecedor)
   compraId        String?
   funcionarioId   String? // Para salários (RH)
   despesaFixaId   String? // Para despesas fixas
+  descontoFolhaTipo String? // RH: UMA_VEZ, PARCELADO
+  descontoFolhaParcelas Int?
+  descontoFolhaReferenciaAno Int?
+  descontoFolhaReferenciaMes Int?
+  rhParcelamentoId String?
   descricao       String
   valorParcela    Float // Valor da parcela/despesa
   dataVencimento  DateTime
   dataAgendamento DateTime? // Data agendada para pagamento
   dataPagamento   DateTime?
+  meioPagamento   String? // PIX, CARTAO_CREDITO, CARTAO_DEBITO, BOLETO, TRANSFERENCIA, DINHEIRO
+  valorJuros      Float? // Juros no pagamento (conciliação bancária)
+  valorDesconto   Float? // Desconto no pagamento (conciliação bancária)
   status          String    @default("Pendente") // Pendente, Pago, Atrasado, Cancelado
   numeroParcela   Int?
   totalParcelas   Int?
   observacoes     String?
+  classificacao   String? // Impostos, TRT-ART, Serviço mão de obra, Brindes, Combustíveis e pedagios, Frete, Material de escritório, Saídas (movimentações, fluxo de caixa, DRE)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  fornecedor Fornecedor? @relation(fields: [fornecedorId], references: [id])
-  compra     Compra?     @relation(fields: [compraId], references: [id])
+  fornecedor  Fornecedor?  @relation(fields: [fornecedorId], references: [id])
+  compra      Compra?      @relation(fields: [compraId], references: [id])
+  funcionario Funcionario? @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+  despesaFixa DespesaFixa? @relation(fields: [despesaFixaId], references: [id], onDelete: Cascade)
+  rhParcelamento RhAdiantamentoParcelamento? @relation("RhParcelamentoVinculo", fields: [rhParcelamentoId], references: [id], onDelete: SetNull)
+  parcelamentoOrigemRh RhAdiantamentoParcelamento[] @relation("RhParcelamentoContaOrigem")
 
   @@index([tipo])
   @@index([status])
+  @@index([classificacao])
+  @@index([funcionarioId])
+  @@index([despesaFixaId])
+  @@index([rhParcelamentoId])
   @@map("contas_pagar")
 }
 
@@ -702,6 +1120,7 @@ model EmpresaFiscal {
   id                  String    @id @default(uuid())
   cnpj                String    @unique
   inscricaoEstadual   String
+  inscricaoMunicipal  String? // Obrigatória para NFS-e (ex.: Itajaí/SC)
   razaoSocial         String
   nomeFantasia        String?
   endereco            String // Logradouro
@@ -717,6 +1136,12 @@ model EmpresaFiscal {
   certificadoPath     String? // Caminho do arquivo .pfx no servidor
   certificadoSenha    String? // Senha criptografada
   certificadoValidade DateTime?
+  ultimoRpsEnviado    Int? // Último nº RPS emitido (site/prefeitura); próximo = ultimoRpsEnviado + 1
+  serieRps            String? // Série RPS (ex: A1) - Pública Itajaí
+  ultimoNumeroNFe     Int? // Último número de NF-e informado manualmente (para sincronização)
+  serieNFe            String? // Série NF-e (ex: 1) - para controle do usuário
+  aliquotaMaterial    Float?    @default(8) // Alíquota % DAS sobre venda de materiais (Simples Nacional)
+  aliquotaServico     Float?    @default(8) // Alíquota % DAS sobre venda de serviços (Simples Nacional)
   ativo               Boolean   @default(true)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -724,6 +1149,10 @@ model EmpresaFiscal {
   // Relações
   notasFiscais NotaFiscal[]
   nfeFila      NFeFila[]
+  nfse         Nfse[]
+  nfseFila     NfseFila[] // ✅ NOVO: Fila de contingência NFS-e
+  orcamentos   Orcamento[]
+  vendas       Venda[]
 
   @@map("empresas_fiscais")
 }
@@ -735,9 +1164,14 @@ model EmpresaFiscal {
 model NotaFiscal {
   id              String   @id @default(uuid())
   projetoId       String?
+  /**
+   * Pedido de venda que originou esta NF (integral ou fração)
+   */
+  vendaId         String?
   empresaFiscalId String? // CNPJ emissor
-  numero          String   @unique
+  numero          String?
   serie           String
+  ambiente        String   @default("HOMOLOGACAO")
   chaveAcesso     String?  @unique
   tipo            String // PRODUTO, SERVICO
   natureza        String // Venda de produção, Remessa, etc
@@ -753,10 +1187,30 @@ model NotaFiscal {
   updatedAt       DateTime @updatedAt
 
   projeto       Projeto?       @relation(fields: [projetoId], references: [id])
+  venda         Venda?         @relation(fields: [vendaId], references: [id], onDelete: SetNull)
   empresaFiscal EmpresaFiscal? @relation(fields: [empresaFiscalId], references: [id])
   nfeFila       NFeFila[]
+  nfeEventos    NfeEvento[]
+  contasReceber ContaReceber[]
 
+  @@unique([empresaFiscalId, numero])
   @@map("notas_fiscais")
+}
+
+// Eventos / Logs específicos de NF-e para rastreabilidade visível ao usuário
+model NfeEvento {
+  id           String   @id @default(uuid())
+  notaFiscalId String? // vinculado à nota_fiscal quando aplicável
+  tipo         String // INFO, SUCESSO, ERRO
+  descricao    String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  notaFiscal NotaFiscal? @relation(fields: [notaFiscalId], references: [id], onDelete: Cascade)
+
+  @@index([notaFiscalId])
+  @@index([createdAt])
+  @@map("nfe_eventos")
 }
 
 // ============================================
@@ -782,6 +1236,60 @@ model NFeFila {
 
   @@index([status, proximaTentativa])
   @@map("nfe_fila")
+}
+
+// ============================================
+// NFS-e (NOTA FISCAL DE SERVIÇO - PÚBLICA/ITAJAI)
+// ============================================
+
+model Nfse {
+  id                 String   @id @default(uuid())
+  empresaFiscalId    String
+  numeroLote         Int
+  protocolo          String? // Número retornado por RecepcionarLoteRps
+  numeroNfse         String? // Número da NFS-e após processamento do lote
+  codigoVerificacao  String?
+  situacao           String   @default("Pendente") // Pendente, Processado, Erro, Cancelada
+  ambiente           String // 1 Produção, 2 Homologação
+  xmlEnvio           String? // XML do lote enviado (assinado)
+  xmlResposta        String?
+  erro               String? // Código/mensagem em caso de falha
+  tomadorRazaoSocial String? // Razão social do tomador (cliente)
+  tomadorEmail       String? // E-mail do tomador para envio
+  valorTotal         Decimal? @db.Decimal(15, 2) // Valor total dos serviços
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  empresaFiscal EmpresaFiscal @relation(fields: [empresaFiscalId], references: [id])
+
+  @@index([empresaFiscalId])
+  @@index([protocolo])
+  @@index([numeroNfse])
+  @@map("nfse")
+}
+
+// ============================================
+// FILA DE ENVIO DE NFS-e (CONTINGÊNCIA)
+// ============================================
+
+model NfseFila {
+  id               String   @id @default(uuid())
+  empresaFiscalId  String
+  ambiente         String // '1' = Produção, '2' = Homologação
+  numeroLote       Int
+  xmlEnvio         String   @db.Text // XML assinado do lote para envio
+  status           String   @default("PENDENTE") // PENDENTE, ENVIANDO, ENVIADA, FALHA
+  tentativas       Int      @default(0)
+  ultimoErro       String?  @db.Text
+  proximaTentativa DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  empresaFiscal EmpresaFiscal @relation(fields: [empresaFiscalId], references: [id])
+
+  @@index([status])
+  @@index([proximaTentativa])
+  @@map("nfse_fila")
 }
 
 // ============================================
@@ -900,7 +1408,8 @@ model TarefaObra {
   id                String    @id @default(uuid())
   obraId            String
   descricao         String
-  atribuidoA        String? // ID do User (eletricista/operador individual)
+  atribuidoA        String? // Primeiro usuário (compatibilidade)
+  atribuidosIds     Json? // Array de IDs de usuários ["id1","id2",...]
   equipeId          String? // ID da Equipe alocada (novo campo)
   alocacaoId        String? // ID da Alocação relacionada
   progresso         Int       @default(0) // 0 a 100
@@ -937,26 +1446,365 @@ model RegistroAtividade {
 }
 
 // ============================================
+// TAREFAS INTERNAS (Kanban administrativo)
+// ============================================
+
+enum StatusTarefaInterna {
+  BACKLOG
+  A_FAZER
+  ANDAMENTO
+  CONCLUIDO
+}
+
+model TarefaInterna {
+  id            String              @id @default(uuid())
+  titulo        String
+  motivo        String?
+  descricao     String?
+  prioridade    String              @default("MEDIA") // BAIXA, MEDIA, ALTA
+  progresso     Int                 @default(0) // 0-100, sincronizado com itens
+  coluna        StatusTarefaInterna @default(BACKLOG)
+  userId        String? // Primeiro responsável (compatibilidade)
+  userIds       Json? // Array de IDs de usuários ["id1","id2",...]
+  /// Data de prazo (obrigatória). Se usuário não informar, backend usa createdAt + 1 dia.
+  prazo         DateTime
+  /// True quando o usuário definiu prazo explicitamente (UI pode escolher exibir/ocultar).
+  prazoDefinido Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  user  User?               @relation("TarefaInternaResponsavel", fields: [userId], references: [id], onDelete: SetNull)
+  itens TarefaInternaItem[]
+
+  @@index([coluna])
+  @@index([userId])
+  @@map("tarefas_internas")
+}
+
+model TarefaInternaItem {
+  id              String    @id @default(uuid())
+  tarefaInternaId String
+  titulo          String
+  descricao       String?
+  dataInicio      DateTime?
+  dataPrevisaoFim DateTime?
+  /// True quando o usuário definiu dataPrevisaoFim explicitamente (UI pode exibir/ocultar).
+  prazoDefinido   Boolean   @default(false)
+  observacoes     String?
+  concluido       Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tarefaInterna TarefaInterna @relation(fields: [tarefaInternaId], references: [id], onDelete: Cascade)
+
+  @@index([tarefaInternaId])
+  @@map("tarefas_internas_itens")
+}
+
+// ============================================
 // GERENCIAMENTO EMPRESARIAL - RH, FROTA, PLANOS
 // ============================================
 
 // Funcionários da Empresa
 model Funcionario {
-  id           String   @id @default(uuid())
-  nome         String
-  cargo        String
-  salario      Decimal  @db.Decimal(10, 2)
-  dataAdmissao DateTime
-  cpf          String   @unique
-  telefone     String?
-  email        String?
-  status       String   @default("Ativo") // Ativo, Inativo, Férias, Afastado
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                              String                  @id @default(uuid())
+  nome                            String
+  cargo                           String
+  salario                         Decimal                 @db.Decimal(10, 2)
+  /// Salário base mensal utilizado para cálculo de folha (pode espelhar campo salario)
+  salarioBase                     Decimal?                @db.Decimal(10, 2)
+  dataAdmissao                    DateTime
+  cpf                             String                  @unique
+  telefone                        String?
+  email                           String?
+  status                          String                  @default("Ativo") // Ativo, Inativo, Férias, Afastado
+  // Tipo de contrato para regras de folha (CLT registrado ou autônomo)
+  tipoContrato                    TipoContratoFuncionario @default(REGISTRADO)
+  // Valor da hora de trabalho (autônomo: fim de semana se não houver config; CLT: fallback)
+  valorHora                       Decimal?                @db.Decimal(10, 2)
+  /// Autônomo: valor fixo por dia útil com registro de ponto (Seg–Sex)
+  valorDiaria                     Decimal?                @db.Decimal(12, 2)
+  /// Autônomo: após importar ponto, lançar desconto (Falta) = valor da diária em cada dia útil (seg–sex, não feriado) sem registro de batida
+  descontoDiariaSemBatidaAutonomo Boolean                 @default(false)
+  /// CLT: carga contratual mensal em horas (ex.: 220) para banco de horas
+  cargaHorariaMensal              Int?                    @default(220)
+  /// CLT: saldo total (normais + HE100) — espelha a soma dos componentes abaixo
+  saldoBancoHoras                 Decimal?                @db.Decimal(12, 2)
+  /// CLT: parte do banco referente a excedente de jornada/HE50 (não HE100)
+  saldoBancoHorasNormaisExcedente Decimal?                @db.Decimal(12, 2)
+  /// CLT: parte do banco referente a horas extras 100% acumuladas no banco
+  saldoBancoHorasExtras100        Decimal?                @db.Decimal(12, 2)
+  /// Horas convertidas em folga (crédito de folgas para o gestor acompanhar)
+  horasFolgaAcumuladas            Decimal?                @db.Decimal(12, 2)
+  // Dia do mês (1-31) para vencimento do salário em Contas a Pagar
+  diaPagamento                    Int?                    @default(5)
+  // Tamanhos de uniforme
+  uniformeCamisa                  String?
+  uniformeCalca                   String?
+  uniformeBermuda                 String?
+  uniformeSapato                  String?
+  /// ID numérico do colaborador no relógio de ponto (ex.: Namero I:4)
+  codigoRelogio                   Int?                    @unique
+  /// CLT: se true, horas em domingos/feriados são pagas como HE 100%; se false, vão para banco de horas
+  permitirHorasExtras100          Boolean                 @default(false)
+  /// Autônomo: valor hora na janela 8h–17h30 (seg–sex); se vazio, usa valorHora
+  valorHoraNormalAutonomo         Decimal?                @db.Decimal(12, 2)
+  /// Autônomo: valor hora fora da jornada (até 18h)
+  valorHoraExtra50Autonomo        Decimal?                @db.Decimal(12, 2)
+  /// Autônomo: domingos e feriados (calendário BR)
+  valorHoraExtra100Autonomo       Decimal?                @db.Decimal(12, 2)
+  /// Autônomo: após 18h (adicional noturno)
+  valorHoraNoturna20Autonomo      Decimal?                @db.Decimal(12, 2)
+  /// Saldo de horas negativas para registrado (atrasos/faltas não justificadas)
+  saldoHorasNegativas             Decimal?                @default(0) @db.Decimal(12, 2)
+  modoQuitacaoHorasNegativas      ModoQuitacaoHorasNegativas?
+  periodoCompensacaoHoras         PeriodoCompensacaoHoras?
+  createdAt                       DateTime                @default(now())
+  updatedAt                       DateTime                @updatedAt
 
-  vales Vale[]
+  vales             Vale[]
+  contasPagar       ContaPagar[]
+  parcelamentosRh   RhAdiantamentoParcelamento[]
+  recursosHumanos   RecursoHumanoEstoque[] // ✅ NOVO: Recursos humanos vinculados
+  historicoRecursos HistoricoRecursoHumano[] // ✅ NOVO: Histórico de recursos humanos
+
+  // Relações com módulo de RH/Folha
+  configuracaoPonto             ConfiguracaoPonto?
+  registrosPonto                RegistroPonto[]
+  beneficios                    Beneficio[]
+  lancamentosFolha              LancamentoFolha[]
+  bancoHorasExcessoCompetencias BancoHorasExcessoCompetencia[]
+  ocorrenciasPontoRh            OcorrenciaPontoRh[]
+  workShiftCompensacoes         CompensacaoHorasRh[]
 
   @@map("funcionarios")
+}
+
+model RhAdiantamentoParcelamento {
+  id                     String   @id @default(uuid())
+  funcionarioId          String
+  contaPagarId           String?
+  subtipo                String // ADIANTAMENTO, VALE
+  descricao              String?
+  valorTotal             Decimal  @db.Decimal(12, 2)
+  valorParcela           Decimal  @db.Decimal(12, 2)
+  saldoRestante          Decimal  @db.Decimal(12, 2)
+  parcelasTotal          Int
+  parcelasAplicadas      Int      @default(0)
+  referenciaAnoInicio    Int
+  referenciaMesInicio    Int
+  proximaReferenciaAno   Int
+  proximaReferenciaMes   Int
+  status                 String   @default("ATIVO") // ATIVO, QUITADO, CANCELADO
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  contaPagar  ContaPagar? @relation("RhParcelamentoContaOrigem", fields: [contaPagarId], references: [id], onDelete: SetNull)
+  lancamentos LancamentoFolha[]
+  contasPagar ContaPagar[] @relation("RhParcelamentoVinculo")
+
+  @@index([funcionarioId])
+  @@index([contaPagarId])
+  @@index([status, proximaReferenciaAno, proximaReferenciaMes])
+  @@map("rh_adiantamentos_parcelamentos")
+}
+
+model WorkShift {
+  id         String   @id @default(uuid())
+  nome       String   @unique
+  entrada1   String
+  saida1     String
+  entrada2   String
+  saida2     String
+  ativo      Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  configuracoesPonto ConfiguracaoPonto[]
+
+  @@map("work_shifts")
+}
+
+/// Excedente (horas trabalhadas − carga mensal) por competência; permite aplicar delta no saldo sem duplicar em reimportações
+model BancoHorasExcessoCompetencia {
+  id               String   @id @default(uuid())
+  funcionarioId    String
+  referenciaAno    Int
+  referenciaMes    Int
+  /// Soma (normais + HE100) para conferência
+  excessoHoras     Decimal  @db.Decimal(12, 2)
+  excessoNormais   Decimal? @db.Decimal(12, 2)
+  excessoExtras100 Decimal? @db.Decimal(12, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+
+  @@unique([funcionarioId, referenciaAno, referenciaMes])
+  @@map("banco_horas_excesso_competencia")
+}
+
+model LancamentoFolha {
+  id                       String                   @id @default(uuid())
+  funcionarioId            String
+  referenciaAno            Int
+  referenciaMes            Int
+  categoria                LancamentoFolhaCategoria
+  valor                    Decimal                  @db.Decimal(12, 2)
+  descricao                String?
+  /// Horas do banco vinculadas (ex.: PAGAMENTO_BANCO_HORAS) — baixadas do saldo ao pagar o salário
+  quantidadeHoras          Decimal?                 @db.Decimal(12, 2)
+  horasComponenteNormais   Decimal?                 @db.Decimal(12, 2)
+  horasComponenteExtras100 Decimal?                 @db.Decimal(12, 2)
+  rhParcelamentoId         String?
+  rhParcelaNumero          Int?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  rhParcelamento RhAdiantamentoParcelamento? @relation(fields: [rhParcelamentoId], references: [id], onDelete: SetNull)
+
+  @@index([funcionarioId, referenciaAno, referenciaMes])
+  @@index([rhParcelamentoId])
+  @@unique([rhParcelamentoId, rhParcelaNumero])
+  @@map("lancamentos_folha")
+}
+
+// Benefícios cadastrados (Alimentação, Bonificação, Assiduidade, Transporte, etc.)
+model Beneficio {
+  id          String   @id @default(uuid())
+  nome        String
+  valorPadrao Decimal  @db.Decimal(10, 2)
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  funcionarios Funcionario[]
+
+  @@map("beneficios")
+}
+
+// Configurações de ponto por funcionário (carga horária especial, fim de semana, etc.)
+model ConfiguracaoPonto {
+  id                   String   @id @default(uuid())
+  funcionarioId        String   @unique
+  workShiftId          String?
+  trabalhaFimDeSemana  Boolean  @default(false)
+  valorHoraFimDeSemana Decimal? @db.Decimal(10, 2)
+  toleranciaMinutos    Int      @default(5)
+  inicioNoturno        String?  @default("18:00")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  workShift   WorkShift?  @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
+
+  @@index([workShiftId])
+  @@map("configuracoes_ponto")
+}
+
+// Registro de ponto diário consolidado do funcionário
+model RegistroPonto {
+  id                 String                   @id @default(uuid())
+  funcionarioId      String
+  dataReferencia     DateTime
+  entrada            DateTime
+  saida              DateTime
+  horasNormais       Float
+  // Horas extras com adicional de 50%
+  horasExtras50      Float                    @default(0)
+  // Horas extras com adicional de 100% (feriados/fins de semana)
+  horasExtras100     Float                    @default(0)
+  // Flag auxiliar para indicar se o registro é de fim de semana
+  ehFimDeSemana      Boolean                  @default(false)
+  /// Batidas brutas importadas (ordem do relógio), ex.: ["08:19","12:36","15:38"]
+  batidasBrutas      Json?
+  statusConsistencia StatusConsistenciaPonto?
+  origemImportacao   String?
+  minutosTrabalhados Int                      @default(0)
+  minutosAtraso      Int                      @default(0)
+  minutosHorasDevidas Int                     @default(0)
+  minutosExtra50     Int                      @default(0)
+  minutosExtra100    Int                      @default(0)
+  minutosExtra20     Int                      @default(0)
+  /// Intervalo de almoço explícito (manual) — formato "HH:mm"
+  intervaloAlmocoInicio String?
+  /// Intervalo de almoço explícito (manual) — formato "HH:mm"
+  intervaloAlmocoFim    String?
+  /// Origem do intervalo (ex.: "manual_rh")
+  intervaloAlmocoOrigem String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  ocorrenciasRh OcorrenciaPontoRh[]
+
+  @@unique([funcionarioId, dataReferencia])
+  @@map("registros_ponto")
+}
+
+model OcorrenciaPontoRh {
+  id                    String                   @id @default(uuid())
+  funcionarioId          String
+  registroPontoId        String?
+  dataReferencia         DateTime
+  tipo                   OcorrenciaPontoRhTipo
+  status                 StatusAprovacaoRh       @default(PENDENTE)
+  descricao              String?
+  minutos                Int                      @default(0)
+  modoQuitacao           ModoQuitacaoHorasNegativas?
+  periodoCompensacao     PeriodoCompensacaoHoras?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  funcionario Funcionario   @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  registroPonto RegistroPonto? @relation(fields: [registroPontoId], references: [id], onDelete: SetNull)
+  diasCompensacao CompensacaoHorasDiaRh[]
+
+  @@index([funcionarioId, dataReferencia])
+  @@index([registroPontoId])
+  @@unique([funcionarioId, dataReferencia, tipo])
+  @@map("ocorrencias_ponto_rh")
+}
+
+model CompensacaoHorasRh {
+  id                    String                   @id @default(uuid())
+  funcionarioId          String
+  referenciaAno          Int
+  referenciaMes          Int
+  minutosDivida          Int
+  minutosQuitados        Int                     @default(0)
+  modoQuitacao           ModoQuitacaoHorasNegativas
+  periodoCompensacao     PeriodoCompensacaoHoras
+  status                 StatusAprovacaoRh       @default(PENDENTE)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+  dias       CompensacaoHorasDiaRh[]
+
+  @@index([funcionarioId, referenciaAno, referenciaMes])
+  @@map("compensacoes_horas_rh")
+}
+
+model CompensacaoHorasDiaRh {
+  id                String            @id @default(uuid())
+  compensacaoRhId   String
+  ocorrenciaRhId    String?
+  dataCompensacao   DateTime
+  minutosPrevistos  Int               @default(60)
+  minutosAprovados  Int               @default(0)
+  status            StatusAprovacaoRh @default(PENDENTE)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  compensacao CompensacaoHorasRh @relation(fields: [compensacaoRhId], references: [id], onDelete: Cascade)
+  ocorrencia  OcorrenciaPontoRh? @relation(fields: [ocorrenciaRhId], references: [id], onDelete: SetNull)
+
+  @@index([compensacaoRhId])
+  @@index([dataCompensacao])
+  @@map("compensacoes_horas_dias_rh")
 }
 
 // Vales (Transporte, Alimentação, Adiantamentos)
@@ -1045,7 +1893,8 @@ model DespesaFixa {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  pagamentos PagamentoDespesaFixa[]
+  pagamentos  PagamentoDespesaFixa[]
+  contasPagar ContaPagar[]
 
   @@index([categoria])
   @@index([ativa])
@@ -1105,7 +1954,8 @@ model Ferramenta {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  itensKit KitFerramentaItem[]
+  itensKit    KitFerramentaItem[]
+  compraItems CompraItem[] // Itens de compra classificados como FERRAMENTAS
 
   @@map("ferramentas")
 }
@@ -1141,7 +1991,8 @@ model KitFerramentaItem {
   ferramentaId  String
   quantidade    Int      @default(1)
   estadoEntrega String   @default("Novo") // Novo, Bom, Regular, Desgastado
-  observacoes   String?
+  observacoes   String? // Observação por item (ex.: motivo da adição, estado)
+  dataAdicao    DateTime @default(now()) // Data em que a ferramenta foi adicionada ao kit (entrega/alteracao)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

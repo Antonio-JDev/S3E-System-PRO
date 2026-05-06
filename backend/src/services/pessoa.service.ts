@@ -1,6 +1,5 @@
-import { PrismaClient, FuncaoPessoa } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { FuncaoPessoa } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
 export interface CriarPessoaDTO {
   nome: string;

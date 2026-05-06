@@ -344,5 +344,233 @@ export class BIController {
       });
     }
   }
+
+  /**
+   * GET /api/bi/servicos-rentaveis
+   * Serviços mais rentáveis (maiores lucros) nos pedidos de venda
+   */
+  static async getServicosRentaveis(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getServicosRentaveis(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar serviços rentáveis:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar serviços rentáveis',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/orcamentos-por-status
+   * Estatísticas de orçamentos por status (Aprovado, Pendente, Expirado, Declinado)
+   */
+  static async getOrcamentosPorStatus(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getEstatisticasOrcamentosPorStatus(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar estatísticas de orçamentos por status:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar estatísticas de orçamentos por status',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/orcamentos-por-tipo-servico-classificado
+   * Evolução de orçamentos por tipo de serviço com classificação
+   */
+  static async getOrcamentosPorTipoServicoClassificado(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getEvolucaoOrcamentosPorTipoServicoClassificado(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar orçamentos por tipo de serviço classificado:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar orçamentos por tipo de serviço classificado',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/markup-vendas-por-servico
+   * Estatísticas de markup de vendas por tipo de serviço e período
+   */
+  static async getMarkupVendasPorServico(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim, periodo = 'mes' } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const periodoValido = ['mes', 'semana', 'semestre', 'ano'].includes(periodo as string);
+      if (!periodoValido) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetro periodo deve ser: mes, semana, semestre ou ano',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getMarkupVendasPorTipoServico(
+        inicio,
+        fim,
+        periodo as 'mes' | 'semana' | 'semestre' | 'ano'
+      );
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar markup de vendas por serviço:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar markup de vendas por serviço',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/vendas-compras-classificacao
+   * Receita (orçamentos aprovados) vs compras por classificação no período
+   */
+  static async getVendasEComprasPorClassificacao(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          success: false,
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+
+      const resultado = await BIService.getVendasEComprasPorClassificacao(inicio, fim);
+
+      res.json({
+        success: true,
+        data: resultado,
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar vendas e compras por classificação:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar vendas e compras por classificação',
+        message: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /api/bi/materiais-mais-comprados-periodo?dias=30|60
+   */
+  static async getMateriaisMaisCompradosPeriodo(req: Request, res: Response): Promise<void> {
+    try {
+      const diasRaw = req.query.dias;
+      const dias = diasRaw === '60' ? 60 : 30;
+
+      const fim = new Date();
+      fim.setHours(23, 59, 59, 999);
+      const inicio = new Date(fim);
+      inicio.setDate(inicio.getDate() - dias);
+      inicio.setHours(0, 0, 0, 0);
+
+      const materiais = await BIService.getMateriaisMaisComprados(inicio, fim, 25);
+
+      res.json({
+        success: true,
+        data: {
+          dias,
+          dataInicio: inicio.toISOString(),
+          dataFim: fim.toISOString(),
+          materiais,
+        },
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar materiais mais comprados (período):', error);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao buscar materiais mais comprados',
+        message: error.message,
+      });
+    }
+  }
 }
 

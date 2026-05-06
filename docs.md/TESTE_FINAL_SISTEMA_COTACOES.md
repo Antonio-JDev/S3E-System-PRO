@@ -7,18 +7,21 @@
 ## 🎯 **O QUE FOI CORRIGIDO:**
 
 ### **1. Nome do Material (não Fornecedor)** ✅
+
 ```
 ANTES: "NCM: 85444200 | Fornecedor: Eletromar"
 DEPOIS: "Cabo de Cobre 2,5mm - Rolo 100m"
 ```
 
 ### **2. Modal de Visualização** ✅
+
 ```
 ANTES: Mostrava "NCM | Fornecedor"
 DEPOIS: Mostra "Nome do Material" + Flag "📦 Banco Frio"
 ```
 
 ### **3. PDF** ✅
+
 ```
 ANTES: DESCRIÇÃO: "NCM | Fornecedor: ..."
 DEPOIS: DESCRIÇÃO: "Cabo de Cobre 2,5mm"
@@ -29,6 +32,7 @@ DEPOIS: DESCRIÇÃO: "Cabo de Cobre 2,5mm"
 ## 🚀 **TESTE COMPLETO (PASSO A PASSO):**
 
 ### **1️⃣ Cadastrar Cotação**
+
 ```
 Menu → Cotações → Template
 
@@ -51,6 +55,7 @@ Importar → Toast: "✅ 1 criados"
 ---
 
 ### **2️⃣ Criar/Editar Orçamento**
+
 ```
 Menu → Orçamentos → Editar um orçamento
 Ou → Novo Orçamento
@@ -59,6 +64,7 @@ Ou → Novo Orçamento
 ---
 
 ### **3️⃣ Adicionar Cotação**
+
 ```
 1. "+ Adicionar Item"
 2. Modal abre
@@ -73,6 +79,7 @@ Toast: "✅ Cotação adicionada do banco frio"
 ---
 
 ### **4️⃣ Verificar Item Adicionado**
+
 ```
 Item aparece na lista:
 
@@ -92,6 +99,7 @@ Item aparece na lista:
 ---
 
 ### **5️⃣ Salvar e Visualizar**
+
 ```
 1. Preencha todos os campos do orçamento
 2. Clique: "Salvar Orçamento"
@@ -115,6 +123,7 @@ Itens do Orçamento:
 ---
 
 ### **6️⃣ Gerar PDF Rápido**
+
 ```
 1. No modal de visualização
 2. Clique: "📄 Gerar PDF Rápido"
@@ -132,6 +141,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540,00   | R$ 540,00
 ---
 
 ### **7️⃣ Personalizar PDF**
+
 ```
 1. No modal de visualização
 2. Clique: "🎨 Personalizar PDF"
@@ -154,6 +164,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | UN    | 1.00| R$ 540,00   | R$ 540,00
 ## ✅ **VERIFICAÇÕES FINAIS:**
 
 ### **Adicionar Item:**
+
 ```
 ✓ Campo descricao = cotacao.nome
 ✓ Não salva "NCM | Fornecedor"
@@ -161,6 +172,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | UN    | 1.00| R$ 540,00   | R$ 540,00
 ```
 
 ### **Modal de Visualização:**
+
 ```
 ✓ Exibe: item.nome
 ✓ Flag "📦 Banco Frio" aparece
@@ -168,6 +180,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | UN    | 1.00| R$ 540,00   | R$ 540,00
 ```
 
 ### **PDF (Para Cliente):**
+
 ```
 ✓ DESCRIÇÃO: Nome do material
 ✓ Sem informações de fornecedor
@@ -176,6 +189,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | UN    | 1.00| R$ 540,00   | R$ 540,00
 ```
 
 ### **Sistema (Para Usuário Interno):**
+
 ```
 ✓ Nome do material visível
 ✓ Flag "Banco Frio" visível
@@ -224,4 +238,3 @@ Cabo de Cobre 2,5mm - Rolo 100m   | UN    | 1.00| R$ 540,00   | R$ 540,00
 
 **Data:** 12/11/2025  
 **Status:** ✅ PROBLEMA RESOLVIDO
-

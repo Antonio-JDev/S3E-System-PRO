@@ -9,46 +9,52 @@ Criado um serviço completo de autenticação JWT com:
 #### Funções Principais:
 
 ##### `generateToken(payload: { id: string, role: string }): string`
+
 - ✅ Gera token JWT válido por **7 dias**
 - ✅ Usa `JWT_SECRET` das variáveis de ambiente
 - ✅ Retorna token assinado pronto para uso
 - ✅ Tratamento de erros robusto
 
 **Exemplo de uso:**
+
 ```typescript
-import { generateToken } from '../services/jwt.service';
+import { generateToken } from "../services/jwt.service";
 
 const token = generateToken({ id: user.id, role: user.role });
 // Retorna: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
 ##### `verifyToken(token: string): DecodedToken`
+
 - ✅ Valida assinatura do token
 - ✅ Verifica expiração
 - ✅ Retorna payload decodificado
 - ✅ Lança erros específicos (expirado, inválido, etc)
 
 **Exemplo de uso:**
+
 ```typescript
-import { verifyToken } from '../services/jwt.service';
+import { verifyToken } from "../services/jwt.service";
 
 try {
   const decoded = verifyToken(token);
   console.log(decoded.userId); // "user-123"
-  console.log(decoded.role);   // "admin"
+  console.log(decoded.role); // "admin"
 } catch (error) {
-  console.error('Token inválido:', error.message);
+  console.error("Token inválido:", error.message);
 }
 ```
 
 #### Funções Auxiliares:
 
 ##### `extractTokenFromHeader(authHeader: string | undefined): string | null`
+
 - ✅ Extrai token do header `Authorization: Bearer <token>`
 - ✅ Valida formato do header
 - ✅ Retorna token limpo ou `null`
 
 ##### `decodeTokenWithoutVerification(token: string): any`
+
 - ⚠️ **Apenas para debug/desenvolvimento**
 - ✅ Decodifica sem verificar assinatura
 - ❌ **NÃO use para autenticação real**
@@ -58,21 +64,26 @@ try {
 ### 2. **Atualização do AuthController** (`backend/src/controllers/authController.ts`)
 
 #### Antes:
-```typescript
-import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'default';
-const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+```typescript
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "default";
+const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, {
+  expiresIn: "7d",
+});
 ```
 
 #### Depois:
+
 ```typescript
-import { generateToken } from '../services/jwt.service';
+import { generateToken } from "../services/jwt.service";
 
 const token = generateToken({ id: user.id, role: user.role });
 ```
 
 **Benefícios:**
+
 - ✅ Código mais limpo e legível
 - ✅ Lógica centralizada
 - ✅ Fácil manutenção
@@ -83,27 +94,30 @@ const token = generateToken({ id: user.id, role: user.role });
 ### 3. **Atualização do Middleware de Autenticação** (`backend/src/middlewares/auth.ts`)
 
 #### Antes:
-```typescript
-import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'default';
+```typescript
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "default";
 const token = authHeader.substring(7);
 const decoded = jwt.verify(token, JWT_SECRET);
 ```
 
 #### Depois:
+
 ```typescript
-import { verifyToken, extractTokenFromHeader } from '../services/jwt.service';
+import { verifyToken, extractTokenFromHeader } from "../services/jwt.service";
 
 const token = extractTokenFromHeader(req.headers.authorization);
 if (!token) {
-  return res.status(401).json({ error: 'Token não fornecido' });
+  return res.status(401).json({ error: "Token não fornecido" });
 }
 
 const decoded = verifyToken(token);
 ```
 
 **Benefícios:**
+
 - ✅ Extração automática do token
 - ✅ Validação aprimorada
 - ✅ Mensagens de erro específicas
@@ -114,6 +128,7 @@ const decoded = verifyToken(token);
 ### 4. **Documentação Completa** (`backend/src/services/README_JWT.md`)
 
 Criada documentação detalhada com:
+
 - 📖 Visão geral do serviço
 - 📋 Descrição de todas as funções
 - 💡 Exemplos de uso
@@ -126,6 +141,7 @@ Criada documentação detalhada com:
 ### 5. **Testes Unitários** (`backend/src/services/jwt.service.test.ts`)
 
 Criada suite completa de testes:
+
 - ✅ Testes de geração de tokens
 - ✅ Testes de verificação de tokens
 - ✅ Testes de extração de headers
@@ -134,6 +150,7 @@ Criada suite completa de testes:
 - ✅ Testes de casos extremos
 
 **Para rodar os testes:**
+
 ```bash
 cd backend
 npm test -- jwt.service.test.ts
@@ -144,6 +161,7 @@ npm test -- jwt.service.test.ts
 ## 🎯 Tipagem TypeScript
 
 ### Interface `JwtPayload`
+
 ```typescript
 export interface JwtPayload {
   userId: string;
@@ -152,10 +170,11 @@ export interface JwtPayload {
 ```
 
 ### Interface `DecodedToken`
+
 ```typescript
 export interface DecodedToken extends JwtPayload {
-  iat?: number;  // Issued at (timestamp)
-  exp?: number;  // Expiration (timestamp)
+  iat?: number; // Issued at (timestamp)
+  exp?: number; // Expiration (timestamp)
 }
 ```
 
@@ -168,11 +187,13 @@ export interface DecodedToken extends JwtPayload {
 O serviço usa `JWT_SECRET` dos arquivos `.env`:
 
 #### `.env.development` (seu ambiente local)
+
 ```env
 JWT_SECRET=seu_secret_dev_aqui_12345
 ```
 
 #### `.env.production` (servidor S3E)
+
 ```env
 JWT_SECRET=seu_secret_producao_super_seguro_complexo_e_aleatorio
 ```
@@ -184,6 +205,7 @@ JWT_SECRET=seu_secret_producao_super_seguro_complexo_e_aleatorio
 3. Use secrets **longos e aleatórios** (mínimo 32 caracteres)
 
 **Gerar um secret seguro:**
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
@@ -195,16 +217,16 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ### 1. No Controller (Gerar Token no Login/Register)
 
 ```typescript
-import { generateToken } from '../services/jwt.service';
+import { generateToken } from "../services/jwt.service";
 
 export const login = async (req: Request, res: Response) => {
   // ... validar credenciais ...
-  
+
   const token = generateToken({ id: user.id, role: user.role });
-  
+
   res.json({
     token,
-    user: { id: user.id, email: user.email, name: user.name, role: user.role }
+    user: { id: user.id, email: user.email, name: user.name, role: user.role },
   });
 };
 ```
@@ -212,19 +234,23 @@ export const login = async (req: Request, res: Response) => {
 ### 2. No Middleware (Validar Token)
 
 ```typescript
-import { verifyToken, extractTokenFromHeader } from '../services/jwt.service';
+import { verifyToken, extractTokenFromHeader } from "../services/jwt.service";
 
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+export const authenticate = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     const token = extractTokenFromHeader(req.headers.authorization);
-    
+
     if (!token) {
-      return res.status(401).json({ error: 'Token não fornecido' });
+      return res.status(401).json({ error: "Token não fornecido" });
     }
-    
+
     const decoded = verifyToken(token);
     req.user = decoded;
-    
+
     next();
   } catch (error) {
     res.status(401).json({ error: error.message });
@@ -235,13 +261,13 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
 ### 3. Em Rotas Protegidas
 
 ```typescript
-import { authenticate } from '../middlewares/auth';
+import { authenticate } from "../middlewares/auth";
 
 // Rota pública (sem autenticação)
-router.post('/login', login);
+router.post("/login", login);
 
 // Rota protegida (requer autenticação)
-router.get('/me', authenticate, getMe);
+router.get("/me", authenticate, getMe);
 ```
 
 ---
@@ -267,22 +293,22 @@ curl -X GET http://localhost:3001/api/auth/me \
 
 ```typescript
 // Login
-const response = await fetch('http://localhost:3001/api/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'user@s3e.com', password: '123456' })
+const response = await fetch("http://localhost:3001/api/auth/login", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "user@s3e.com", password: "123456" }),
 });
 
 const { token } = await response.json();
 
 // Salvar token (localStorage, cookie, etc)
-localStorage.setItem('token', token);
+localStorage.setItem("token", token);
 
 // Usar em requisições
-const userData = await fetch('http://localhost:3001/api/auth/me', {
-  headers: { 
-    'Authorization': `Bearer ${localStorage.getItem('token')}` 
-  }
+const userData = await fetch("http://localhost:3001/api/auth/me", {
+  headers: {
+    Authorization: `Bearer ${localStorage.getItem("token")}`,
+  },
 });
 ```
 
@@ -362,27 +388,32 @@ backend/
 ## ✨ Benefícios da Implementação
 
 ### 1. **Centralização**
+
 - ✅ Toda lógica JWT em um único lugar
 - ✅ Fácil de manter e atualizar
 - ✅ Evita duplicação de código
 
 ### 2. **Consistência**
+
 - ✅ Mesmo comportamento em todo o sistema
 - ✅ Mesma expiração (7 dias)
 - ✅ Mesmo formato de payload
 
 ### 3. **Segurança**
+
 - ✅ Usa JWT_SECRET do ambiente
 - ✅ Validação robusta de tokens
 - ✅ Mensagens de erro específicas
 - ✅ Tratamento adequado de exceções
 
 ### 4. **Testabilidade**
+
 - ✅ Funções isoladas e testáveis
 - ✅ Suite completa de testes
 - ✅ Fácil de mockar em testes
 
 ### 5. **Documentação**
+
 - ✅ Código bem documentado
 - ✅ Exemplos de uso
 - ✅ Guias de troubleshooting
@@ -392,6 +423,7 @@ backend/
 ## 🔄 Próximos Passos
 
 ### 1. **Testar o Serviço**
+
 ```bash
 cd backend
 npm run dev
@@ -403,6 +435,7 @@ curl -X POST http://localhost:3001/api/auth/login \
 ```
 
 ### 2. **Atualizar JWT_SECRET**
+
 Edite os arquivos `.env.development` e `.env.production` com secrets seguros:
 
 ```bash
@@ -413,6 +446,7 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
 
 ### 3. **Rodar Testes (Opcional)**
+
 ```bash
 npm test -- jwt.service.test.ts
 ```
@@ -423,8 +457,8 @@ npm test -- jwt.service.test.ts
 
 - 📖 **Documentação Completa:** `backend/src/services/README_JWT.md`
 - 🧪 **Testes:** `backend/src/services/jwt.service.test.ts`
-- 🔐 **JWT.io:** https://jwt.io/ (para debug de tokens)
-- 📘 **RFC 7519:** https://tools.ietf.org/html/rfc7519 (especificação JWT)
+- 🔐 **JWT.io:** <https://jwt.io/> (para debug de tokens)
+- 📘 **RFC 7519:** <https://tools.ietf.org/html/rfc7519> (especificação JWT)
 
 ---
 
@@ -446,7 +480,8 @@ npm test -- jwt.service.test.ts
 
 ## 🎉 Resultado Final
 
-O sistema agora possui um **serviço de autenticação JWT robusto, seguro e bem documentado**, pronto para uso em desenvolvimento e produção! 
+O sistema agora possui um **serviço de autenticação JWT robusto, seguro e bem
+documentado**, pronto para uso em desenvolvimento e produção!
 
 **Tempo de expiração:** 7 dias  
 **Algoritmo:** HS256 (HMAC SHA-256)  
@@ -457,4 +492,3 @@ O sistema agora possui um **serviço de autenticação JWT robusto, seguro e bem
 **Data da Implementação:** 16 de Outubro de 2024  
 **Versão:** 1.0.0  
 **Status:** ✅ **CONCLUÍDO**
-

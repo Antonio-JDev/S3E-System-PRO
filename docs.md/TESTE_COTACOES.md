@@ -7,11 +7,13 @@
 ## 🚀 **TESTE EM 6 PASSOS:**
 
 ### **1️⃣ Acesse a Página**
+
 ```
 Menu Lateral → COMERCIAL → Cotações
 ```
 
 **Deve aparecer:**
+
 ```
 🏷️ Cotações de Fornecedores
 Banco frio de materiais cotados
@@ -22,6 +24,7 @@ Banco frio de materiais cotados
 ---
 
 ### **2️⃣ Baixe o Template**
+
 ```
 Clique: "Template"
 ```
@@ -29,6 +32,7 @@ Clique: "Template"
 **Deve baixar:** `template-cotacoes-2025-11-12.json`
 
 **Conteúdo:**
+
 ```json
 {
   "versao": "1.0",
@@ -39,7 +43,7 @@ Clique: "Template"
     {
       "nome": "EXEMPLO - Cabo de Cobre 2,5mm",
       "ncm": "85444200",
-      "valorUnitario": 100.50,
+      "valorUnitario": 100.5,
       "fornecedorNome": "Fornecedor Exemplo Ltda",
       "observacoes": "Cotação válida por 30 dias"
     }
@@ -52,6 +56,7 @@ Clique: "Template"
 ---
 
 ### **3️⃣ Edite o Template**
+
 ```json
 {
   "versao": "1.0",
@@ -59,21 +64,21 @@ Clique: "Template"
     {
       "nome": "Cabo de Cobre 2,5mm - Rolo 100m",
       "ncm": "85444200",
-      "valorUnitario": 450.00,
+      "valorUnitario": 450.0,
       "fornecedorNome": "Eletromar Distribuidora",
       "observacoes": "Entrega em 7 dias"
     },
     {
       "nome": "Disjuntor Tripolar 32A Siemens",
       "ncm": "85362000",
-      "valorUnitario": 85.50,
+      "valorUnitario": 85.5,
       "fornecedorNome": "WEG Automação",
       "observacoes": "Pronta entrega"
     },
     {
       "nome": "Tomada 2P+T 10A - Tramontina",
       "ncm": "85362000",
-      "valorUnitario": 15.90,
+      "valorUnitario": 15.9,
       "fornecedorNome": "Leroy Merlin",
       "observacoes": "Disponível em estoque"
     }
@@ -84,6 +89,7 @@ Clique: "Template"
 ---
 
 ### **4️⃣ Importe**
+
 ```
 1. Clique: "Importar JSON"
 2. Selecione o arquivo editado
@@ -91,6 +97,7 @@ Clique: "Template"
 ```
 
 **Console Backend:**
+
 ```
 📥 Importando cotações: cotacoes-*.json
 📄 JSON parseado: { versao: '1.0', totalCotacoes: 3 }
@@ -104,6 +111,7 @@ POST /api/cotacoes/importar 200
 **Toast:** "✅ Importação concluída: 3 criados, 0 atualizados, 0 erros"
 
 **Tabela atualiza:**
+
 ```
 ┌────────────────────────────────────────────────────────────┐
 │ Material            │ NCM    │ Valor    │ Forn.  │ Data   │
@@ -119,6 +127,7 @@ POST /api/cotacoes/importar 200
 ### **5️⃣ Teste Ações**
 
 #### **Visualizar 👁️:**
+
 ```
 Clique: 👁️ (primeira linha)
 Modal abre com:
@@ -131,6 +140,7 @@ Modal abre com:
 ```
 
 #### **Editar ✏️:**
+
 ```
 1. Clique: ✏️ (primeira linha)
 2. Altere: valorUnitario para 475.00
@@ -141,6 +151,7 @@ Tabela atualiza: R$ 475,00
 ```
 
 #### **Excluir 🗑️:**
+
 ```
 1. Clique: 🗑️ (última linha)
 2. AlertDialog: "Confirmar Exclusão"
@@ -153,6 +164,7 @@ Linha some da tabela
 ---
 
 ### **6️⃣ Teste Busca**
+
 ```
 Digite: "cabo"
 Filtro: Mostra apenas "Cabo de Cobre"
@@ -169,6 +181,7 @@ Filtro: Mostra apenas "Disjuntor" (fornecedor WEG)
 ## ✅ **VERIFICAÇÕES:**
 
 ### **Toasts Funcionando:**
+
 ```
 ✓ Sucesso (verde): Template, Exportar, Importar, Editar, Excluir
 ✓ Erro (vermelho): Validações, erros de API
@@ -177,6 +190,7 @@ Filtro: Mostra apenas "Disjuntor" (fornecedor WEG)
 ```
 
 ### **Modals:**
+
 ```
 ✓ Visualizar: Mostra todos os dados
 ✓ Editar: Formulário completo, validação
@@ -186,6 +200,7 @@ Filtro: Mostra apenas "Disjuntor" (fornecedor WEG)
 ```
 
 ### **Backend:**
+
 ```
 ✓ POST 200 (importar)
 ✓ GET 200 (listar)
@@ -195,6 +210,7 @@ Filtro: Mostra apenas "Disjuntor" (fornecedor WEG)
 ```
 
 ### **Frontend:**
+
 ```
 ✓ Tabela renderiza
 ✓ Busca funciona
@@ -238,4 +254,3 @@ Integrar com orçamentos para poder usar as cotações ao criar orçamentos!
 ---
 
 **TESTE AGORA E APROVEITE! 🎊**
-

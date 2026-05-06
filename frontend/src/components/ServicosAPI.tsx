@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { servicosService, type Servico as ServicoBase, type CreateServicoData as CreateServicoDataBase, type UpdateServicoData } from '../services/servicosService';
-import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
 
 // Extend types para incluir campos opcionais do componente
@@ -322,26 +321,26 @@ const ServicosAPI: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando serviços...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-600 dark:border-cyan-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando serviços...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Serviços</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie serviços e especialidades técnicas</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Serviços</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie serviços e especialidades técnicas</p>
                     </div>
                 </div>
                 <button

@@ -43,6 +43,14 @@ router.get(
     ContasPagarController.buscarConta
 );
 
+// Atualizar dados da conta (apenas admin e desenvolvedor)
+router.put(
+    '/:id',
+    authenticate,
+    authorize('admin', 'desenvolvedor'),
+    ContasPagarController.atualizarConta
+);
+
 // Marcar conta como paga
 router.put(
     '/:id/pagar',
@@ -118,6 +126,14 @@ router.post(
     '/gerar/despesas-fixas',
     authenticate,
     ContasPagarController.gerarContasDespesasFixas
+);
+
+// Excluir parcela (apenas admin e desenvolvedor)
+router.delete(
+    '/:id',
+    authenticate,
+    authorize('admin', 'desenvolvedor'),
+    ContasPagarController.excluirParcela
 );
 
 export default router;

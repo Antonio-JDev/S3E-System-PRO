@@ -29,7 +29,9 @@ export const parseNFeXML = (xmlContent: string): ParsedNFeData | null => {
   try {
     const parser = new XMLParser({
       ignoreAttributes: false,
-      attributeNamePrefix: '@_'
+      attributeNamePrefix: '@_',
+      parseNumbers: false,
+      parseBooleans: false
     });
 
     const result = parser.parse(xmlContent);

@@ -40,9 +40,11 @@ if errorlevel 1 (
 
 echo.
 echo [2/4] Building Frontend Image...
+echo ATENCAO: Usando dominio de producao: http://app.s3eengenharia.com.br:3001
+echo          (Mapeado via hosts para IP Tailscale: 100.74.201.62)
 docker build -t %DOCKER_USER%/s3e-frontend:%VERSION% ^
   --target production ^
-  --build-arg VITE_API_URL=http://192.168.100.228:3001 ^
+  --build-arg VITE_API_URL=http://app.s3eengenharia.com.br:3001 ^
   -f frontend/Dockerfile ^
   ./frontend
 

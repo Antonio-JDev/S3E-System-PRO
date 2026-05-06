@@ -77,6 +77,7 @@ GET /api/materiais/template-importacao?tipo=todos&formato=json
 ```
 
 **✅ CORRETO:**
+
 ```json
 {
   "versao": "1.0",
@@ -96,6 +97,7 @@ GET /api/materiais/template-importacao?tipo=todos&formato=json
 ```
 
 **❌ ERRADO:**
+
 ```
 [object Object]
 ```
@@ -177,12 +179,14 @@ Deseja continuar?
 ### **O que os logs me dizem:**
 
 **Console do navegador mostra:**
+
 - Qual caso de extração foi usado
 - Se dados foram extraídos corretamente
 - Tamanho do JSON gerado
 - Primeiros caracteres do JSON
 
 **Console do backend mostra:**
+
 - Se arquivo foi recebido
 - Tamanho do arquivo
 - Conteúdo do JSON
@@ -198,22 +202,26 @@ Deseja continuar?
 **Execute o teste e me envie:**
 
 1. **Console do navegador** ao clicar "📄 JSON":
+
    ```
    Copie TODAS as linhas que começam com 📄, ✅ ou ❌
    ```
 
 2. **Console do backend** (terminal) ao clicar "📄 JSON":
+
    ```
    Copie linha: ✅ Gerando template JSON: { ... }
    ```
 
 3. **Primeiras 10 linhas do arquivo baixado**:
+
    ```
    Abra no Bloco de Notas
    Copie primeiras 10 linhas
    ```
 
 4. **Console do backend ao importar**:
+
    ```
    Copie TUDO que aparecer quando clicar "Processar"
    ```
@@ -231,25 +239,28 @@ Cole no console do navegador (F12):
 ```javascript
 (async () => {
   try {
-    const token = localStorage.getItem('token');
-    
-    const response = await fetch('http://localhost:3000/api/materiais?ativo=true', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    
+    const token = localStorage.getItem("token");
+
+    const response = await fetch(
+      "http://localhost:3000/api/materiais?ativo=true",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
     const materiais = await response.json();
-    console.log('📊 Total de materiais:', materiais.length);
-    
+    console.log("📊 Total de materiais:", materiais.length);
+
     const template = {
-      "versao": "1.0",
-      "geradoEm": new Date().toISOString(),
-      "empresa": "S3E Engenharia Elétrica",
-      "instrucoes": "Atualize apenas o campo precoNovo de cada material",
-      "materiais": materiais.map(m => ({
+      versao: "1.0",
+      geradoEm: new Date().toISOString(),
+      empresa: "S3E Engenharia Elétrica",
+      instrucoes: "Atualize apenas o campo precoNovo de cada material",
+      materiais: materiais.map((m) => ({
         id: m.id,
         sku: m.sku,
         nome: m.nome,
-        descricao: m.descricao || '',
+        descricao: m.descricao || "",
         categoria: m.categoria,
         tipo: m.tipo,
         unidadeMedida: m.unidadeMedida,
@@ -258,25 +269,27 @@ Cole no console do navegador (F12):
         precoAtual: m.preco || 0,
         precoNovo: m.preco || 0,
         ultimaAtualizacao: m.ultimaAtualizacaoPreco || m.updatedAt,
-        fornecedor: 'N/A',
-        localizacao: m.localizacao || '',
-        preco: m.preco || 0
-      }))
+        fornecedor: "N/A",
+        localizacao: m.localizacao || "",
+        preco: m.preco || 0,
+      })),
     };
-    
+
     const jsonString = JSON.stringify(template, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+    const blob = new Blob([jsonString], {
+      type: "application/json;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `template-manual-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `template-manual-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
-    
-    console.log('✅ Template gerado manualmente!');
-    console.log('📊 Materiais incluídos:', template.materiais.length);
-    console.log('Arquivo baixado: template-manual-*.json');
+
+    console.log("✅ Template gerado manualmente!");
+    console.log("📊 Materiais incluídos:", template.materiais.length);
+    console.log("Arquivo baixado: template-manual-*.json");
   } catch (error) {
-    console.error('❌ Erro:', error);
+    console.error("❌ Erro:", error);
   }
 })();
 ```
@@ -290,10 +303,10 @@ Use este arquivo para testar a importação enquanto debugamos o botão "📄 JS
 ## 📞 **AGUARDO SEUS LOGS!**
 
 Faça o teste e me envie:
+
 1. Logs do console ao baixar
 2. Logs do backend ao baixar
 3. Primeiras 10 linhas do JSON
 4. Logs ao tentar importar
 
 **Com isso, resolvo o problema em minutos! 🚀**
-

@@ -13,15 +13,22 @@ export class CryptoUtil {
   private static readonly KEY_LENGTH = 32; // 32 bytes para AES-256
 
   /**
-   * Obtém a chave de criptografia fixa
-   * Usa uma chave fixa para que funcione automaticamente em dev e produção
-   * A senha do certificado é criptografada apenas para não ficar em texto plano no banco
+   * Obtém a chave de criptografia para senha do certificado e outros dados sensíveis.
+   * Usa ENCRYPTION_KEY do .env em produção (32 caracteres para AES-256).
+   * Se não existir, usa chave fixa para compatibilidade com instalações antigas.
    */
   private static getEncryptionKey(): Buffer {
-    // Chave fixa derivada do nome do sistema - funciona em todos os ambientes
+    const envKey = process.env.ENCRYPTION_KEY;
+    if (envKey && envKey.length >= 32) {
+      // Usar exatamente 32 bytes (AES-256): primeiros 32 caracteres da variável
+      return Buffer.from(envKey.slice(0, 32), 'utf8');
+    }
+    if (envKey && envKey.length > 0) {
+      // Menos de 32 chars: derivar 32 bytes com SHA-256
+      return crypto.createHash('sha256').update(envKey).digest();
+    }
+    // Fallback: chave fixa (compatibilidade com dados já criptografados)
     const secretKey = 's3e-engenharia-certificado-digital-encryption-key-2024';
-    
-    // Deriva uma chave de 32 bytes usando SHA-256
     return crypto.createHash('sha256').update(secretKey).digest();
   }
 

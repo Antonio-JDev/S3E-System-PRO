@@ -4,6 +4,7 @@ export interface EmpresaFiscal {
   id: string;
   cnpj: string;
   inscricaoEstadual: string;
+  inscricaoMunicipal?: string;
   razaoSocial: string;
   nomeFantasia?: string;
   endereco: string;
@@ -24,6 +25,7 @@ export interface EmpresaFiscal {
 export interface CreateEmpresaFiscalData {
   cnpj: string;
   inscricaoEstadual: string;
+  inscricaoMunicipal?: string;
   razaoSocial: string;
   nomeFantasia?: string;
   endereco: string;
@@ -42,6 +44,7 @@ export interface CreateEmpresaFiscalData {
 
 export interface UpdateEmpresaFiscalData {
   inscricaoEstadual?: string;
+  inscricaoMunicipal?: string;
   razaoSocial?: string;
   nomeFantasia?: string;
   endereco?: string;

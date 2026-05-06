@@ -2,11 +2,9 @@ import { Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import DynamicPDFService from '../services/DynamicPDFService';
 import { PDFCustomization, OrcamentoPDFData } from '../types/pdfCustomization';
-
-const prisma = new PrismaClient();
 
 // Configuração do multer para uploads
 const storage = multer.diskStorage({

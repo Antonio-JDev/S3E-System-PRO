@@ -9,6 +9,7 @@ router.use(authenticateToken);
 
 // Rotas de Kits
 router.get('/', kitsController.listarKits);
+router.get('/:id/composicao', kitsController.buscarKitComposicaoPorId);
 router.get('/:id', kitsController.buscarKitPorId);
 router.post('/', kitsController.criarKit);
 router.put('/:id', kitsController.atualizarKit);

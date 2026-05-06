@@ -8,6 +8,11 @@ export interface ConfiguracaoSistema {
   nomeEmpresa: string;
   emailContato?: string;
   telefoneContato?: string;
+  multiplicadorVenda?: number | null;
+  percentualImpostoPadrao?: number | null;
+  aliquotaImpostoPadrao?: number | null; // Alíquota % sobre valor de venda (DAS Simples Nacional), default 8
+  markupFabricante?: number | null; // Preço venda = Preço compra × este valor (Fabricante), default 1.55
+  markupRevendedor?: number | null; // Preço venda = Preço compra × este valor (Representante/Vendedor), default 1.10
   createdAt: string;
   updatedAt: string;
 }
@@ -18,13 +23,20 @@ export interface UpdateConfiguracaoData {
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
+  multiplicadorVenda?: number;
+  percentualImpostoPadrao?: number;
+  aliquotaImpostoPadrao?: number;
+  markupFabricante?: number;
+  markupRevendedor?: number;
 }
 
 export interface Usuario {
   id: string;
   name: string;
+  setor?: string | null;
   email: string;
   role: string;
+  isAdmin?: boolean;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -36,12 +48,40 @@ export interface UsuarioFiltros {
   active?: boolean;
 }
 
+export type OrcamentoInsercaoModo = 'check' | 'ocultar';
+
+export interface PreferenciasUsuario {
+  orcamentoInsercaoModo: OrcamentoInsercaoModo;
+}
+
+/** Meta de vendas global (API /api/configuracoes/meta-vendas) */
+export interface MetaVendasSistema {
+  padrao: number;
+  porMes: Record<string, number>;
+  mesAtual: string;
+  valorEfetivo: number;
+}
+
 class ConfiguracoesService {
   /**
    * Busca as configurações do sistema
    */
   async getConfiguracoes() {
     return axiosApiService.get<ConfiguracaoSistema>('/api/configuracoes');
+  }
+
+  /**
+   * Meta de faturamento mensal (sistema inteiro; leitura para usuário autenticado)
+   */
+  async getMetaVendas(mes?: string) {
+    return axiosApiService.get<MetaVendasSistema>('/api/configuracoes/meta-vendas', mes ? { mes } : undefined);
+  }
+
+  /**
+   * Atualiza meta de um mês (admin ou desenvolvedor)
+   */
+  async salvarMetaVendas(body: { mes?: string; valor: number; atualizarMetaPadrao?: boolean }) {
+    return axiosApiService.put<MetaVendasSistema>('/api/configuracoes/meta-vendas', body);
   }
 
   /**
@@ -124,7 +164,7 @@ class ConfiguracoesService {
   /**
    * Cria um novo usuário (Admin-only)
    */
-  async criarUsuario(data: { email: string; password: string; name: string; role: string }) {
+  async criarUsuario(data: { email: string; password: string; name: string; role: string; setor?: string | null }) {
     return axiosApiService.post<Usuario>('/api/configuracoes/usuarios/criar', data);
   }
 
@@ -139,8 +179,29 @@ class ConfiguracoesService {
   /**
    * Atualiza email e senha de um usuário (Gerente, Admin ou Desenvolvedor)
    */
-  async atualizarUsuario(userId: string, data: { email?: string; name?: string; senhaNova?: string }) {
+  async atualizarUsuario(
+    userId: string,
+    data: { email?: string; name?: string; setor?: string | null; senhaNova?: string; isAdmin?: boolean }
+  ) {
     return axiosApiService.put<Usuario>(`/api/configuracoes/usuarios/${userId}`, data);
+  }
+
+  /**
+   * Retorna as preferências do usuário logado (ex: orcamentoInsercaoModo)
+   */
+  async getPreferenciasUsuario() {
+    const res = await axiosApiService.get<PreferenciasUsuario>('/api/configuracoes/usuarios/me/preferencias');
+    if (res.success && res.data) {
+      return { success: true as const, data: res.data };
+    }
+    return { success: false as const, error: (res as any).error || 'Erro ao buscar preferências' };
+  }
+
+  /**
+   * Salva as preferências do usuário logado
+   */
+  async salvarPreferenciasUsuario(data: { orcamentoInsercaoModo?: OrcamentoInsercaoModo }) {
+    return axiosApiService.put<PreferenciasUsuario>('/api/configuracoes/usuarios/me/preferencias', data);
   }
 }
 

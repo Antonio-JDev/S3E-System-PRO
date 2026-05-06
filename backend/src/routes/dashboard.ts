@@ -36,6 +36,13 @@ router.get('/alertas', DashboardController.getAlertas);
 router.get('/evolucao-obras', DashboardController.getEvolucaoObras);
 
 /**
+ * @route GET /api/dashboard/graficos-executivo
+ * @desc Evoluções (orçamentos, OS, obras, vendas), comparativo e categorias de venda
+ * @access Authenticated
+ */
+router.get('/graficos-executivo', DashboardController.getGraficosExecutivo);
+
+/**
  * @route GET /api/dashboard/producao-quadros
  * @desc Retorna dados de produção de quadros elétricos
  * @access Authenticated

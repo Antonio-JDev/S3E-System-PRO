@@ -82,6 +82,30 @@ export interface DashboardMetrics {
   gastosPorFornecedorTop10: Array<{ nomeFornecedor: string; valorGasto: number }>; // Top 10 fornecedores
 }
 
+export interface VendasComprasClassificacao {
+  vendasOrcamentosAprovados: { valorTotal: number; quantidadeOrcamentos: number };
+  comprasPorClassificacao: Array<{
+    classificacao: string;
+    nomeExibicao: string;
+    valorTotal: number;
+    quantidadeCompras: number;
+  }>;
+}
+
+export interface MateriaisMaisCompradosPeriodo {
+  dias: number;
+  dataInicio: string;
+  dataFim: string;
+  materiais: Array<{
+    materialId: string;
+    sku: string;
+    nome: string;
+    quantidade?: number;
+    valorTotal?: number;
+    custoMedio?: number;
+  }>;
+}
+
 export interface BIServiceResponse<T> {
   success: boolean;
   data?: T;
@@ -124,9 +148,23 @@ class BIService {
         dataInicio,
         dataFim,
       });
-      return { success: true, data: response.data?.data };
+      
+      console.log('📊 [biService] Response getGastosFornecedor:', response);
+      
+      // Extrair dados da resposta
+      const data = response.data?.data || response.data;
+      
+      if (!data) {
+        console.error('❌ [biService] Dados não encontrados na resposta:', response);
+        return {
+          success: false,
+          error: 'Dados não encontrados na resposta do servidor',
+        };
+      }
+      
+      return { success: true, data };
     } catch (error: any) {
-      console.error('Erro ao buscar gastos por fornecedor:', error);
+      console.error('❌ [biService] Erro ao buscar gastos por fornecedor:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Erro ao buscar gastos por fornecedor',
@@ -339,6 +377,251 @@ class BIService {
       return {
         success: false,
         error: error?.response?.data?.error || error?.message || 'Erro ao buscar métricas do dashboard',
+      };
+    }
+  }
+
+  /**
+   * Busca serviços mais rentáveis
+   */
+  async getServicosRentaveis(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<Array<{
+    servicoNome: string;
+    classificacao: string;
+    receita: number;
+    custo: number;
+    lucro: number;
+    markup: number;
+    quantidade: number;
+  }>>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/servicos-rentaveis', {
+        dataInicio,
+        dataFim,
+      });
+      
+      console.log('📊 [biService] Response getServicosRentaveis:', response);
+      
+      const data = response.data?.data || response.data;
+      
+      if (!data) {
+        console.error('❌ [biService] Dados não encontrados na resposta:', response);
+        return {
+          success: false,
+          error: 'Dados não encontrados na resposta do servidor',
+        };
+      }
+      
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('❌ [biService] Erro ao buscar serviços rentáveis:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar serviços rentáveis',
+      };
+    }
+  }
+
+  /**
+   * Busca estatísticas de orçamentos por status
+   */
+  async getOrcamentosPorStatus(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<{
+    aprovados: { quantidade: number; valorTotal: number };
+    pendentes: { quantidade: number; valorTotal: number };
+    expirados: { quantidade: number; valorTotal: number };
+    declinados: { quantidade: number; valorTotal: number };
+    total: { quantidade: number; valorTotal: number };
+    porStatus: Array<{ status: string; quantidade: number; valorTotal: number; cor: string }>;
+  }>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/orcamentos-por-status', {
+        dataInicio,
+        dataFim,
+      });
+      
+      console.log('📊 [biService] Response getOrcamentosPorStatus:', response);
+      
+      // Extrair dados da resposta (pode estar em response.data ou response.data.data)
+      const data = response.data?.data || response.data;
+      
+      if (!data) {
+        console.error('❌ [biService] Dados não encontrados na resposta:', response);
+        return {
+          success: false,
+          error: 'Dados não encontrados na resposta do servidor',
+        };
+      }
+      
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('❌ [biService] Erro ao buscar orçamentos por status:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar orçamentos por status',
+      };
+    }
+  }
+
+  /**
+   * Busca evolução de orçamentos por tipo de serviço classificado
+   */
+  async getOrcamentosPorTipoServicoClassificado(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<{
+    porClassificacao: Array<{
+      classificacao: string;
+      quantidade: number;
+      valorTotal: number;
+      taxaAprovacao: number;
+      servicos: Array<{ nome: string; quantidade: number; valorTotal: number }>;
+    }>;
+    evolucaoMensal: Array<{
+      mes: string;
+      maoDeObra: number;
+      engenharia: number;
+      administrativo: number;
+      montagem: number;
+    }>;
+  }>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/orcamentos-por-tipo-servico-classificado', {
+        dataInicio,
+        dataFim,
+      });
+      
+      console.log('📊 [biService] Response getOrcamentosPorTipoServicoClassificado:', response);
+      
+      // Extrair dados da resposta
+      const data = response.data?.data || response.data;
+      
+      if (!data) {
+        console.error('❌ [biService] Dados não encontrados na resposta:', response);
+        return {
+          success: false,
+          error: 'Dados não encontrados na resposta do servidor',
+        };
+      }
+      
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('❌ [biService] Erro ao buscar orçamentos por tipo de serviço classificado:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar orçamentos por tipo de serviço classificado',
+      };
+    }
+  }
+
+  /**
+   * Busca markup de vendas por tipo de serviço e período
+   */
+  async getMarkupVendasPorServico(
+    dataInicio: string,
+    dataFim: string,
+    periodo: 'mes' | 'semana' | 'semestre' | 'ano' = 'mes'
+  ): Promise<BIServiceResponse<{
+    periodo: string;
+    dados: Array<{
+      periodo: string;
+      classificacao: string;
+      servicoNome: string;
+      receita: number;
+      custo: number;
+      lucro: number;
+      markup: number;
+      quantidade: number;
+    }>;
+    resumoPorClassificacao: Array<{
+      classificacao: string;
+      receita: number;
+      custo: number;
+      lucro: number;
+      markup: number;
+      quantidade: number;
+    }>;
+  }>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/markup-vendas-por-servico', {
+        dataInicio,
+        dataFim,
+        periodo,
+      });
+      
+      console.log('📊 [biService] Response getMarkupVendasPorServico:', response);
+      
+      // Extrair dados da resposta
+      const data = response.data?.data || response.data;
+      
+      if (!data) {
+        console.error('❌ [biService] Dados não encontrados na resposta:', response);
+        return {
+          success: false,
+          error: 'Dados não encontrados na resposta do servidor',
+        };
+      }
+      
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('❌ [biService] Erro ao buscar markup de vendas por serviço:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar markup de vendas por serviço',
+      };
+    }
+  }
+
+  /**
+   * Receita de orçamentos aprovados vs compras por classificação (mesmo período do BI)
+   */
+  async getVendasComprasClassificacao(
+    dataInicio: string,
+    dataFim: string
+  ): Promise<BIServiceResponse<VendasComprasClassificacao>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/vendas-compras-classificacao', {
+        dataInicio,
+        dataFim,
+      });
+      const data = response.data?.data || response.data;
+      if (!data) {
+        return { success: false, error: 'Dados não encontrados na resposta do servidor' };
+      }
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('Erro ao buscar vendas/compras por classificação:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar dados',
+      };
+    }
+  }
+
+  /**
+   * Materiais mais comprados nos últimos 30 ou 60 dias
+   */
+  async getMateriaisMaisCompradosPeriodo(
+    dias: 30 | 60
+  ): Promise<BIServiceResponse<MateriaisMaisCompradosPeriodo>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/materiais-mais-comprados-periodo', {
+        dias,
+      });
+      const data = response.data?.data || response.data;
+      if (!data) {
+        return { success: false, error: 'Dados não encontrados na resposta do servidor' };
+      }
+      return { success: true, data };
+    } catch (error: any) {
+      console.error('Erro ao buscar materiais mais comprados:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar materiais',
       };
     }
   }

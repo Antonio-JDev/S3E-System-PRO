@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Resumo Administrativo - Métricas de Lucro e Evolução Financeira
@@ -134,6 +132,7 @@ export class ResumoAdministrativoService {
       let custoVenda = 0;
 
       venda.orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'MATERIAL') {
           const valorVendido = item.precoUnit * item.quantidade;
           const custo = item.custoUnit * item.quantidade;
@@ -223,6 +222,7 @@ export class ResumoAdministrativoService {
       let custoVenda = 0;
 
       venda.orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'SERVICO') {
           const valorVendido = item.precoUnit * item.quantidade;
           const custo = item.custoUnit * item.quantidade;
@@ -308,7 +308,9 @@ export class ResumoAdministrativoService {
       // precoVenda = custoTotal * (1 + BDI/100)
       // valorBDI = precoVenda - custoTotal
       const custoTotal = orcamento.custoTotal || 0;
-      const precoVenda = orcamento.precoVenda || 0;
+      // Para indicadores financeiros, usar o valor do PV (valor que entra no faturamento).
+      // `orcamento.precoVenda` pode incluir itens de venda direta do fornecedor.
+      const precoVenda = (venda as any).valorTotal || orcamento.precoVenda || 0;
       const valorBDI = precoVenda - custoTotal;
       const lucroTotal = valorBDI; // O BDI representa o lucro
 

@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { EstoqueService } from '../services/estoque.service';
-
-const prisma = new PrismaClient();
 
 export class AlocacaoMateriaisController {
   /**

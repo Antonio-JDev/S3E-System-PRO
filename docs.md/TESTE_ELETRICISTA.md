@@ -34,6 +34,7 @@
 ### Arquivo: `frontend/src/constants/index.tsx`
 
 **ANTES** (páginas sem permissão - apareciam para todos):
+
 ```typescript
 { name: 'Clientes', icon: ClientsIcon },  // ❌ SEM requiredPermission
 { name: 'Orçamentos', icon: BudgetIcon }, // ❌ SEM requiredPermission
@@ -41,6 +42,7 @@
 ```
 
 **DEPOIS** (todas com permissões):
+
 ```typescript
 { name: 'Clientes', icon: ClientsIcon, requiredPermission: 'view_projetos' },
 { name: 'Orçamentos', icon: BudgetIcon, requiredPermission: 'view_projetos' },
@@ -54,18 +56,22 @@
 ## ✅ Como Testar Agora
 
 ### 1. **Recarregar a Página**
-   - Faça logout
-   - Limpe o cache do navegador (Ctrl + Shift + Delete)
-   - Faça login novamente como eletricista
+
+- Faça logout
+- Limpe o cache do navegador (Ctrl + Shift + Delete)
+- Faça login novamente como eletricista
 
 ### 2. **Credenciais de Teste**:
+
 ```
 Email: eletricista1@s3e.com
 Senha: eletricista123
 ```
 
 ### 3. **Verificar Sidebar**:
+
 Após login, a sidebar deve mostrar APENAS:
+
 ```
 ┌─────────────────────────┐
 │ GERAL                   │
@@ -86,13 +92,16 @@ Após login, a sidebar deve mostrar APENAS:
 ```
 
 ### 4. **Testar Navegação**:
+
 - ✅ Clicar em "Dashboard" → Deve funcionar
 - ✅ Clicar em "Obras" → Deve funcionar
 - ✅ Clicar em "Tarefas da Obra" → Deve funcionar
 - ✅ Clicar em "Movimentações" → Deve funcionar
 
 ### 5. **Tentar Acessar Página Bloqueada**:
+
 Se tentar acessar URL diretamente (ex: digitando na barra):
+
 - ❌ Não verá link na sidebar
 - ❌ Página não renderiza (fica no Dashboard)
 
@@ -104,14 +113,15 @@ Se tentar acessar URL diretamente (ex: digitando na barra):
 
 1. **Abrir Console do Navegador** (F12)
 2. **Executar**:
+
 ```javascript
 // Ver dados do usuário
-const authData = localStorage.getItem('auth_token');
-console.log('Token:', authData);
+const authData = localStorage.getItem("auth_token");
+console.log("Token:", authData);
 
 // Verificar role
-const user = JSON.parse(localStorage.getItem('user') || '{}');
-console.log('Role:', user?.role);
+const user = JSON.parse(localStorage.getItem("user") || "{}");
+console.log("Role:", user?.role);
 ```
 
 3. **Verificar se role está correta**: Deve retornar `"eletricista"`
@@ -135,6 +145,7 @@ npx tsx prisma/seed.ts
 Após a correção, quando um **eletricista** faz login, ele deve ver:
 
 ### Sidebar Completa:
+
 ```
 ╔═══════════════════════════╗
 ║ S3E Engenharia            ║
@@ -176,4 +187,3 @@ Após a correção, quando um **eletricista** faz login, ele deve ver:
 
 **Status**: ✅ Correção aplicada  
 **Ação Necessária**: Recarregar navegador e fazer novo login
-

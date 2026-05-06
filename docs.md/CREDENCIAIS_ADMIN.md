@@ -7,6 +7,7 @@
 ## 👤 Dados de Acesso
 
 ### Credenciais
+
 ```
 📧 Email: admin@s3e.com.br
 🔑 Senha: 123456
@@ -19,18 +20,22 @@
 ## 🚀 Como Usar
 
 ### 1. Acessar o Sistema
+
 1. Abra o navegador
 2. Acesse: `http://localhost:5173` (frontend)
 3. Você verá a tela de login
 
 ### 2. Fazer Login
-1. Digite o email: **admin@s3e.com.br**
+
+1. Digite o email: **<admin@s3e.com.br>**
 2. Digite a senha: **123456**
 3. Clique em "Entrar"
 4. ✅ Você será redirecionado para o Dashboard!
 
 ### 3. Permissões de Admin
+
 Como admin, você tem acesso a:
+
 - ✅ **Dashboard** - Visão completa
 - ✅ **Orçamentos** - Criar, editar, aprovar, rejeitar
 - ✅ **Clientes** - CRUD completo
@@ -55,6 +60,7 @@ npm run seed
 ```
 
 Este comando:
+
 1. ✅ Deleta o usuário `admin@s3e.com.br` (se existir)
 2. ✅ Cria novo usuário admin
 3. ✅ Cria configuração do sistema
@@ -67,22 +73,23 @@ Este comando:
 **Localização**: `backend/prisma/seed.ts`
 
 **O que faz**:
+
 - Cria usuário admin com senha criptografada (bcrypt)
 - Cria configuração do sistema S3E Engenharia
 - Usa `upsert` para não duplicar
 
-**Modificar credenciais**:
-Se quiser mudar email ou senha, edite o arquivo `seed.ts`:
+**Modificar credenciais**: Se quiser mudar email ou senha, edite o arquivo
+`seed.ts`:
 
 ```typescript
 const admin = await prisma.user.create({
   data: {
-    email: 'seu-email@aqui.com',      // Mudar aqui
-    password: hashedPassword,          // Hash da senha
-    name: 'Seu Nome',                 // Mudar aqui
-    role: 'admin',
-    active: true
-  }
+    email: "seu-email@aqui.com", // Mudar aqui
+    password: hashedPassword, // Hash da senha
+    name: "Seu Nome", // Mudar aqui
+    role: "admin",
+    active: true,
+  },
 });
 ```
 
@@ -95,11 +102,13 @@ E rode: `npm run seed`
 ### Fluxo de Teste Completo
 
 #### 1. Login
+
 ```
 ✅ Login com admin@s3e.com.br / 123456
 ```
 
 #### 2. Cadastros Básicos
+
 ```
 ✅ Criar 2-3 clientes
 ✅ Criar 2-3 fornecedores
@@ -107,6 +116,7 @@ E rode: `npm run seed`
 ```
 
 #### 3. Criar Orçamento
+
 ```
 ✅ Clicar em "Orçamentos"
 ✅ Clicar em "Novo Orçamento"
@@ -118,6 +128,7 @@ E rode: `npm run seed`
 ```
 
 #### 4. Gerar PDF Personalizado
+
 ```
 ✅ Clicar em "PDF" no card do orçamento
 ✅ Personalizar:
@@ -130,6 +141,7 @@ E rode: `npm run seed`
 ```
 
 #### 5. Salvar Template
+
 ```
 ✅ No modal de PDF, aba "Preview"
 ✅ Clicar em "Salvar como Template"
@@ -138,6 +150,7 @@ E rode: `npm run seed`
 ```
 
 #### 6. Testar Outras Funcionalidades
+
 ```
 ✅ Gerenciar usuários (Configurações)
 ✅ Ver dashboard com estatísticas
@@ -153,6 +166,7 @@ E rode: `npm run seed`
 Se quiser criar mais usuários para testar permissões diferentes:
 
 ### Via Interface (Recomendado)
+
 1. Login como admin
 2. Ir em **Configurações** → **Gerenciamento de Usuários**
 3. Clicar em **"Novo Usuário"**
@@ -164,27 +178,28 @@ Se quiser criar mais usuários para testar permissões diferentes:
 5. Salvar
 
 ### Via Seed (Adicionar ao seed.ts)
+
 ```typescript
 // Criar usuário orçamentista
 const orcamentista = await prisma.user.create({
   data: {
-    email: 'orcamentista@s3e.com.br',
-    password: await bcrypt.hash('123456', 10),
-    name: 'João Orçamentista',
-    role: 'orcamentista',
-    active: true
-  }
+    email: "orcamentista@s3e.com.br",
+    password: await bcrypt.hash("123456", 10),
+    name: "João Orçamentista",
+    role: "orcamentista",
+    active: true,
+  },
 });
 
 // Criar usuário compras
 const compras = await prisma.user.create({
   data: {
-    email: 'compras@s3e.com.br',
-    password: await bcrypt.hash('123456', 10),
-    name: 'Maria Compras',
-    role: 'compras',
-    active: true
-  }
+    email: "compras@s3e.com.br",
+    password: await bcrypt.hash("123456", 10),
+    name: "Maria Compras",
+    role: "compras",
+    active: true,
+  },
 });
 ```
 
@@ -193,10 +208,12 @@ const compras = await prisma.user.create({
 ## ⚠️ Segurança
 
 ### ⚠️ IMPORTANTE - Ambiente de Desenvolvimento
+
 - ✅ Senha simples (`123456`) é OK para **desenvolvimento**
 - ❌ **NUNCA use senha simples em produção!**
 
 ### 🔒 Para Produção
+
 - Use senhas fortes (mín. 12 caracteres, misturadas)
 - Ative 2FA (autenticação de dois fatores)
 - Troque senhas periodicamente
@@ -206,25 +223,27 @@ const compras = await prisma.user.create({
 
 ## 🎯 Roles Disponíveis no Sistema
 
-| Role | Permissões | Quando Usar |
-|------|------------|-------------|
-| `admin` | **Tudo** | Administrador geral |
-| `orcamentista` | Orçamentos, clientes | Criar propostas |
-| `compras` | Compras, fornecedores | Gestão de compras |
-| `gerente` | Visualização + Aprovações | Gerência |
-| `user` | Básico | Usuário comum |
+| Role           | Permissões                | Quando Usar         |
+| -------------- | ------------------------- | ------------------- |
+| `admin`        | **Tudo**                  | Administrador geral |
+| `orcamentista` | Orçamentos, clientes      | Criar propostas     |
+| `compras`      | Compras, fornecedores     | Gestão de compras   |
+| `gerente`      | Visualização + Aprovações | Gerência            |
+| `user`         | Básico                    | Usuário comum       |
 
 ---
 
 ## 🛠️ Comandos Úteis
 
 ### Recriar Admin
+
 ```bash
 cd backend
 npm run seed
 ```
 
 ### Ver Usuários no Banco
+
 ```bash
 cd backend
 npx prisma studio
@@ -233,6 +252,7 @@ npx prisma studio
 ```
 
 ### Resetar Banco Completo
+
 ```bash
 cd backend
 npx prisma migrate reset --force
@@ -246,23 +266,27 @@ npm run seed
 Para verificar se o usuário foi criado corretamente:
 
 ### Opção 1: Tentar Login
+
 1. Acesse o sistema
 2. Faça login com as credenciais
 3. Se entrar → ✅ Funcionou!
 
 ### Opção 2: Prisma Studio
+
 ```bash
 npx prisma studio
 ```
-1. Abre no navegador (http://localhost:5555)
+
+1. Abre no navegador (<http://localhost:5555>)
 2. Clique em "users"
 3. Veja o usuário `admin@s3e.com.br`
 4. Verifique role: `admin`
 
 ### Opção 3: Console do Banco
+
 ```sql
-SELECT email, name, role, active 
-FROM users 
+SELECT email, name, role, active
+FROM users
 WHERE email = 'admin@s3e.com.br';
 ```
 
@@ -284,10 +308,9 @@ Agora você pode:
 
 **Credenciais criadas com sucesso!** 🎊
 
-**Email**: admin@s3e.com.br  
+**Email**: <admin@s3e.com.br>  
 **Senha**: 123456  
 **Role**: admin  
 **Status**: ✅ Ativo e Funcional
 
 **Pode fazer login agora!** 🚀
-

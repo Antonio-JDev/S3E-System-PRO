@@ -14,12 +14,14 @@ O sistema S3E já suporta **4 formas de pagamento** diferentes:
 ## 💰 1. À Vista
 
 ### Características
+
 - **Parcelas:** 1
 - **Entrada:** Não tem
 - **Vencimento:** 30 dias após a venda
 - **Uso:** Pagamento único, geralmente com desconto
 
 ### Exemplo de Requisição
+
 ```json
 POST /api/vendas/realizar
 {
@@ -33,6 +35,7 @@ POST /api/vendas/realizar
 ```
 
 ### Resultado
+
 ```
 Venda: R$ 75.000,00
 Contas a Receber geradas: 1
@@ -44,6 +47,7 @@ Parcela única:
 ```
 
 ### Frontend
+
 ```tsx
 <select name="formaPagamento" value="À vista">
   <option value="À vista">À vista</option>
@@ -58,12 +62,14 @@ Parcela única:
 ## 📅 2. Parcelado (Cartão/Crediário)
 
 ### Características
+
 - **Parcelas:** 1 a 12 (ou mais)
 - **Entrada:** Opcional
 - **Vencimento:** +30 dias por parcela
 - **Uso:** Facilitar pagamento para cliente
 
 ### Exemplo 1: Parcelado sem Entrada (3x)
+
 ```json
 POST /api/vendas/realizar
 {
@@ -77,6 +83,7 @@ POST /api/vendas/realizar
 ```
 
 **Resultado:**
+
 ```
 Venda: R$ 75.000,00
 Contas a Receber: 3
@@ -89,6 +96,7 @@ Parcela 3: R$ 25.000,00 (venc: +90 dias)
 ---
 
 ### Exemplo 2: Parcelado com Entrada (6x)
+
 ```json
 POST /api/vendas/realizar
 {
@@ -102,6 +110,7 @@ POST /api/vendas/realizar
 ```
 
 **Resultado:**
+
 ```
 Venda: R$ 120.000,00
 Entrada: R$ 30.000,00
@@ -121,12 +130,14 @@ Parcela 6: R$ 15.000,00 (venc: +180 dias)
 ## 📄 3. Boleto (Duplicata)
 
 ### Características
+
 - **Parcelas:** Geralmente 1 a 6
 - **Entrada:** Opcional
 - **Vencimento:** Customizável (geralmente 30, 60, 90 dias)
 - **Uso:** Empresas, pagamento formal
 
 ### Exemplo: Boleto em 3 Parcelas
+
 ```json
 POST /api/vendas/realizar
 {
@@ -141,6 +152,7 @@ POST /api/vendas/realizar
 ```
 
 **Resultado:**
+
 ```
 Venda: R$ 75.000,00
 Contas a Receber: 3 boletos
@@ -151,6 +163,7 @@ Boleto 3: R$ 25.000,00 (venc: 90 dias)
 ```
 
 ### Diferença para Parcelado
+
 ```
 Parcelado (Cartão):
 - Geralmente sem entrada
@@ -168,12 +181,14 @@ Boleto (Duplicata):
 ## ⚡ 4. PIX
 
 ### Características
+
 - **Parcelas:** Geralmente 1 (à vista)
 - **Entrada:** Não aplicável
 - **Vencimento:** Imediato ou poucos dias
 - **Uso:** Pagamento instantâneo, desconto
 
 ### Exemplo 1: PIX à Vista
+
 ```json
 POST /api/vendas/realizar
 {
@@ -187,6 +202,7 @@ POST /api/vendas/realizar
 ```
 
 **Resultado:**
+
 ```
 Venda: R$ 25.000,00
 Contas a Receber: 1
@@ -197,6 +213,7 @@ PIX único: R$ 25.000,00 (venc: +7 dias)
 ---
 
 ### Exemplo 2: PIX Parcelado (menos comum)
+
 ```json
 POST /api/vendas/realizar
 {
@@ -211,6 +228,7 @@ POST /api/vendas/realizar
 ```
 
 **Resultado:**
+
 ```
 Venda: R$ 60.000,00
 Contas a Receber: 2
@@ -223,12 +241,12 @@ PIX 2: R$ 15.000,00 (venc: +37 dias)
 
 ## 📊 Comparação das Formas
 
-| Forma | Parcelas | Entrada | Vencimento Típico | Quando Usar |
-|-------|----------|---------|-------------------|-------------|
-| **À vista** | 1 | Não | 30 dias | Desconto, pagamento único |
-| **Parcelado** | 1-12 | Opcional | 30, 60, 90... | Facilitar para cliente |
-| **Boleto** | 1-6 | Opcional | 30, 60, 90 | Empresas, formal |
-| **PIX** | 1-2 | Não | 0-7 dias | Rápido, instantâneo |
+| Forma         | Parcelas | Entrada  | Vencimento Típico | Quando Usar               |
+| ------------- | -------- | -------- | ----------------- | ------------------------- |
+| **À vista**   | 1        | Não      | 30 dias           | Desconto, pagamento único |
+| **Parcelado** | 1-12     | Opcional | 30, 60, 90...     | Facilitar para cliente    |
+| **Boleto**    | 1-6      | Opcional | 30, 60, 90        | Empresas, formal          |
+| **PIX**       | 1-2      | Não      | 0-7 dias          | Rápido, instantâneo       |
 
 ---
 
@@ -245,6 +263,7 @@ PIX 2: R$ 15.000,00 (venc: +37 dias)
 ```
 
 **Comportamento:**
+
 - ✅ Campo `formaPagamento` é armazenado
 - ✅ Parcelas calculadas igualmente
 - ✅ Vencimentos padrão (+30 dias por parcela)
@@ -262,53 +281,53 @@ PIX 2: R$ 15.000,00 (venc: +37 dias)
 
 // Calcular data de vencimento baseado na forma de pagamento
 const calcularDataVencimento = (
-    formaPagamento: string, 
-    numeroParcela: number
+  formaPagamento: string,
+  numeroParcela: number
 ): Date => {
-    const data = new Date();
-    
-    switch (formaPagamento) {
-        case 'À vista':
-            // 30 dias para pagamento
-            data.setDate(data.getDate() + 30);
-            break;
-            
-        case 'PIX':
-            // 7 dias para PIX (ou imediato)
-            data.setDate(data.getDate() + 7);
-            break;
-            
-        case 'Boleto':
-            // 30 dias por boleto (padrão bancário)
-            data.setDate(data.getDate() + (numeroParcela * 30));
-            break;
-            
-        case 'Parcelado':
-            // 30 dias por parcela (padrão de cartão)
-            data.setDate(data.getDate() + (numeroParcela * 30));
-            break;
-            
-        default:
-            // Padrão: 30 dias
-            data.setDate(data.getDate() + (numeroParcela * 30));
-    }
-    
-    return data;
+  const data = new Date();
+
+  switch (formaPagamento) {
+    case "À vista":
+      // 30 dias para pagamento
+      data.setDate(data.getDate() + 30);
+      break;
+
+    case "PIX":
+      // 7 dias para PIX (ou imediato)
+      data.setDate(data.getDate() + 7);
+      break;
+
+    case "Boleto":
+      // 30 dias por boleto (padrão bancário)
+      data.setDate(data.getDate() + numeroParcela * 30);
+      break;
+
+    case "Parcelado":
+      // 30 dias por parcela (padrão de cartão)
+      data.setDate(data.getDate() + numeroParcela * 30);
+      break;
+
+    default:
+      // Padrão: 30 dias
+      data.setDate(data.getDate() + numeroParcela * 30);
+  }
+
+  return data;
 };
 
 // Usar na criação das contas
 for (let i = 1; i <= parcelas; i++) {
-    const dataVencimento = calcularDataVencimento(formaPagamento, i);
-    
-    await tx.contaReceber.create({
-        data: {
-            vendaId: venda.id,
-            descricao: `${formaPagamento} - Parcela ${i}/${parcelas} - Venda ${numeroVenda}`,
-            valorParcela: i === 1 ? valorEntrada + valorParcela : valorParcela,
-            dataVencimento,
-            // ...
-        }
-    });
+  const dataVencimento = calcularDataVencimento(formaPagamento, i);
+
+  await tx.contaReceber.create({
+    data: {
+      vendaId: venda.id,
+      descricao: `${formaPagamento} - Parcela ${i}/${parcelas} - Venda ${numeroVenda}`,
+      valorParcela: i === 1 ? valorEntrada + valorParcela : valorParcela,
+      dataVencimento,
+      // ...
+    },
+  });
 }
 ```
 
@@ -319,31 +338,31 @@ for (let i = 1; i <= parcelas; i++) {
 ```typescript
 // Validar regras de negócio por forma de pagamento
 const validarFormaPagamento = (formaPagamento: string, parcelas: number) => {
-    switch (formaPagamento) {
-        case 'À vista':
-            if (parcelas > 1) {
-                throw new Error('À vista deve ter apenas 1 parcela');
-            }
-            break;
-            
-        case 'PIX':
-            if (parcelas > 2) {
-                throw new Error('PIX suporta no máximo 2 parcelas');
-            }
-            break;
-            
-        case 'Boleto':
-            if (parcelas > 6) {
-                throw new Error('Boleto suporta no máximo 6 parcelas');
-            }
-            break;
-            
-        case 'Parcelado':
-            if (parcelas > 12) {
-                throw new Error('Parcelamento suporta no máximo 12x');
-            }
-            break;
-    }
+  switch (formaPagamento) {
+    case "À vista":
+      if (parcelas > 1) {
+        throw new Error("À vista deve ter apenas 1 parcela");
+      }
+      break;
+
+    case "PIX":
+      if (parcelas > 2) {
+        throw new Error("PIX suporta no máximo 2 parcelas");
+      }
+      break;
+
+    case "Boleto":
+      if (parcelas > 6) {
+        throw new Error("Boleto suporta no máximo 6 parcelas");
+      }
+      break;
+
+    case "Parcelado":
+      if (parcelas > 12) {
+        throw new Error("Parcelamento suporta no máximo 12x");
+      }
+      break;
+  }
 };
 ```
 
@@ -365,16 +384,16 @@ model ContaReceber {
   numeroParcela  Int?
   totalParcelas  Int?
   observacoes    String?
-  
+
   // NOVOS CAMPOS SUGERIDOS:
   numeroBoleto   String?  // Número da duplicata (ex: "001/003")
   codigoBarras   String?  // Código de barras do boleto
   linhaDigitavel String?  // Linha digitável
   nossoNumero    String?  // Número do banco
-  
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  
+
   venda Venda @relation(fields: [vendaId], references: [id], onDelete: Cascade)
 }
 ```
@@ -387,75 +406,80 @@ model ContaReceber {
 
 ```tsx
 const FormularioVenda = () => {
-    const [formaPagamento, setFormaPagamento] = useState('À vista');
-    const [parcelas, setParcelas] = useState(1);
-    
-    // Ajustar limites por forma de pagamento
-    const getMaxParcelas = () => {
-        switch (formaPagamento) {
-            case 'À vista': return 1;
-            case 'PIX': return 2;
-            case 'Boleto': return 6;
-            case 'Parcelado': return 12;
-            default: return 12;
-        }
-    };
-    
-    // Ajustar parcelas quando muda forma de pagamento
-    useEffect(() => {
-        const max = getMaxParcelas();
-        if (parcelas > max) {
-            setParcelas(max);
-        }
-    }, [formaPagamento]);
-    
-    return (
-        <form>
-            {/* Forma de Pagamento */}
-            <select 
-                value={formaPagamento}
-                onChange={(e) => setFormaPagamento(e.target.value)}
-            >
-                <option value="À vista">💵 À vista (30 dias)</option>
-                <option value="Parcelado">💳 Parcelado (até 12x)</option>
-                <option value="Boleto">📄 Boleto/Duplicata (até 6x)</option>
-                <option value="PIX">⚡ PIX (instantâneo)</option>
-            </select>
-            
-            {/* Número de Parcelas (desabilita para À vista) */}
-            <input 
-                type="number"
-                name="parcelas"
-                value={parcelas}
-                onChange={(e) => setParcelas(parseInt(e.target.value))}
-                min={1}
-                max={getMaxParcelas()}
-                disabled={formaPagamento === 'À vista'}
-            />
-            
-            {/* Entrada (opcional para todas menos PIX) */}
-            {formaPagamento !== 'PIX' && (
-                <input 
-                    type="number"
-                    name="valorEntrada"
-                    placeholder="Valor de entrada (opcional)"
-                />
-            )}
-            
-            {/* Aviso por forma */}
-            {formaPagamento === 'PIX' && (
-                <div className="bg-yellow-50 border border-yellow-200 p-3">
-                    ⚡ PIX: Pagamento será validado instantaneamente
-                </div>
-            )}
-            
-            {formaPagamento === 'Boleto' && (
-                <div className="bg-blue-50 border border-blue-200 p-3">
-                    📄 Boleto: Duplicatas serão geradas automaticamente
-                </div>
-            )}
-        </form>
-    );
+  const [formaPagamento, setFormaPagamento] = useState("À vista");
+  const [parcelas, setParcelas] = useState(1);
+
+  // Ajustar limites por forma de pagamento
+  const getMaxParcelas = () => {
+    switch (formaPagamento) {
+      case "À vista":
+        return 1;
+      case "PIX":
+        return 2;
+      case "Boleto":
+        return 6;
+      case "Parcelado":
+        return 12;
+      default:
+        return 12;
+    }
+  };
+
+  // Ajustar parcelas quando muda forma de pagamento
+  useEffect(() => {
+    const max = getMaxParcelas();
+    if (parcelas > max) {
+      setParcelas(max);
+    }
+  }, [formaPagamento]);
+
+  return (
+    <form>
+      {/* Forma de Pagamento */}
+      <select
+        value={formaPagamento}
+        onChange={(e) => setFormaPagamento(e.target.value)}
+      >
+        <option value="À vista">💵 À vista (30 dias)</option>
+        <option value="Parcelado">💳 Parcelado (até 12x)</option>
+        <option value="Boleto">📄 Boleto/Duplicata (até 6x)</option>
+        <option value="PIX">⚡ PIX (instantâneo)</option>
+      </select>
+
+      {/* Número de Parcelas (desabilita para À vista) */}
+      <input
+        type="number"
+        name="parcelas"
+        value={parcelas}
+        onChange={(e) => setParcelas(parseInt(e.target.value))}
+        min={1}
+        max={getMaxParcelas()}
+        disabled={formaPagamento === "À vista"}
+      />
+
+      {/* Entrada (opcional para todas menos PIX) */}
+      {formaPagamento !== "PIX" && (
+        <input
+          type="number"
+          name="valorEntrada"
+          placeholder="Valor de entrada (opcional)"
+        />
+      )}
+
+      {/* Aviso por forma */}
+      {formaPagamento === "PIX" && (
+        <div className="bg-yellow-50 border border-yellow-200 p-3">
+          ⚡ PIX: Pagamento será validado instantaneamente
+        </div>
+      )}
+
+      {formaPagamento === "Boleto" && (
+        <div className="bg-blue-50 border border-blue-200 p-3">
+          📄 Boleto: Duplicatas serão geradas automaticamente
+        </div>
+      )}
+    </form>
+  );
 };
 ```
 
@@ -469,7 +493,7 @@ const FormularioVenda = () => {
 {
   "orcamentoId": "ORC-2025-010",
   "clienteId": "CLI-005",
-  "valorTotal": 15000.00,
+  "valorTotal": 15000.0,
   "formaPagamento": "À vista",
   "parcelas": 1,
   "valorEntrada": 0,
@@ -488,10 +512,10 @@ const FormularioVenda = () => {
 {
   "orcamentoId": "ORC-2025-001",
   "clienteId": "CLI-001",
-  "valorTotal": 150000.00,
+  "valorTotal": 150000.0,
   "formaPagamento": "Boleto",
   "parcelas": 3,
-  "valorEntrada": 50000.00,
+  "valorEntrada": 50000.0,
   "observacoes": "Entrada + 2 boletos (30/60 dias)"
 }
 ```
@@ -507,10 +531,10 @@ const FormularioVenda = () => {
 {
   "orcamentoId": "ORC-2025-002",
   "clienteId": "CLI-002",
-  "valorTotal": 45000.00,
+  "valorTotal": 45000.0,
   "formaPagamento": "Parcelado",
   "parcelas": 6,
-  "valorEntrada": 7500.00,
+  "valorEntrada": 7500.0,
   "observacoes": "Parcelamento em cartão de crédito"
 }
 ```
@@ -526,7 +550,7 @@ const FormularioVenda = () => {
 {
   "orcamentoId": "ORC-2025-008",
   "clienteId": "CLI-004",
-  "valorTotal": 3500.00,
+  "valorTotal": 3500.0,
   "formaPagamento": "PIX",
   "parcelas": 1,
   "valorEntrada": 0,
@@ -567,24 +591,24 @@ interface VendaPayload {
 
 ```typescript
 // Gerar boleto automaticamente
-if (formaPagamento === 'Boleto') {
-    const boletos = await BoletoService.gerarBoletos({
-        vendaId: venda.id,
-        contasReceber
-    });
-    
-    // Retorna com links dos boletos
-    return { venda, contasReceber, boletos };
+if (formaPagamento === "Boleto") {
+  const boletos = await BoletoService.gerarBoletos({
+    vendaId: venda.id,
+    contasReceber,
+  });
+
+  // Retorna com links dos boletos
+  return { venda, contasReceber, boletos };
 }
 
 // Gerar QR Code PIX
-if (formaPagamento === 'PIX') {
-    const qrCode = await PIXService.gerarQRCode({
-        valor: valorTotal,
-        descricao: `Venda ${numeroVenda}`
-    });
-    
-    return { venda, contasReceber, qrCode };
+if (formaPagamento === "PIX") {
+  const qrCode = await PIXService.gerarQRCode({
+    valor: valorTotal,
+    descricao: `Venda ${numeroVenda}`,
+  });
+
+  return { venda, contasReceber, qrCode };
 }
 ```
 
@@ -595,7 +619,7 @@ if (formaPagamento === 'PIX') {
 ```prisma
 model Venda {
   // ... campos existentes
-  
+
   taxaCartao      Float?   // Taxa do cartão (ex: 3.5%)
   descontoAVista  Float?   // Desconto à vista (ex: 10%)
   valorLiquido    Float?   // Valor após taxas/descontos
@@ -603,17 +627,18 @@ model Venda {
 ```
 
 **Cálculo:**
+
 ```typescript
 // À vista com desconto
-if (formaPagamento === 'À vista') {
-    const desconto = valorTotal * 0.10;  // 10%
-    const valorLiquido = valorTotal - desconto;
+if (formaPagamento === "À vista") {
+  const desconto = valorTotal * 0.1; // 10%
+  const valorLiquido = valorTotal - desconto;
 }
 
 // Parcelado com taxa
-if (formaPagamento === 'Parcelado') {
-    const taxa = valorTotal * 0.035;  // 3.5%
-    const valorLiquido = valorTotal + taxa;
+if (formaPagamento === "Parcelado") {
+  const taxa = valorTotal * 0.035; // 3.5%
+  const valorLiquido = valorTotal + taxa;
 }
 ```
 
@@ -623,17 +648,17 @@ if (formaPagamento === 'Parcelado') {
 
 ```typescript
 enum StatusPagamento {
-    Pendente = 'Pendente',
-    Pago = 'Pago',
-    Atrasado = 'Atrasado',
-    
-    // Novos status específicos:
-    AguardandoPIX = 'Aguardando PIX',
-    BoletoEmitido = 'Boleto Emitido',
-    BoletoVencido = 'Boleto Vencido',
-    CartaoAprovado = 'Cartão Aprovado',
-    CartaoRecusado = 'Cartão Recusado',
-    EmAnalise = 'Em Análise'
+  Pendente = "Pendente",
+  Pago = "Pago",
+  Atrasado = "Atrasado",
+
+  // Novos status específicos:
+  AguardandoPIX = "Aguardando PIX",
+  BoletoEmitido = "Boleto Emitido",
+  BoletoVencido = "Boleto Vencido",
+  CartaoAprovado = "Cartão Aprovado",
+  CartaoRecusado = "Cartão Recusado",
+  EmAnalise = "Em Análise",
 }
 ```
 
@@ -645,65 +670,65 @@ enum StatusPagamento {
 
 ```tsx
 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-    {/* Opção 1: À Vista */}
-    <button
-        onClick={() => setFormaPagamento('À vista')}
-        className={`p-4 border-2 rounded-lg ${
-            formaPagamento === 'À vista' 
-                ? 'border-green-500 bg-green-50' 
-                : 'border-gray-300'
-        }`}
-    >
-        <div className="text-3xl mb-2">💵</div>
-        <h3 className="font-bold">À Vista</h3>
-        <p className="text-sm text-gray-600">30 dias</p>
-        <span className="text-green-600 font-semibold">-10% desconto</span>
-    </button>
-    
-    {/* Opção 2: Parcelado */}
-    <button
-        onClick={() => setFormaPagamento('Parcelado')}
-        className={`p-4 border-2 rounded-lg ${
-            formaPagamento === 'Parcelado' 
-                ? 'border-blue-500 bg-blue-50' 
-                : 'border-gray-300'
-        }`}
-    >
-        <div className="text-3xl mb-2">💳</div>
-        <h3 className="font-bold">Parcelado</h3>
-        <p className="text-sm text-gray-600">até 12x</p>
-        <span className="text-blue-600 font-semibold">Sem juros</span>
-    </button>
-    
-    {/* Opção 3: Boleto */}
-    <button
-        onClick={() => setFormaPagamento('Boleto')}
-        className={`p-4 border-2 rounded-lg ${
-            formaPagamento === 'Boleto' 
-                ? 'border-orange-500 bg-orange-50' 
-                : 'border-gray-300'
-        }`}
-    >
-        <div className="text-3xl mb-2">📄</div>
-        <h3 className="font-bold">Boleto</h3>
-        <p className="text-sm text-gray-600">até 6x</p>
-        <span className="text-orange-600 font-semibold">Duplicata</span>
-    </button>
-    
-    {/* Opção 4: PIX */}
-    <button
-        onClick={() => setFormaPagamento('PIX')}
-        className={`p-4 border-2 rounded-lg ${
-            formaPagamento === 'PIX' 
-                ? 'border-purple-500 bg-purple-50' 
-                : 'border-gray-300'
-        }`}
-    >
-        <div className="text-3xl mb-2">⚡</div>
-        <h3 className="font-bold">PIX</h3>
-        <p className="text-sm text-gray-600">Instantâneo</p>
-        <span className="text-purple-600 font-semibold">Imediato</span>
-    </button>
+  {/* Opção 1: À Vista */}
+  <button
+    onClick={() => setFormaPagamento("À vista")}
+    className={`p-4 border-2 rounded-lg ${
+      formaPagamento === "À vista"
+        ? "border-green-500 bg-green-50"
+        : "border-gray-300"
+    }`}
+  >
+    <div className="text-3xl mb-2">💵</div>
+    <h3 className="font-bold">À Vista</h3>
+    <p className="text-sm text-gray-600">30 dias</p>
+    <span className="text-green-600 font-semibold">-10% desconto</span>
+  </button>
+
+  {/* Opção 2: Parcelado */}
+  <button
+    onClick={() => setFormaPagamento("Parcelado")}
+    className={`p-4 border-2 rounded-lg ${
+      formaPagamento === "Parcelado"
+        ? "border-blue-500 bg-blue-50"
+        : "border-gray-300"
+    }`}
+  >
+    <div className="text-3xl mb-2">💳</div>
+    <h3 className="font-bold">Parcelado</h3>
+    <p className="text-sm text-gray-600">até 12x</p>
+    <span className="text-blue-600 font-semibold">Sem juros</span>
+  </button>
+
+  {/* Opção 3: Boleto */}
+  <button
+    onClick={() => setFormaPagamento("Boleto")}
+    className={`p-4 border-2 rounded-lg ${
+      formaPagamento === "Boleto"
+        ? "border-orange-500 bg-orange-50"
+        : "border-gray-300"
+    }`}
+  >
+    <div className="text-3xl mb-2">📄</div>
+    <h3 className="font-bold">Boleto</h3>
+    <p className="text-sm text-gray-600">até 6x</p>
+    <span className="text-orange-600 font-semibold">Duplicata</span>
+  </button>
+
+  {/* Opção 4: PIX */}
+  <button
+    onClick={() => setFormaPagamento("PIX")}
+    className={`p-4 border-2 rounded-lg ${
+      formaPagamento === "PIX"
+        ? "border-purple-500 bg-purple-50"
+        : "border-gray-300"
+    }`}
+  >
+    <div className="text-3xl mb-2">⚡</div>
+    <h3 className="font-bold">PIX</h3>
+    <p className="text-sm text-gray-600">Instantâneo</p>
+    <span className="text-purple-600 font-semibold">Imediato</span>
+  </button>
 </div>
 ```
 
@@ -736,7 +761,8 @@ Posso adicionar:
 
 1. **Vencimentos personalizados** por forma de pagamento
 2. **Validações específicas** (ex: À vista = 1 parcela apenas)
-3. **Descrições melhores** nas contas (ex: "Boleto 1/3" ao invés de "Parcela 1/3")
+3. **Descrições melhores** nas contas (ex: "Boleto 1/3" ao invés de "Parcela
+   1/3")
 4. **Enum de formas de pagamento** (type-safe)
 
 Me avise se quer que eu implemente alguma dessas melhorias! 😊

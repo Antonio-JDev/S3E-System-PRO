@@ -3,7 +3,7 @@
 ## ✅ **Tudo Está Pronto!**
 
 - ✅ Migration aplicada
-- ✅ 66 materiais inicializados  
+- ✅ 66 materiais inicializados
 - ✅ Backend compilado
 - ✅ Frontend atualizado
 - ✅ **Problema do JSON vazio: CORRIGIDO!** ✨
@@ -116,7 +116,7 @@ Exemplo do que você verá:
 
 6. ✅ Deve mostrar preview:
    "✅ 1 item válido será importado"
-   
+
    Preview mostra:
    - SKU: MAT001
    - Nome: Cabo...
@@ -138,7 +138,7 @@ Exemplo do que você verá:
 
 ```
 1. No Prisma Studio (deve estar aberto)
-   
+
 2. Clique em "historicoPrecos" (tabela)
 
 3. ✅ Deve ter 1 registro:
@@ -177,7 +177,9 @@ Exemplo do que você verá:
 ## 🐛 **SE ALGO NÃO FUNCIONOU:**
 
 ### Problema: JSON ainda vazio
+
 **Solução:**
+
 ```bash
 # Limpe cache do navegador
 Ctrl + Shift + Delete → Limpar cache
@@ -187,7 +189,9 @@ Ctrl + Shift + R
 ```
 
 ### Problema: PDF não abre
+
 **Solução:**
+
 ```
 1. Verifique bloqueador de pop-ups
 2. Permita pop-ups para localhost:5173
@@ -195,7 +199,9 @@ Ctrl + Shift + R
 ```
 
 ### Problema: Erro ao importar
+
 **Solução:**
+
 ```
 1. Valide JSON em: https://jsonlint.com/
 2. Certifique que não alterou id ou sku
@@ -219,8 +225,8 @@ Copie este conteúdo e salve como `teste.json`:
       "id": "COLE_ID_REAL_AQUI",
       "sku": "COLE_SKU_REAL_AQUI",
       "nome": "Material Teste",
-      "precoAtual": 10.00,
-      "precoNovo": 12.00,
+      "precoAtual": 10.0,
+      "precoNovo": 12.0,
       "unidadeMedida": "UN",
       "estoque": 50,
       "estoqueMinimo": 10
@@ -230,6 +236,7 @@ Copie este conteúdo e salve como `teste.json`:
 ```
 
 **Substitua:**
+
 - `COLE_ID_REAL_AQUI` → Copie do JSON baixado
 - `COLE_SKU_REAL_AQUI` → Copie do JSON baixado
 
@@ -259,18 +266,21 @@ Depois importe este arquivo!
 Abra o Console (F12) e veja os logs:
 
 **Ao baixar JSON:**
+
 ```
 ✅ GET /api/materiais/template-importacao?formato=json 200
 ✅ JSON com 66 materiais
 ```
 
 **Ao baixar PDF:**
+
 ```
 ✅ GET /api/materiais/template-importacao?formato=pdf 200
 ✅ Materiais carregados, abrindo HTML
 ```
 
 **Ao importar:**
+
 ```
 ✅ POST /api/materiais/preview-importacao 200
 ✅ Preview gerado: X alterações
@@ -308,4 +318,3 @@ Após confirmar que tudo funciona:
 ---
 
 **BOA SORTE NOS TESTES! 🍀**
-

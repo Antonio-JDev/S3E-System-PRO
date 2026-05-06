@@ -1,11 +1,9 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { EstoqueService } from './estoque.service';
 import { ContasPagarService } from './contasPagar.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
 import { normalizarNomeProduto, compararNomesProdutos } from '../utils/stringUtils';
-
-const prisma = new PrismaClient();
 
 export interface CompraItemPayload {
     materialId?: string;
@@ -31,10 +29,12 @@ export interface CompraPayload {
     dataRecebimento?: Date;
     valorFrete?: number;
     outrasDespesas?: number;
+    /** Desconto em R$ sobre o subtotal dos produtos (não ultrapassa o subtotal) */
+    valorDesconto?: number;
     status: string; // Pendente, Recebido, Cancelado
+    classificacao?: 'COMPOSICAO_ESTOQUE' | 'FERRAMENTAS' | 'RECURSOS_HUMANOS' | 'LIMPEZA_INSUMOS' | 'ESCRITORIO_INSUMOS' | 'DESPESAS_VARIADAS';
     items: CompraItemPayload[];
     observacoes?: string;
-    // Campos financeiros adicionais (XML ou preenchimento manual)
     valorIPI?: number;
     valorTotalProdutos?: number;
     valorTotalNota?: number;
@@ -53,6 +53,25 @@ export interface CompraPayload {
 
 export class ComprasService {
     /**
+     * Retorna o destino do processamento da compra baseado na classificação.
+     * Possíveis retornos:
+     * - 'estoque' (COMPOSICAO_ESTOQUE, LIMPEZA_INSUMOS, ESCRITORIO_INSUMOS)
+     * - 'despesas_variadas' (DESPESAS_VARIADAS) — apenas registro financeiro / histórico; não cria Material nem movimenta estoque
+     * - 'ferramentas' (FERRAMENTAS)
+     * - 'rh' (RECURSOS_HUMANOS)
+     */
+    static destinoPorClassificacao(
+        classificacao?: string | null
+    ): 'estoque' | 'ferramentas' | 'rh' | 'despesas_variadas' {
+        const cls = (classificacao || 'COMPOSICAO_ESTOQUE').toString().toUpperCase();
+        if (cls === 'FERRAMENTAS') return 'ferramentas';
+        if (cls === 'RECURSOS_HUMANOS') return 'rh';
+        if (cls === 'DESPESAS_VARIADAS') return 'despesas_variadas';
+        // LIMPEZA_INSUMOS e ESCRITORIO_INSUMOS seguem fluxo de estoque
+        return 'estoque';
+    }
+
+    /**
      * Registra uma compra completa com integração de estoque e contas a pagar
      */
     static async registrarCompra(data: CompraPayload) {
@@ -67,7 +86,9 @@ export class ComprasService {
             dataRecebimento,
             valorFrete = 0,
             outrasDespesas = 0,
+            valorDesconto: valorDescontoRaw = 0,
             status,
+            classificacao = 'COMPOSICAO_ESTOQUE', // ✅ NOVO: Classificação da compra (padrão: Composição Estoque)
             items,
             observacoes,
             valorIPI = 0,
@@ -120,21 +141,26 @@ export class ComprasService {
             0
         );
 
+        const valorDesconto = Math.min(
+            Math.max(0, Number(valorDescontoRaw) || 0),
+            valorSubtotal
+        );
+
         // Preferência de cálculo:
         // 1) Se vier valorTotalNota do XML, confiar nele
-        // 2) Caso contrário, somar subtotal + frete + outras + IPI (se houver)
+        // 2) Caso contrário: (subtotal - desconto) + frete + outras + IPI
         let valorTotal = valorTotalNota && valorTotalNota > 0
             ? valorTotalNota
-            : valorSubtotal + valorFrete + outrasDespesas + (valorIPI || 0);
+            : valorSubtotal - valorDesconto + valorFrete + outrasDespesas + (valorIPI || 0);
 
         // Buscar o próximo número sequencial disponível
         // Isso garante que não haverá conflito mesmo após importações com números específicos
         const ultimaCompra = await prisma.compra.findFirst({
-            orderBy: { numeroSequencial: 'desc' },
-            select: { numeroSequencial: true }
+            orderBy: { numeroSequencial: 'desc' } as any,
+            select: { numeroSequencial: true } as any
         });
 
-        const proximoNumero = (ultimaCompra?.numeroSequencial || 0) + 1;
+        const proximoNumero = ((ultimaCompra as any)?.numeroSequencial || 0) + 1;
 
         // Atualizar a sequência do PostgreSQL para evitar conflitos futuros
         // Tentar diferentes nomes possíveis da sequência
@@ -158,7 +184,303 @@ export class ComprasService {
 
         // Usar transação para garantir consistência
         const resultado = await prisma.$transaction(async (tx) => {
-            // 0. CRIAR MATERIALS AUTOMATICAMENTE para itens novos
+            // Determinar destino por classificação
+            const destino = ComprasService.destinoPorClassificacao(classificacao);
+
+            // ========== CLASSIFICAÇÃO FERRAMENTAS: não vai para estoque (Material), vai para página Ferramentas ==========
+            if (destino === 'ferramentas') {
+                console.log('🔧 Compra classificada como FERRAMENTAS - itens entram na página Ferramentas (não no estoque).');
+                const categoriaPadrao = 'Ferramenta';
+                const itemsComFerramentaId: Array<{
+                    ferramentaId: string;
+                    nomeProduto: string;
+                    ncm: string | null;
+                    quantidade: number;
+                    valorUnit: number;
+                    valorTotal: number;
+                    quantidadeFracionada?: number;
+                    tipoEmbalagem?: string;
+                    unidadeEmbalagem?: string;
+                }> = [];
+
+                for (const item of items) {
+                    const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
+                    const quantidadeParaFerramenta = temFracionamento
+                        ? Math.round(item.quantidade * (item as any).quantidadeFracionada)
+                        : Math.round(item.quantidade);
+
+                    let ferramenta = await tx.ferramenta.findFirst({
+                        where: { nome: item.nomeProduto, ativo: true }
+                    });
+                    if (!ferramenta) {
+                        let codigo = `FER-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+                        let exists = await tx.ferramenta.findUnique({ where: { codigo } });
+                        while (exists) {
+                            codigo = `FER-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+                            exists = await tx.ferramenta.findUnique({ where: { codigo } });
+                        }
+                        ferramenta = await tx.ferramenta.create({
+                            data: {
+                                nome: item.nomeProduto,
+                                codigo,
+                                categoria: categoriaPadrao,
+                                valorCompra: item.valorUnit,
+                                quantidade: 0,
+                                ativo: true
+                            }
+                        });
+                        console.log(`✅ Ferramenta criada: ${ferramenta.nome} (${ferramenta.codigo})`);
+                    }
+
+                    itemsComFerramentaId.push({
+                        ferramentaId: ferramenta.id,
+                        nomeProduto: item.nomeProduto,
+                        ncm: item.ncm ? String(item.ncm) : null,
+                        quantidade: item.quantidade,
+                        valorUnit: item.valorUnit,
+                        valorTotal: item.quantidade * item.valorUnit,
+                        quantidadeFracionada: (item as any).quantidadeFracionada,
+                        tipoEmbalagem: (item as any).tipoEmbalagem,
+                        unidadeEmbalagem: item.unidadeEmbalagem
+                    });
+                }
+
+                const xmlMeta: any = {
+                    valorSubtotal,
+                    valorFrete,
+                    outrasDespesas,
+                    valorDesconto,
+                    valorIPI: valorIPI || 0,
+                    valorTotalProdutos: valorTotalProdutos ?? valorSubtotal,
+                    valorTotalNota: valorTotal,
+                    duplicatas: duplicatas || [],
+                    statusImportacao: statusImportacao || 'MANUAL',
+                    condicoesPagamento: condicoesPagamento || null,
+                    parcelas: parcelas || null,
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                };
+
+                const compra = await tx.compra.create({
+                    data: {
+                        numeroSequencial: proximoNumero,
+                        fornecedorId: fornecedor.id,
+                        fornecedorNome,
+                        fornecedorCNPJ: cnpjString,
+                        fornecedorTel: fornecedorTel || null,
+                        numeroNF: String(numeroNF),
+                        serieNF: serieNF != null && serieNF !== '' ? String(serieNF) : null,
+                        dataEmissaoNF,
+                        dataCompra,
+                        dataRecebimento: dataRecebimento || null,
+                        valorSubtotal,
+                        valorFrete,
+                        outrasDespesas,
+                        valorDesconto,
+                        valorTotal,
+                        status,
+                        classificacao,
+                        observacoes,
+                        xmlData: JSON.stringify(xmlMeta),
+                        obraId: obraId || null,
+                        empresaCompradoraNome: data.empresaCompradoraNome || null,
+                        empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null,
+                        items: {
+                            create: itemsComFerramentaId.map((it: any) => ({
+                                ferramentaId: it.ferramentaId,
+                                nomeProduto: it.nomeProduto,
+                                ncm: it.ncm,
+                                quantidade: it.quantidade,
+                                valorUnit: it.valorUnit,
+                                valorTotal: it.valorTotal,
+                                quantidadeFracionada: it.quantidadeFracionada || null,
+                                tipoEmbalagem: it.tipoEmbalagem || null,
+                                unidadeEmbalagem: it.unidadeEmbalagem || null
+                            }))
+                        }
+                    } as any,
+                    include: { items: true, fornecedor: true }
+                });
+
+                if (status === 'Recebido') {
+                    for (const it of itemsComFerramentaId) {
+                        const temFrac = it.quantidadeFracionada && it.quantidadeFracionada > 0;
+                        const qtd = temFrac ? Math.round(it.quantidade * it.quantidadeFracionada!) : Math.round(it.quantidade);
+                        await tx.ferramenta.update({
+                            where: { id: it.ferramentaId },
+                            data: { quantidade: { increment: qtd } }
+                        });
+                    }
+                    console.log('✅ Quantidade adicionada às ferramentas (compra Recebida).');
+                }
+
+                return {
+                    compra,
+                    contasPagar: null,
+                    estoqueAtualizado: false,
+                    estatisticas: { materiaisCriados: 0, materiaisIncrementados: 0, totalItens: items.length }
+                };
+            }
+
+            // ========== CLASSIFICAÇÃO RECURSOS_HUMANOS: itens aparecem na página RH (vincular eletricista, data compra/entrega) ==========
+            if (destino === 'rh') {
+                console.log('👥 Compra classificada como RECURSOS_HUMANOS - itens entram na página Recursos Humanos.');
+                const xmlMeta: any = {
+                    valorSubtotal,
+                    valorFrete,
+                    outrasDespesas,
+                    valorDesconto,
+                    valorIPI: valorIPI || 0,
+                    valorTotalProdutos: valorTotalProdutos ?? valorSubtotal,
+                    valorTotalNota: valorTotal,
+                    duplicatas: duplicatas || [],
+                    statusImportacao: statusImportacao || 'MANUAL',
+                    condicoesPagamento: condicoesPagamento || null,
+                    parcelas: parcelas || null,
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                };
+
+                const compra = await tx.compra.create({
+                    data: {
+                        numeroSequencial: proximoNumero,
+                        fornecedorId: fornecedor.id,
+                        fornecedorNome,
+                        fornecedorCNPJ: cnpjString,
+                        fornecedorTel: fornecedorTel || null,
+                        numeroNF: String(numeroNF),
+                        serieNF: serieNF != null && serieNF !== '' ? String(serieNF) : null,
+                        dataEmissaoNF,
+                        dataCompra,
+                        dataRecebimento: dataRecebimento || null,
+                        valorSubtotal,
+                        valorFrete,
+                        outrasDespesas,
+                        valorDesconto,
+                        valorTotal,
+                        status,
+                        classificacao,
+                        observacoes,
+                        xmlData: JSON.stringify(xmlMeta),
+                        obraId: obraId || null,
+                        empresaCompradoraNome: data.empresaCompradoraNome || null,
+                        empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null,
+                        items: {
+                            create: items.map((item: any) => ({
+                                nomeProduto: item.nomeProduto,
+                                quantidade: item.quantidade,
+                                valorUnit: item.valorUnit,
+                                valorTotal: item.quantidade * item.valorUnit,
+                                ncm: item.ncm ? String(item.ncm) : null,
+                                quantidadeFracionada: item.quantidadeFracionada || null,
+                                tipoEmbalagem: item.tipoEmbalagem || null,
+                                unidadeEmbalagem: item.unidadeEmbalagem || null
+                            }))
+                        }
+                    } as any,
+                    include: { items: true, fornecedor: true }
+                });
+
+                if (status === 'Recebido') {
+                    const compraComItems = await tx.compra.findUnique({
+                        where: { id: compra.id },
+                        include: { items: true }
+                    });
+                    if (compraComItems?.items) {
+                        for (const item of compraComItems.items) {
+                            await (tx as any).recursoHumanoEstoque.create({
+                                data: {
+                                    compraId: compra.id,
+                                    compraItemId: item.id,
+                                    nomeItem: item.nomeProduto,
+                                    quantidade: item.quantidade,
+                                    valorUnitario: item.valorUnit,
+                                    valorTotal: item.valorTotal
+                                }
+                            });
+                        }
+                    }
+                    console.log('✅ Itens de RH criados no estoque de Recursos Humanos.');
+                }
+
+                return {
+                    compra,
+                    contasPagar: null,
+                    estoqueAtualizado: false,
+                    estatisticas: { materiaisCriados: 0, materiaisIncrementados: 0, totalItens: items.length }
+                };
+            }
+
+            // ========== DESPESAS VARIADAS: só registro de gasto (NF, fornecedor, itens descritivos); sem Material e sem estoque ==========
+            if (destino === 'despesas_variadas') {
+                console.log(
+                    '💸 Compra classificada como DESPESAS_VARIADAS — registro financeiro apenas (sem cadastro em estoque).'
+                );
+                // Sem remessa física / reposição: concluída no registro (contas a pagar seguem pelo xmlData).
+                const statusDespesa = 'Recebido';
+                const dataRefRecebimento = dataRecebimento ?? dataCompra;
+                const xmlMeta: any = {
+                    valorSubtotal,
+                    valorFrete,
+                    outrasDespesas,
+                    valorDesconto,
+                    valorIPI: valorIPI || 0,
+                    valorTotalProdutos: valorTotalProdutos ?? valorSubtotal,
+                    valorTotalNota: valorTotal,
+                    duplicatas: duplicatas || [],
+                    statusImportacao: statusImportacao || 'MANUAL',
+                    condicoesPagamento: condicoesPagamento || null,
+                    parcelas: parcelas || null,
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                };
+
+                const compra = await tx.compra.create({
+                    data: {
+                        numeroSequencial: proximoNumero,
+                        fornecedorId: fornecedor.id,
+                        fornecedorNome,
+                        fornecedorCNPJ: cnpjString,
+                        fornecedorTel: fornecedorTel || null,
+                        numeroNF: String(numeroNF),
+                        serieNF: serieNF != null && serieNF !== '' ? String(serieNF) : null,
+                        dataEmissaoNF,
+                        dataCompra,
+                        dataRecebimento: dataRefRecebimento,
+                        valorSubtotal,
+                        valorFrete,
+                        outrasDespesas,
+                        valorDesconto,
+                        valorTotal,
+                        status: statusDespesa,
+                        classificacao,
+                        observacoes,
+                        xmlData: JSON.stringify(xmlMeta),
+                        obraId: obraId || null,
+                        empresaCompradoraNome: data.empresaCompradoraNome || null,
+                        empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null,
+                        items: {
+                            create: items.map((item: any) => ({
+                                nomeProduto: item.nomeProduto,
+                                quantidade: item.quantidade,
+                                valorUnit: item.valorUnit,
+                                valorTotal: item.quantidade * item.valorUnit,
+                                ncm: item.ncm ? String(item.ncm) : null,
+                                quantidadeFracionada: item.quantidadeFracionada || null,
+                                tipoEmbalagem: item.tipoEmbalagem || null,
+                                unidadeEmbalagem: item.unidadeEmbalagem || null
+                            }))
+                        }
+                    } as any,
+                    include: { items: true, fornecedor: true }
+                });
+
+                return {
+                    compra,
+                    contasPagar: null,
+                    estoqueAtualizado: false,
+                    estatisticas: { materiaisCriados: 0, materiaisIncrementados: 0, totalItens: items.length }
+                };
+            }
+
+            // 0. CRIAR MATERIALS AUTOMATICAMENTE para itens novos (COMPOSICAO_ESTOQUE e demais)
             console.log('🔍 Processando items da compra...');
             const itemsComMaterialId: Array<{
                 materialId: string;
@@ -180,16 +502,16 @@ export class ComprasService {
                 let materialId = item.materialId;
                 
                 // ✅ PROCESSAR FRACIONAMENTO
-                const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                 let quantidadeTotalUnidades = item.quantidade; // Quantidade de embalagens por padrão
                 let precoUnitarioCalculado: number | null = null;
                 let precoEmbalagem: number | null = null;
                 
                 if (temFracionamento) {
-                    quantidadeTotalUnidades = item.quantidade * item.quantidadeFracionada;
+                    quantidadeTotalUnidades = item.quantidade * (item as any).quantidadeFracionada;
                     precoEmbalagem = item.valorUnit;
-                    precoUnitarioCalculado = item.valorUnit / item.quantidadeFracionada;
-                    console.log(`📦 Item fracionado: ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} × ${item.quantidadeFracionada} un = ${quantidadeTotalUnidades} unidades`);
+                    precoUnitarioCalculado = item.valorUnit / (item as any).quantidadeFracionada;
+                    console.log(`📦 Item fracionado: ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} × ${(item as any).quantidadeFracionada} un = ${quantidadeTotalUnidades} unidades`);
                     console.log(`💰 Preço embalagem: R$ ${precoEmbalagem.toFixed(2)} | Preço unitário: R$ ${precoUnitarioCalculado.toFixed(4)}`);
                 }
                 
@@ -257,8 +579,8 @@ export class ComprasService {
                         
                         // ✅ Adicionar campos de fracionamento se houver
                         if (temFracionamento) {
-                            materialData.quantidadePorEmbalagem = item.quantidadeFracionada;
-                            materialData.tipoEmbalagem = item.tipoEmbalagem || 'CAIXA';
+                            materialData.quantidadePorEmbalagem = (item as any).quantidadeFracionada;
+                            materialData.tipoEmbalagem = (item as any).tipoEmbalagem || 'CAIXA';
                             materialData.precoEmbalagem = precoEmbalagem;
                             materialData.precoUnitario = precoUnitarioCalculado;
                         }
@@ -281,12 +603,12 @@ export class ComprasService {
                         
                         // ✅ Atualizar informações de fracionamento se houver
                         if (temFracionamento) {
-                            updateData.quantidadePorEmbalagem = item.quantidadeFracionada;
-                            updateData.tipoEmbalagem = item.tipoEmbalagem || 'CAIXA';
+                            updateData.quantidadePorEmbalagem = (item as any).quantidadeFracionada;
+                            updateData.tipoEmbalagem = (item as any).tipoEmbalagem || 'CAIXA';
                             updateData.precoEmbalagem = precoEmbalagem;
                             updateData.precoUnitario = precoUnitarioCalculado;
                             needsUpdate = true;
-                            console.log(`📦 Fracionamento atualizado: ${item.quantidadeFracionada} un/${item.tipoEmbalagem || 'CAIXA'}`);
+                            console.log(`📦 Fracionamento atualizado: ${(item as any).quantidadeFracionada} un/${(item as any).tipoEmbalagem || 'CAIXA'}`);
                         }
                         
                         // Atualizar preço se necessário
@@ -337,8 +659,8 @@ export class ComprasService {
                         valorUnit: item.valorUnit, // Preço por embalagem
                         valorTotal: item.quantidade * item.valorUnit,
                         // ✅ Campos de fracionamento
-                        quantidadeFracionada: item.quantidadeFracionada,
-                        tipoEmbalagem: item.tipoEmbalagem,
+                        quantidadeFracionada: (item as any).quantidadeFracionada,
+                        tipoEmbalagem: (item as any).tipoEmbalagem,
                         unidadeEmbalagem: item.unidadeEmbalagem
                     });
                 }
@@ -350,6 +672,7 @@ export class ComprasService {
                 valorSubtotal,
                 valorFrete,
                 outrasDespesas,
+                valorDesconto,
                 valorIPI: valorIPI || 0,
                 valorTotalProdutos: valorTotalProdutos ?? valorSubtotal,
                 valorTotalNota: valorTotal,
@@ -369,15 +692,17 @@ export class ComprasService {
                     fornecedorCNPJ: cnpjString,
                     fornecedorTel: fornecedorTel || null,
                     numeroNF: String(numeroNF),
-                    serieNF: serieNF || null,
+                    serieNF: serieNF != null && serieNF !== '' ? String(serieNF) : null,
                     dataEmissaoNF,
                     dataCompra,
                     dataRecebimento: dataRecebimento || null,
                     valorSubtotal,
                     valorFrete,
                     outrasDespesas,
+                    valorDesconto,
                     valorTotal,
                     status,
+                    classificacao, // ✅ NOVO: Classificação da compra
                     observacoes,
                     xmlData: JSON.stringify(xmlMeta),
                     obraId: obraId || null, // ✅ NOVO: Vincular obra se fornecida
@@ -392,19 +717,19 @@ export class ComprasService {
                             valorUnit: item.valorUnit,
                             valorTotal: item.valorTotal,
                             // ✅ Campos de fracionamento
-                            quantidadeFracionada: item.quantidadeFracionada || null,
-                            tipoEmbalagem: item.tipoEmbalagem || null,
+                            quantidadeFracionada: (item as any).quantidadeFracionada || null,
+                            tipoEmbalagem: (item as any).tipoEmbalagem || null,
                             unidadeEmbalagem: item.unidadeEmbalagem || null
                         }))
                     }
-                },
+                } as any,
                 include: {
                     items: true,
                     fornecedor: true
                 }
             });
             
-            console.log(`✅ Compra criada: #${compra.numeroSequencial} com ${compra.items.length} itens`);
+            console.log(`✅ Compra criada: #${(compra as any).numeroSequencial} com ${(compra as any).items.length} itens`);
 
             // ✅ CORREÇÃO: NÃO atualizar estoque automaticamente ao criar compra
             // O estoque só deve ser atualizado quando o usuário confirmar o recebimento
@@ -431,22 +756,33 @@ export class ComprasService {
             };
         });
 
-        // ✅ CORREÇÃO CRÍTICA: Se a compra foi criada com status "Recebido",
-        // gerar contas a pagar imediatamente (caso contrário nunca serão criadas)
-        if (status === 'Recebido') {
-            console.log('💰 Compra criada com status Recebido - gerando contas a pagar...');
-            await ComprasService.gerarContasPagarAoReceberCompra(resultado.compra.id);
+        // ✅ CORREÇÃO CRÍTICA: Gerar contas a pagar SEMPRE que houver duplicatas/parcelas,
+        // independente do status (Pendente ou Recebido). As parcelas são obrigações financeiras
+        // que existem desde o momento da compra - tanto para XML quanto para registro manual.
+        let xmlMetaCriacao: any = {};
+        try {
+            xmlMetaCriacao = JSON.parse((resultado.compra as any).xmlData || '{}');
+        } catch (_) {
+            xmlMetaCriacao = {};
+        }
+        const duplicatasCriacao = Array.isArray(xmlMetaCriacao?.duplicatas) ? xmlMetaCriacao.duplicatas : [];
+        const temParcelasFallback = xmlMetaCriacao?.parcelas && xmlMetaCriacao?.dataPrimeiroVencimento;
+
+        if (duplicatasCriacao.length > 0 || temParcelasFallback) {
+            console.log('💰 Gerando contas a pagar para compra (manual ou XML) com parcelas cadastradas...');
+            await ComprasService.gerarContasPagarParaCompra(resultado.compra.id);
         }
 
         return resultado;
     }
 
     /**
-     * Gera contas a pagar para uma compra que foi marcada como "Recebido",
-     * utilizando as duplicatas ou condições de pagamento salvas em xmlData.
+     * Gera contas a pagar para uma compra utilizando as duplicatas ou condições de pagamento salvas em xmlData.
      * Só gera se ainda não existirem contas vinculadas a essa compra.
+     * É chamado tanto na CRIAÇÃO da compra (manual ou XML) quanto no RECEBIMENTO.
+     * As parcelas são obrigações financeiras que existem desde o momento da compra.
      */
-    static async gerarContasPagarAoReceberCompra(id: string) {
+    static async gerarContasPagarParaCompra(id: string) {
         // Verificar se já existem contas a pagar vinculadas a esta compra
         const contasExistentes = await prisma.contaPagar.count({
             where: { compraId: id }
@@ -454,7 +790,7 @@ export class ComprasService {
 
         if (contasExistentes > 0) {
             console.log(`💰 Já existem ${contasExistentes} conta(s) a pagar para a compra ${id}. Nada a fazer.`);
-            return;
+            return null;
         }
 
         const compra = await prisma.compra.findUnique({
@@ -463,13 +799,7 @@ export class ComprasService {
 
         if (!compra) {
             console.warn(`⚠️ Não foi possível gerar contas a pagar: compra ${id} não encontrada.`);
-            return;
-        }
-
-        // Somente gerar contas a pagar se a compra estiver com status "Recebido"
-        if (compra.status !== 'Recebido') {
-            console.log(`💤 Compra ${id} com status "${compra.status}" - contas a pagar serão geradas apenas ao receber.`);
-            return;
+            return null;
         }
 
         // Recuperar metadados financeiros/duplicatas do xmlData
@@ -562,7 +892,7 @@ export class ComprasService {
                             }
                         }
                     }
-                }
+                } as any
             });
 
             if (!compra) {
@@ -603,13 +933,17 @@ export class ComprasService {
     /**
      * Lista compras com filtros
      */
+    /**
+     * Lista compras com filtros
+     * ✅ CORREÇÃO CRÍTICA: Aumentar limit padrão de 10 para 1000 para evitar perda de dados em auditoria
+     */
     static async listarCompras(
         status?: string,
         fornecedorId?: string,
         dataInicio?: Date,
         dataFim?: Date,
         page: number = 1,
-        limit: number = 10
+        limit: number = 1000
     ) {
         const skip = (page - 1) * limit;
         const where: any = {};
@@ -637,7 +971,7 @@ export class ComprasService {
                 where,
                 skip,
                 take: limit,
-                orderBy: { numeroSequencial: 'desc' }, // ✅ Ordenar por número sequencial (mais recente no topo)
+                orderBy: { numeroSequencial: 'desc' } as any, // ✅ Ordenar por número sequencial (mais recente no topo)
                 include: {
                     fornecedor: {
                         select: {
@@ -653,12 +987,22 @@ export class ComprasService {
                             nomeObra: true,
                             status: true
                         }
-                    },
-                    items: true
-                }
+                    } as any,
+                    items: true,
+                    contasPagar: {
+                        select: {
+                            id: true,
+                            status: true,
+                            valorParcela: true,
+                            dataVencimento: true
+                        }
+                    }
+                } as any
             }),
             prisma.compra.count({ where })
         ]);
+
+        console.log(`📦 Compras listadas: ${compras.length} de ${total} total (página ${page}, limit ${limit})`);
 
         return {
             compras,
@@ -704,9 +1048,44 @@ export class ComprasService {
                 include: { items: true, fornecedor: true }
             });
 
-            // Atualizar estoque se necessário
+            // Atualizar estoque/ferramentas/RH conforme classificação
             if (deveAtualizarEstoque) {
-                console.log('📦 Mudança para "Recebido" - Criando Materials e dando entrada no estoque...');
+                const classificacaoCompra = (compra as any).classificacao;
+                const destino = ComprasService.destinoPorClassificacao(classificacaoCompra);
+
+                if (destino === 'ferramentas') {
+                    console.log('🔧 Recebido - adicionando quantidade às Ferramentas (não ao estoque).');
+                    for (const item of compra.items) {
+                        const ferramentaId = (item as any).ferramentaId;
+                        if (ferramentaId) {
+                            const temFrac = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
+                            const qtd = temFrac ? Math.round(item.quantidade * (item as any).quantidadeFracionada) : Math.round(item.quantidade);
+                            await tx.ferramenta.update({
+                                where: { id: ferramentaId },
+                                data: { quantidade: { increment: qtd } }
+                            });
+                        }
+                    }
+                } else if (destino === 'rh') {
+                    console.log('👥 Recebido - criando itens no estoque de Recursos Humanos.');
+                    for (const item of compra.items) {
+                        await (tx as any).recursoHumanoEstoque.create({
+                            data: {
+                                compraId: compra.id,
+                                compraItemId: item.id,
+                                nomeItem: item.nomeProduto,
+                                quantidade: item.quantidade,
+                                valorUnitario: item.valorUnit,
+                                valorTotal: item.valorTotal
+                            }
+                        });
+                    }
+                } else if (destino === 'despesas_variadas') {
+                    console.log(
+                        '💸 Recebido — DESPESAS_VARIADAS: sem criação de Material e sem movimentação de estoque.'
+                    );
+                } else {
+                    console.log('📦 Mudança para "Recebido" - Criando Materials e dando entrada no estoque...');
                 
                 for (const item of compra.items) {
                     let materialIdFinal = item.materialId;
@@ -797,9 +1176,9 @@ export class ComprasService {
                         
                         if (materialAtual) {
                             // ✅ PROCESSAR FRACIONAMENTO para calcular preço unitário
-                            const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                            const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                             const precoParaUsar = temFracionamento 
-                                ? item.valorUnit / item.quantidadeFracionada // Preço unitário quando fracionado
+                                ? item.valorUnit / (item as any).quantidadeFracionada // Preço unitário quando fracionado
                                 : item.valorUnit; // Preço normal
                             
                             // Atualizar preço se for diferente (sempre usar o valor da última compra)
@@ -826,36 +1205,70 @@ export class ComprasService {
                         }
                         
                         // ✅ PROCESSAR FRACIONAMENTO
-                        const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                        const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                         const quantidadeParaEstoque = temFracionamento 
-                            ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                            ? item.quantidade * (item as any).quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
                             : item.quantidade; // Quantidade normal
                         
                         const observacoesEstoque = temFracionamento
-                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento confirmado`
+                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento confirmado`
                             : `Compra NF: ${compra.numeroNF} - Recebimento confirmado`;
-                        
-                        // Incrementar estoque diretamente na transação
-                        await tx.material.update({
-                            where: { id: materialIdFinal },
-                            data: {
-                                estoque: {
-                                    increment: quantidadeParaEstoque
+
+                        // ✅ COMPRA AVULSA PARA OBRA - Fluxo especial: entrada (auditoria) + baixa imediata para a obra
+                        const isCompraAvulsa = !!(compra as any).obraId;
+                        if (isCompraAvulsa) {
+                            console.log(`🏗️ COMPRA AVULSA para obra ${(compra as any).obraId}`);
+                            // 1. Registrar entrada no estoque (auditoria)
+                            await tx.material.update({
+                                where: { id: materialIdFinal },
+                                data: { estoque: { increment: quantidadeParaEstoque } }
+                            });
+                            await tx.movimentacaoEstoque.create({
+                                data: {
+                                    materialId: materialIdFinal,
+                                    tipo: 'ENTRADA',
+                                    quantidade: quantidadeParaEstoque,
+                                    motivo: 'COMPRA',
+                                    referencia: id,
+                                    observacoes: `Compra Avulsa NF: ${compra.numeroNF} - Material destinado à obra ${(compra as any).obraId}`
                                 }
-                            }
-                        });
-                        
-                        // Registrar movimentação
-                        await tx.movimentacaoEstoque.create({
-                            data: {
-                                materialId: materialIdFinal,
-                                tipo: 'ENTRADA',
-                                quantidade: quantidadeParaEstoque,
-                                motivo: 'COMPRA',
-                                referencia: id,
-                                observacoes: observacoesEstoque
-                            }
-                        });
+                            });
+                            // 2. Baixa imediata para a obra
+                            await tx.material.update({
+                                where: { id: materialIdFinal },
+                                data: { estoque: { decrement: quantidadeParaEstoque } }
+                            });
+                            await tx.movimentacaoEstoque.create({
+                                data: {
+                                    materialId: materialIdFinal,
+                                    tipo: 'SAIDA',
+                                    quantidade: quantidadeParaEstoque,
+                                    motivo: 'OBRA',
+                                    referencia: (compra as any).obraId,
+                                    observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF} - Item novo adicionado`
+                                }
+                            });
+                        } else {
+                            // Compra normal - apenas incrementar estoque
+                            await tx.material.update({
+                                where: { id: materialIdFinal },
+                                data: {
+                                    estoque: {
+                                        increment: quantidadeParaEstoque
+                                    }
+                                }
+                            });
+                            await tx.movimentacaoEstoque.create({
+                                data: {
+                                    materialId: materialIdFinal,
+                                    tipo: 'ENTRADA',
+                                    quantidade: quantidadeParaEstoque,
+                                    motivo: 'COMPRA',
+                                    referencia: id,
+                                    observacoes: observacoesEstoque
+                                }
+                            });
+                        }
                         
                         // ✅ Marcar fracionamento como aplicado se houver
                         if (temFracionamento) {
@@ -863,7 +1276,7 @@ export class ComprasService {
                                 where: { id: item.id },
                                 data: {
                                     fracionamentoAplicado: true
-                                }
+                                } as any
                             });
                             console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
                         }
@@ -871,6 +1284,7 @@ export class ComprasService {
                 }
                 
                 console.log('✅ Todos os Materials criados e estoque atualizado!');
+                }
             }
 
             return {
@@ -890,7 +1304,7 @@ export class ComprasService {
         // Após a transação, se a compra passou a ficar como "Recebido",
         // gerar contas a pagar (se ainda não existirem) usando as duplicatas/condições salvas em xmlData
         if (novoStatus === 'Recebido' && compra.status !== 'Recebido') {
-            await ComprasService.gerarContasPagarAoReceberCompra(id);
+            await ComprasService.gerarContasPagarParaCompra(id);
         }
 
         return {
@@ -940,30 +1354,55 @@ export class ComprasService {
             
             console.log(`📅 Data salva no banco: ${compraAtualizada.dataRecebimento?.toISOString()} (${compraAtualizada.dataRecebimento?.toLocaleDateString('pt-BR')})`);
 
-            // Atualizar estoque apenas dos itens marcados
+            // Atualizar estoque/ferramentas/RH apenas dos itens marcados
             if (deveAtualizarEstoque) {
+                const itensSelecionados = compra.items.filter(item => produtoIds.includes(item.id));
+                const classificacaoCompra = (compra as any).classificacao;
+                const destino = ComprasService.destinoPorClassificacao(classificacaoCompra);
+
+                if (destino === 'ferramentas') {
+                    console.log('🔧 Recebimento parcial - adicionando quantidade às Ferramentas.');
+                    for (const item of itensSelecionados) {
+                        const ferramentaId = (item as any).ferramentaId;
+                        if (ferramentaId) {
+                            const temFrac = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
+                            const qtd = temFrac ? Math.round(item.quantidade * (item as any).quantidadeFracionada) : Math.round(item.quantidade);
+                            await tx.ferramenta.update({
+                                where: { id: ferramentaId },
+                                data: { quantidade: { increment: qtd } }
+                            });
+                        }
+                    }
+                } else if (destino === 'rh') {
+                    console.log('👥 Recebimento parcial - criando itens no estoque de Recursos Humanos.');
+                    for (const item of itensSelecionados) {
+                        await (tx as any).recursoHumanoEstoque.create({
+                            data: {
+                                compraId: compra.id,
+                                compraItemId: item.id,
+                                nomeItem: item.nomeProduto,
+                                quantidade: item.quantidade,
+                                valorUnitario: item.valorUnit,
+                                valorTotal: item.valorTotal
+                            }
+                        });
+                    }
+                } else if (destino === 'despesas_variadas') {
+                    console.log(
+                        '💸 Recebimento parcial — DESPESAS_VARIADAS: sem processamento de estoque.'
+                    );
+                } else {
                 console.log('📦 Recebendo itens parciais - Processando estoque...');
                 console.log('📦 Produtos selecionados:', produtoIds);
                 console.log('📦 Total de itens na compra:', compra.items.length);
-                console.log('📦 Status da compra:', compra.status);
-                console.log('📦 Novo status:', novoStatus);
                 
-                // ✅ CORREÇÃO: Filtrar pelos IDs dos CompraItem, não pelos materialIds
-                // Isso permite processar itens sem materialId (que serão criados automaticamente)
-                const itensSelecionados = compra.items.filter(item => 
-                    produtoIds.includes(item.id)
-                );
+                const itensSelecionadosEstoque = compra.items.filter(item => produtoIds.includes(item.id));
                 
-                console.log(`📦 ${itensSelecionados.length} de ${compra.items.length} itens serão processados`);
-                console.log(`📦 IDs dos itens selecionados:`, produtoIds);
-                
-                if (itensSelecionados.length === 0) {
+                if (itensSelecionadosEstoque.length === 0) {
                     console.error('❌ ERRO: Nenhum item foi selecionado para processamento!');
-                    console.error('❌ IDs recebidos:', produtoIds);
-                    console.error('❌ IDs disponíveis:', compra.items.map(i => i.id));
                 }
                 
-                for (const item of itensSelecionados) {
+                for (const item of itensSelecionadosEstoque) {
                     let materialIdFinal = item.materialId;
                     
                     // Se item não tem materialId, criar Material automaticamente
@@ -1036,9 +1475,9 @@ export class ComprasService {
                         
                         if (materialAtual) {
                             // ✅ PROCESSAR FRACIONAMENTO para calcular preço unitário
-                            const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                            const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                             const precoParaUsar = temFracionamento 
-                                ? item.valorUnit / item.quantidadeFracionada // Preço unitário quando fracionado
+                                ? item.valorUnit / (item as any).quantidadeFracionada // Preço unitário quando fracionado
                                 : item.valorUnit; // Preço normal
                             
                             // Atualizar preço se for diferente (sempre usar o valor da última compra)
@@ -1065,15 +1504,15 @@ export class ComprasService {
                         }
                         
                         // ✅ PROCESSAR FRACIONAMENTO
-                        const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                        const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                         const quantidadeParaEstoque = temFracionamento 
-                            ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                            ? item.quantidade * (item as any).quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
                             : item.quantidade; // Quantidade normal
                         
                         const estoqueAnterior = materialAtual?.estoque || 0;
                         console.log(`📦 Material: ${materialAtual?.nome || materialIdFinal}`);
                         if (temFracionamento) {
-                            console.log(`📦 Fracionado: ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} × ${item.quantidadeFracionada} un = ${quantidadeParaEstoque} unidades`);
+                            console.log(`📦 Fracionado: ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} × ${(item as any).quantidadeFracionada} un = ${quantidadeParaEstoque} unidades`);
                         } else {
                             console.log(`📦 Estoque anterior: ${estoqueAnterior}, Quantidade a adicionar: ${quantidadeParaEstoque}`);
                         }
@@ -1091,11 +1530,19 @@ export class ComprasService {
                         
                         console.log(`✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado.estoque} (adicionado ${quantidadeParaEstoque} unidades)`);
                         
-                        // Registrar movimentação
-                        const observacoesMovimentacao = temFracionamento
-                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento parcial confirmado`
-                            : `Compra NF: ${compra.numeroNF} - Recebimento parcial confirmado`;
-                        
+                        // ✅ COMPRA AVULSA PARA OBRA (remessa parcial): entrada (auditoria) + baixa imediata para a obra
+                        const obraIdVinculada = (compra as any).obraId as (string | null | undefined);
+                        const isCompraAvulsa = !!obraIdVinculada;
+
+                        // Registrar movimentação de ENTRADA (auditoria)
+                        // Observação: se todos os itens foram recebidos por este endpoint, não deve aparecer como "parcial".
+                        const sufixoRecebimento = todosRecebidos ? 'Recebimento confirmado' : 'Recebimento parcial confirmado';
+                        const observacoesMovimentacao = isCompraAvulsa
+                          ? `Compra Avulsa NF: ${compra.numeroNF} - Material destinado à obra ${obraIdVinculada}`
+                          : (temFracionamento
+                              ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - ${sufixoRecebimento}`
+                              : `Compra NF: ${compra.numeroNF} - ${sufixoRecebimento}`);
+
                         await tx.movimentacaoEstoque.create({
                             data: {
                                 materialId: materialIdFinal,
@@ -1106,6 +1553,25 @@ export class ComprasService {
                                 observacoes: observacoesMovimentacao
                             }
                         });
+
+                        // Se for compra avulsa, dar baixa imediata e registrar SAÍDA para OBRA
+                        if (isCompraAvulsa) {
+                            await tx.material.update({
+                                where: { id: materialIdFinal },
+                                data: { estoque: { decrement: quantidadeParaEstoque } }
+                            });
+
+                            await tx.movimentacaoEstoque.create({
+                                data: {
+                                    materialId: materialIdFinal,
+                                    tipo: 'SAIDA',
+                                    quantidade: quantidadeParaEstoque,
+                                    motivo: 'OBRA',
+                                    referencia: obraIdVinculada!,
+                                    observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF} - Item novo adicionado`
+                                }
+                            });
+                        }
                         
                         // ✅ Marcar fracionamento como aplicado se houver
                         if (temFracionamento) {
@@ -1113,7 +1579,7 @@ export class ComprasService {
                                 where: { id: item.id },
                                 data: {
                                     fracionamentoAplicado: true
-                                }
+                                } as any
                             });
                             console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
                         }
@@ -1158,6 +1624,7 @@ export class ComprasService {
                 }
                 
                 console.log('✅ Remessa parcial processada!');
+                }
             }
 
             return compraAtualizada;
@@ -1166,7 +1633,7 @@ export class ComprasService {
         // Se após o processamento a compra passou a ser considerada "Recebida",
         // gerar contas a pagar (se ainda não existirem)
         if (resultado.status === 'Recebido') {
-            await ComprasService.gerarContasPagarAoReceberCompra(id);
+            await ComprasService.gerarContasPagarParaCompra(id);
         }
 
         return resultado;
@@ -1192,8 +1659,61 @@ export class ComprasService {
 
         console.log(`📦 Recebendo compra ${compra.numeroNF} com associações explícitas`);
 
+        const classificacaoCompra = (compra as any).classificacao;
+        if (classificacaoCompra === 'DESPESAS_VARIADAS') {
+            const resultadoDv = await prisma.$transaction(async (tx) => {
+                return tx.compra.update({
+                    where: { id },
+                    data: { status: 'Recebido', dataRecebimento },
+                    include: { items: true, fornecedor: true }
+                });
+            });
+            await ComprasService.gerarContasPagarParaCompra(id);
+            return resultadoDv;
+        }
+
+        if (classificacaoCompra === 'FERRAMENTAS' || classificacaoCompra === 'RECURSOS_HUMANOS') {
+            return await prisma.$transaction(async (tx) => {
+                const compraAtualizada = await tx.compra.update({
+                    where: { id },
+                    data: { status: 'Recebido', dataRecebimento },
+                    include: { items: true, fornecedor: true }
+                });
+                if (classificacaoCompra === 'FERRAMENTAS') {
+                    for (const item of compra.items) {
+                        const ferramentaId = (item as any).ferramentaId;
+                        if (ferramentaId) {
+                            const temFrac = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
+                            const qtd = temFrac ? Math.round(item.quantidade * (item as any).quantidadeFracionada) : Math.round(item.quantidade);
+                            await tx.ferramenta.update({
+                                where: { id: ferramentaId },
+                                data: { quantidade: { increment: qtd } }
+                            });
+                        }
+                    }
+                } else {
+                    for (const item of compra.items) {
+                        await (tx as any).recursoHumanoEstoque.create({
+                            data: {
+                                compraId: compra.id,
+                                compraItemId: item.id,
+                                nomeItem: item.nomeProduto,
+                                quantidade: item.quantidade,
+                                valorUnitario: item.valorUnit,
+                                valorTotal: item.valorTotal
+                            }
+                        });
+                    }
+                }
+                return compraAtualizada;
+            }).then(async (compraAtualizada) => {
+                await ComprasService.gerarContasPagarParaCompra(id);
+                return compraAtualizada;
+            });
+        }
+
         const resultado = await prisma.$transaction(async (tx) => {
-            // Processar cada item da compra
+            // Processar cada item da compra (COMPOSICAO_ESTOQUE)
             for (const item of compra.items) {
                 const associacao = associacoes[item.id];
 
@@ -1269,13 +1789,13 @@ export class ComprasService {
                 // ✅ Dar entrada no estoque (considerando fracionamento) - dentro da transação
                 if (materialIdFinal) {
                     // ✅ PROCESSAR FRACIONAMENTO
-                    const temFracionamento = item.quantidadeFracionada && item.quantidadeFracionada > 0;
+                    const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
                     const quantidadeParaEstoque = temFracionamento 
-                        ? item.quantidade * item.quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
+                        ? item.quantidade * (item as any).quantidadeFracionada // Quantidade de embalagens × unidades por embalagem
                         : item.quantidade; // Quantidade normal
                     
                     const observacoesEstoque = temFracionamento
-                        ? `Compra NF: ${compra.numeroNF} - ${item.nomeProduto} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades)`
+                        ? `Compra NF: ${compra.numeroNF} - ${item.nomeProduto} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades)`
                         : `Compra NF: ${compra.numeroNF} - ${item.nomeProduto}`;
                     
                     // Incrementar estoque diretamente na transação
@@ -1306,13 +1826,13 @@ export class ComprasService {
                             where: { id: item.id },
                             data: {
                                 fracionamentoAplicado: true
-                            }
+                            } as any
                         });
                         console.log(`✅ Fracionamento marcado como aplicado para item ${item.nomeProduto}`);
                     }
                     
                     if (temFracionamento) {
-                        console.log(`✅ Entrada no estoque: ${item.nomeProduto} - ${item.quantidade} ${item.tipoEmbalagem || 'embalagens'} = ${quantidadeParaEstoque} unidades`);
+                        console.log(`✅ Entrada no estoque: ${item.nomeProduto} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} = ${quantidadeParaEstoque} unidades`);
                     } else {
                         console.log(`✅ Entrada no estoque: ${item.nomeProduto} - Qtd: ${quantidadeParaEstoque}`);
                     }
@@ -1335,7 +1855,7 @@ export class ComprasService {
 
         // ✅ CORREÇÃO CRÍTICA: Gerar contas a pagar após receber a compra
         // (se ainda não existirem) usando as duplicatas/condições salvas em xmlData
-        await ComprasService.gerarContasPagarAoReceberCompra(id);
+        await ComprasService.gerarContasPagarParaCompra(id);
 
         return resultado;
     }
@@ -1397,7 +1917,7 @@ export class ComprasService {
                 }
             });
 
-            console.log(`✅ Compra #${compra.numeroSequencial} cancelada com sucesso`);
+            console.log(`✅ Compra #${(compra as any).numeroSequencial} cancelada com sucesso`);
             return compraCancelada;
         });
     }

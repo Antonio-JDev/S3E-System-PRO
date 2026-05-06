@@ -3,6 +3,7 @@
 ## 🎊 **O QUE FOI FEITO:**
 
 ### **Limpeza Completa:**
+
 - ❌ Deletado: `comparacaoPrecosController.ts`
 - ❌ Deletado: `comparacaoPrecos.service.ts`
 - ❌ Deletado: `comparacaoPrecos.routes.ts`
@@ -10,6 +11,7 @@
 - ❌ Removido: Referências no `app.ts`
 
 ### **Sistema Novo e Limpo:**
+
 - ✅ Componente: `AtualizacaoPrecos.tsx`
 - ✅ Rotas: Tudo em `/api/materiais/*`
 - ✅ Controller: `materiaisController.ts`
@@ -35,12 +37,13 @@ npm run dev
 ```
 
 **Aguarde ver:**
+
 ```
 ✅ Servidor rodando na porta 3000
 📁 Servindo uploads de: ...
 ```
 
-###**Passo 3: Abrir Frontend Limpo**
+### **Passo 3: Abrir Frontend Limpo**
 
 ```
 1. Abra navegador (novo)
@@ -58,6 +61,7 @@ npm run dev
 ```
 
 **Console DEVE mostrar:**
+
 ```
 ✅ Dados extraídos: { totalMateriais: 66 }
 🧹 Dados limpos: { temVersao: true, totalMateriais: 66 }
@@ -65,6 +69,7 @@ npm run dev
 ```
 
 **Arquivo baixado DEVE ter:**
+
 ```json
 {
   "versao": "1.0",
@@ -82,6 +87,7 @@ npm run dev
 ```
 
 **Backend DEVE logar:**
+
 ```
 📥 Preview - Recebendo arquivo...
 📂 Lendo arquivo: ...
@@ -91,6 +97,7 @@ npm run dev
 ```
 
 **Sistema DEVE mostrar:**
+
 ```
 ℹ️ Nenhuma alteração detectada
 Todos os 66 materiais já estão corretos
@@ -105,6 +112,7 @@ Todos os 66 materiais já estão corretos
 ```
 
 **DEVE mostrar:**
+
 ```
 ✅ 1 item COM alteração
 ⏭️ 65 itens SEM alteração (ignorados)
@@ -141,4 +149,3 @@ Todos os 66 materiais já estão corretos
 ---
 
 **TESTE E BOA SORTE! 🚀**
-

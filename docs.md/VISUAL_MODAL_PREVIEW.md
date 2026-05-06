@@ -76,6 +76,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ## 🎨 **LEGENDA DE CORES:**
 
 ### **Cards de Resumo:**
+
 ```
 ┌─────────────┐
 │ 🔵 AZUL     │ → Total de Itens
@@ -99,6 +100,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ```
 
 ### **Badges na Tabela:**
+
 ```
 🔴 ↑ +10%  → Preço AUMENTOU (vermelho)
 🟢 ↓ -6%   → Preço DIMINUIU (verde)
@@ -110,6 +112,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ## 📱 **RESPONSIVIDADE:**
 
 ### **Desktop (>1024px):**
+
 ```
 - Modal ocupa 80% da largura
 - 4 cards lado a lado
@@ -118,6 +121,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ```
 
 ### **Tablet (768px - 1024px):**
+
 ```
 - Modal ocupa 90% da largura
 - 2 cards por linha
@@ -125,6 +129,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ```
 
 ### **Mobile (<768px):**
+
 ```
 - Modal tela cheia
 - 1 card por linha
@@ -137,6 +142,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ## ⚡ **ANIMAÇÕES E INTERAÇÕES:**
 
 ### **Abertura:**
+
 ```
 1. Fade in do backdrop (fundo escuro)
 2. Slide up do modal (de baixo para cima)
@@ -144,6 +150,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ```
 
 ### **Hover:**
+
 ```
 - Linhas da tabela: fundo muda para cinza claro
 - Botões: sombra aumenta
@@ -151,6 +158,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ```
 
 ### **Loading:**
+
 ```
 - Botões ficam desabilitados
 - Texto muda: "Processando..."
@@ -162,6 +170,7 @@ Quando clicar em "✅ Confirmar Atualização":
 ## 🔥 **CASOS DE USO:**
 
 ### **Caso 1: Apenas Aumentos**
+
 ```
 ┌──────────┐
 │ +15%     │ ← Card vermelho
@@ -172,6 +181,7 @@ Todas as linhas com badges vermelhos ↑
 ```
 
 ### **Caso 2: Apenas Reduções**
+
 ```
 ┌──────────┐
 │ -8%      │ ← Card verde
@@ -182,6 +192,7 @@ Todas as linhas com badges verdes ↓
 ```
 
 ### **Caso 3: Misto**
+
 ```
 ┌──────────┐
 │ +5%      │ ← Card vermelho (total aumentou)
@@ -196,11 +207,13 @@ Linhas: algumas 🔴↑ outras 🟢↓
 ## ✅ **ESTADOS DO MODAL:**
 
 ### **1. Carregando Preview:**
+
 ```
 [Ainda não implementado - preview é instantâneo]
 ```
 
 ### **2. Mostrando Preview:**
+
 ```
 ✅ Modal aberto
 ✅ Dados visíveis
@@ -208,6 +221,7 @@ Linhas: algumas 🔴↑ outras 🟢↓
 ```
 
 ### **3. Confirmando (AlertDialog aberto):**
+
 ```
 ✅ Modal de fundo ainda visível (desfocado)
 ✅ AlertDialog no topo
@@ -215,6 +229,7 @@ Linhas: algumas 🔴↑ outras 🟢↓
 ```
 
 ### **4. Processando Atualização:**
+
 ```
 ✅ AlertDialog fechado
 ✅ Modal ainda aberto
@@ -223,6 +238,7 @@ Linhas: algumas 🔴↑ outras 🟢↓
 ```
 
 ### **5. Sucesso:**
+
 ```
 ✅ Modal fechado
 ✅ Alert de sucesso
@@ -254,6 +270,7 @@ TOTAL: R$ 345,00 (+4.5%)
 ```
 
 **Modal mostrará:**
+
 ```
 Cards:
 - Total: 3 itens
@@ -270,4 +287,3 @@ Linha 3: Toma → R$ 80  → R$ 75  | 🟢 ↓ -6%
 ---
 
 **VISUAL MODERNO, LIMPO E PROFISSIONAL! 🎨**
-

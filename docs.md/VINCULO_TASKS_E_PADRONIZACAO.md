@@ -6,11 +6,13 @@
 
 #### Funcionalidade Implementada:
 
-Agora as tasks do Kanban de Engenharia podem ser **vinculadas** a qualquer uma das 10 etapas administrativas, permitindo melhor rastreabilidade e organização.
+Agora as tasks do Kanban de Engenharia podem ser **vinculadas** a qualquer uma
+das 10 etapas administrativas, permitindo melhor rastreabilidade e organização.
 
 #### O Que Foi Adicionado:
 
 **No Formulário de Task:**
+
 - ✅ Campo "🔗 Vincular à Etapa Administrativa"
 - ✅ Dropdown com as 10 etapas fixas
 - ✅ Indicador visual de etapas concluídas (✅)
@@ -18,12 +20,14 @@ Agora as tasks do Kanban de Engenharia podem ser **vinculadas** a qualquer uma d
 - ✅ Dica contextual abaixo do campo
 
 **Na Task Card do Kanban:**
+
 - ✅ Badge azul mostrando etapa vinculada
 - ✅ Formato: "🔗 1. Organizar Projeto"
 - ✅ Exibição condicional (só aparece se houver vínculo)
 - ✅ Design limpo e discreto (não atrapalha a visualização)
 
 **Na Lógica:**
+
 - ✅ `taskForm` atualizado com `linkedAdminStageId`
 - ✅ `handleOpenAddTaskModal` inicializa com `undefined`
 - ✅ `handleOpenEditTaskModal` carrega o vínculo existente
@@ -39,12 +43,14 @@ Todos os modais agora usam a **cor oficial da S3E Engenharia: `#0a1a2f`**
 #### Modais Padronizados:
 
 **1. Modal de Criar/Editar Projeto**
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]`
 - ✅ Emoji ajustado: `<span className="text-2xl">✏️</span>` ou `✨`
 - ✅ Botão submit: `bg-brand-s3e`
 - ✅ Emoji do botão visível: `<span className="text-lg">💾</span>` ou `✨`
 
 **2. Modal de Gerenciar Equipe**
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]` (era roxo/rosa)
 - ✅ Emoji ajustado: `<span className="text-2xl">👥</span>`, `✏️`, `➕`
 - ✅ Botão "Adicionar Membro": `bg-brand-s3e`
@@ -52,21 +58,25 @@ Todos os modais agora usam a **cor oficial da S3E Engenharia: `#0a1a2f`**
 - ✅ Emojis dos botões visíveis
 
 **3. Modal de Adicionar/Editar Task** (já padronizado)
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]`
 - ✅ Emoji: `<span className="text-2xl">📝</span>`
 - ✅ Botão submit: `bg-brand-s3e`
 
 **4. Modal de Visualizar Projeto** (já padronizado)
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]`
 - ✅ Emoji: `<span className="text-2xl">📋</span>`
 - ✅ Tamanho: `max-w-7xl` (aumentado)
 
 **5. Modal de Extensão de Prazo** (já criado com padrão)
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]`
 - ✅ Emoji: `<span className="text-2xl">⏰</span>`
 - ✅ Botão submit: `bg-brand-s3e`
 
 **6. Modal de Configurações** (já atualizado anteriormente)
+
 - ✅ Header: `from-brand-s3e to-[#0d2847]`
 - ✅ Emoji: `<span className="text-2xl">⚙️</span>`
 
@@ -75,9 +85,11 @@ Todos os modais agora usam a **cor oficial da S3E Engenharia: `#0a1a2f`**
 ### 3. ✅ Ajustes de Emojis em Todos os Modais
 
 #### Problema Resolvido:
+
 Os emojis estavam pequenos e difíceis de ver.
 
 #### Solução Implementada:
+
 ```typescript
 // ANTES:
 {projectToEdit ? '✏️ Editar' : '✨ Criar'}
@@ -88,6 +100,7 @@ Os emojis estavam pequenos e difíceis de ver.
 ```
 
 **Padrões Aplicados:**
+
 - ✅ Emojis em headers: `text-2xl` (24px)
 - ✅ Emojis em botões: `text-lg` (18px)
 - ✅ Separação clara: `flex items-center gap-2` ou `gap-3`
@@ -120,37 +133,44 @@ Os emojis estavam pequenos e difíceis de ver.
 **Etapa Administrativa:** "3. Emitir ART"
 
 **Tasks Vinculadas:**
+
 - ✅ "Revisar projeto elétrico" (A Fazer)
 - ✅ "Coletar assinaturas" (Em Andamento)
 - ✅ "Protocolar documentação" (A Fazer)
 
-**Benefício:** Equipe administrativa sabe exatamente quais tarefas de engenharia estão relacionadas à emissão da ART.
+**Benefício:** Equipe administrativa sabe exatamente quais tarefas de engenharia
+estão relacionadas à emissão da ART.
 
 ---
 
 ## 🎨 PALETA DE CORES PADRONIZADA
 
 ### Cor Principal S3E:
+
 ```css
-brand-s3e: #0a1a2f
+brand-s3e: #0a1a2f;
 ```
 
 ### Headers de Modais:
+
 ```css
 bg-gradient-to-r from-brand-s3e to-[#0d2847]
 ```
 
 ### Botões Primários:
+
 ```css
 bg-brand-s3e hover:bg-opacity-90
 ```
 
 ### Cards de Kanban:
+
 ```css
 border-l-4 border-brand-s3e (era border-brand-blue)
 ```
 
 ### Abas Ativas:
+
 ```css
 border-brand-s3e text-brand-s3e (era border-brand-blue)
 ```
@@ -163,14 +183,14 @@ border-brand-s3e text-brand-s3e (era border-brand-blue)
 
 ```typescript
 interface ProjectStage {
-    id: string;
-    title: string;
-    status: ProjectStageStatus;
-    dueDate?: string;
-    assignedMemberId?: string;
-    assignedMemberName?: string;
-    highlight?: 'paused' | 'cancelled' | null;
-    linkedAdminStageId?: string; // ← Novo campo
+  id: string;
+  title: string;
+  status: ProjectStageStatus;
+  dueDate?: string;
+  assignedMemberId?: string;
+  assignedMemberName?: string;
+  highlight?: "paused" | "cancelled" | null;
+  linkedAdminStageId?: string; // ← Novo campo
 }
 ```
 
@@ -178,15 +198,15 @@ interface ProjectStage {
 
 ```typescript
 const [taskForm, setTaskForm] = useState<{
-    title: string;
-    dueDate: string;
-    status: ProjectStageStatus;
-    linkedAdminStageId?: string; // ← Novo campo
+  title: string;
+  dueDate: string;
+  status: ProjectStageStatus;
+  linkedAdminStageId?: string; // ← Novo campo
 }>({
-    title: '',
-    dueDate: '',
-    status: ProjectStageStatus.AFazer,
-    linkedAdminStageId: undefined,
+  title: "",
+  dueDate: "",
+  status: ProjectStageStatus.AFazer,
+  linkedAdminStageId: undefined,
 });
 ```
 
@@ -291,4 +311,3 @@ const [taskForm, setTaskForm] = useState<{
 **Status:** ✅ **100% FUNCIONAL**  
 **Data:** 17 de Outubro de 2024  
 **Sistema:** S3E System PRO - Gestão Empresarial Elétrica
-

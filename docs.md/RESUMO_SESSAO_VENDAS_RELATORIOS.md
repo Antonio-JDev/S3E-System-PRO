@@ -5,6 +5,7 @@
 ### 1️⃣ Módulo de Vendas e Contas a Receber
 
 #### Backend
+
 - ✅ Modelo `Venda` no Prisma
 - ✅ Modelo `ContaReceber` no Prisma
 - ✅ Serviço completo de vendas (`vendas.service.ts`)
@@ -13,6 +14,7 @@
 - ✅ Integração no app principal
 
 #### Frontend
+
 - ✅ Componente `Vendas.tsx` completo
 - ✅ 3 tabs: Dashboard, Lista, Nova Venda
 - ✅ Formulário baseado em orçamentos aprovados
@@ -25,6 +27,7 @@
 ### 2️⃣ Módulo de Relatórios e Dashboard
 
 #### Backend
+
 - ✅ Modelo `ContaPagar` atualizado no Prisma
 - ✅ Serviço de relatórios (`relatorios.service.ts`)
 - ✅ Controller de relatórios (`relatoriosController.ts`)
@@ -32,6 +35,7 @@
 - ✅ 5 endpoints completos
 
 #### Funcionalidades
+
 - ✅ Dados financeiros mensais (últimos 12 meses)
 - ✅ Resumo financeiro geral
 - ✅ Estatísticas de vendas
@@ -43,15 +47,18 @@
 ### 3️⃣ Melhorias na Sidebar
 
 #### Reorganização
+
 - ✅ Agrupamento por setores de negócio
 - ✅ Identificação visual com cores
 - ✅ Separadores entre grupos
 - ✅ Ordem lógica de navegação
 
 #### Setores
+
 1. **Geral** (Cinza) - Dashboard
 2. **Comercial** (Verde) - Clientes, Orçamentos, Vendas
-3. **Suprimentos** (Laranja) - Fornecedores, Compras, Materiais, Catálogo, Comparação
+3. **Suprimentos** (Laranja) - Fornecedores, Compras, Materiais, Catálogo,
+   Comparação
 4. **Operacional** (Roxo) - Projetos, Obras, Serviços
 5. **Financeiro** (Azul) - Financeiro, NF-e, Movimentações, Histórico
 
@@ -60,6 +67,7 @@
 ## 📁 Arquivos Criados
 
 ### Backend (9 arquivos)
+
 1. `backend/src/services/vendas.service.ts`
 2. `backend/src/controllers/vendasController.ts`
 3. `backend/src/routes/vendas.routes.ts`
@@ -69,9 +77,11 @@
 7. `backend/src/routes/relatorios.routes.ts`
 
 ### Frontend (1 arquivo)
+
 8. `frontend/src/components/Vendas.tsx`
 
 ### Documentação (5 arquivos)
+
 9. `IMPLEMENTACAO_MODULO_VENDAS.md`
 10. `ATUALIZACAO_VENDAS_ORCAMENTO.md`
 11. `IMPLEMENTACAO_RELATORIOS_DASHBOARD.md`
@@ -84,10 +94,12 @@
 ## 🔄 Arquivos Modificados
 
 ### Backend (2 arquivos)
+
 1. `backend/prisma/schema.prisma` - Modelos Venda, ContaReceber, ContaPagar
 2. `backend/src/app.ts` - Rotas de vendas e relatórios
 
 ### Frontend (4 arquivos)
+
 3. `frontend/src/App.tsx` - Rota de Vendas
 4. `frontend/src/constants/index.tsx` - Navegação reorganizada
 5. `frontend/src/components/Sidebar.tsx` - Setores visuais
@@ -99,6 +111,7 @@
 ## 🔌 Endpoints Criados
 
 ### Vendas (`/api/vendas`)
+
 - `GET /dashboard` - Dados para dashboard
 - `GET /` - Lista vendas (paginação)
 - `GET /:id` - Busca venda específica
@@ -107,6 +120,7 @@
 - `PUT /contas/:id/pagar` - Paga conta a receber
 
 ### Relatórios (`/api/relatorios`)
+
 - `GET /dashboard` - Dashboard completo
 - `GET /financeiro` - Dados mensais (12 meses)
 - `GET /financeiro/resumo` - Resumo geral
@@ -220,6 +234,7 @@ Resultado:
 ### Página de Vendas
 
 #### Tab 1: Dashboard
+
 - Card: Total de Vendas (azul)
 - Card: A Receber (verde)
 - Card: Em Atraso (vermelho)
@@ -227,11 +242,13 @@ Resultado:
 - Painel: Contas a Receber
 
 #### Tab 2: Vendas Realizadas
+
 - Tabela completa de vendas
 - Colunas: Nº, Cliente, Projeto, Data, Valor, Status, Parcelas
 - Badges coloridos por status
 
 #### Tab 3: Nova Venda
+
 - Seletor de orçamento aprovado
 - Card de informações do orçamento
 - Forma de pagamento
@@ -275,11 +292,13 @@ Resultado:
 ## 🔐 Segurança Implementada
 
 ### Autenticação
+
 - ✅ JWT obrigatório em todas as rotas
 - ✅ Token com 7 dias de validade
 - ✅ Middleware de autenticação
 
 ### Autorização
+
 - ✅ Controle granular por perfil
 - ✅ Admin: Acesso total
 - ✅ Financeiro: Relatórios financeiros
@@ -287,6 +306,7 @@ Resultado:
 - ✅ Comercial: Vendas e clientes
 
 ### Validações
+
 - ✅ Dados obrigatórios validados
 - ✅ Valores numéricos verificados
 - ✅ Relações de banco verificadas
@@ -297,6 +317,7 @@ Resultado:
 ## 🧪 Testes Sugeridos
 
 ### 1. Testar Realização de Venda
+
 ```bash
 # Realizar venda baseada em orçamento
 curl -X POST http://localhost:3001/api/vendas/realizar \
@@ -313,6 +334,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 ### 2. Testar Relatório Financeiro
+
 ```bash
 # Buscar dados mensais
 curl -X GET http://localhost:3001/api/relatorios/financeiro \
@@ -320,6 +342,7 @@ curl -X GET http://localhost:3001/api/relatorios/financeiro \
 ```
 
 ### 3. Testar Dashboard Completo
+
 ```bash
 # Carregar dashboard
 curl -X GET http://localhost:3001/api/relatorios/dashboard \
@@ -331,6 +354,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 ## 🚀 Próximos Passos Recomendados
 
 ### Fase 1: Migrations
+
 ```bash
 # Aplicar migrations no banco
 cd backend
@@ -338,18 +362,21 @@ dotenv -e .env.development -- npx prisma migrate dev --name "vendas_relatorios_c
 ```
 
 ### Fase 2: Frontend Dashboard
+
 - [ ] Criar componente Dashboard aprimorado
 - [ ] Integrar Chart.js ou Recharts
 - [ ] Conectar aos endpoints de relatórios
 - [ ] Adicionar filtros de período
 
 ### Fase 3: Testes
+
 - [ ] Testar criação de vendas
 - [ ] Testar geração de contas a receber
 - [ ] Validar agregação mensal
 - [ ] Verificar permissões
 
 ### Fase 4: Integrações
+
 - [ ] Conectar Vendas com backend real
 - [ ] Conectar Dashboard com endpoints
 - [ ] Implementar feedback de erros
@@ -359,29 +386,31 @@ dotenv -e .env.development -- npx prisma migrate dev --name "vendas_relatorios_c
 
 ## 📈 Estatísticas da Implementação
 
-| Métrica | Valor |
-|---------|-------|
-| Arquivos criados | 14 |
-| Arquivos modificados | 7 |
-| Linhas de código | ~2.500 |
-| Endpoints criados | 11 |
-| Componentes React | 1 |
-| Modelos Prisma | 3 |
-| Serviços | 2 |
-| Controllers | 2 |
-| Rotas | 2 |
+| Métrica              | Valor  |
+| -------------------- | ------ |
+| Arquivos criados     | 14     |
+| Arquivos modificados | 7      |
+| Linhas de código     | ~2.500 |
+| Endpoints criados    | 11     |
+| Componentes React    | 1      |
+| Modelos Prisma       | 3      |
+| Serviços             | 2      |
+| Controllers          | 2      |
+| Rotas                | 2      |
 
 ---
 
 ## 🎓 Conceitos Implementados
 
 ### Padrões de Arquitetura
+
 - ✅ MVC (Model-View-Controller)
 - ✅ Service Layer Pattern
 - ✅ Repository Pattern (via Prisma)
 - ✅ Middleware Chain
 
 ### Práticas de Desenvolvimento
+
 - ✅ TypeScript Type Safety
 - ✅ Tratamento de Erros
 - ✅ Validação de Dados
@@ -389,12 +418,14 @@ dotenv -e .env.development -- npx prisma migrate dev --name "vendas_relatorios_c
 - ✅ Código Limpo e Documentado
 
 ### Segurança
+
 - ✅ Autenticação JWT
 - ✅ Autorização RBAC
 - ✅ Proteção de Rotas
 - ✅ Validação de Entrada
 
 ### Performance
+
 - ✅ Promise.all() para queries paralelas
 - ✅ Select específico de campos
 - ✅ Agregação em memória
@@ -473,26 +504,31 @@ dotenv -e .env.development -- npx prisma migrate dev --name "vendas_relatorios_c
 ## 🎯 Benefícios Alcançados
 
 ### 1. Gestão Comercial Completa
+
 - Rastreamento de orçamentos → vendas
 - Histórico completo por cliente
 - Análise de conversão
 
 ### 2. Controle Financeiro Real
+
 - Fluxo de caixa baseado em pagamentos efetivos
 - Identificação de atrasos
 - Previsão de recebimentos
 
 ### 3. Relatórios Inteligentes
+
 - Agregação automática mensal
 - Análise de tendências
 - Top clientes
 
 ### 4. UX Aprimorada
+
 - Navegação intuitiva por setores
 - Formulários simplificados
 - Feedback visual claro
 
 ### 5. Escalabilidade
+
 - Arquitetura modular
 - Fácil adicionar funcionalidades
 - Performance otimizada
@@ -501,15 +537,15 @@ dotenv -e .env.development -- npx prisma migrate dev --name "vendas_relatorios_c
 
 ## 🎨 Paleta de Cores do Sistema
 
-| Elemento | Cor | Uso |
-|----------|-----|-----|
-| **Brand S3E** | `#0a1a2f` | Headers, logo, identidade |
-| **Azul** | `#3b82f6` | Primário, botões, links |
-| **Verde** | `#22c55e` | Sucesso, receitas, Comercial |
-| **Vermelho** | `#ef4444` | Erros, despesas, alertas |
-| **Laranja** | `#ea580c` | Suprimentos, atenção |
-| **Roxo** | `#9333ea` | Operacional, projetos |
-| **Cinza** | `#6b7280` | Textos, bordas, neutro |
+| Elemento      | Cor       | Uso                          |
+| ------------- | --------- | ---------------------------- |
+| **Brand S3E** | `#0a1a2f` | Headers, logo, identidade    |
+| **Azul**      | `#3b82f6` | Primário, botões, links      |
+| **Verde**     | `#22c55e` | Sucesso, receitas, Comercial |
+| **Vermelho**  | `#ef4444` | Erros, despesas, alertas     |
+| **Laranja**   | `#ea580c` | Suprimentos, atenção         |
+| **Roxo**      | `#9333ea` | Operacional, projetos        |
+| **Cinza**     | `#6b7280` | Textos, bordas, neutro       |
 
 ---
 
@@ -547,19 +583,20 @@ Fornecedor
 
 ## ⚡ Performance Esperada
 
-| Operação | Tempo | Otimização |
-|----------|-------|------------|
-| Realizar venda | ~200ms | Transação única |
-| Listar vendas | ~150ms | Paginação |
-| Dashboard completo | ~500ms | Promise.all() |
-| Relatório mensal | ~200ms | Agregação em memória |
-| Top clientes | ~100ms | Índices de banco |
+| Operação           | Tempo  | Otimização           |
+| ------------------ | ------ | -------------------- |
+| Realizar venda     | ~200ms | Transação única      |
+| Listar vendas      | ~150ms | Paginação            |
+| Dashboard completo | ~500ms | Promise.all()        |
+| Relatório mensal   | ~200ms | Agregação em memória |
+| Top clientes       | ~100ms | Índices de banco     |
 
 ---
 
 ## 🧪 Checklist de Testes
 
 ### Backend
+
 - [ ] Criar venda via API
 - [ ] Verificar geração de contas a receber
 - [ ] Testar cálculo de parcelas
@@ -569,6 +606,7 @@ Fornecedor
 - [ ] Validar formato de resposta
 
 ### Frontend
+
 - [ ] Navegar para página Vendas
 - [ ] Selecionar orçamento aprovado
 - [ ] Verificar exibição de dados
@@ -582,6 +620,7 @@ Fornecedor
 ## 📝 Comandos Úteis
 
 ### Migrations
+
 ```bash
 # Aplicar todas as migrations
 cd backend
@@ -592,6 +631,7 @@ npx prisma studio
 ```
 
 ### Testes de API
+
 ```bash
 # Login
 curl -X POST http://localhost:3001/api/auth/login \
@@ -610,6 +650,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 ```
 
 ### Desenvolvimento
+
 ```bash
 # Backend
 cd backend
@@ -625,22 +666,26 @@ npm run dev
 ## 🎓 Aprendizados e Boas Práticas
 
 ### 1. Modelagem de Dados
+
 - Usar relações 1:1 para vendas e orçamentos
 - Padronizar nomes de campos (`valorParcela`)
 - Tornar relações opcionais quando apropriado
 
 ### 2. Agregação de Dados
+
 - Usar data de pagamento para regime de caixa
 - Filtrar por status antes de agregar
 - Criar mapas para agregação eficiente
 
 ### 3. API Design
+
 - Endpoints RESTful consistentes
 - Respostas padronizadas
 - Códigos HTTP apropriados
 - Documentação clara
 
 ### 4. Frontend
+
 - Componentes reutilizáveis
 - Estados gerenciados com hooks
 - Formulários controlados
@@ -651,28 +696,33 @@ npm run dev
 ## 🌟 Destaques da Implementação
 
 ### ⭐ Venda Baseada em Orçamento
+
 Garante rastreabilidade completa e elimina duplicação de dados.
 
 ### ⭐ Geração Automática de Parcelas
+
 Uma venda cria automaticamente todas as contas a receber.
 
 ### ⭐ Relatórios em Regime de Caixa
+
 Mostra apenas dinheiro efetivamente movimentado.
 
 ### ⭐ Sidebar Intuitiva
+
 Navegação organizada por contexto de trabalho.
 
 ### ⭐ Segurança Granular
+
 Controle de acesso por perfil de usuário.
 
 ---
 
 ## 📞 Suporte e Referências
 
-- 📖 Documentação Prisma: https://www.prisma.io/docs
-- 🔐 JWT: https://jwt.io
-- 📊 Chart.js: https://www.chartjs.org
-- 🎨 Tailwind CSS: https://tailwindcss.com
+- 📖 Documentação Prisma: <https://www.prisma.io/docs>
+- 🔐 JWT: <https://jwt.io>
+- 📊 Chart.js: <https://www.chartjs.org>
+- 🎨 Tailwind CSS: <https://tailwindcss.com>
 
 ---
 
@@ -680,4 +730,3 @@ Controle de acesso por perfil de usuário.
 **Sistema S3E Engenharia Elétrica** ⚡🔌
 
 **Desenvolvido com ❤️ e muita ⚡**
-

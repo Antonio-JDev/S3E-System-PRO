@@ -1,0 +1,54 @@
+import { calculateMonthlyTotal, calculateTimeDifference, jornadaMinutosPorDia } from './workshift.util';
+
+describe('workshift.util', () => {
+  it('calcula minutos de jornada diária corretamente', () => {
+    const minutos = jornadaMinutosPorDia({
+      entrada1: '08:00',
+      saida1: '12:00',
+      entrada2: '13:00',
+      saida2: '17:48',
+    });
+    expect(minutos).toBe(528);
+  });
+
+  it('calcula total mensal sem hardcode para 220h', () => {
+    const total = calculateMonthlyTotal(
+      {
+        entrada1: '08:00',
+        saida1: '12:00',
+        entrada2: '13:00',
+        saida2: '17:00',
+      },
+      2026,
+      4,
+    );
+    expect(total).toBeGreaterThan(0);
+    expect(total).not.toBe(220);
+  });
+
+  it('considera tolerância de 5 minutos na entrada e saída', () => {
+    const diff = calculateTimeDifference({
+      batidaEntrada: new Date(2026, 3, 14, 8, 6, 0),
+      batidaSaida: new Date(2026, 3, 14, 16, 54, 0),
+      shiftEntrada: '08:00',
+      shiftSaida: '17:00',
+      toleranceMin: 5,
+    });
+    expect(diff.minutosAtrasoEntrada).toBe(6);
+    expect(diff.minutosSaidaAntecipada).toBe(6);
+    expect(diff.minutosAtrasoTotal).toBe(12);
+  });
+
+  it('conta hora extra quando fora da tolerância', () => {
+    const diff = calculateTimeDifference({
+      batidaEntrada: new Date(2026, 3, 14, 7, 54, 0),
+      batidaSaida: new Date(2026, 3, 14, 17, 8, 0),
+      shiftEntrada: '08:00',
+      shiftSaida: '17:00',
+      toleranceMin: 5,
+    });
+    expect(diff.minutosExtraEntrada).toBe(6);
+    expect(diff.minutosExtraSaida).toBe(8);
+    expect(diff.minutosExtraTotal).toBe(14);
+  });
+});

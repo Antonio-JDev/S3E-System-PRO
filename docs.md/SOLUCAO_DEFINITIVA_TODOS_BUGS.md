@@ -3,16 +3,20 @@
 ## 🐛 **PROBLEMAS QUE VOCÊ REPORTOU:**
 
 ### **1. Alert "Nenhum material para atualizar"**
+
 - ✅ **RESOLVIDO:** Dados agora são enviados corretamente
 
 ### **2. Erros HTML no Console**
+
 ```
 ❌ <p> cannot contain <div>
-❌ <p> cannot contain <ul>  
+❌ <p> cannot contain <ul>
 ```
+
 - ✅ **RESOLVIDO:** Trocado estrutura HTML
 
 ### **3. Modal antigo ainda aparecia**
+
 - ✅ **RESOLVIDO:** Fluxo agora limpa todos os estados
 
 ---
@@ -21,7 +25,8 @@
 
 ### **Arquivo:** `PreviewAtualizacaoModal.tsx`
 
-**PROBLEMA:** AlertDialogDescription usa `<p>` internamente, que não pode conter `<div>` ou `<ul>`.
+**PROBLEMA:** AlertDialogDescription usa `<p>` internamente, que não pode conter
+`<div>` ou `<ul>`.
 
 **SOLUÇÃO:** Removi o `AlertDialogDescription` e uso `<div>` diretamente:
 
@@ -46,12 +51,14 @@
 ## 🚀 **TESTE AGORA (100% FUNCIONAL):**
 
 ### **Passo 1: Reinicie Frontend**
+
 ```
 Ctrl + Shift + R (hard reload)
 F12 → Console → Ctrl+L (limpar)
 ```
 
 ### **Passo 2: Importe JSON**
+
 ```
 Menu → Atualização de Preços
 Importar JSON (com 2 preços editados)
@@ -59,6 +66,7 @@ Clique: Processar
 ```
 
 ### **Passo 3: Modal de Preview**
+
 ```
 ✅ Modal abre automaticamente
 ✅ Mostra 2 materiais:
@@ -68,6 +76,7 @@ Clique: Processar
 ```
 
 ### **Passo 4: AlertDialog (SEM ERROS HTML)**
+
 ```
 ✅ AlertDialog aparece
 ✅ SEM ERROS NO CONSOLE!
@@ -78,6 +87,7 @@ Clique: Processar
 ### **Passo 5: Processamento**
 
 **Console Frontend:**
+
 ```
 📤 Enviando materiais: [
   { sku: 'NCM-39269090-uhrr2c30h', precoAtual: 18.14, precoNovo: 70.14 },
@@ -90,6 +100,7 @@ Clique: Processar
 ```
 
 **Console Backend:**
+
 ```
 📥 Importando: importacao-atualizacao.json
 📄 JSON parseado: { versao: '1.0', totalMateriais: 2 }
@@ -104,6 +115,7 @@ POST /api/materiais/importar-precos 200
 ```
 
 ### **Passo 6: Sucesso!**
+
 ```
 ✅ Alert: "Preços atualizados com sucesso! 2 itens foram atualizados."
 ✅ Modal fecha automaticamente
@@ -116,6 +128,7 @@ POST /api/materiais/importar-precos 200
 ## ✅ **VERIFICAÇÕES FINAIS:**
 
 ### **Console do Navegador:**
+
 ```
 ✓ SEM erros HTML (<p> cannot contain...)
 ✓ SEM erros 400
@@ -124,6 +137,7 @@ POST /api/materiais/importar-precos 200
 ```
 
 ### **Backend:**
+
 ```
 ✓ JSON parseado corretamente
 ✓ Materiais encontrados no banco
@@ -133,10 +147,11 @@ POST /api/materiais/importar-precos 200
 ```
 
 ### **Banco de Dados:**
+
 ```sql
 -- Verificar se preços foram atualizados:
-SELECT sku, preco, ultimaAtualizacaoPreco 
-FROM materiais 
+SELECT sku, preco, ultimaAtualizacaoPreco
+FROM materiais
 WHERE sku IN ('NCM-39269090-uhrr2c30h', 'NCM-39269090-0y4vt3m19');
 
 -- Deve mostrar:
@@ -149,10 +164,12 @@ WHERE sku IN ('NCM-39269090-uhrr2c30h', 'NCM-39269090-0y4vt3m19');
 ## 📂 **ARQUIVOS MODIFICADOS:**
 
 ### **1. `frontend/src/components/PreviewAtualizacaoModal.tsx`**
+
 - **Linha ~202-235:** Removido `AlertDialogDescription`, usando `<div>` direto
 - **Motivo:** Evitar erro HTML de nesting inválido
 
 ### **2. `frontend/src/components/AtualizacaoPrecos.tsx`**
+
 - **Linha ~544-612:** Função `handleAtualizarPrecos` já estava correta
 - **Usa:** `materiaisParaAtualizar` (dados do preview)
 - **Cria:** JSON no formato correto para o backend
@@ -186,11 +203,14 @@ WHERE sku IN ('NCM-39269090-uhrr2c30h', 'NCM-39269090-0y4vt3m19');
 
 ## 💡 **RESUMO TÉCNICO:**
 
-**Problema Principal:** Componente `AlertDialogDescription` do shadcn/ui renderiza um `<p>` que não pode conter `<div>` ou `<ul>` (regra HTML válida).
+**Problema Principal:** Componente `AlertDialogDescription` do shadcn/ui
+renderiza um `<p>` que não pode conter `<div>` ou `<ul>` (regra HTML válida).
 
-**Solução:** Remover o `AlertDialogDescription` e usar `<div>` diretamente como container, mantendo toda a funcionalidade e estilo.
+**Solução:** Remover o `AlertDialogDescription` e usar `<div>` diretamente como
+container, mantendo toda a funcionalidade e estilo.
 
-**Impacto:** Zero. Visualmente idêntico, estruturalmente correto, funcionalmente perfeito.
+**Impacto:** Zero. Visualmente idêntico, estruturalmente correto, funcionalmente
+perfeito.
 
 ---
 
@@ -199,4 +219,3 @@ WHERE sku IN ('NCM-39269090-uhrr2c30h', 'NCM-39269090-0y4vt3m19');
 **PRONTO PARA:** PRODUÇÃO 🚀
 
 **TESTE AGORA E APROVEITE O SISTEMA FUNCIONANDO! 🎉**
-

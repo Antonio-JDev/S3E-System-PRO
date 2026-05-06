@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import obraService from '../services/obra.service';
 
 import { EstoqueService } from '../services/estoque.service';
-
-const prisma = new PrismaClient();
 
 export class ObraController {
   /**

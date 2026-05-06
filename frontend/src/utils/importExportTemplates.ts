@@ -12,7 +12,7 @@ export interface OrcamentoTemplate {
   descricao?: string;
   descricaoProjeto?: string;
   validade: string; // ISO date string
-  status?: 'Pendente' | 'Aprovado' | 'Recusado';
+  status?: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado';
   bdi?: number;
   observacoes?: string;
   empresaCNPJ?: string;
@@ -85,16 +85,29 @@ export interface VendaTemplate {
   items?: VendaItemTemplate[]; // Itens (materiais/serviços) da venda
 }
 
+/** Campos aceitos na importação de materiais (compatível com a API e o modelo Material). */
 export interface MaterialTemplate {
-  codigo: string;
-  descricao: string;
-  unidade: string;
-  preco: number;
-  estoque: number;
-  estoqueMinimo?: number;
+  /** Nome do material (obrigatório no banco). Use este ou descricao. */
+  nome?: string;
+  /** Descrição/nome alternativo (usado como nome se nome não for informado). */
+  descricao?: string;
+  /** Código de referência (opcional; não é salvo no banco; pode ser usado como fallback de nome). */
+  codigo?: string;
+  /** Tipo do material (ex.: Insumo, Material Elétrico, Produto). */
+  tipo?: string;
+  /** Categoria (ex.: Material Elétrico, Ferramenta). */
   categoria?: string;
+  /** Unidade de medida (un, m, kg, etc.). Aceito também como "unidade". */
+  unidadeMedida?: string;
+  /** Alias para unidadeMedida. */
+  unidade?: string;
+  preco?: number;
+  estoque?: number;
+  estoqueMinimo?: number;
+  sku?: string;
+  ncm?: string;
   fornecedorId?: string;
-  fornecedorNome?: string; // Para busca/associação
+  fornecedorNome?: string;
   ativo?: boolean;
 }
 
@@ -242,16 +255,30 @@ export function generateExampleTemplate(type: 'orcamentos' | 'vendas' | 'materia
       return {
         version: '1.0.0',
         exportDate: exampleDate,
+        _instrucoes: 'Preencha o array "materiais" com os itens. Campos obrigatórios por item: nome (ou descricao). Opcionais: tipo, categoria, unidadeMedida, preco, estoque, estoqueMinimo, sku, ncm, fornecedorId.',
         materiais: [
           {
-            codigo: 'MAT001',
-            descricao: 'Material Exemplo',
-            unidade: 'UN',
+            nome: 'Material Exemplo',
+            descricao: 'Descrição opcional do material',
+            tipo: 'Insumo',
+            categoria: 'Material Elétrico',
+            unidadeMedida: 'un',
             preco: 100,
             estoque: 50,
             estoqueMinimo: 10,
-            categoria: 'Categoria Exemplo',
-            fornecedorNome: 'Fornecedor Exemplo',
+            sku: '',
+            ncm: '',
+            fornecedorId: '',
+            ativo: true,
+          },
+          {
+            nome: 'Segundo Material',
+            tipo: 'Material Elétrico',
+            categoria: 'Material Elétrico',
+            unidadeMedida: 'm',
+            preco: 25.5,
+            estoque: 0,
+            estoqueMinimo: 5,
             ativo: true,
           },
         ],
@@ -373,14 +400,17 @@ export function validateImportData(data: ImportExportData): { valid: boolean; er
 
   if (data.materiais) {
     data.materiais.forEach((mat, index) => {
-      if (!mat.codigo) errors.push(`Material ${index + 1}: campo 'codigo' é obrigatório`);
-      if (!mat.descricao) errors.push(`Material ${index + 1}: campo 'descricao' é obrigatório`);
-      if (!mat.unidade) errors.push(`Material ${index + 1}: campo 'unidade' é obrigatório`);
-      if (mat.preco === undefined || mat.preco === null) {
-        errors.push(`Material ${index + 1}: campo 'preco' é obrigatório`);
+      const hasNome = !!(mat.nome && String(mat.nome).trim());
+      const hasDescricao = !!(mat.descricao && String(mat.descricao).trim());
+      const hasCodigo = !!(mat.codigo && String(mat.codigo).trim());
+      if (!hasNome && !hasDescricao && !hasCodigo) {
+        errors.push(`Material ${index + 1}: informe ao menos um de: nome, descricao ou codigo`);
       }
-      if (mat.estoque === undefined || mat.estoque === null) {
-        errors.push(`Material ${index + 1}: campo 'estoque' é obrigatório`);
+      if (mat.preco !== undefined && mat.preco !== null && (typeof mat.preco !== 'number' || mat.preco < 0)) {
+        errors.push(`Material ${index + 1}: preco deve ser um número >= 0`);
+      }
+      if (mat.estoque !== undefined && mat.estoque !== null && (typeof mat.estoque !== 'number' || mat.estoque < 0)) {
+        errors.push(`Material ${index + 1}: estoque deve ser um número >= 0`);
       }
     });
   }

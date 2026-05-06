@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 interface DadosFinanceirosMensais {
     mes: string;
@@ -380,7 +378,15 @@ export class RelatoriosService {
                 valorParcela: true,
                 dataVencimento: true,
                 dataPagamento: true,
-                status: true
+                status: true,
+                vendaId: true,
+                venda: {
+                    select: {
+                        numeroSequencial: true,
+                        numeroVenda: true,
+                        valorTotal: true
+                    }
+                }
             },
             orderBy: { dataVencimento: 'asc' }
         });
@@ -492,12 +498,14 @@ export class RelatoriosService {
             totalPago,
             lucroLiquido,
             contasReceber: contasReceberFiltradas.map(c => ({
-                id: c.id,
+                id: c.venda?.numeroSequencial ? `Venda N${c.venda.numeroSequencial}` : c.venda?.numeroVenda || `Conta #${c.id.slice(0, 8)}`,
                 descricao: c.descricao,
                 valor: c.valorParcela,
                 dataVencimento: c.dataVencimento,
                 dataPagamento: c.dataPagamento,
-                status: c.status
+                status: c.status,
+                numeroVenda: c.venda?.numeroSequencial || null,
+                identificadorVenda: c.venda?.numeroVenda || null
             })),
             contasPagar: contasPagarFiltradas.map(c => ({
                 id: c.id,

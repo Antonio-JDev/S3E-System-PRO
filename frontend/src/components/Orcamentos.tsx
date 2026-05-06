@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { orcamentosService, type Orcamento as ApiOrcamento, type CreateOrcamentoData } from '../services/orcamentosService';
 import { clientesService, type Cliente } from '../services/clientesService';
 import { empresasService, type Empresa } from '../services/empresasService';
+import { empresaFiscalService, type EmpresaFiscal } from '../services/empresaFiscalService';
 import { axiosApiService } from '../services/axiosApi';
 import ViewToggle from './ui/ViewToggle';
 import { ENDPOINTS } from '../config/api';
@@ -23,13 +24,17 @@ import {
     type OrcamentoTemplate,
     type ImportExportData,
 } from '../utils/importExportTemplates';
-import JoditEditorComponent from './JoditEditor';
+import TechnicalEditor from './TechnicalEditor';
 import { generateOrcamentoPDF, type OrcamentoPDFData as OrcamentoPDFDataOld } from '../utils/pdfGenerator';
 import NovoOrcamentoPage from '../pages/NovoOrcamentoPage';
 import PDFCustomizationModal from './PDFCustomization/PDFCustomizationModalWrapper';
 import { OrcamentoPDFData } from '../types/pdfCustomization';
-import { identificarTipoMaterial, TipoMaterial, podeVenderEmMetroOuCm } from '../utils/unitConverter';
+import { identificarTipoMaterial, TipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento } from '../utils/unitConverter';
+import { mapItensOrcamentoParaCopia } from '../utils/orcamentoCopy';
 import { matchCrossSearch } from '../utils/searchUtils';
+import { roundMoney } from '../utils/currency';
+import { calcularValorAReceberDoOrcamento, calcularValorVendaDiretaDoOrcamento } from '../utils/orcamentoValorAReceber';
+import ModalItensKit from './ModalItensKit';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -73,6 +78,11 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
 );
+const ArrowsUpDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+    </svg>
+);
 const DocumentArrowDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m.75 12l3 3m0 0l3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -83,6 +93,52 @@ const DocumentArrowUpIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
     </svg>
 );
+
+type OrcamentosAbaNav = 'listagem' | 'novo' | 'expirados' | 'declinados';
+
+/** Borda esquerda no primeiro <td> (tabelas collapse — mesma abordagem da página Compras). Na aba Expirados sem barra. */
+function getOrcamentoRowLateralBorderClass(status: string, abaAtiva: OrcamentosAbaNav): string {
+    if (abaAtiva === 'expirados') return '';
+    if (abaAtiva === 'declinados') {
+        return 'border-l-4 border-gray-900 dark:border-neutral-950';
+    }
+    switch (status) {
+        case 'Pendente':
+            return 'border-l-4 border-yellow-400';
+        case 'Enviado ao Cliente':
+            return 'border-l-4 border-blue-600';
+        case 'Aprovado':
+            return 'border-l-4 border-green-600';
+        case 'Recusado':
+        case 'Declinado':
+        case 'Cancelado':
+            return 'border-l-4 border-gray-900 dark:border-neutral-950';
+        default:
+            return 'border-l-4 border-gray-300 dark:border-gray-600';
+    }
+}
+
+/** Faixa lateral nos cards (grade). Na aba Expirados não exibe cor. */
+function getOrcamentoCardStripeClass(status: string, abaAtiva: OrcamentosAbaNav): string {
+    if (abaAtiva === 'expirados') return '';
+    if (abaAtiva === 'declinados') {
+        return 'bg-gray-900 dark:bg-neutral-950';
+    }
+    switch (status) {
+        case 'Pendente':
+            return 'bg-yellow-400';
+        case 'Enviado ao Cliente':
+            return 'bg-blue-600';
+        case 'Aprovado':
+            return 'bg-green-600';
+        case 'Recusado':
+        case 'Declinado':
+        case 'Cancelado':
+            return 'bg-gray-900 dark:bg-neutral-950';
+        default:
+            return 'bg-gray-300 dark:bg-gray-600';
+    }
+}
 
 // Types (usar tipo Cliente do service importado)
 
@@ -121,7 +177,7 @@ interface OrcamentoItem {
     ncm?: string; // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
     quantidade: number;
     custoUnit: number;
-    precoBase?: number; // Base do preço de venda (valorVenda || preco) sem BDI - usado para recalcular quando BDI muda
+    precoBase?: number; // Base do preço de venda (valorVenda || preco)
     precoUnit: number;
     subtotal: number;
     orcamentoId?: string;
@@ -144,14 +200,35 @@ type Orcamento = ApiOrcamento;
 
 interface OrcamentosProps {
     toggleSidebar: () => void;
+    initialBudgetId?: string | null;
+    onClearInitialBudgetId?: () => void;
 }
 
-const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
+interface OrcamentosPropsExtended extends OrcamentosProps {
+    suppressSuspenseSpinner?: boolean;
+}
+
+const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialBudgetId, onClearInitialBudgetId, suppressSuspenseSpinner }) => {
     const { user } = useContext(AuthContext)!;
     const navigate = useNavigate();
-    
+    const location = useLocation();
+
     // Estado de Navegação por Abas
-    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'novo' | 'reprovados-expirados'>('listagem');
+    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'novo' | 'expirados' | 'declinados'>('listagem');
+    // Dados do lead (Funil de Atendimento) para preencher Novo Orçamento
+    const [initialDataFromLead, setInitialDataFromLead] = useState<{
+      nome?: string;
+      cpfCnpj?: string;
+      observacoes?: string;
+      logradouro?: string;
+      numero?: string;
+      bairro?: string;
+      cep?: string;
+      cidade?: string;
+      estado?: string;
+      clienteId?: string;
+      contatoLeadId?: string;
+    } | null>(null);
 
     const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
     const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -160,9 +237,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const [error, setError] = useState<string | null>(null);
 
     const [statusFilter, setStatusFilter] = useState<string>('Todos');
+    const [sortAprovadosPorDataAprovacao, setSortAprovadosPorDataAprovacao] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Orcamentos'));
-    
+
     // Salvar viewMode no localStorage quando mudar
     const handleViewModeChange = (mode: 'grid' | 'list') => {
         setViewMode(mode);
@@ -173,7 +251,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const [shouldLoadEditor, setShouldLoadEditor] = useState(false);
     const [orcamentoToEdit, setOrcamentoToEdit] = useState<Orcamento | null>(null);
     const [orcamentoToView, setOrcamentoToView] = useState<Orcamento | null>(null);
-    
+
     // Estado para modal de visualização de itens do kit
     const [showModalItensKit, setShowModalItensKit] = useState(false);
     const [itensKitParaVisualizar, setItensKitParaVisualizar] = useState<any[]>([]);
@@ -192,49 +270,29 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         return tipos[tipo] || tipo;
     };
 
-    // Função auxiliar para aplicar BDI aos itens do kit
-    const aplicarBdiAosItensKit = (itensKit: any[], bdi: number, bdiOriginal?: number): any[] => {
-        return itensKit.map(itemKit => {
-            // Se houver valorVendaOriginal, usar como base
-            // Caso contrário, tentar calcular a partir do valorVenda atual e do BDI original
-            let valorBase = itemKit.valorVendaOriginal;
-            
-            if (!valorBase && itemKit.valorVenda && bdiOriginal !== undefined) {
-                // Calcular valor base a partir do valor atual e do BDI original
-                valorBase = itemKit.valorVenda / (1 + bdiOriginal / 100);
-            } else if (!valorBase) {
-                // Se não conseguir calcular, usar o valorVenda atual como base
-                valorBase = itemKit.valorVenda || 0;
-            }
-            
-            // Aplicar o novo BDI ao valor base
-            const valorVendaComBdi = valorBase * (1 + bdi / 100);
-            
-            return {
-                ...itemKit,
-                valorVenda: valorVendaComBdi,
-                // Manter o valorVendaOriginal para referência futura
-                valorVendaOriginal: itemKit.valorVendaOriginal || valorBase
-            };
-        });
+    // Função auxiliar para retornar itens do kit (BDI removido)
+    const aplicarBdiAosItensKit = (itensKit: any[]): any[] => {
+        return itensKit;
     };
-    
+
     // Estado para AlertDialog de aprovação
     const [showAprovarDialog, setShowAprovarDialog] = useState(false);
     const [orcamentoToAprovar, setOrcamentoToAprovar] = useState<Orcamento | null>(null);
-    
+
     // Estado para PDF Customization
     const [showPDFCustomization, setShowPDFCustomization] = useState(false);
     const [orcamentoForPDF, setOrcamentoForPDF] = useState<Orcamento | null>(null);
+
+    // Modal Atualizar dados cliente (CPF/CNPJ e endereço de cobrança para NF)
+    const [showModalAtualizarCliente, setShowModalAtualizarCliente] = useState(false);
+    const [clienteParaAtualizar, setClienteParaAtualizar] = useState<Cliente | null>(null);
+    const [formClienteAtualizar, setFormClienteAtualizar] = useState<{ nome: string; cpfCnpj: string; endereco: string; cidade: string; estado: string; cep: string; telefone: string; email: string }>({ nome: '', cpfCnpj: '', endereco: '', cidade: '', estado: '', cep: '', telefone: '', email: '' });
+    const [salvandoCliente, setSalvandoCliente] = useState(false);
 
     // Estados para importação/exportação
     const [importing, setImporting] = useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    // Importação de orçamentos históricos (JSON simples vindo do sistema antigo)
-    const [importingHistorico, setImportingHistorico] = useState(false);
-    const historicoFileInputRef = React.useRef<HTMLInputElement>(null);
-    
     // Estados para modal de preview de importação
     const [modalPreviewImportOpen, setModalPreviewImportOpen] = useState(false);
     const [dadosParaImportar, setDadosParaImportar] = useState<{
@@ -249,10 +307,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         descricao: '',
         descricaoProjeto: '',
         validade: '',
-        bdi: 20,
+        bdi: 0,
         observacoes: '',
-        // Novos campos
+        // Novos campos (empresa executora: Orçamento → PV → NF-e/NFS-e)
         empresaCNPJ: '',
+        empresaFiscalId: '',
         enderecoObra: '',
         cidade: '',
         bairro: '',
@@ -267,18 +326,26 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     const [items, setItems] = useState<OrcamentoItem[]>([]);
     const [showItemModal, setShowItemModal] = useState(false);
+
+    // Estados para quantidades dos itens selecionados
+    const [quantidadesMateriais, setQuantidadesMateriais] = useState<Map<string, number>>(new Map());
+    const [quantidadesServicos, setQuantidadesServicos] = useState<Map<string, number>>(new Map());
+    const [quantidadesKits, setQuantidadesKits] = useState<Map<string, number>>(new Map());
+    const [quantidadesQuadros, setQuantidadesQuadros] = useState<Map<string, number>>(new Map());
+    const [quantidadesCotacoes, setQuantidadesCotacoes] = useState<Map<string, number>>(new Map());
     const [itemSearchTerm, setItemSearchTerm] = useState('');
     const [tipoItemSelecionado, setTipoItemSelecionado] = useState<'material' | 'kit' | 'servico' | 'quadro' | 'cotacao' | 'extra'>('material');
     const [cotacoes, setCotacoes] = useState<any[]>([]);
     const [kits, setKits] = useState<any[]>([]);
     const [servicos, setServicos] = useState<any[]>([]);
     const [quadrosProntos, setQuadrosProntos] = useState<any[]>([]);
-    
+
     // Estados para modal de comparação (estoque vs banco frio)
     const [modalExpandido, setModalExpandido] = useState(false);
     const [materiaisComEstoque, setMateriaisComEstoque] = useState<Material[]>([]);
     const [cotacoesBancoFrio, setCotacoesBancoFrio] = useState<any[]>([]);
     const [empresas, setEmpresas] = useState<Empresa[]>([]);
+    const [empresasFiscais, setEmpresasFiscais] = useState<EmpresaFiscal[]>([]);
     const [searchEstoque, setSearchEstoque] = useState('');
     const [searchCotacoes, setSearchCotacoes] = useState('');
     const [searchGlobalComparacao, setSearchGlobalComparacao] = useState('');
@@ -286,7 +353,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const [cotacaoSelecionadaComparacao, setCotacaoSelecionadaComparacao] = useState<any | null>(null);
     const [materiaisSelecionadosComparacao, setMateriaisSelecionadosComparacao] = useState<Set<string>>(new Set());
     const [cotacoesSelecionadasComparacao, setCotacoesSelecionadasComparacao] = useState<Set<string>>(new Set());
-    
+
     // Estado para busca global e modo de adição
     const [buscaGlobal, setBuscaGlobal] = useState('');
     const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'cotacoes' | 'manual' | 'comparacao'>('materiais');
@@ -385,14 +452,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
             console.log('🔍 Carregando dados de orçamentos via serviços...');
 
-            const [orcamentosRes, clientesRes, materiaisRes, cotacoesRes, kitsRes, servicosRes, empresasRes] = await Promise.all([
+            const [orcamentosRes, clientesRes, materiaisRes, cotacoesRes, kitsRes, servicosRes, empresasRes, empresasFiscaisRes] = await Promise.all([
                 orcamentosService.listar(),
                 clientesService.listar(),
                 axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
                 axiosApiService.get('/api/cotacoes'),
                 axiosApiService.get(ENDPOINTS.KITS),
                 axiosApiService.get(ENDPOINTS.SERVICOS),
-                empresasService.listar({ ativo: true })
+                empresasService.listar({ ativo: true }),
+                empresaFiscalService.listar()
             ]);
 
             console.log('📊 Resposta do serviço - Orçamentos:', orcamentosRes);
@@ -469,6 +537,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 setEmpresas([]);
             }
 
+            // Tratar empresas fiscais (empresa executora: Orçamento → PV → NF-e/NFS-e)
+            if (empresasFiscaisRes?.data) {
+                const list = Array.isArray(empresasFiscaisRes.data) ? empresasFiscaisRes.data : [];
+                setEmpresasFiscais(list);
+                console.log(`✅ ${list.length} empresas fiscais carregadas`);
+            } else {
+                setEmpresasFiscais([]);
+            }
+
         } catch (err) {
             console.error('❌ Erro crítico ao carregar dados:', err);
             setError('Erro de conexão ao carregar dados');
@@ -486,6 +563,72 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         loadData();
     }, []);
+
+    // Ao montar: se veio do Funil de Atendimento com "Gerar Orçamento", abrir aba novo e passar dados
+    useEffect(() => {
+        // 1) Via query params (novo fluxo)
+        try {
+            const sp = new URLSearchParams(location.search || '');
+            const clienteId = (sp.get('clienteId') || '').trim();
+            const leadId = (sp.get('leadId') || '').trim();
+            if (clienteId || leadId) {
+                setInitialDataFromLead({
+                    clienteId: clienteId || undefined,
+                    contatoLeadId: leadId || undefined,
+                });
+                setAbaAtiva('novo');
+                // limpar query params para não reabrir caso o usuário navegue por abas internamente
+                navigate('/orcamentos', { replace: true });
+                return;
+            }
+        } catch (_) {
+            // ignore
+        }
+
+        // 2) Via localStorage (compatibilidade)
+        try {
+            const raw = localStorage.getItem('s3e_lead_para_orcamento');
+            if (!raw) return;
+            const data = JSON.parse(raw) as {
+              nome?: string;
+              cpfCnpj?: string;
+              observacoes?: string;
+              logradouro?: string;
+              numero?: string;
+              bairro?: string;
+              cep?: string;
+              cidade?: string;
+              estado?: string;
+              clienteId?: string;
+              contatoLeadId?: string;
+            };
+            localStorage.removeItem('s3e_lead_para_orcamento');
+            setInitialDataFromLead(data);
+            setAbaAtiva('novo');
+        } catch (_) {
+            localStorage.removeItem('s3e_lead_para_orcamento');
+        }
+    }, [location.search, navigate]);
+
+    // Abrir modal do orçamento quando vier pelo link rápido (ordem de serviço)
+    useEffect(() => {
+        if (!initialBudgetId || !onClearInitialBudgetId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await axiosApiService.get<any>(`/api/orcamentos/${initialBudgetId}`);
+                if (cancelled) return;
+                if (res.success && res.data) {
+                    setOrcamentoToView(res.data);
+                }
+            } catch (e) {
+                if (!cancelled) toast.error('Orçamento não encontrado');
+            } finally {
+                if (!cancelled) onClearInitialBudgetId();
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [initialBudgetId, onClearInitialBudgetId]);
 
     // Fechar modal de visualização com tecla ESC
     useEffect(() => {
@@ -510,9 +653,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         if (showItemModal && buscaGlobal.trim()) {
             setModalExpandido(true);
-        } else if (showItemModal && !buscaGlobal.trim() && modalExpandido && modoAdicao !== 'comparacao') {
-            // Não colapsar automaticamente se estiver em modo comparação manual
-            // setModalExpandido(false);
+        } else if (showItemModal && !buscaGlobal.trim()) {
+            setModalExpandido(false);
         }
     }, [buscaGlobal, showItemModal]);
 
@@ -521,7 +663,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         if (!Array.isArray(materiais)) return [];
 
         return materiais
-            .filter(material => material.ativo && material.estoque > 0)
+            .filter(material => material.ativo)
             .filter(material =>
                 matchCrossSearch(itemSearchTerm, material.nome) ||
                 material.sku.toLowerCase().includes(itemSearchTerm.toLowerCase())
@@ -582,8 +724,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     // Popular materiais com estoque e cotações do banco frio para comparação
     useEffect(() => {
-        if (Array.isArray(materiais)) {
-            setMateriaisComEstoque(materiais.filter(m => m.ativo && (m.estoque ?? 0) > 0));
+            if (Array.isArray(materiais)) {
+            setMateriaisComEstoque(materiais.filter(m => m.ativo));
         }
         if (Array.isArray(cotacoes)) {
             setCotacoesBancoFrio(cotacoes.filter(c => c.ativo !== false));
@@ -629,10 +771,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         }
 
         const termo = buscaGlobal.toLowerCase();
-        
+
         const materiaisEncontrados = (materiais || [])
-            .filter(m => m && m.ativo && (m.estoque ?? 0) > 0)
-            .filter(m => 
+            .filter(m => m && m.ativo)
+            .filter(m =>
                 (m.nome || '').toLowerCase().includes(termo) ||
                 (m.sku || '').toLowerCase().includes(termo)
             );
@@ -681,50 +823,60 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const isOrcamentoExpirado = (orcamento: Orcamento): boolean => {
         if (!orcamento.validade) return false;
         if (orcamento.status === 'Aprovado') return false; // Orçamentos aprovados não expiram
-        
+
         const dataValidade = new Date(orcamento.validade);
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
         dataValidade.setHours(0, 0, 0, 0);
-        
+
         return dataValidade < hoje;
     };
 
-    // Filtrar orçamentos reprovados e expirados
-    const orcamentosReprovadosExpirados = useMemo(() => {
+    // Apenas orçamentos expirados (validade vencida, não aprovados).
+    // Declinado/Recusado/Cancelado vão somente para a aba Declinados — a validade não os coloca em Expirados.
+    const orcamentosExpirados = useMemo(() => {
         if (!Array.isArray(orcamentos)) return [];
-
         return orcamentos
+            .filter(orc => orc.status !== 'Recusado' && orc.status !== 'Declinado' && orc.status !== 'Cancelado')
+            .filter(orc => isOrcamentoExpirado(orc))
             .filter(orc => {
-                // Incluir reprovados
-                if (orc.status === 'Recusado') return true;
-                // Incluir declinados
-                if (orc.status === 'Declinado') return true;
-                // Incluir cancelados
-                if (orc.status === 'Cancelado') return true;
-                // Incluir expirados (exceto aprovados)
-                if (isOrcamentoExpirado(orc)) return true;
-                return false;
+                const term = searchTerm.toLowerCase();
+                const clienteNome = (orc.cliente?.nome || '').toLowerCase();
+                const titulo = (orc.titulo || '').toLowerCase();
+                const numeroSeq = orc.numeroSequencial !== undefined && orc.numeroSequencial !== null ? String(orc.numeroSequencial) : (orc.numero !== undefined && orc.numero !== null ? String(orc.numero) : '');
+                return titulo.includes(term) || clienteNome.includes(term) || numeroSeq.includes(term) || (orc.id || '').toLowerCase().includes(term);
             })
-            .filter(orc =>
-                orc.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (orc.cliente?.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
-            )
             .sort((a, b) => {
-                // Ordenar por data de criação (mais recente primeiro)
                 const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
                 const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-                return dateB - dateA; // Mais recente primeiro
+                return dateB - dateA;
+            });
+    }, [orcamentos, searchTerm]);
+
+    // Apenas orçamentos declinados (Recusado, Declinado, Cancelado)
+    const orcamentosDeclinados = useMemo(() => {
+        if (!Array.isArray(orcamentos)) return [];
+        return orcamentos
+            .filter(orc => orc.status === 'Recusado' || orc.status === 'Declinado' || orc.status === 'Cancelado')
+            .filter(orc => {
+                const term = searchTerm.toLowerCase();
+                const clienteNome = (orc.cliente?.nome || '').toLowerCase();
+                const titulo = (orc.titulo || '').toLowerCase();
+                const numeroSeq = orc.numeroSequencial !== undefined && orc.numeroSequencial !== null ? String(orc.numeroSequencial) : (orc.numero !== undefined && orc.numero !== null ? String(orc.numero) : '');
+                return titulo.includes(term) || clienteNome.includes(term) || numeroSeq.includes(term) || (orc.id || '').toLowerCase().includes(term);
+            })
+            .sort((a, b) => {
+                const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return dateB - dateA;
             });
     }, [orcamentos, searchTerm]);
 
     const filteredOrcamentos = useMemo(() => {
         if (!Array.isArray(orcamentos)) return [];
 
-        // Se estiver na aba de reprovados/expirados, retornar lista específica
-        if (abaAtiva === 'reprovados-expirados') {
-            return orcamentosReprovadosExpirados;
-        }
+        if (abaAtiva === 'expirados') return orcamentosExpirados;
+        if (abaAtiva === 'declinados') return orcamentosDeclinados;
 
         // Filtro normal para aba de listagem
         return orcamentos
@@ -737,17 +889,26 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 // Aplicar filtro de status
                 return statusFilter === 'Todos' || orc.status === statusFilter;
             })
-            .filter(orc =>
-                orc.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                (orc.cliente?.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
-            )
+            .filter(orc => {
+                const term = searchTerm.toLowerCase();
+                const clienteNome = (orc.cliente?.nome || '').toLowerCase();
+                const titulo = (orc.titulo || '').toLowerCase();
+                const numeroSeq = orc.numeroSequencial !== undefined && orc.numeroSequencial !== null ? String(orc.numeroSequencial) : (orc.numero !== undefined && orc.numero !== null ? String(orc.numero) : '');
+                return titulo.includes(term) || clienteNome.includes(term) || numeroSeq.includes(term) || (orc.id || '').toLowerCase().includes(term);
+            })
             .sort((a, b) => {
+                // Quando filtro é Aprovado e ordenação por data de aprovação está ativa: mais recentemente aprovados primeiro
+                if (statusFilter === 'Aprovado' && sortAprovadosPorDataAprovacao) {
+                    const dateA = a.aprovedAt ? new Date(a.aprovedAt).getTime() : 0;
+                    const dateB = b.aprovedAt ? new Date(b.aprovedAt).getTime() : 0;
+                    return dateB - dateA; // Mais recente primeiro (sem data vai para o fim)
+                }
                 // Ordenar por data de criação (mais recente primeiro)
                 const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
                 const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                 return dateB - dateA; // Mais recente primeiro
             });
-    }, [orcamentos, statusFilter, searchTerm, abaAtiva, orcamentosReprovadosExpirados]);
+    }, [orcamentos, statusFilter, searchTerm, abaAtiva, orcamentosExpirados, orcamentosDeclinados, sortAprovadosPorDataAprovacao]);
 
     // Calcular totais do orçamento (NOVA LÓGICA)
     const calculosOrcamento = useMemo(() => {
@@ -773,11 +934,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             navigate(`/orcamentos/editar/${orcamento.id}`);
             return;
         }
-        
+
         // Se for criação, abrir modal
         // Reset editor loading state
         setShouldLoadEditor(false);
-        
+
         // Limpar dados para novo orçamento
         setOrcamentoToEdit(null);
         setFormState({
@@ -786,9 +947,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             descricao: '',
             descricaoProjeto: '',
             validade: '',
-            bdi: 20,
+            bdi: 0,
             observacoes: '',
             empresaCNPJ: '',
+            empresaFiscalId: '',
             enderecoObra: '',
             cidade: '',
             bairro: '',
@@ -801,10 +963,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             condicaoPagamento: 'À Vista'
         });
         setItems([]);
-        
+
         // Abrir modal IMEDIATAMENTE (sem esperar)
         setIsModalOpen(true);
-        
+
         // Carregar editor Jodit DEPOIS de 300ms (dar tempo pro modal renderizar)
         setTimeout(() => {
             setShouldLoadEditor(true);
@@ -823,9 +985,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             descricao: '',
             descricaoProjeto: '',
             validade: '',
-            bdi: 20,
+            bdi: 0,
             observacoes: '',
             empresaCNPJ: '',
+            empresaFiscalId: '',
             enderecoObra: '',
             cidade: '',
             bairro: '',
@@ -844,6 +1007,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     // Fechar modais com ESC
     useEscapeKey(isModalOpen, handleCloseModal);
     useEscapeKey(showItemModal, () => setShowItemModal(false));
+    useEscapeKey(showPDFCustomization, () => setShowPDFCustomization(false));
 
     // Funções de Exportação/Importação
     const handleExportTemplate = () => {
@@ -868,7 +1032,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     titulo: orc.titulo,
                     descricao: orc.descricao,
                     descricaoProjeto: orc.descricaoProjeto,
-                    validade: orc.validade,
+                    validade: orc.validade ?? orc.createdAt ?? new Date().toISOString().split('T')[0],
                     status: orc.status,
                     bdi: orc.bdi,
                     observacoes: orc.observacoes,
@@ -884,7 +1048,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     impostoPercentual: orc.impostoPercentual,
                     condicaoPagamento: orc.condicaoPagamento,
                     items: (orc.items || []).map(item => ({
-                        tipo: item.tipo as 'MATERIAL' | 'KIT' | 'SERVICO' | 'QUADRO_PRONTO' | 'CUSTO_EXTRA' | 'COTACAO',
+                        tipo: (item.tipo || 'MATERIAL') as 'MATERIAL' | 'KIT' | 'SERVICO' | 'QUADRO_PRONTO' | 'CUSTO_EXTRA' | 'COTACAO',
                         materialId: item.materialId,
                         materialNome: item.nome,
                         nome: getItemNome(item) as string,
@@ -892,8 +1056,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         unidadeMedida: item.unidadeMedida || 'UN',
                         quantidade: item.quantidade,
                         custoUnit: item.custoUnit,
-                        precoUnit: item.precoUnit,
-                        subtotal: item.subtotal,
+                        precoUnit: item.precoUnit ?? item.valorUnitario,
+                        subtotal: item.subtotal ?? item.valorTotal,
                     })),
                 })),
             };
@@ -909,10 +1073,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         fileInputRef.current?.click();
     };
 
-    const handleImportHistoricoClick = () => {
-        historicoFileInputRef.current?.click();
-    };
-
     const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -920,7 +1080,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         try {
             setImporting(true);
             const data = await readJSONFile(file);
-            
+
             // Validar estrutura
             const validation = validateImportData(data);
             if (!validation.valid) {
@@ -940,7 +1100,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             // Validar cada orçamento antes de mostrar no preview
             for (const orcTemplate of data.orcamentos) {
                 const errosOrcamento: string[] = [];
-                
+
                 // Buscar cliente por nome se não tiver ID
                 let clienteId = orcTemplate.clienteId;
                 let clienteNome = orcTemplate.clienteNome || '';
@@ -1010,42 +1170,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         }
     };
 
-    // Importação direta de orçamentos históricos em formato simples
-    const handleImportHistoricoFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        try {
-            setImportingHistorico(true);
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const response = await axiosApiService.post(`${ENDPOINTS.ORCAMENTOS}/import`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
-
-            if (response.data?.success) {
-                const criados = response.data.data?.criados ?? 0;
-                const erros = response.data.data?.erros ?? 0;
-                toast.success(`✅ Importação de históricos concluída. ${criados} orçamento(s) criado(s), ${erros} erro(s).`);
-                await loadData();
-            } else {
-                toast.error(response.data?.error || '❌ Erro ao importar orçamentos históricos');
-            }
-        } catch (error: any) {
-            console.error('Erro ao importar orçamentos históricos:', error);
-            toast.error('❌ Erro ao importar orçamentos históricos: ' + (error?.message || 'Erro desconhecido'));
-        } finally {
-            setImportingHistorico(false);
-            if (historicoFileInputRef.current) {
-                historicoFileInputRef.current.value = '';
-            }
-        }
-    };
-
     const handleConfirmarImportacao = async () => {
         if (!dadosParaImportar) return;
 
@@ -1067,7 +1191,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         titulo: orcTemplate.titulo,
                         descricao: orcTemplate.descricao,
                         validade: orcTemplate.validade,
-                        bdi: orcTemplate.bdi || 20,
+                        bdi: 0,
                         observacoes: orcTemplate.observacoes,
                         items: orcTemplate.items,
                     };
@@ -1098,78 +1222,105 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         }
     };
 
-    // Função para resetar todos os orçamentos (apenas admin)
-    const [resetting, setResetting] = useState(false);
-    const handleResetarOrcamentos = async () => {
-        // Confirmar ação destrutiva
-        const confirmar = window.confirm(
-            '⚠️ ATENÇÃO: Esta ação irá DELETAR TODOS os orçamentos permanentemente!\n\n' +
-            'Isso não pode ser desfeito. Deseja continuar?'
-        );
-
-        if (!confirmar) return;
-
-        const confirmarNovamente = window.confirm(
-            '🚨 ÚLTIMA CONFIRMAÇÃO\n\n' +
-            'Você tem certeza que deseja deletar TODOS os orçamentos?\n' +
-            'Esta ação é IRREVERSÍVEL!'
-        );
-
-        if (!confirmarNovamente) return;
-
-        try {
-            setResetting(true);
-            const response = await axiosApiService.post('/api/orcamentos/reset');
-
-            if (response.success) {
-                const totalDeletados = (response.data as any)?.totalDeletados || 0;
-                toast.success(
-                    `✅ Reset concluído! ${totalDeletados} orçamento(s) deletado(s) e sequência resetada.`,
-                    { duration: 5000 }
-                );
-                await loadData(); // Recarregar lista
+    // Adicionar item ao orçamento
+    // Funções auxiliares para atualizar quantidades
+    const atualizarQuantidadeMaterial = (materialId: string, quantidade: number) => {
+        setQuantidadesMateriais(prev => {
+            const novo = new Map(prev);
+            if (quantidade > 0) {
+                novo.set(materialId, quantidade);
             } else {
-                toast.error(response.error || 'Erro ao resetar orçamentos');
+                novo.delete(materialId);
             }
-        } catch (error: any) {
-            console.error('Erro ao resetar orçamentos:', error);
-            toast.error('Erro ao resetar orçamentos: ' + (error?.message || 'Erro desconhecido'));
-        } finally {
-            setResetting(false);
-        }
+            return novo;
+        });
     };
 
-    // Adicionar item ao orçamento
-    const handleAddItem = (material: Material, manterModalAberto = false) => {
+    const atualizarQuantidadeServico = (servicoId: string, quantidade: number) => {
+        setQuantidadesServicos(prev => {
+            const novo = new Map(prev);
+            if (quantidade > 0) {
+                novo.set(servicoId, quantidade);
+            } else {
+                novo.delete(servicoId);
+            }
+            return novo;
+        });
+    };
+
+    const atualizarQuantidadeKit = (kitId: string, quantidade: number) => {
+        setQuantidadesKits(prev => {
+            const novo = new Map(prev);
+            if (quantidade > 0) {
+                novo.set(kitId, quantidade);
+            } else {
+                novo.delete(kitId);
+            }
+            return novo;
+        });
+    };
+
+    const atualizarQuantidadeQuadro = (quadroId: string, quantidade: number) => {
+        setQuantidadesQuadros(prev => {
+            const novo = new Map(prev);
+            if (quantidade > 0) {
+                novo.set(quadroId, quantidade);
+            } else {
+                novo.delete(quadroId);
+            }
+            return novo;
+        });
+    };
+
+    const atualizarQuantidadeCotacao = (cotacaoId: string, quantidade: number) => {
+        setQuantidadesCotacoes(prev => {
+            const novo = new Map(prev);
+            if (quantidade > 0) {
+                novo.set(cotacaoId, quantidade);
+            } else {
+                novo.delete(cotacaoId);
+            }
+            return novo;
+        });
+    };
+
+    const handleAddItem = (material: Material, manterModalAberto = false, quantidade?: number) => {
+        const qtd = quantidade || quantidadesMateriais.get(material.id) || 1;
+
         // Usar valorVenda se disponível, senão usar preco (preço de compra)
         const precoVenda = material.valorVenda || material.preco;
-        const precoBase = precoVenda; // Armazenar base para recalcular quando BDI mudar
-        
+        const precoBase = precoVenda; // Preço base
+
         const newItem: OrcamentoItem = {
             tipo: 'MATERIAL',
             materialId: material.id,
             nome: material.nome,
             descricao: material.nome, // Usar o nome como descrição
             unidadeMedida: material.unidadeMedida,
-            quantidade: 1,
+            quantidade: qtd,
             custoUnit: material.preco, // Custo sempre é o preço de compra
-            precoBase: precoBase, // Base do preço de venda (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase, // Preço base
+            precoUnit: precoBase,
+            subtotal: precoBase * qtd
         };
 
         setItems(prev => [...prev, newItem]);
+
+        // Limpar quantidade após adicionar
+        atualizarQuantidadeMaterial(material.id, 0);
+
         if (!manterModalAberto) {
             setShowItemModal(false);
         }
         setItemSearchTerm('');
-        toast.success('Material adicionado ao orçamento');
+        toast.success(`Material adicionado ao orçamento (${qtd}x)`);
     };
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
-    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVenda?: string) => {
+    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVenda?: string, quantidade?: number) => {
+        const qtd = quantidade || quantidadesCotacoes.get(cotacao.id) || 1;
         const unidadeVendaFinal = unidadeVenda || cotacao.unidadeMedida || 'UN';
-        
+
         // Calcular custo baseado na unidade de venda
         let custoUnitario = cotacao.valorUnitario || 0;
         // Se a unidade de medida da cotação permitir venda em M/cm e estiver vendendo em cm, ajustar o preço
@@ -1177,14 +1328,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             // Se vender em cm, dividir o preço por metro por 100
             custoUnitario = cotacao.valorUnitario / 100;
         }
-        
-        // Calcular preço de venda: usar valorVenda se disponível, senão aplicar o mesmo BDI usado para materiais
-        const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
-        const precoBase = valorVendaBase; // Base para recalcular quando BDI mudar
-        
+        custoUnitario = roundMoney(custoUnitario);
+
+        // Calcular preço de venda: usar valorVenda se disponível, senão usar custo unitário
+        const valorVendaBase = cotacao.valorVenda || custoUnitario;
+        const precoBase = roundMoney(valorVendaBase); // Preço base (2 decimais)
+
         // Identificar tipo de material baseado no nome da cotação
         const tipoMaterial = identificarTipoMaterial(cotacao.nome);
-        
+
         const newItem: OrcamentoItem = {
             tipo: 'COTACAO',
             cotacaoId: cotacao.id,
@@ -1194,34 +1346,38 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             unidadeMedida: unidadeVendaFinal,
             unidadeVenda: unidadeVendaFinal, // Unidade de venda
             tipoMaterial: tipoMaterial,
-            quantidade: 1,
+            quantidade: qtd,
             custoUnit: custoUnitario, // Custo é sempre o valor da cotação (valorUnitario)
-            precoBase: precoBase, // Base do preço de venda (sem BDI adicional, já que valorVenda já pode ter margem)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário com BDI aplicado
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase, // Preço base
+            precoUnit: precoBase,
+            subtotal: roundMoney(precoBase * qtd)
         };
 
         setItems(prev => [...prev, newItem]);
+
+        // Limpar quantidade após adicionar
+        atualizarQuantidadeCotacao(cotacao.id, 0);
+
         if (!manterModalAberto) {
             setShowItemModal(false);
         }
         setItemSearchTerm('');
-        
+
         // Verificar se a cotação tem mais de 30 dias
         if (cotacao.dataAtualizacao) {
             const dataAtualizacao = new Date(cotacao.dataAtualizacao);
             const diasDesdeAtualizacao = Math.floor((new Date().getTime() - dataAtualizacao.getTime()) / (1000 * 60 * 60 * 24));
-            
+
             if (diasDesdeAtualizacao > 30) {
                 toast.warning(`⚠️ Cotação antiga: ${diasDesdeAtualizacao} dias desde a última atualização`, {
                     description: `A cotação "${cotacao.nome}" foi atualizada há mais de 30 dias. Considere realizar uma nova cotação.`,
                     duration: 5000
                 });
             } else {
-                toast.success(`Cotação adicionada do banco frio`);
+                toast.success(`Cotação adicionada do banco frio (${qtd}x)`);
             }
         } else {
-            toast.success(`Cotação adicionada do banco frio`);
+            toast.success(`Cotação adicionada do banco frio (${qtd}x)`);
         }
     };
 
@@ -1252,36 +1408,36 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     const handleAddItemComValidacao = (material?: Material, cotacao?: any, quantidade?: number, unidadeVenda?: string) => {
         const qtd = quantidade || 1;
-        
+
         // Validar estoque se for material
         if (material) {
             if (material.estoque < qtd) {
-                toast.error('Estoque insuficiente', {
+                toast.warning('Estoque insuficiente', {
                     description: `Estoque disponível: ${material.estoque} ${material.unidadeMedida}. Solicitado: ${qtd} ${material.unidadeMedida}`
                 });
-                return;
+                // Não bloquear a adição; apenas avisar
             }
-            
+
             const unidadeVendaFinal = unidadeVenda || material.unidadeMedida;
-            
+
             // Determinar preço de venda baseado na unidade
             let precoVenda = material.preco || 0;
-            
+
             // Se a unidade de medida permitir venda em M/cm, usar valores específicos
             if (podeVenderEmMetroOuCm(material.unidadeMedida)) {
                 if (unidadeVendaFinal === 'm') {
                     precoVenda = (material as any).valorVendaM || material.valorVenda || material.preco || 0;
                 } else if (unidadeVendaFinal === 'cm') {
-                    precoVenda = (material as any).valorVendaCM || 
-                                ((material as any).valorVendaM ? (material as any).valorVendaM / 100 : 
-                                (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
+                    precoVenda = (material as any).valorVendaCM ||
+                        ((material as any).valorVendaM ? (material as any).valorVendaM / 100 :
+                            (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
                 }
             } else {
                 precoVenda = material.valorVenda || material.preco || 0;
             }
-            
+
             const precoBase = precoVenda;
-            
+
             const newItem: OrcamentoItem = {
                 tipo: 'MATERIAL',
                 materialId: material.id,
@@ -1292,21 +1448,21 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 quantidade: qtd,
                 custoUnit: material.preco,
                 precoBase: precoBase,
-                precoUnit: precoBase * (1 + formState.bdi / 100),
-                subtotal: precoBase * (1 + formState.bdi / 100) * qtd
+                precoUnit: precoBase,
+                subtotal: precoBase * qtd
             };
-            
+
             setItems(prev => [...prev, newItem]);
             toast.success('Material adicionado', {
                 description: `${material.nome} (${qtd} ${unidadeVendaFinal}) - Estoque: ${material.estoque} ${material.unidadeMedida}`
             });
         }
-        
+
         // Adicionar cotação se fornecida
         if (cotacao) {
             const valorVenda = cotacao.valorVenda || cotacao.valorUnitario * 1.4;
             const precoBase = valorVenda;
-            
+
             const newItem: OrcamentoItem = {
                 tipo: 'COTACAO',
                 cotacaoId: cotacao.id,
@@ -1316,17 +1472,17 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 quantidade: qtd,
                 custoUnit: cotacao.valorUnitario || 0,
                 precoBase: precoBase,
-                precoUnit: precoBase * (1 + formState.bdi / 100),
-                subtotal: precoBase * (1 + formState.bdi / 100) * qtd,
+                precoUnit: precoBase,
+                subtotal: precoBase * qtd,
                 dataAtualizacaoCotacao: cotacao.dataAtualizacao
             };
-            
+
             setItems(prev => [...prev, newItem]);
             toast.success('Cotação adicionada', {
                 description: `${cotacao.nome} do banco frio - Fornecedor: ${cotacao.fornecedorNome || 'N/A'}`
             });
         }
-        
+
         // Limpar seleções
         setMaterialSelecionadoComparacao(null);
         setCotacaoSelecionadaComparacao(null);
@@ -1336,40 +1492,118 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     const handleInserirSelecionados = () => {
         let inseridos = 0;
-        
+
         // Inserir materiais selecionados
         materiaisSelecionadosComparacao.forEach(materialId => {
             const material = materiaisComEstoque.find(m => m.id === materialId);
             if (material) {
-                handleAddItemComValidacao(material, undefined, 1);
+                const qtd = quantidadesMateriais.get(materialId) || 1;
+                handleAddItemComValidacao(material, undefined, qtd);
                 inseridos++;
             }
         });
-        
+
         // Inserir cotações selecionadas
         cotacoesSelecionadasComparacao.forEach(cotacaoId => {
             const cotacao = cotacoesBancoFrio.find(c => c.id === cotacaoId);
             if (cotacao) {
-                handleAddItemComValidacao(undefined, cotacao, 1);
+                const qtd = quantidadesCotacoes.get(cotacaoId) || 1;
+                handleAddItemComValidacao(undefined, cotacao, qtd);
                 inseridos++;
             }
         });
-        
+
         if (inseridos > 0) {
             toast.success(`${inseridos} item(ns) inserido(s) com sucesso!`);
-            // Limpar seleções
+            // Limpar seleções e quantidades
             setMateriaisSelecionadosComparacao(new Set());
             setCotacoesSelecionadasComparacao(new Set());
+            setQuantidadesMateriais(new Map());
+            setQuantidadesCotacoes(new Map());
+        }
+    };
+
+    // Função para inserir múltiplos itens com quantidades definidas
+    const handleInserirItensComQuantidades = () => {
+        let inseridos = 0;
+
+        // Inserir materiais com quantidades
+        quantidadesMateriais.forEach((qtd, materialId) => {
+            if (qtd > 0) {
+                const material = materiais.find(m => m.id === materialId);
+                if (material) {
+                    handleAddItem(material, true, qtd);
+                    inseridos++;
+                }
+            }
+        });
+
+        // Inserir serviços com quantidades
+        quantidadesServicos.forEach((qtd, servicoId) => {
+            if (qtd > 0) {
+                const servico = servicos.find(s => s.id === servicoId);
+                if (servico) {
+                    handleAddServico(servico, true, qtd);
+                    inseridos++;
+                }
+            }
+        });
+
+        // Inserir kits com quantidades
+        quantidadesKits.forEach((qtd, kitId) => {
+            if (qtd > 0) {
+                const kit = kits.find(k => k.id === kitId);
+                if (kit) {
+                    handleAddKit(kit, true, qtd);
+                    inseridos++;
+                }
+            }
+        });
+
+        // Inserir quadros com quantidades
+        quantidadesQuadros.forEach((qtd, quadroId) => {
+            if (qtd > 0) {
+                const quadro = quadrosProntos.find(q => q.id === quadroId);
+                if (quadro) {
+                    handleAddQuadro(quadro, true, qtd);
+                    inseridos++;
+                }
+            }
+        });
+
+        // Inserir cotações com quantidades
+        quantidadesCotacoes.forEach((qtd, cotacaoId) => {
+            if (qtd > 0) {
+                const cotacao = cotacoes.find(c => c.id === cotacaoId);
+                if (cotacao) {
+                    handleAddCotacao(cotacao, true, undefined, qtd);
+                    inseridos++;
+                }
+            }
+        });
+
+        if (inseridos > 0) {
+            toast.success(`${inseridos} item(ns) inserido(s) com sucesso!`);
+            // Limpar todas as quantidades
+            setQuantidadesMateriais(new Map());
+            setQuantidadesServicos(new Map());
+            setQuantidadesKits(new Map());
+            setQuantidadesQuadros(new Map());
+            setQuantidadesCotacoes(new Map());
+        } else {
+            toast.warning('Nenhum item com quantidade definida para inserir');
         }
     };
 
     // Adicionar kit ao orçamento
-    const handleAddKit = (kit: any, manterModalAberto = false) => {
+    const handleAddKit = (kit: any, manterModalAberto = false, quantidade?: number) => {
+        const qtd = quantidade || quantidadesKits.get(kit.id) || 1;
+
         // Calcular custo total do kit (soma dos preços de compra dos materiais do estoque real)
-        const custoTotalKit = kit.items?.reduce((sum: number, kitItem: any) => {
+        const custoTotalKit = roundMoney(kit.items?.reduce((sum: number, kitItem: any) => {
             const precoCompra = kitItem.material?.preco || 0;
             return sum + (precoCompra * kitItem.quantidade);
-        }, 0) || 0;
+        }, 0) || 0);
 
         // Calcular preço de venda total do kit (soma dos valorVenda || preco dos materiais do estoque real)
         let precoVendaTotalKit = kit.items?.reduce((sum: number, kitItem: any) => {
@@ -1387,32 +1621,37 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             }, 0);
             precoVendaTotalKit += precoVendaExtras;
         }
+        precoVendaTotalKit = roundMoney(precoVendaTotalKit);
+        const precoBase = precoVendaTotalKit; // Preço base (2 decimais)
 
-        const precoBase = precoVendaTotalKit; // Base para recalcular quando BDI mudar
-        
         const newItem: OrcamentoItem = {
             tipo: 'KIT',
             kitId: kit.id,
             nome: kit.nome,
             descricao: kit.descricao || kit.nome,
             unidadeMedida: 'UN',
-            quantidade: 1,
+            quantidade: qtd,
             custoUnit: custoTotalKit, // Custo é sempre a soma dos preços de compra
-            precoBase: precoBase, // Base do preço de venda (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Preço unitário usa valorVenda || preco
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase, // Preço base
+            precoUnit: precoBase,
+            subtotal: roundMoney(precoBase * qtd)
         };
 
         setItems(prev => [...prev, newItem]);
+
+        // Limpar quantidade após adicionar
+        atualizarQuantidadeKit(kit.id, 0);
+
         if (!manterModalAberto) {
             setShowItemModal(false);
         }
         setItemSearchTerm('');
-        toast.success('Kit adicionado ao orçamento');
+        toast.success(`Kit adicionado ao orçamento (${qtd}x)`);
     };
 
     // Adicionar serviço ao orçamento
-    const handleAddServico = (servico: any, manterModalAberto = false) => {
+    const handleAddServico = (servico: any, manterModalAberto = false, quantidade?: number) => {
+        const qtd = quantidade || quantidadesServicos.get(servico.id) || 1;
         const precoBase = servico.precoUnitario || servico.preco || 0;
         const newItem: OrcamentoItem = {
             tipo: 'SERVICO',
@@ -1421,46 +1660,56 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             nome: servico.nome,
             descricao: servico.descricao || servico.nome,
             unidadeMedida: servico.unidadeMedida || 'UN',
-            quantidade: 1,
+            quantidade: qtd,
             custoUnit: precoBase,
             precoBase: precoBase,
-            precoUnit: precoBase * (1 + formState.bdi / 100),
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoUnit: precoBase,
+            subtotal: precoBase * qtd
         };
 
         setItems(prev => [...prev, newItem]);
+
+        // Limpar quantidade após adicionar
+        atualizarQuantidadeServico(servico.id, 0);
+
         if (!manterModalAberto) {
             setShowItemModal(false);
         }
         setItemSearchTerm('');
-        toast.success('Serviço adicionado ao orçamento');
+        toast.success(`Serviço adicionado ao orçamento (${qtd}x)`);
     };
 
     // Adicionar quadro ao orçamento (alias para handleAddQuadroPronto)
-    const handleAddQuadro = (quadro: any, manterModalAberto = false) => {
-        return handleAddQuadroPronto(quadro, manterModalAberto);
+    const handleAddQuadro = (quadro: any, manterModalAberto = false, quantidade?: number) => {
+        return handleAddQuadroPronto(quadro, manterModalAberto, quantidade);
     };
 
     // Adicionar quadro pronto ao orçamento
-    const handleAddQuadroPronto = (quadro: any, manterModalAberto = false) => {
+    const handleAddQuadroPronto = (quadro: any, manterModalAberto = false, quantidade?: number) => {
+        const qtd = quantidade || quantidadesQuadros.get(quadro.id) || 1;
         const newItem: OrcamentoItem = {
             tipo: 'QUADRO_PRONTO',
             quadroId: quadro.id,
             nome: quadro.nome,
             descricao: quadro.descricao || quadro.nome,
             unidadeMedida: 'UN',
-            quantidade: 1,
+            quantidade: qtd,
             custoUnit: quadro.precoVenda || quadro.custoTotal || 0,
-            precoUnit: (quadro.precoVenda || quadro.custoTotal || 0) * (1 + formState.bdi / 100),
-            subtotal: (quadro.precoVenda || quadro.custoTotal || 0) * (1 + formState.bdi / 100)
+            precoBase: quadro.precoVenda || quadro.custoTotal || 0,
+            precoUnit: quadro.precoVenda || quadro.custoTotal || 0,
+            subtotal: (quadro.precoVenda || quadro.custoTotal || 0) * qtd
         };
 
         setItems(prev => [...prev, newItem]);
+
+        // Limpar quantidade após adicionar
+        atualizarQuantidadeQuadro(quadro.id, 0);
+
         if (!manterModalAberto) {
             setShowItemModal(false);
         }
         setItemSearchTerm('');
-        toast.success('Quadro pronto adicionado ao orçamento');
+        toast.success(`Quadro pronto adicionado ao orçamento (${qtd}x)`);
     };
 
     // Adicionar item manual (sem estoque)
@@ -1486,7 +1735,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         }
 
         const precoBase = novoItemManual.custoUnit;
-        const precoUnit = precoBase * (1 + formState.bdi / 100);
+        const precoUnit = precoBase;
 
         const newItem: OrcamentoItem = {
             tipo: novoItemManual.tipo,
@@ -1535,22 +1784,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         }));
     };
 
-    // Atualizar BDI e recalcular preços
-    const handleBdiChange = (newBdi: number) => {
-        setFormState(prev => ({ ...prev, bdi: newBdi }));
-
-        setItems(prev => prev.map(item => {
-            // Usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
-            const basePreco = item.precoBase !== undefined ? item.precoBase : item.custoUnit;
-            const precoUnit = basePreco * (1 + newBdi / 100);
-            return {
-                ...item,
-                precoUnit,
-                subtotal: precoUnit * item.quantidade
-            };
-        }));
-    };
-
     // Salvar orçamento usando o serviço
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1577,8 +1810,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 validade: formState.validade,
                 bdi: formState.bdi,
                 observacoes: formState.observacoes,
-                // Novos campos
+                // Novos campos (empresa executora: Orçamento → PV → NF-e/NFS-e)
                 empresaCNPJ: formState.empresaCNPJ,
+                empresaFiscalId: formState.empresaFiscalId || undefined,
                 enderecoObra: formState.enderecoObra,
                 cidade: formState.cidade,
                 bairro: formState.bairro,
@@ -1661,77 +1895,123 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         if (!orcamentoToAprovar) return;
 
         const orcamentoId = orcamentoToAprovar.id;
-                    const response = await orcamentosService.aprovar(orcamentoId);
-                    
-                    if (response.success) {
-                        const data: any = response.data || response;
-                        const itemsFrios = data.itemsFrios || [];
-                        const itemsDisponiveis = data.itemsDisponiveis || [];
-                        
-                        // Mostrar mensagem personalizada baseada em items frios
-                        if (itemsFrios.length > 0) {
-                            // Criar lista de items frios para exibir
-                            const listaItemsFrios = itemsFrios.map((item: any) => 
-                                `• ${item.nome} - Faltam: ${item.quantidadeFaltante || item.quantidadeNecessaria} ${item.sku ? `(${item.sku})` : ''}`
-                            ).join('\n');
-                            
-                            toast.warning('⚠️ Orçamento aprovado com restrições', {
-                                description: `${itemsFrios.length} item(ns) sem estoque suficiente:\n${listaItemsFrios}\n\n📦 Realize a compra destes materiais antes de iniciar o projeto.`,
-                                duration: 10000,
-                                action: {
-                                    label: 'Entendi',
-                                    onClick: () => {}
-                                }
-                            });
-                        } else {
-                            toast.success('✅ Orçamento aprovado!', {
-                                description: `Todos os ${itemsDisponiveis.length} item(ns) estão disponíveis em estoque. O projeto foi criado e está pronto para aprovação.`
-                            });
-                        }
-                        
-                        await loadData();
-                    } else {
-                        toast.error('Erro ao aprovar', {
-                            description: response.error
-                        });
+        const response = await orcamentosService.aprovar(orcamentoId);
+
+        if (response.success) {
+            const data: any = response.data || response;
+            const itemsFrios = data.itemsFrios || [];
+            const itemsDisponiveis = data.itemsDisponiveis || [];
+
+            // Mostrar mensagem personalizada baseada em items frios
+            if (itemsFrios.length > 0) {
+                // Criar lista de items frios para exibir
+                const listaItemsFrios = itemsFrios.map((item: any) =>
+                    `• ${item.nome} - Faltam: ${item.quantidadeFaltante || item.quantidadeNecessaria} ${item.sku ? `(${item.sku})` : ''}`
+                ).join('\n');
+
+                toast.warning('⚠️ Orçamento aprovado com restrições', {
+                    description: `${itemsFrios.length} item(ns) sem estoque suficiente:\n${listaItemsFrios}\n\n📦 Realize a compra destes materiais antes de iniciar o projeto.`,
+                    duration: 10000,
+                    action: {
+                        label: 'Entendi',
+                        onClick: () => { }
                     }
+                });
+            } else {
+                toast.success('✅ Orçamento aprovado!', {
+                    description: `Todos os ${itemsDisponiveis.length} item(ns) estão disponíveis em estoque. O projeto foi criado e está pronto para aprovação.`
+                });
+            }
+
+            await loadData();
+        } else {
+            toast.error('Erro ao aprovar', {
+                description: response.error
+            });
+        }
 
         // Fechar o dialog
         setShowAprovarDialog(false);
         setOrcamentoToAprovar(null);
     };
 
-    // Recusar orçamento (com motivo em modal)
-    const [orcamentoToRecusar, setOrcamentoToRecusar] = useState<Orcamento | null>(null);
-    const [showRecusarDialog, setShowRecusarDialog] = useState(false);
-    const [motivoRecusa, setMotivoRecusa] = useState('');
-
-    const handleRecusarOrcamento = (orcamentoId: string) => {
-        const encontrado = orcamentos.find(o => o.id === orcamentoId) || null;
-        setOrcamentoToRecusar(encontrado);
-        setMotivoRecusa('');
-        setShowRecusarDialog(true);
+    const handleAbrirAtualizarCliente = async (orcamento: Orcamento) => {
+        const clienteId = (orcamento as any).clienteId || (orcamento as any).cliente?.id;
+        if (!clienteId) {
+            toast.error('Orçamento sem cliente vinculado.');
+            return;
+        }
+        let clienteData: Cliente | null = (orcamento as any).cliente || null;
+        if (!clienteData) {
+            const res = await clientesService.buscar(clienteId);
+            if (!res.success || !res.data) {
+                toast.error(res.error || 'Cliente não encontrado.');
+                return;
+            }
+            clienteData = res.data;
+        }
+        setClienteParaAtualizar(clienteData);
+        setFormClienteAtualizar({
+            nome: clienteData.nome || '',
+            cpfCnpj: clienteData.cpfCnpj || '',
+            endereco: clienteData.endereco || '',
+            cidade: clienteData.cidade || '',
+            estado: clienteData.estado || '',
+            cep: clienteData.cep || '',
+            telefone: clienteData.telefone || '',
+            email: clienteData.email || ''
+        });
+        setShowModalAtualizarCliente(true);
     };
 
-    const handleConfirmarRecusa = async () => {
-        if (!orcamentoToRecusar) return;
-
-        const response = await orcamentosService.recusar(orcamentoToRecusar.id, motivoRecusa || undefined);
-        
-        if (response.success) {
-            toast.success('Orçamento recusado', {
-                description: motivoRecusa || 'Orçamento foi marcado como recusado'
-            });
-            await loadData();
-        } else {
-            toast.error('Erro ao recusar', {
-                description: response.error
-            });
+    const handleSalvarDadosCliente = async () => {
+        if (!clienteParaAtualizar) return;
+        if (!formClienteAtualizar.nome?.trim() || !formClienteAtualizar.cpfCnpj?.trim()) {
+            toast.error('Preencha nome e CPF/CNPJ.');
+            return;
         }
+        setSalvandoCliente(true);
+        try {
+            const res = await clientesService.atualizar(clienteParaAtualizar.id, {
+                nome: formClienteAtualizar.nome.trim(),
+                cpfCnpj: formClienteAtualizar.cpfCnpj.replace(/\D/g, ''),
+                endereco: formClienteAtualizar.endereco || undefined,
+                cidade: formClienteAtualizar.cidade || undefined,
+                estado: formClienteAtualizar.estado || undefined,
+                cep: formClienteAtualizar.cep || undefined,
+                telefone: formClienteAtualizar.telefone || undefined,
+                email: formClienteAtualizar.email || undefined
+            });
+            if (res.success) {
+                toast.success('Dados do cliente atualizados.', { description: 'CPF/CNPJ e endereço de cobrança (usado na NF) foram salvos.' });
+                setShowModalAtualizarCliente(false);
+                setClienteParaAtualizar(null);
+                await loadData();
+            } else {
+                toast.error(res.error || 'Erro ao atualizar cliente.');
+            }
+        } finally {
+            setSalvandoCliente(false);
+        }
+    };
 
-        setShowRecusarDialog(false);
-        setOrcamentoToRecusar(null);
-        setMotivoRecusa('');
+    // Declinar orçamento (confirmação)
+    const [orcamentoToDeclinar, setOrcamentoToDeclinar] = useState<Orcamento | null>(null);
+    const [showDeclinarDialog, setShowDeclinarDialog] = useState(false);
+
+    const handleDeclinarOrcamento = (orcamento: Orcamento, fecharModalView = false) => {
+        setOrcamentoToDeclinar(orcamento);
+        if (fecharModalView) setOrcamentoToView(null);
+        setShowDeclinarDialog(true);
+    };
+
+    const handleConfirmarDeclinio = async () => {
+        if (!orcamentoToDeclinar) return;
+        const id = orcamentoToDeclinar.id;
+        setShowDeclinarDialog(false);
+        setOrcamentoToDeclinar(null);
+        await handleChangeStatus(id, 'Declinado');
+        if (orcamentoToView?.id === id) setOrcamentoToView(null);
     };
 
     // Excluir orçamento
@@ -1743,9 +2023,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         if (!orcamentoToDelete) return;
 
         const response = await orcamentosService.excluir(orcamentoToDelete.id, deletePermanent);
-        
+
         if (response.success) {
-            const message = deletePermanent 
+            const message = deletePermanent
                 ? `Orçamento "${orcamentoToDelete.titulo}" foi excluído permanentemente do banco de dados`
                 : `Orçamento "${orcamentoToDelete.titulo}" foi cancelado com sucesso`;
             toast.success(deletePermanent ? 'Orçamento excluído' : 'Orçamento cancelado', {
@@ -1767,16 +2047,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
     const handleChangeStatus = async (orcamentoId: string, novoStatus: 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado') => {
         const promise = (async () => {
             console.log(`🔄 Alterando status do orçamento ${orcamentoId} para ${novoStatus}...`);
-            
-            // Se for declinar e o orçamento estiver aprovado, confirmar
-            const orcamento = orcamentos.find(o => o.id === orcamentoId);
-            if (novoStatus === 'Declinado' && orcamento?.status === 'Aprovado') {
-                const confirmar = window.confirm('Este orçamento está aprovado. Ao declinar, o projeto será cancelado. Deseja continuar?');
-                if (!confirmar) {
-                    throw new Error('Operação cancelada');
-                }
-            }
-            
+
             const response = await orcamentosService.atualizarStatus(orcamentoId, novoStatus);
 
             if (response.success) {
@@ -1804,8 +2075,14 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
         return {
             numero: orcamento.id.substring(0, 8).toUpperCase(),
+            numeroSequencial: orcamento.numeroSequencial || undefined,
             data: new Date(orcamento.createdAt).toLocaleDateString('pt-BR'),
-            validade: new Date(orcamento.validade).toLocaleDateString('pt-BR'),
+            emissao: new Date(orcamento.createdAt).toLocaleDateString('pt-BR'),
+            validade: new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR'),
+            enderecos: {
+                cobranca: clienteCompleto?.endereco,
+                obra: (orcamento as any).enderecoObra
+            },
             cliente: {
                 nome: orcamento.cliente?.nome || clienteCompleto?.nome || 'Cliente não informado',
                 cpfCnpj: (orcamento.cliente as any)?.cpfCnpj || clienteCompleto?.cpfCnpj || '',
@@ -1832,19 +2109,27 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     descricao: shouldShowDescricao(item) ? item.descricao : undefined,
                     unidade: item.unidadeMedida || 'UN',
                     quantidade: item.quantidade,
-                    valorUnitario: item.precoUnit || item.precoUnitario,
-                    valorTotal: item.subtotal
+                    valorUnitario: item.precoUnit ?? item.precoUnitario ?? item.valorUnitario ?? 0,
+                    valorTotal: item.subtotal ?? item.valorTotal ?? 0
                 };
             }),
             financeiro: {
-                subtotal: orcamento.custoTotal,
+                subtotal: orcamento.custoTotal ?? 0,
                 bdi: orcamento.bdi,
-                valorComBDI: orcamento.custoTotal * (1 + orcamento.bdi / 100),
-                desconto: (orcamento as any).descontoValor || 0,
-                impostos: (orcamento as any).impostoPercentual || 0,
-                valorTotal: orcamento.precoVenda,
-                condicaoPagamento: (orcamento as any).condicaoPagamento || 'À Vista'
+                valorComBDI: orcamento.custoTotal ?? 0,
+                desconto: orcamento.descontoValor ?? 0,
+                impostos: orcamento.impostoPercentual ?? 0,
+                valorTotal: orcamento.precoVenda ?? orcamento.valorTotal ?? 0,
+                condicaoPagamento: orcamento.condicaoPagamento ?? 'À Vista'
             },
+            orcamentistaNome: (() => {
+                const nome = (orcamento as any).orcamentistaNome;
+                if (!nome || !String(nome).trim()) return undefined;
+                const s = String(nome).trim();
+                // Não truncar "Não identificado" para "Não" no PDF
+                if (s === 'Não identificado') return s;
+                return s.split(/\s+/)[0];
+            })(),
             observacoes: orcamento.observacoes,
             descricaoTecnica: (orcamento as any).descricaoProjeto,
             fotos: [], // Fotos agora estão inline no HTML do Jodit
@@ -1864,47 +2149,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
         setShowPDFCustomization(true);
     };
 
-    // Gerar PDF profissional com marca d'água
-    const handleGerarPDFProfissional = async (orcamento: Orcamento) => {
-        try {
-            console.log('📄 Gerando PDF profissional:', orcamento.id);
-            toast.info('Gerando PDF...');
-            
-            // Buscar HTML via API autenticada
-            const response = await axiosApiService.get(`/api/orcamentos/${orcamento.id}/pdf/preview?opacidade=0.08`);
-            
-            const responseData: any = response.data || {};
-            if (response.success && responseData.html) {
-                // Criar blob com o HTML
-                const blob = new Blob([responseData.html], { type: 'text/html' });
-                const url = URL.createObjectURL(blob);
-                
-                console.log('✅ PDF gerado, abrindo em nova janela...');
-                
-                // Abrir em nova janela
-                const win = window.open(url, '_blank');
-                
-                if (win) {
-                    // Aguardar carregar e disparar impressão automaticamente
-                    win.addEventListener('load', () => {
-                        setTimeout(() => {
-                            win.print();
-                            // Limpar blob URL após uso
-                            setTimeout(() => URL.revokeObjectURL(url), 1000);
-                        }, 500);
-                    });
-                    toast.success('PDF aberto em nova janela!');
-                } else {
-                    toast.error('Popup bloqueado! Permita popups neste site.');
-                }
-            } else {
-                toast.error('Erro ao gerar PDF');
-            }
-        } catch (error) {
-            console.error('Erro ao gerar PDF:', error);
-            toast.error('Erro ao gerar PDF do orçamento');
-        }
-    };
+    // Removido: "Gerar PDF profissional" via /pdf/preview (evita fluxos paralelos e confusão com envio no WhatsApp CRM)
 
     // Gerar PDF do orçamento (função antiga mantida para compatibilidade)
     const handleGerarPDF = (orcamento: Orcamento) => {
@@ -1921,7 +2166,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     telefone: orcamento.cliente?.telefone
                 },
                 data: new Date(orcamento.createdAt).toLocaleDateString('pt-BR'),
-                validade: new Date(orcamento.validade).toLocaleDateString('pt-BR'),
+                validade: new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR'),
                 descricao: orcamento.descricao,
                 items: (orcamento.items || []).map((item: any) => ({
                     nome: getItemNome(item),
@@ -1929,9 +2174,9 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     valorUnit: item.precoUnit || item.precoUnitario,
                     valorTotal: item.subtotal
                 })),
-                subtotal: orcamento.custoTotal,
+                subtotal: orcamento.custoTotal ?? 0,
                 bdi: orcamento.bdi,
-                valorTotal: orcamento.precoVenda,
+                valorTotal: orcamento.precoVenda ?? orcamento.valorTotal ?? 0,
                 observacoes: orcamento.observacoes
             };
 
@@ -1963,10 +2208,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando orçamentos...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 dark:border-purple-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando orçamentos...</p>
                 </div>
             </div>
         );
@@ -1978,6 +2223,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             <NovoOrcamentoPage
                 setAbaAtiva={setAbaAtiva}
                 onOrcamentoCriado={loadData}
+                initialDataFromLead={initialDataFromLead ?? undefined}
+                onConsumedInitialData={() => setInitialDataFromLead(null)}
             />
         );
     }
@@ -2042,24 +2289,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             style={{ display: 'none' }}
                         />
                     </div>
-                    {/* Botão separado para importação de orçamentos antigos (JSON simples) */}
                     <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={handleImportHistoricoClick}
-                            disabled={importingHistorico}
-                            className="btn-secondary flex items-center gap-2"
-                        >
-                            <DocumentArrowUpIcon className={`w-5 h-5 ${importingHistorico ? 'animate-spin' : ''}`} />
-                            {importingHistorico ? 'Importando Históricos...' : 'Importar Orçamentos Antigos (JSON)'}
-                        </button>
-                        <input
-                            ref={historicoFileInputRef}
-                            type="file"
-                            accept=".json"
-                            onChange={handleImportHistoricoFile}
-                            style={{ display: 'none' }}
-                        />
                         <button
                             onClick={() => setAbaAtiva('novo')}
                             className="btn-primary flex items-center gap-2"
@@ -2067,21 +2297,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             <PlusIcon className="w-5 h-5" />
                             Novo Orçamento
                         </button>
-                        {/* Botão de Reset (apenas para admin e desenvolvedor) */}
-                        {(user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'desenvolvedor') && (
-                            <button
-                                type="button"
-                                onClick={handleResetarOrcamentos}
-                                disabled={resetting}
-                                className="btn-danger flex items-center gap-2"
-                                title="Resetar todos os orçamentos e a sequência (apenas admin/desenvolvedor)"
-                            >
-                                <svg className={`w-5 h-5 ${resetting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                {resetting ? 'Resetando...' : 'Resetar Orçamentos'}
-                            </button>
-                        )}
                     </div>
                 </div>
             </header>
@@ -2101,51 +2316,73 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 </div>
             )}
 
-            {/* DIALOGO DE RECUSA */}
-            <AlertDialog
-                isOpen={showRecusarDialog}
-                onClose={() => {
-                    setShowRecusarDialog(false);
-                    setOrcamentoToRecusar(null);
-                    setMotivoRecusa('');
-                }}
-                onConfirm={handleConfirmarRecusa}
-                title={
-                    `Recusar orçamento${orcamentoToRecusar?.numeroSequencial ? ` #${orcamentoToRecusar.numeroSequencial}` : ''}`
-                }
-                message=""
-                variant="warning"
-            >
-                <div className="space-y-3">
-                    <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
-                        Você está prestes a recusar este orçamento. O motivo é opcional,
-                        mas ajuda no histórico e na comunicação com o cliente.
-                    </p>
-                    <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                            Motivo da recusa (opcional)
-                        </label>
-                        <textarea
-                            value={motivoRecusa}
-                            onChange={(e) => setMotivoRecusa(e.target.value)}
-                            rows={3}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-                            placeholder="Ex: Preço fora do orçamento do cliente, prazo de execução incompatível, etc."
-                        />
+            {/* Modal Atualizar dados cliente (CPF/CNPJ e endereço de cobrança para NF) */}
+            {showModalAtualizarCliente && clienteParaAtualizar && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-lg w-full overflow-hidden">
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text">Atualizar dados do cliente</h3>
+                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+                                CPF/CNPJ e endereço de cobrança (usado na emissão de NF/NFS-e). O endereço da obra no orçamento é apenas para fluxo interno.
+                            </p>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Nome *</label>
+                                <input value={formClienteAtualizar.nome} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, nome: e.target.value })} className="input-field w-full" placeholder="Nome ou razão social" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">CPF/CNPJ *</label>
+                                <input value={formClienteAtualizar.cpfCnpj} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, cpfCnpj: e.target.value })} className="input-field w-full" placeholder="000.000.000-00 ou 00.000.000/0000-00" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Endereço (cobrança)</label>
+                                <input value={formClienteAtualizar.endereco} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, endereco: e.target.value })} className="input-field w-full" placeholder="Logradouro, número, complemento" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Cidade</label>
+                                    <input value={formClienteAtualizar.cidade} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, cidade: e.target.value })} className="input-field w-full" placeholder="Cidade" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Estado</label>
+                                    <input value={formClienteAtualizar.estado} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, estado: e.target.value })} className="input-field w-full" placeholder="UF" maxLength={2} />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">CEP</label>
+                                <input value={formClienteAtualizar.cep} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, cep: e.target.value })} className="input-field w-full" placeholder="00000-000" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Telefone</label>
+                                    <input value={formClienteAtualizar.telefone} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, telefone: e.target.value })} className="input-field w-full" placeholder="(00) 00000-0000" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">E-mail</label>
+                                    <input type="email" value={formClienteAtualizar.email} onChange={(e) => setFormClienteAtualizar({ ...formClienteAtualizar, email: e.target.value })} className="input-field w-full" placeholder="email@exemplo.com" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-gray-200 dark:border-dark-border flex justify-end gap-3">
+                            <button type="button" onClick={() => { setShowModalAtualizarCliente(false); setClienteParaAtualizar(null); }} className="btn-secondary">Cancelar</button>
+                            <button type="button" onClick={handleSalvarDadosCliente} disabled={salvandoCliente} className="btn-primary">
+                                {salvandoCliente ? 'Salvando...' : 'Salvar'}
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </AlertDialog>
+            )}
 
-            {/* Abas de Navegação */}
+            {/* Abas de Navegação: Listagem | Expirados | Declinados */}
             <div className="bg-white rounded-2xl shadow-soft border border-gray-100 mb-6">
                 <div className="flex border-b border-gray-200">
                     <button
                         onClick={() => setAbaAtiva('listagem')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${
-                            abaAtiva === 'listagem'
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'listagem'
                                 ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
                                 : 'text-gray-600 hover:text-blue-600 hover:bg-gray-50'
-                        }`}
+                            }`}
                     >
                         <div className="flex items-center justify-center gap-2">
                             <span>📋</span>
@@ -2158,19 +2395,43 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         </div>
                     </button>
                     <button
-                        onClick={() => setAbaAtiva('reprovados-expirados')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${
-                            abaAtiva === 'reprovados-expirados'
+                        onClick={() => setAbaAtiva('expirados')}
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all relative ${abaAtiva === 'expirados'
+                                ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50'
+                                : 'text-gray-600 hover:text-amber-600 hover:bg-gray-50'
+                            }`}
+                    >
+                        <div className="flex items-center justify-center gap-2">
+                            <span>⏰</span>
+                            <span>Expirados</span>
+                            {orcamentosExpirados.length > 0 && (
+                                <span
+                                    className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs font-bold text-white bg-red-500 rounded-full ring-2 ring-white"
+                                    title={`${orcamentosExpirados.length} orçamento(s) expirado(s)`}
+                                >
+                                    {orcamentosExpirados.length > 99 ? '99+' : orcamentosExpirados.length}
+                                </span>
+                            )}
+                            {abaAtiva === 'expirados' && (
+                                <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
+                                    {orcamentosExpirados.length}
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('declinados')}
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'declinados'
                                 ? 'text-red-600 border-b-2 border-red-600 bg-red-50'
                                 : 'text-gray-600 hover:text-red-600 hover:bg-gray-50'
-                        }`}
+                            }`}
                     >
                         <div className="flex items-center justify-center gap-2">
                             <span>❌</span>
-                            <span>Reprovados e Expirados</span>
-                            {abaAtiva === 'reprovados-expirados' && (
+                            <span>Declinados</span>
+                            {abaAtiva === 'declinados' && (
                                 <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
-                                    {orcamentosReprovadosExpirados.length}
+                                    {orcamentosDeclinados.length}
                                 </span>
                             )}
                         </div>
@@ -2195,11 +2456,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     </div>
 
                     {abaAtiva === 'listagem' && (
-                        <div>
+                        <div className="flex flex-wrap items-center gap-2">
                             <select
                                 value={statusFilter}
                                 onChange={(e) => setStatusFilter(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
+                                className="w-full min-w-[180px] px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
                             >
                                 <option value="Todos">Todos os Status</option>
                                 <option value="Pendente">Pendente</option>
@@ -2207,12 +2468,34 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 <option value="Aprovado">Aprovado</option>
                                 <option value="Recusado">Recusado</option>
                             </select>
+                            {statusFilter === 'Aprovado' && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSortAprovadosPorDataAprovacao(prev => !prev)}
+                                    className={`inline-flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium whitespace-nowrap transition-colors ${
+                                        sortAprovadosPorDataAprovacao
+                                            ? 'bg-blue-600 text-white border-blue-600'
+                                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                    title={sortAprovadosPorDataAprovacao ? 'Ordenar por sequência (padrão)' : 'Ordenar por data de aprovação (mais recentes primeiro)'}
+                                >
+                                    <ArrowsUpDownIcon className="w-5 h-5" />
+                                    {sortAprovadosPorDataAprovacao ? 'Mais recentes aprovados' : 'Por data de aprovação'}
+                                </button>
+                            )}
                         </div>
                     )}
-                    {abaAtiva === 'reprovados-expirados' && (
-                        <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-3">
-                            <p className="text-xs text-orange-800 font-semibold">
-                                ⚠️ Exibindo apenas orçamentos reprovados, declinados, cancelados e expirados
+                    {abaAtiva === 'expirados' && (
+                        <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-3">
+                            <p className="text-xs text-amber-800 font-semibold">
+                                ⏰ Exibindo apenas orçamentos com validade vencida
+                            </p>
+                        </div>
+                    )}
+                    {abaAtiva === 'declinados' && (
+                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3">
+                            <p className="text-xs text-red-800 font-semibold">
+                                ❌ Exibindo apenas orçamentos recusados, declinados ou cancelados
                             </p>
                         </div>
                     )}
@@ -2220,9 +2503,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                 <div className="mt-4 flex items-center justify-between">
                     <p className="text-sm text-gray-600">
-                        {abaAtiva === 'reprovados-expirados' ? (
+                        {abaAtiva === 'expirados' ? (
                             <>
-                                Exibindo <span className="font-bold text-gray-900">{orcamentosReprovadosExpirados.length}</span> orçamentos reprovados/declinados/cancelados/expirados
+                                Exibindo <span className="font-bold text-gray-900">{filteredOrcamentos.length}</span> orçamento(s) expirado(s)
+                            </>
+                        ) : abaAtiva === 'declinados' ? (
+                            <>
+                                Exibindo <span className="font-bold text-gray-900">{filteredOrcamentos.length}</span> orçamento(s) declinado(s)
                             </>
                         ) : (
                             <>
@@ -2258,21 +2545,25 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
             {filteredOrcamentos.length === 0 ? (
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
                     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <span className="text-4xl">📋</span>
+                        <span className="text-4xl">{abaAtiva === 'expirados' ? '⏰' : abaAtiva === 'declinados' ? '❌' : '📋'}</span>
                     </div>
                     <h3 className="text-lg font-bold text-gray-900 mb-2">
-                        {abaAtiva === 'reprovados-expirados'
-                            ? 'Nenhum orçamento reprovado, declinado, cancelado ou expirado encontrado'
-                            : 'Nenhum orçamento encontrado'}
+                        {abaAtiva === 'expirados'
+                            ? 'Nenhum orçamento expirado'
+                            : abaAtiva === 'declinados'
+                                ? 'Nenhum orçamento declinado'
+                                : 'Nenhum orçamento encontrado'}
                     </h3>
                     <p className="text-gray-500 mb-6">
-                        {abaAtiva === 'reprovados-expirados' 
-                            ? 'Não há orçamentos reprovados, declinados, cancelados ou expirados no momento'
-                            : searchTerm || statusFilter !== 'Todos'
-                                ? 'Tente ajustar os filtros de busca'
-                                : 'Comece criando seu primeiro orçamento'}
+                        {abaAtiva === 'expirados'
+                            ? 'Não há orçamentos com validade vencida no momento.'
+                            : abaAtiva === 'declinados'
+                                ? 'Não há orçamentos recusados, declinados ou cancelados.'
+                                : searchTerm || statusFilter !== 'Todos'
+                                    ? 'Tente ajustar os filtros de busca'
+                                    : 'Comece criando seu primeiro orçamento'}
                     </p>
-                    {abaAtiva !== 'reprovados-expirados' && !searchTerm && statusFilter === 'Todos' && (
+                    {abaAtiva === 'listagem' && !searchTerm && statusFilter === 'Todos' && (
                         <button
                             onClick={() => setAbaAtiva('novo')}
                             className="btn-primary flex items-center gap-2"
@@ -2284,8 +2575,21 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 </div>
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredOrcamentos.map((orcamento) => (
-                        <div key={orcamento.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-purple-300 transition-all duration-200">
+                    {filteredOrcamentos.map((orcamento) => {
+                        const stripeClass = getOrcamentoCardStripeClass(orcamento.status, abaAtiva);
+                        return (
+                        <div
+                            key={orcamento.id}
+                            className="flex rounded-2xl overflow-hidden border-2 border-gray-200 dark:border-dark-border shadow-soft hover:shadow-medium hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-200"
+                        >
+                            {stripeClass ? (
+                                <div
+                                    className={`w-1.5 shrink-0 min-h-[8rem] ${stripeClass}`}
+                                    title={orcamento.status}
+                                    aria-hidden
+                                />
+                            ) : null}
+                            <div className="flex-1 p-6 bg-white dark:bg-dark-card min-w-0">
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
@@ -2324,9 +2628,24 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
                                     <span>💰</span>
-                                    <span className="font-bold text-purple-700">
-                                        R$ {orcamento.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
-                                    </span>
+                                    {(() => {
+                                        const valorAReceber = calcularValorAReceberDoOrcamento(orcamento as any);
+                                        const valorVendaDireta = calcularValorVendaDiretaDoOrcamento(orcamento as any);
+                                        const totalCliente = roundMoney(Number((orcamento as any).precoVenda) || 0);
+                                        const temVendaDireta = valorVendaDireta > 0.009 && totalCliente > valorAReceber + 0.009;
+                                        return (
+                                            <div className="flex flex-col leading-tight">
+                                                <span className="font-bold text-purple-700">
+                                                    R$ {valorAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                </span>
+                                                {temVendaDireta && (
+                                                    <span className="text-xs text-gray-500">
+                                                        Total cliente: R$ {totalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • Venda direta: R$ {valorVendaDireta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                                 {/* Validade - apenas para orçamentos não aprovados */}
                                 {orcamento.status !== 'Aprovado' && (
@@ -2334,7 +2653,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         <span>📅</span>
                                         <span>
                                             {isOrcamentoExpirado(orcamento) ? '⏰ ' : ''}
-                                            Válido até: {new Date(orcamento.validade).toLocaleDateString('pt-BR')}
+                                            Válido até: {new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}
                                             {isOrcamentoExpirado(orcamento) && ' (Expirado)'}
                                         </span>
                                     </div>
@@ -2343,7 +2662,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 {orcamento.status === 'Aprovado' && orcamento.aprovedAt && (
                                     <div className="flex items-center gap-2 text-sm text-green-600">
                                         <span>✅</span>
-                                        <span>Aprovado em: {new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR')}</span>
+                                        <span>Aprovado em: {orcamento.aprovedAt ? new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR') : ''}</span>
                                     </div>
                                 )}
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -2451,7 +2770,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         </button>
                                     )}
                                 </div>
-                                
+
                                 {/* Botões de Status */}
                                 {orcamento.status === 'Pendente' && (
                                     <div className="flex flex-col gap-2">
@@ -2464,26 +2783,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             </svg>
                                             Enviado ao Cliente
                                         </button>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleAprovarOrcamento(orcamento.id)}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                </svg>
-                                                Aprovar
-                                            </button>
-                                            <button
-                                                onClick={() => handleRecusarOrcamento(orcamento.id)}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-lg hover:from-red-700 hover:to-red-600 transition-all font-semibold shadow-md"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                                Recusar
-                                            </button>
-                                        </div>
+                                        <button
+                                            onClick={() => handleAprovarOrcamento(orcamento.id)}
+                                            className="flex items-center justify-center gap-1 w-full px-3 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            Aprovar
+                                        </button>
                                     </div>
                                 )}
                                 {orcamento.status === 'Enviado ao Cliente' && (
@@ -2498,7 +2806,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             Aprovar
                                         </button>
                                         <button
-                                            onClick={() => handleChangeStatus(orcamento.id, 'Declinado')}
+                                            onClick={() => handleDeclinarOrcamento(orcamento)}
                                             className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-lg hover:from-gray-800 hover:to-gray-700 transition-all font-semibold shadow-md"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2510,7 +2818,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 )}
                                 {orcamento.status === 'Aprovado' && (
                                     <button
-                                        onClick={() => handleChangeStatus(orcamento.id, 'Declinado')}
+                                        onClick={() => handleDeclinarOrcamento(orcamento)}
                                         className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-lg hover:from-orange-700 hover:to-orange-600 transition-all font-semibold shadow-md text-sm"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2520,248 +2828,227 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     </button>
                                 )}
                             </div>
+                            </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             ) : (
                 /* Visualização em Lista */
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-soft" style={{ overflow: 'visible', position: 'relative' }}>
                     <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
-                    <table className="w-full">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                            <tr>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase w-16">Nº</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Título</th>
-                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Validade</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                            {filteredOrcamentos.map((orcamento, index) => (
-                                <tr key={orcamento.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4 text-center">
+                        <table className="w-full">
+                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                                <tr>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase w-16">Nº</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Título</th>
+                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">A receber (PV)</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Validade</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase min-w-[200px]">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {filteredOrcamentos.map((orcamento, index) => (
+                                    <tr key={orcamento.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className={`px-6 py-4 text-center ${getOrcamentoRowLateralBorderClass(orcamento.status, abaAtiva)}`}>
 
-                                        <span className="text-sm font-semibold text-gray-600">{orcamento.numeroSequencial || index + 1}</span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="font-semibold text-gray-900">{orcamento.cliente?.nome || 'N/A'}</p>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <p className="font-medium text-gray-900">{orcamento.titulo}</p>
-                                        <p className="text-xs text-gray-500">#{orcamento.numero || orcamento.id.substring(0, 8)}</p>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <p className="text-lg font-bold text-purple-700">
-                                            R$ {(orcamento.precoVenda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </p>
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        {orcamento.status === 'Aprovado' ? (
+                                            <span className="text-sm font-semibold text-gray-600">{orcamento.numeroSequencial || index + 1}</span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <p className="font-semibold text-gray-900">{orcamento.cliente?.nome || 'N/A'}</p>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <p className="font-medium text-gray-900">{orcamento.titulo}</p>
+                                            <p className="text-xs text-gray-500">#{orcamento.numeroSequencial ?? orcamento.numero ?? orcamento.id.substring(0, 8)}</p>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            {(() => {
+                                                const valorAReceber = calcularValorAReceberDoOrcamento(orcamento as any);
+                                                const valorVendaDireta = calcularValorVendaDiretaDoOrcamento(orcamento as any);
+                                                const totalCliente = roundMoney(Number((orcamento as any).precoVenda) || 0);
+                                                const temVendaDireta = valorVendaDireta > 0.009 && totalCliente > valorAReceber + 0.009;
+                                                return (
+                                                    <div className="flex flex-col items-end leading-tight">
+                                                        <span className="text-lg font-bold text-purple-700">
+                                                            R$ {valorAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        </span>
+                                                        {temVendaDireta && (
+                                                            <span className="text-xs text-gray-500">
+                                                                Total cliente: R$ {totalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            {orcamento.status === 'Aprovado' ? (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <p className="text-xs text-gray-400 italic">Histórico</p>
+                                                    <p className="text-xs text-gray-500">{new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}</p>
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <p className={`text-sm ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 font-semibold' : 'text-gray-600'}`}>
+                                                        {new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}
+                                                    </p>
+                                                    {isOrcamentoExpirado(orcamento) && (
+                                                        <span className="text-xs text-orange-600 font-semibold">⏰ Expirado</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
                                             <div className="flex flex-col items-center gap-1">
-                                                <p className="text-xs text-gray-400 italic">Histórico</p>
-                                                <p className="text-xs text-gray-500">{new Date(orcamento.validade).toLocaleDateString('pt-BR')}</p>
-                                            </div>
-                                        ) : (
-                                            <div className="flex flex-col items-center gap-1">
-                                                <p className={`text-sm ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 font-semibold' : 'text-gray-600'}`}>
-                                                    {new Date(orcamento.validade).toLocaleDateString('pt-BR')}
-                                                </p>
+                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(orcamento.status)}`}>
+                                                    {orcamento.status === 'Pendente' && '⏳ '}
+                                                    {orcamento.status === 'Enviado ao Cliente' && '📤 '}
+                                                    {orcamento.status === 'Aprovado' && '✅ '}
+                                                    {orcamento.status === 'Recusado' && '❌ '}
+                                                    {orcamento.status === 'Declinado' && '🔻 '}
+                                                    {orcamento.status === 'Cancelado' && '🚫 '}
+                                                    {orcamento.status}
+                                                </span>
                                                 {isOrcamentoExpirado(orcamento) && (
-                                                    <span className="text-xs text-orange-600 font-semibold">⏰ Expirado</span>
+                                                    <span className="px-2 py-0.5 text-xs font-bold rounded bg-orange-100 text-orange-800">
+                                                        ⏰ Expirado
+                                                    </span>
                                                 )}
                                             </div>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <div className="flex flex-col items-center gap-1">
-                                            <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(orcamento.status)}`}>
-                                                {orcamento.status === 'Pendente' && '⏳ '}
-                                                {orcamento.status === 'Enviado ao Cliente' && '📤 '}
-                                                {orcamento.status === 'Aprovado' && '✅ '}
-                                                {orcamento.status === 'Recusado' && '❌ '}
-                                                {orcamento.status === 'Declinado' && '🔻 '}
-                                                {orcamento.status === 'Cancelado' && '🚫 '}
-                                                {orcamento.status}
-                                            </span>
-                                            {isOrcamentoExpirado(orcamento) && (
-                                                <span className="px-2 py-0.5 text-xs font-bold rounded bg-orange-100 text-orange-800">
-                                                    ⏰ Expirado
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
-                                        <div className="flex items-center justify-center" style={{ position: 'relative' }}>
-                                            <ActionsDropdown
-                                                actions={[
-                                                    {
-                                                        label: 'Visualizar',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: async () => {
-                                                            // Buscar orçamento completo do backend para garantir relações carregadas
-                                                            const response = await orcamentosService.buscar(orcamento.id);
-                                                            if (response.success && response.data) {
-                                                                setOrcamentoToView(response.data);
-                                                            } else {
-                                                                // Fallback: usar o orçamento da lista
-                                                                setOrcamentoToView(orcamento);
-                                                            }
-                                                        },
-                                                        variant: 'primary'
-                                                    },
-                                                    {
-                                                        label: 'Editar',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => handleOpenModal(orcamento),
-                                                        variant: 'default'
-                                                    },
-                                                    {
-                                                        label: 'Copiar',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                                            </svg>
-                                                        ),
+                                        </td>
+                                        <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
+                                            <div className="flex items-center justify-center" style={{ position: 'relative' }}>
+                                                <ActionsDropdown
+                                                    actions={[
+                                                        {
+                                                            label: 'Visualizar',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                                </svg>
+                                                            ),
                                                             onClick: async () => {
-                                                            // Buscar orçamento completo
-                                                            const response = await orcamentosService.buscar(orcamento.id);
-                                                            if (response.success && response.data) {
-                                                                const orcData = response.data;
-                                                                // Mapear items corretamente garantindo que o nome seja preservado
-                                                                const itemsMapeados = (orcData.items || []).map((item: any) => ({
-                                                                    tipo: item.tipo,
-                                                                    materialId: item.materialId,
-                                                                    kitId: item.kitId,
-                                                                    cotacaoId: item.cotacaoId,
-                                                                    servicoNome: item.servicoNome,
-                                                                    descricao: item.descricao,
-                                                                    // Buscar data da cotação de múltiplas fontes possíveis
-                                                                    dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || 
-                                                                                          item.cotacao?.dataAtualizacao || 
-                                                                                          item.cotacao?.updatedAt || 
-                                                                                          item.cotacao?.createdAt,
-                                                                    nome: item.nome || item.material?.nome || item.kit?.nome || item.cotacao?.nome || item.servicoNome || 'Item sem nome',
-                                                                    unidadeMedida: item.unidadeMedida,
-                                                                    unidadeVenda: item.unidadeVenda,
-                                                                    tipoMaterial: item.tipoMaterial,
-                                                                    quantidade: item.quantidade,
-                                                                    custoUnit: item.custoUnit,
-                                                                    precoBase: item.precoBase,
-                                                                    precoUnit: item.precoUnit,
-                                                                    subtotal: item.subtotal,
-                                                                    precoEditadoManual: item.precoEditadoManual
-                                                                }));
-                                                                
-                                                                // Salvar no localStorage (sem cliente)
-                                                                const orcamentoCopia = {
-                                                                    empresaCNPJ: orcData.empresaCNPJ,
-                                                                    titulo: orcData.titulo,
-                                                                    descricao: orcData.descricao,
-                                                                    descricaoProjeto: orcData.descricaoProjeto,
-                                                                    validade: orcData.validade,
-                                                                    endereco: orcData.enderecoObra,
-                                                                    bairro: orcData.bairro,
-                                                                    cidade: orcData.cidade,
-                                                                    cep: orcData.cep,
-                                                                    responsavelObra: orcData.responsavelObra,
-                                                                    bdi: orcData.bdi,
-                                                                    previsaoInicio: orcData.previsaoInicio,
-                                                                    previsaoTermino: orcData.previsaoTermino,
-                                                                    condicaoPagamento: orcData.condicaoPagamento,
-                                                                    items: itemsMapeados
-                                                                };
-                                                                localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
-                                                                toast.success('Orçamento copiado', {
-                                                                    description: 'Abrindo novo orçamento...'
-                                                                });
-                                                                setAbaAtiva('novo');
-                                                            } else {
-                                                                toast.error('Erro ao copiar orçamento', {
-                                                                    description: response.error || 'Não foi possível buscar os dados'
-                                                                });
-                                                            }
+                                                                // Buscar orçamento completo do backend para garantir relações carregadas
+                                                                const response = await orcamentosService.buscar(orcamento.id);
+                                                                if (response.success && response.data) {
+                                                                    setOrcamentoToView(response.data);
+                                                                } else {
+                                                                    // Fallback: usar o orçamento da lista
+                                                                    setOrcamentoToView(orcamento);
+                                                                }
+                                                            },
+                                                            variant: 'primary'
                                                         },
-                                                        variant: 'default'
-                                                    },
-                                                    {
-                                                        label: 'Personalizar PDF',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => handlePersonalizarPDF(orcamento),
-                                                        variant: 'default'
-                                                    },
-                                                    // Ações de status
-                                                    {
-                                                        label: 'Marcar como Enviado ao Cliente',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => handleChangeStatus(orcamento.id, 'Enviado ao Cliente'),
-                                                        variant: 'primary',
-                                                        show: orcamento.status === 'Pendente'
-                                                    },
-                                                    {
-                                                        label: 'Declinar Orçamento',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => handleChangeStatus(orcamento.id, 'Declinado'),
-                                                        variant: 'danger',
-                                                        show: orcamento.status === 'Aprovado'
-                                                    },
-                                                    {
-                                                        label: 'Cancelar',
-                                                        icon: (
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                            </svg>
-                                                        ),
-                                                        onClick: () => {
-                                                            setOrcamentoToDelete(orcamento);
-                                                            setDeletePermanent(false);
-                                                            setShowDeleteDialog(true);
+                                                        {
+                                                            label: 'Editar',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: () => handleOpenModal(orcamento),
+                                                            variant: 'default'
                                                         },
-                                                        variant: 'default',
-                                                        show: true
-                                                    },
-                                                    {
-                                                        label: 'Excluir Permanentemente',
-                                                        icon: <TrashIcon className="w-4 h-4" />,
-                                                        onClick: () => {
-                                                            setOrcamentoToDelete(orcamento);
-                                                            setDeletePermanent(true);
-                                                            setShowDeleteDialog(true);
+                                                        {
+                                                            label: 'Copiar',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: async () => {
+                                                                // Buscar orçamento completo
+                                                                const response = await orcamentosService.buscar(orcamento.id);
+                                                                if (response.success && response.data) {
+                                                                    const orcData = response.data;
+                                                                    const itemsMapeados = mapItensOrcamentoParaCopia(orcData.items || []);
+
+                                                                    // Salvar no localStorage (sem cliente)
+                                                                    const orcamentoCopia = {
+                                                                        empresaCNPJ: orcData.empresaCNPJ,
+                                                                        titulo: orcData.titulo,
+                                                                        descricao: orcData.descricao,
+                                                                        descricaoProjeto: orcData.descricaoProjeto,
+                                                                        validade: orcData.validade,
+                                                                        endereco: orcData.enderecoObra,
+                                                                        bairro: orcData.bairro,
+                                                                        cidade: orcData.cidade,
+                                                                        cep: orcData.cep,
+                                                                        responsavelObra: orcData.responsavelObra,
+                                                                        bdi: orcData.bdi,
+                                                                        previsaoInicio: orcData.previsaoInicio,
+                                                                        previsaoTermino: orcData.previsaoTermino,
+                                                                        condicaoPagamento: orcData.condicaoPagamento,
+                                                                        items: itemsMapeados
+                                                                    };
+                                                                    localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));
+                                                                    toast.success('Orçamento copiado', {
+                                                                        description: 'Abrindo novo orçamento...'
+                                                                    });
+                                                                    setAbaAtiva('novo');
+                                                                } else {
+                                                                    toast.error('Erro ao copiar orçamento', {
+                                                                        description: response.error || 'Não foi possível buscar os dados'
+                                                                    });
+                                                                }
+                                                            },
+                                                            variant: 'default'
                                                         },
-                                                        variant: 'danger',
-                                                        show: canDelete(user)
-                                                    }
-                                                ]}
-                                            />
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                                        {
+                                                            label: 'PDF',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: () => handlePersonalizarPDF(orcamento),
+                                                            variant: 'default'
+                                                        },
+                                                        // Ações de status
+                                                        {
+                                                            label: 'Enviado-Cliente',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: () => handleChangeStatus(orcamento.id, 'Enviado ao Cliente'),
+                                                            variant: 'primary',
+                                                            show: orcamento.status === 'Pendente'
+                                                        },
+                                                        {
+                                                            label: 'Declinar Orçamento',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: () => handleDeclinarOrcamento(orcamento),
+                                                            variant: 'danger',
+                                                            show: orcamento.status === 'Aprovado'
+                                                        },
+                                                        {
+                                                            label: 'Excluir Permanentemente',
+                                                            icon: <TrashIcon className="w-4 h-4" />,
+                                                            onClick: () => {
+                                                                setOrcamentoToDelete(orcamento);
+                                                                setDeletePermanent(true);
+                                                                setShowDeleteDialog(true);
+                                                            },
+                                                            variant: 'danger',
+                                                            show: canDelete(user)
+                                                        }
+                                                    ]}
+                                                />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
@@ -2771,7 +3058,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
-                        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-[#0a1a2f] dark:bg-gradient-to-r dark:from-purple-600 dark:to-purple-700">
+                        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-[#0a1a2f]">
                             <div className="flex items-center gap-4">
                                 <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
                                     {orcamentoToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
@@ -2803,22 +3090,31 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            CNPJ da Empresa Executora
+                                            Empresa executora (Orçamento → PV → NF-e/NFS-e)
                                         </label>
                                         <select
-                                            value={formState.empresaCNPJ}
-                                            onChange={(e) => setFormState(prev => ({ ...prev, empresaCNPJ: e.target.value }))}
+                                            value={formState.empresaFiscalId}
+                                            onChange={(e) => {
+                                                const id = e.target.value;
+                                                const emp = empresasFiscais.find(ef => ef.id === id);
+                                                setFormState(prev => ({
+                                                    ...prev,
+                                                    empresaFiscalId: id,
+                                                    empresaCNPJ: emp ? emp.cnpj : prev.empresaCNPJ
+                                                }));
+                                            }}
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
                                         >
-                                            <option value="">Selecione o CNPJ</option>
-                                            {empresas
-                                                .filter(emp => emp.ativo)
-                                                .map(emp => (
-                                                    <option key={emp.id} value={emp.cnpj}>
-                                                        {(emp.nomeFantasia || emp.razaoSocial) + ' - ' + emp.cnpj}
+                                            <option value="">Selecione a empresa (prestadora)</option>
+                                            {empresasFiscais
+                                                .filter(ef => ef.ativo !== false)
+                                                .map(ef => (
+                                                    <option key={ef.id} value={ef.id}>
+                                                        {(ef.nomeFantasia || ef.razaoSocial) + ' — ' + (ef.cnpj || '')}
                                                     </option>
                                                 ))}
                                         </select>
+                                        <p className="text-xs text-gray-500 mt-1">Mesma empresa será usada no PV e na emissão de NF-e/NFS-e.</p>
                                     </div>
 
                                     <div>
@@ -2939,22 +3235,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            BDI - Margem (%) *
-                                        </label>
-                                        <input
-                                            type="number"
-                                            value={formState.bdi}
-                                            onChange={(e) => handleBdiChange(Number(e.target.value))}
-                                            min="0"
-                                            max="100"
-                                            required
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
-                                            placeholder="20"
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
                                             Descrição Resumida
                                         </label>
                                         <textarea
@@ -3029,20 +3309,20 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 const dataAtualizacao = getItemDataAtualizacaoCotacao(item);
                                                 const isBancoFrio = isItemBancoFrio(item);
                                                 const mostrarDescricao = shouldShowDescricao(item);
-                                                
+
                                                 return (
-                                                <div key={index} className="bg-gray-50 border border-gray-200 p-4 rounded-xl">
-                                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
-                                                        <div>
+                                                    <div key={index} className="bg-gray-50 border border-gray-200 p-4 rounded-xl">
+                                                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+                                                            <div>
                                                                 <p className="font-semibold text-gray-900">{itemNome}</p>
                                                                 {mostrarDescricao && (
                                                                     <p className="text-sm text-gray-600 mt-1">{item.descricao}</p>
                                                                 )}
-                                                            <p className="text-sm text-gray-600">{item.unidadeMedida}</p>
-                                                            {/* Flag de Banco Frio */}
+                                                                <p className="text-sm text-gray-600">{item.unidadeMedida}</p>
+                                                                {/* Flag de Banco Frio */}
                                                                 {isBancoFrio && (
-                                                                <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
-                                                                    <span>📦 Banco Frio</span>
+                                                                    <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
+                                                                        <span>📦 Banco Frio</span>
                                                                         {dataAtualizacao ? (() => {
                                                                             const data = new Date(dataAtualizacao);
                                                                             if (!isNaN(data.getTime())) {
@@ -3050,49 +3330,60 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                             }
                                                                             return <span className="text-blue-600">• Sem data</span>;
                                                                         })() : <span className="text-blue-600">• Sem data</span>}
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
 
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-600 mb-1">Quantidade</label>
-                                                            <input
-                                                                type="number"
-                                                                value={item.quantidade}
-                                                                onChange={(e) => handleUpdateItemQuantity(index, Number(e.target.value))}
-                                                                min="1"
-                                                                step="0.01"
-                                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
-                                                            />
-                                                        </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Quantidade</label>
+                                                                <input
+                                                                    type="number"
+                                                                    value={item.quantidade}
+                                                                    onChange={(e) => handleUpdateItemQuantity(index, Number(e.target.value))}
+                                                                    min="1"
+                                                                    step="0.01"
+                                                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500"
+                                                                />
+                                                            </div>
 
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-600 mb-1">Valor Unit.</label>
-                                                            <p className="text-sm font-semibold text-gray-900">
-                                                                R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </p>
-                                                        </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Valor Unit.</label>
+                                                                <p className="text-sm font-semibold text-gray-900">
+                                                                    R$ {item.precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </p>
+                                                            </div>
 
-                                                        <div>
-                                                            <label className="block text-xs font-medium text-gray-600 mb-1">Subtotal</label>
-                                                            <p className="text-sm font-bold text-purple-700">
-                                                                R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </p>
-                                                        </div>
+                                                            <div>
+                                                                <label className="block text-xs font-medium text-gray-600 mb-1">Subtotal</label>
+                                                                <p className="text-sm font-bold text-purple-700">
+                                                                    R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </p>
+                                                            </div>
 
-                                                        <div className="flex justify-end">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleRemoveItem(index)}
-                                                                className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
-                                                            >
-                                                                <TrashIcon className="w-4 h-4" />
-                                                            </button>
+                                                            <div className="flex justify-end">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleRemoveItem(index)}
+                                                                    className="p-2 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors"
+                                                                >
+                                                                    <TrashIcon className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
                                                 );
                                             })}
+
+                                            {/* Informação de Quantidade Total de Itens */}
+                                            <div className="mt-6 py-4 bg-white border-2 border-gray-400 rounded-lg">
+                                                <div className="text-center py-3">
+                                                    <div className="border-t-2 border-gray-500 mb-3"></div>
+                                                    <p className="text-xl font-bold text-gray-900">
+                                                        Total de itens = {items.length} {items.length === 1 ? 'item' : 'itens'}
+                                                    </p>
+                                                    <div className="border-b-2 border-gray-500 mt-3"></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -3107,7 +3398,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         {/* Subtotal */}
                                         <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
                                             <div className="flex justify-between items-center">
-                                                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal (com BDI {formState.bdi}%)</span>
+                                                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal dos Itens</span>
                                                 <span className="text-xl font-bold text-blue-900 dark:text-blue-200">
                                                     R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </span>
@@ -3160,6 +3451,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                     <option value="30 dias">30 dias</option>
                                                     <option value="30/60 dias">30/60 dias</option>
                                                     <option value="30/60/90 dias">30/60/90 dias</option>
+                                                    <option value="Pagamento conforme condições a serem acordadas.">Pagamento conforme condições a serem acordadas.</option>
                                                     <option value="Personalizado">Personalizado</option>
                                                 </select>
                                             </div>
@@ -3227,11 +3519,12 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 </div>
                                             </div>
                                         ) : (
-                                            <JoditEditorComponent
+                                            <TechnicalEditor
                                                 value={formState.descricaoProjeto}
                                                 onChange={(content) => setFormState(prev => ({ ...prev, descricaoProjeto: content }))}
                                                 placeholder="Digite a descrição técnica completa do projeto... Você pode formatar o texto, inserir imagens, criar tabelas e listas."
-                                                height={400}
+                                                height={800}
+                                                showPagePreview={false}
                                             />
                                         )}
                                     </div>
@@ -3254,7 +3547,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     </button>
                                     <button
                                         type="submit"
-                                        className="px-8 py-3 bg-[#0a1a2f] hover:bg-[#0d2240] dark:bg-gradient-to-r dark:from-purple-600 dark:to-purple-500 text-white rounded-xl dark:hover:from-purple-700 dark:hover:to-purple-600 transition-all shadow-medium font-semibold"
+                                        className="px-8 py-3 bg-[#0a1a2f] hover:bg-[#0d2240] text-white rounded-xl transition-all shadow-medium font-semibold"
                                     >
                                         {orcamentoToEdit ? 'Atualizar' : 'Criar'} Orçamento
                                     </button>
@@ -3291,6 +3584,12 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         setSearchCotacoes('');
                                         setSearchGlobalComparacao('');
                                         setBuscaGlobal('');
+                                        // Limpar todas as quantidades
+                                        setQuantidadesMateriais(new Map());
+                                        setQuantidadesServicos(new Map());
+                                        setQuantidadesKits(new Map());
+                                        setQuantidadesQuadros(new Map());
+                                        setQuantidadesCotacoes(new Map());
                                     }}
                                     className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
                                 >
@@ -3318,104 +3617,61 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             <div className="flex gap-2 flex-wrap items-center">
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        if (modalExpandido) {
-                                            setModalExpandido(false);
-                                            setModoAdicao('materiais');
-                                        } else {
-                                            setModalExpandido(true);
-                                            setModoAdicao('comparacao');
-                                        }
-                                    }}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 ${
-                                        modalExpandido
-                                            ? 'bg-green-500 text-white hover:bg-green-600'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                    title="Expandir para comparar estoque real com banco frio"
-                                >
-                                    {modalExpandido ? (
-                                        <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                                            </svg>
-                                            Comparação Ativa
-                                        </>
-                                    ) : (
-                                        <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                                            </svg>
-                                            Comparar Estoque vs Banco Frio
-                                        </>
-                                    )}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setModoAdicao('materiais');
-                                        setModalExpandido(false);
-                                    }}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'materiais' && !modalExpandido
+                                    onClick={() => setModoAdicao('materiais')}
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'materiais' && !buscaGlobal.trim()
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     📦 Materiais
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setModoAdicao('servicos')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'servicos'
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'servicos'
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     🔧 Serviços
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setModoAdicao('kits')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'kits'
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'kits'
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     📦 Kits
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setModoAdicao('quadros')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'quadros'
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'quadros'
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     ⚡ Quadros
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setModoAdicao('cotacoes')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'cotacoes'
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'cotacoes'
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     🏷️ Cotações
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setModoAdicao('manual')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'manual'
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'manual'
                                             ? 'bg-white text-indigo-700'
                                             : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
+                                        }`}
                                 >
                                     ✏️ Manual
                                 </button>
@@ -3427,636 +3683,322 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             {/* Resultados da Busca Global - Layout lado a lado quando expandido */}
                             {buscaGlobal.trim() && (
                                 <div className={`mb-6 ${modalExpandido ? 'grid grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto' : 'space-y-4'}`}>
-                                            {/* Materiais */}
-                                            {resultadosBuscaGlobal.materiais.length > 0 && (
-                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
-                                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                        <span>📦</span> Materiais ({resultadosBuscaGlobal.materiais.length})
-                                                    </h4>
-                                                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.materiais.map(material => (
-                                                            <button
-                                                                key={material.id}
-                                                                type="button"
-                                                                onClick={() => handleAddItem(material, true)}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
-                                                            >
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
-                                                                    <br />
-                                                                    Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                                    {material.valorVenda && (
-                                                                        <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)} 
-                                                                        {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
-                                                                        </>
-                                                                    )}
-                                                                </p>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Serviços */}
-                                            {resultadosBuscaGlobal.servicos.length > 0 && (
-                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
-                                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                        <span>🔧</span> Serviços ({resultadosBuscaGlobal.servicos.length})
-                                                    </h4>
-                                                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.servicos.map(servico => (
-                                                            <div
-                                                                key={servico.id}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700 transition-all"
-                                                            >
-                                                                <div className="flex justify-between items-start gap-3">
-                                                                    <div className="flex-1">
-                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
-                                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                            Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
-                                                                        </p>
-                                                                    </div>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleAddServico(servico, true)}
-                                                                        className="px-3 py-1 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
-                                                                    >
-                                                                        + Inserir
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Kits */}
-                                            {resultadosBuscaGlobal.kits.length > 0 && (
-                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
-                                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                        <span>📦</span> Kits ({resultadosBuscaGlobal.kits.length})
-                                                    </h4>
-                                                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.kits.map(kit => (
-                                                            <button
-                                                                key={kit.id}
-                                                                type="button"
-                                                                onClick={() => handleAddKit(kit, true)}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700 transition-all"
-                                                            >
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    {kit.items?.length || 0} itens • Preço: R$ {((kit.precoSugerido ?? kit.custoTotal) ?? 0).toFixed(2)}
-                                                                </p>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Quadros */}
-                                            {resultadosBuscaGlobal.quadros.length > 0 && (
-                                                <div>
-                                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                        <span>⚡</span> Quadros ({resultadosBuscaGlobal.quadros.length})
-                                                    </h4>
-                                                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.quadros.map(quadro => (
-                                                            <button
-                                                                key={quadro.id}
-                                                                type="button"
-                                                                onClick={() => handleAddQuadro(quadro, true)}
-                                                                className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700 transition-all"
-                                                            >
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{quadro.nome}</p>
-                                                                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                    Custo: R$ {(quadro.custoTotal ?? 0).toFixed(2)} • Preço: R$ {((quadro.precoSugerido ?? quadro.custoTotal) ?? 0).toFixed(2)}
-                                                                </p>
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Cotações */}
-                                            {resultadosBuscaGlobal.cotacoes.length > 0 && (
-                                                <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
-                                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                        <span>🏷️</span> Cotações - Banco Frio ({resultadosBuscaGlobal.cotacoes.length})
-                                                    </h4>
-                                                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {resultadosBuscaGlobal.cotacoes.map(cotacao => {
-                                                            const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
-                                                            
-                                                            // Calcular valores para exibição
-                                                            const custoUnitario = cotacao.valorUnitario || 0;
-                                                            const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
-                                                            const porcentagemLucro = custoUnitario > 0 
-                                                                ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
-                                                                : 0;
-                                                            const unidadeMedida = cotacao.unidadeMedida || 'UN';
-                                                            
-                                                            return (
-                                                                <div
-                                                                    key={cotacao.id}
-                                                                    className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-                                                                >
-                                                                    <div className="flex items-center gap-2 mb-1">
-                                                                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                            📦 Banco Frio
-                                                                        </span>
-                                                                    </div>
-                                                                    <div className="flex justify-between items-start gap-3">
-                                                                        <div className="flex-1">
-                                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                            <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                                NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                                <br />
-                                                                                Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
-                                                                                {valorVendaBase > 0 && (
-                                                                                    <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
-                                                                                    {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
-                                                                                    </>
-                                                                                )}
-                                                                            </p>
-                                                                            {temSelecaoUnidade && (
-                                                                                <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                                                                    💡 Metros ou cm
-                                                                                </p>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            {temSelecaoUnidade ? (
-                                                                                <>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'm')}
-                                                                                        className="px-2 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
-                                                                                        title="Adicionar em metros"
-                                                                                    >
-                                                                                        + m
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => handleAddCotacao(cotacao, true, 'cm')}
-                                                                                        className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
-                                                                                        title="Adicionar em centímetros"
-                                                                                    >
-                                                                                        + cm
-                                                                                    </button>
-                                                                                </>
-                                                                            ) : (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => handleAddCotacao(cotacao, true)}
-                                                                                    className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
-                                                                                >
-                                                                                    + Inserir
-                                                                                </button>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Nenhum resultado */}
-                                            {Object.values(resultadosBuscaGlobal).every(arr => arr.length === 0) && (
-                                                <div className={`text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl ${modalExpandido ? 'col-span-2' : ''}`}>
-                                                    <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum item encontrado para "{buscaGlobal}"</p>
-                                                </div>
-                                            )}
-                                        </div>
-                            )}
-
-                            {/* Modo: Comparação Estoque vs Banco Frio (Modal Expandido) */}
-                            {modalExpandido && modoAdicao === 'comparacao' && (
-                                <div className="space-y-4">
-                                    {/* Busca Global para Comparação */}
-                                    <div className="mb-4">
-                                        <div className="relative">
-                                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                                            <input
-                                                type="text"
-                                                value={searchGlobalComparacao}
-                                                onChange={(e) => {
-                                                    setSearchGlobalComparacao(e.target.value);
-                                                    setSearchEstoque(e.target.value);
-                                                    setSearchCotacoes(e.target.value);
-                                                }}
-                                                className="input-field w-full pl-10"
-                                                placeholder="🔍 Buscar em ambos os painéis (Materiais e Cotações)..."
-                                            />
-                                        </div>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                                            💡 A busca filtra simultaneamente os materiais com estoque e as cotações do banco frio
-                                        </p>
-                                    </div>
-
-                                    {/* Indicador de seleção múltipla */}
-                                    {(materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
-                                        <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                                            <p className="text-sm font-semibold text-purple-900 dark:text-purple-300 flex items-center gap-2">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                </svg>
-                                                {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} item(ns) selecionado(s)
-                                                {materiaisSelecionadosComparacao.size > 0 && (
-                                                    <span className="ml-2 text-purple-700 dark:text-purple-400 font-normal">
-                                                        ({materiaisSelecionadosComparacao.size} material(is))
-                                                    </span>
-                                                )}
-                                                {cotacoesSelecionadasComparacao.size > 0 && (
-                                                    <span className="ml-2 text-purple-700 dark:text-purple-400 font-normal">
-                                                        ({cotacoesSelecionadasComparacao.size} cotação(ões))
-                                                    </span>
-                                                )}
-                                            </p>
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-2 gap-6">
-                                        {/* Painel Esquerdo: Materiais com Estoque Real */}
-                                        <div className="border-r border-gray-200 dark:border-dark-border pr-6">
-                                            <div className="mb-4">
-                                                <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                    <span className="text-2xl">📦</span>
-                                                    Materiais com Estoque Real
-                                                    {searchGlobalComparacao && (
-                                                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                                                            ({filteredMateriaisEstoque.length} encontrados)
-                                                        </span>
-                                                    )}
-                                                </h4>
-                                                {!searchGlobalComparacao && (
-                                                    <input
-                                                        type="text"
-                                                        value={searchEstoque}
-                                                        onChange={(e) => setSearchEstoque(e.target.value)}
-                                                        className="input-field w-full"
-                                                        placeholder="🔍 Buscar material por nome ou SKU..."
-                                                    />
-                                                )}
-                                            </div>
-                                        
-                                        <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
-                                            {filteredMateriaisEstoque.length === 0 ? (
-                                                <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                                    <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum material com estoque encontrado</p>
-                                                </div>
-                                            ) : (
-                                                filteredMateriaisEstoque.map(material => {
-                                                    const estaSelecionado = materialSelecionadoComparacao?.id === material.id;
-                                                    const estaSelecionadoMultiplo = materiaisSelecionadosComparacao.has(material.id);
-                                                    
+                                    {/* Materiais */}
+                                    {resultadosBuscaGlobal.materiais.length > 0 && (
+                                        <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
+                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                <span>📦</span> Materiais ({resultadosBuscaGlobal.materiais.length})
+                                            </h4>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {resultadosBuscaGlobal.materiais.map(material => {
+                                                    const quantidadeAtual = quantidadesMateriais.get(material.id) || 1;
                                                     return (
                                                         <div
                                                             key={material.id}
-                                                            className={`p-4 border-2 rounded-lg transition-all ${
-                                                                estaSelecionado || estaSelecionadoMultiplo
-                                                                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
-                                                                    : 'border-gray-200 dark:border-dark-border hover:border-indigo-300 dark:hover:border-indigo-700'
-                                                            }`}
+                                                            className="w-full p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
                                                         >
-                                                            <div className="flex items-start gap-3">
-                                                                {/* Checkbox */}
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={estaSelecionadoMultiplo}
-                                                                    onChange={(e) => {
-                                                                        e.stopPropagation();
-                                                                        toggleMaterialSelecionado(material.id);
-                                                                    }}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-                                                                />
-                                                                
-                                                                <div 
-                                                                    className="flex-1 cursor-pointer"
-                                                                    onClick={(e) => {
-                                                                        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') {
-                                                                            return;
-                                                                        }
-                                                                        setMaterialSelecionadoComparacao(material);
-                                                                        const cotacaoCorrespondente = filteredCotacoesComparacao.find(c => 
-                                                                            c.nome?.toLowerCase().includes(material.nome.toLowerCase()) ||
-                                                                            c.ncm === material.sku
-                                                                        );
-                                                                        if (cotacaoCorrespondente) {
-                                                                            setCotacaoSelecionadaComparacao(cotacaoCorrespondente);
-                                                                        }
-                                                                    }}
-                                                                >
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="flex-1">
                                                                     <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                        SKU: {material.sku}
-                                                                    </p>
-
-                                                                    <div className="mt-2 flex flex-col gap-2">
-                                                                        <div className="flex items-center gap-4 text-xs">
-                                                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded font-semibold">
-                                                                                Estoque: {material.estoque} {material.unidadeMedida}
-                                                                            </span>
-                                                                            <span className="text-gray-600 dark:text-gray-400">
-                                                                                Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                                            </span>
-                                                                        </div>
+                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                        SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
+                                                                        <br />
+                                                                        Custo: R$ {(material.preco ?? 0).toFixed(2)}
                                                                         {material.valorVenda && (
-                                                                            <div className="flex items-center gap-4 text-xs">
-                                                                                <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded font-semibold">
-                                                                                    Venda: R$ {(material.valorVenda ?? 0).toFixed(2)}
-                                                                                </span>
-                                                                                {material.porcentagemLucro && (
-                                                                                    <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded font-semibold">
-                                                                                        {(material.porcentagemLucro ?? 0).toFixed(2)}% lucro
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
+                                                                            <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)}
+                                                                                {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
+                                                                            </>
                                                                         )}
-                                                                    </div>
+                                                                    </p>
                                                                 </div>
-                                                                
-                                                                {estaSelecionado && (
-                                                                    <div className="ml-2">
-                                                                        <CheckIcon className="w-5 h-5 text-indigo-600" />
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {estaSelecionado && (
+                                                                <div className="flex items-center gap-2">
+                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        value={quantidadeAtual}
+                                                                        onChange={(e) => {
+                                                                            const qtd = parseInt(e.target.value) || 1;
+                                                                            atualizarQuantidadeMaterial(material.id, qtd);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                    />
                                                                     <button
                                                                         type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleAddItemComValidacao(material, undefined, 1);
-                                                                        }}
-                                                                        className="ml-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors font-semibold whitespace-nowrap"
+                                                                        onClick={() => handleAddItem(material, true, quantidadeAtual)}
+                                                                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-md hover:bg-indigo-700 transition-colors"
                                                                     >
                                                                         Inserir
                                                                     </button>
-                                                                )}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
-                                                })
-                                            )}
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
-                                    {/* Painel Direito: Cotações (Banco Frio) */}
-                                    <div className="pl-6">
-                                        <div className="mb-4">
-                                            <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                <span className="text-2xl">🏷️</span>
-                                                Cotações (Banco Frio)
-                                                {searchGlobalComparacao && (
-                                                    <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                                                        ({filteredCotacoesComparacao.length} encontradas)
-                                                    </span>
-                                                )}
+                                    {/* Serviços */}
+                                    {resultadosBuscaGlobal.servicos.length > 0 && (
+                                        <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
+                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                <span>🔧</span> Serviços ({resultadosBuscaGlobal.servicos.length})
                                             </h4>
-                                            {!searchGlobalComparacao && (
-                                                <input
-                                                    type="text"
-                                                    value={searchCotacoes}
-                                                    onChange={(e) => setSearchCotacoes(e.target.value)}
-                                                    className="input-field w-full"
-                                                    placeholder="🔍 Buscar cotação por nome, NCM ou fornecedor..."
-                                                />
-                                            )}
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {resultadosBuscaGlobal.servicos.map(servico => {
+                                                    const quantidadeAtual = quantidadesServicos.get(servico.id) || 1;
+                                                    return (
+                                                        <div
+                                                            key={servico.id}
+                                                            className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700 transition-all"
+                                                        >
+                                                            <div className="flex justify-between items-start gap-3">
+                                                                <div className="flex-1">
+                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
+                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                        Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        value={quantidadeAtual}
+                                                                        onChange={(e) => {
+                                                                            const qtd = parseInt(e.target.value) || 1;
+                                                                            atualizarQuantidadeServico(servico.id, qtd);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddServico(servico, true, quantidadeAtual)}
+                                                                        className="px-3 py-1 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 transition-colors"
+                                                                    >
+                                                                        Inserir
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
-                                        
-                                        <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
-                                            {filteredCotacoesComparacao.length === 0 ? (
-                                                <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                                    <p className="text-gray-500 dark:text-dark-text-secondary">Nenhuma cotação encontrada</p>
-                                                </div>
-                                            ) : (
-                                                filteredCotacoesComparacao.map(cotacao => {
-                                                    const estaSelecionada = cotacaoSelecionadaComparacao?.id === cotacao.id;
-                                                    const estaSelecionadaMultiplo = cotacoesSelecionadasComparacao.has(cotacao.id);
-                                                    
+                                    )}
+
+                                    {/* Kits */}
+                                    {resultadosBuscaGlobal.kits.length > 0 && (
+                                        <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
+                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                <span>📦</span> Kits ({resultadosBuscaGlobal.kits.length})
+                                            </h4>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {resultadosBuscaGlobal.kits.map(kit => {
+                                                    const quantidadeAtual = quantidadesKits.get(kit.id) || 1;
+                                                    return (
+                                                        <div
+                                                            key={kit.id}
+                                                            className="w-full p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700 transition-all"
+                                                        >
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="flex-1">
+                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
+                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                        {kit.items?.length || 0} itens • Preço: R$ {((kit.precoSugerido ?? kit.custoTotal) ?? 0).toFixed(2)}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        value={quantidadeAtual}
+                                                                        onChange={(e) => {
+                                                                            const qtd = parseInt(e.target.value) || 1;
+                                                                            atualizarQuantidadeKit(kit.id, qtd);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddKit(kit, true, quantidadeAtual)}
+                                                                        className="px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-md hover:bg-green-700 transition-colors"
+                                                                    >
+                                                                        Inserir
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Quadros */}
+                                    {resultadosBuscaGlobal.quadros.length > 0 && (
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                <span>⚡</span> Quadros ({resultadosBuscaGlobal.quadros.length})
+                                            </h4>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {resultadosBuscaGlobal.quadros.map(quadro => {
+                                                    const quantidadeAtual = quantidadesQuadros.get(quadro.id) || 1;
+                                                    return (
+                                                        <div
+                                                            key={quadro.id}
+                                                            className="w-full p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700 transition-all"
+                                                        >
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div className="flex-1">
+                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{quadro.nome}</p>
+                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                        Custo: R$ {(quadro.custoTotal ?? 0).toFixed(2)} • Preço: R$ {((quadro.precoSugerido ?? quadro.custoTotal) ?? 0).toFixed(2)}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        value={quantidadeAtual}
+                                                                        onChange={(e) => {
+                                                                            const qtd = parseInt(e.target.value) || 1;
+                                                                            atualizarQuantidadeQuadro(quadro.id, qtd);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleAddQuadro(quadro, true, quantidadeAtual)}
+                                                                        className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-md hover:bg-amber-700 transition-colors"
+                                                                    >
+                                                                        Inserir
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Cotações */}
+                                    {resultadosBuscaGlobal.cotacoes.length > 0 && (
+                                        <div className={modalExpandido ? 'bg-gray-50 dark:bg-slate-800 p-4 rounded-lg' : ''}>
+                                            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                <span>🏷️</span> Cotações - Banco Frio ({resultadosBuscaGlobal.cotacoes.length})
+                                            </h4>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                                                {resultadosBuscaGlobal.cotacoes.map(cotacao => {
+                                                    const quantidadeAtual = quantidadesCotacoes.get(cotacao.id) || 1;
+                                                    const temSelecaoUnidade = podeVenderEmMetroOuCm(cotacao.unidadeMedida);
+
+                                                    // Calcular valores para exibição
+                                                    const custoUnitario = cotacao.valorUnitario || 0;
+                                                    const valorVendaBase = cotacao.valorVenda || custoUnitario;
+                                                    const porcentagemLucro = custoUnitario > 0
+                                                        ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100
+                                                        : 0;
+                                                    const unidadeMedida = cotacao.unidadeMedida || 'UN';
+
                                                     return (
                                                         <div
                                                             key={cotacao.id}
-                                                            className={`p-4 border-2 rounded-lg transition-all ${
-                                                                estaSelecionada || estaSelecionadaMultiplo
-                                                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
-                                                                    : 'border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-700'
-                                                            }`}
+                                                            className="w-full text-left p-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 transition-all"
                                                         >
-                                                            <div className="flex items-start gap-3">
-                                                                {/* Checkbox */}
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={estaSelecionadaMultiplo}
-                                                                    onChange={(e) => {
-                                                                        e.stopPropagation();
-                                                                        toggleCotacaoSelecionada(cotacao.id);
-                                                                    }}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
-                                                                />
-                                                                
-                                                                <div 
-                                                                    className="flex-1 cursor-pointer"
-                                                                    onClick={(e) => {
-                                                                        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') {
-                                                                            return;
-                                                                        }
-                                                                        setCotacaoSelecionadaComparacao(cotacao);
-                                                                        const materialCorrespondente = filteredMateriaisEstoque.find(m => 
-                                                                            m.nome.toLowerCase().includes(cotacao.nome?.toLowerCase() || '') ||
-                                                                            m.sku === cotacao.ncm
-                                                                        );
-                                                                        if (materialCorrespondente) {
-                                                                            setMaterialSelecionadoComparacao(materialCorrespondente);
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <div className="flex items-center gap-2 mb-1">
-                                                                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                            📦 Banco Frio
-                                                                        </span>
-                                                                    </div>
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
+                                                                    📦 Banco Frio
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between items-start gap-3">
+                                                                <div className="flex-1">
                                                                     <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                    <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
                                                                         NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                    </p>
-                                                                    <div className="mt-2 flex items-center gap-4 text-xs">
-                                                                        <span className="text-gray-600 dark:text-gray-400">
-                                                                            Valor: R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                                        </span>
-                                                                        {cotacao.dataAtualizacao && (
-                                                                            <span className="text-gray-500 dark:text-gray-500">
-                                                                                Atualizado: {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
-                                                                            </span>
+                                                                        <br />
+                                                                        Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
+                                                                        {valorVendaBase > 0 && (
+                                                                            <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
+                                                                                {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
+                                                                            </>
                                                                         )}
-                                                                    </div>
+                                                                    </p>
+                                                                    {temSelecaoUnidade && (
+                                                                        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
+                                                                            💡 Metros ou cm
+                                                                        </p>
+                                                                    )}
                                                                 </div>
-                                                                
-                                                                {estaSelecionada && (
-                                                                    <div className="ml-2">
-                                                                        <CheckIcon className="w-5 h-5 text-blue-600" />
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {estaSelecionada && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleAddItemComValidacao(undefined, cotacao, 1);
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="1"
+                                                                        value={quantidadeAtual}
+                                                                        onChange={(e) => {
+                                                                            const qtd = parseInt(e.target.value) || 1;
+                                                                            atualizarQuantidadeCotacao(cotacao.id, qtd);
                                                                         }}
-                                                                        className="ml-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors font-semibold whitespace-nowrap"
-                                                                    >
-                                                                        Inserir
-                                                                    </button>
-                                                                )}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                    />
+                                                                    {temSelecaoUnidade ? (
+                                                                        <>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddCotacao(cotacao, true, 'm', quantidadeAtual)}
+                                                                                className="px-2 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                                title="Adicionar em metros"
+                                                                            >
+                                                                                + m
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleAddCotacao(cotacao, true, 'cm', quantidadeAtual)}
+                                                                                className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors"
+                                                                                title="Adicionar em centímetros"
+                                                                            >
+                                                                                + cm
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleAddCotacao(cotacao, true, undefined, quantidadeAtual)}
+                                                                            className="px-3 py-1 bg-indigo-600 text-white text-xs font-medium rounded hover:bg-indigo-700 transition-colors"
+                                                                        >
+                                                                            Inserir
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
-                                                })
-                                            )}
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
-                                    </div>
+                                    )}
 
-                                    {/* Painel de Comparação e Validação */}
-                                    {modalExpandido && (materialSelecionadoComparacao || cotacaoSelecionadaComparacao) && (
-                                        <div className="mt-6 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl">
-                                            <h5 className="font-bold text-gray-900 dark:text-dark-text mb-3 flex items-center gap-2">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                </svg>
-                                                Comparação e Validação
-                                            </h5>
-                                            
-                                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                                {/* Material Selecionado */}
-                                                {materialSelecionadoComparacao && (
-                                                    <div className="bg-white dark:bg-dark-card p-4 rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">📦 Material (Estoque Real)</p>
-                                                        <p className="font-bold text-gray-900 dark:text-dark-text">{materialSelecionadoComparacao.nome}</p>
-                                                        <div className="mt-2 space-y-1 text-xs">
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Estoque:</strong> {materialSelecionadoComparacao.estoque} {materialSelecionadoComparacao.unidadeMedida}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Custo:</strong> R$ {(materialSelecionadoComparacao.preco ?? 0).toFixed(2)}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>SKU:</strong> {materialSelecionadoComparacao.sku}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                
-                                                {/* Cotação Selecionada */}
-                                                {cotacaoSelecionadaComparacao && (
-                                                    <div className="bg-white dark:bg-dark-card p-4 rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">🏷️ Cotação (Banco Frio)</p>
-                                                        <p className="font-bold text-gray-900 dark:text-dark-text">{cotacaoSelecionadaComparacao.nome}</p>
-                                                        <div className="mt-2 space-y-1 text-xs">
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Fornecedor:</strong> {cotacaoSelecionadaComparacao.fornecedorNome || 'N/A'}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Valor:</strong> R$ {cotacaoSelecionadaComparacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>NCM:</strong> {cotacaoSelecionadaComparacao.ncm || 'N/A'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            
-                                            {/* Validação e Comparação */}
-                                            {materialSelecionadoComparacao && (
-                                                <div className="mb-4">
-                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                        Quantidade Desejada
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        min="0.01"
-                                                        step="0.01"
-                                                        defaultValue="1"
-                                                        id="quantidadeComparacao"
-                                                        className="input-field w-full"
-                                                        placeholder="Digite a quantidade"
-                                                    />
-                                                    <div className="mt-2 p-3 bg-white dark:bg-dark-card rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                                                            <strong>Validação:</strong> {materialSelecionadoComparacao.estoque > 0 
-                                                                ? `✅ Estoque disponível: ${materialSelecionadoComparacao.estoque} ${materialSelecionadoComparacao.unidadeMedida}`
-                                                                : '❌ Sem estoque disponível'}
-                                                        </p>
-                                                        {cotacaoSelecionadaComparacao && (
-                                                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                                <strong>Comparação:</strong> {(materialSelecionadoComparacao.preco ?? 0) < (cotacaoSelecionadaComparacao.valorUnitario ?? 0)
-                                                                    ? `💰 Estoque é mais barato (R$ ${((cotacaoSelecionadaComparacao.valorUnitario ?? 0) - (materialSelecionadoComparacao.preco ?? 0)).toFixed(2)} de diferença)`
-                                                                    : `💰 Cotação é mais barata (R$ ${((materialSelecionadoComparacao.preco ?? 0) - (cotacaoSelecionadaComparacao.valorUnitario ?? 0)).toFixed(2)} de diferença)`}
-                                                            </p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Botões de Ação */}
-                                            <div className="flex gap-3 flex-wrap">
-                                                {materialSelecionadoComparacao && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const qtdInput = document.getElementById('quantidadeComparacao') as HTMLInputElement;
-                                                            const qtd = parseFloat(qtdInput?.value || '1');
-                                                            handleAddItemComValidacao(materialSelecionadoComparacao, undefined, qtd);
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold"
-                                                    >
-                                                        Adicionar do Estoque
-                                                    </button>
-                                                )}
-                                                {cotacaoSelecionadaComparacao && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const qtdInput = document.getElementById('quantidadeComparacao') as HTMLInputElement;
-                                                            const qtd = parseFloat(qtdInput?.value || '1');
-                                                            handleAddItemComValidacao(undefined, cotacaoSelecionadaComparacao, qtd);
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-                                                    >
-                                                        Adicionar do Banco Frio
-                                                    </button>
-                                                )}
-                                                
-                                                {/* Botão para inserção múltipla */}
-                                                {(materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleInserirSelecionados}
-                                                        className="w-full px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-lg hover:from-purple-700 hover:to-purple-600 transition-colors font-semibold flex items-center justify-center gap-2"
-                                                    >
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                        </svg>
-                                                        Inserir {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} Item(ns) Selecionado(s)
-                                                    </button>
-                                                )}
-                                            </div>
+                                    {/* Nenhum resultado */}
+                                    {Object.values(resultadosBuscaGlobal).every(arr => arr.length === 0) && (
+                                        <div className={`text-center py-8 bg-gray-50 dark:bg-slate-800 rounded-xl ${modalExpandido ? 'col-span-2' : ''}`}>
+                                            <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum item encontrado para "{buscaGlobal}"</p>
                                         </div>
                                     )}
                                 </div>
                             )}
 
                             {/* Modo: Materiais */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'materiais' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'materiais' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -4078,33 +4020,59 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         </div>
                                     ) : (
                                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                                            {filteredMaterials.map(material => (
-                                                <button
-                                                    key={material.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem(material)}
-                                                    className="w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
-                                                >
-                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                        SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
-                                                        <br />
-                                                        Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                        {material.valorVenda && (
-                                                            <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)} 
-                                                            {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
-                                                            </>
-                                                        )}
-                                                    </p>
-                                                </button>
-                                            ))}
+                                            {filteredMaterials.map(material => {
+                                                const quantidadeAtual = quantidadesMateriais.get(material.id) || 1;
+                                                return (
+                                                    <div
+                                                        key={material.id}
+                                                        className="w-full p-4 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-dark-border rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all"
+                                                    >
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="flex-1">
+                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
+                                                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                                    SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
+                                                                    <br />
+                                                                    Custo: R$ {(material.preco ?? 0).toFixed(2)}
+                                                                    {material.valorVenda && (
+                                                                        <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)}
+                                                                            {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
+                                                                        </>
+                                                                    )}
+                                                                </p>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <label className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap">Qtd:</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    value={quantidadeAtual}
+                                                                    onChange={(e) => {
+                                                                        const qtd = parseInt(e.target.value) || 1;
+                                                                        atualizarQuantidadeMaterial(material.id, qtd);
+                                                                    }}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleAddItem(material, false, quantidadeAtual)}
+                                                                    className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-md hover:bg-indigo-700 transition-colors"
+                                                                >
+                                                                    Inserir
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </div>
                             )}
 
                             {/* Modo: Serviços */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'servicos' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'servicos' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -4148,7 +4116,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             )}
 
                             {/* Modo: Kits */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'kits' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'kits' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -4194,7 +4162,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             )}
 
                             {/* Modo: Quadros */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'quadros' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'quadros' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -4240,7 +4208,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             )}
 
                             {/* Modo: Cotações (Banco Frio) */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'cotacoes' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'cotacoes' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -4304,7 +4272,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                             )}
 
                             {/* Modo: Criar Manualmente */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'manual' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'manual' && (
                                 <div className="space-y-6">
                                     <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mb-6">
                                         <p className="text-sm text-blue-800 dark:text-blue-300">
@@ -4408,7 +4376,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 placeholder="0,00"
                                             />
                                             <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-2">
-                                                💡 Digite o custo real do material/serviço (sem BDI). O preço de venda será calculado automaticamente com a margem de {formState.bdi}%.
+                                                💡 Digite o custo/preço unitário do material ou serviço.
                                             </p>
                                         </div>
 
@@ -4423,15 +4391,15 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         </p>
                                                     </div>
                                                     <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Unit. (com BDI)</p>
+                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Unitário</p>
                                                         <p className="text-lg font-bold text-indigo-700 dark:text-indigo-300">
-                                                            R$ {(novoItemManual.custoUnit * (1 + formState.bdi / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            R$ {novoItemManual.custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                         </p>
                                                     </div>
                                                     <div>
                                                         <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Total</p>
                                                         <p className="text-lg font-bold text-green-700 dark:text-green-300">
-                                                            R$ {(novoItemManual.custoUnit * (1 + formState.bdi / 100) * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            R$ {(novoItemManual.custoUnit * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -4444,20 +4412,31 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
 
                         {/* Footer */}
                         <div className="p-6 bg-gray-50 dark:bg-slate-800 border-t border-gray-200 dark:border-dark-border flex justify-between items-center gap-3">
-                            <div className="flex-1">
+                            <div className="flex-1 flex items-center gap-3">
+                                {/* Botão para inserir todos os itens com quantidades definidas */}
+                                {(() => {
+                                    const totalItensComQuantidade =
+                                        Array.from(quantidadesMateriais.values()).filter(q => q > 0).length +
+                                        Array.from(quantidadesServicos.values()).filter(q => q > 0).length +
+                                        Array.from(quantidadesKits.values()).filter(q => q > 0).length +
+                                        Array.from(quantidadesQuadros.values()).filter(q => q > 0).length +
+                                        Array.from(quantidadesCotacoes.values()).filter(q => q > 0).length;
+
+                                    return totalItensComQuantidade > 0 ? (
+                                        <button
+                                            type="button"
+                                            onClick={handleInserirItensComQuantidades}
+                                            className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-xl hover:from-indigo-700 hover:to-indigo-600 transition-all shadow-medium font-semibold flex items-center gap-2"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                            </svg>
+                                            Inserir {totalItensComQuantidade} Item(ns) com Quantidades
+                                        </button>
+                                    ) : null;
+                                })()}
+
                                 {/* Botão para inserção múltipla quando há itens selecionados via checkbox */}
-                                {modoAdicao === 'comparacao' && (materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
-                                    <button
-                                        type="button"
-                                        onClick={handleInserirSelecionados}
-                                        className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-lg hover:from-purple-700 hover:to-purple-600 transition-colors font-semibold flex items-center gap-2"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                        </svg>
-                                        Inserir {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} Item(ns) Selecionado(s)
-                                    </button>
-                                )}
                             </div>
                             <div className="flex gap-3">
                                 <button
@@ -4475,6 +4454,12 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         setSearchCotacoes('');
                                         setSearchGlobalComparacao('');
                                         setBuscaGlobal('');
+                                        // Limpar todas as quantidades
+                                        setQuantidadesMateriais(new Map());
+                                        setQuantidadesServicos(new Map());
+                                        setQuantidadesKits(new Map());
+                                        setQuantidadesQuadros(new Map());
+                                        setQuantidadesCotacoes(new Map());
                                         setNovoItemManual({
                                             nome: '',
                                             descricao: '',
@@ -4543,9 +4528,17 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         </span>
                                     </div>
                                     <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-dark-border">
+                                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Pedido de Venda</h4>
+                                        {orcamentoToView.venda?.numeroSequencial ? (
+                                            <p className="text-gray-900 dark:text-dark-text font-medium">#{orcamentoToView.venda.numeroSequencial}</p>
+                                        ) : (
+                                            <p className="text-gray-500 dark:text-gray-400 font-medium">Não gerado</p>
+                                        )}
+                                    </div>
+                                    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-dark-border">
                                         <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Data de Criação</h4>
                                         <p className="text-gray-900 dark:text-dark-text font-medium">
-                                            {orcamentoToView.dataCriacao ? new Date(orcamentoToView.dataCriacao).toLocaleDateString('pt-BR') : new Date(orcamentoToView.createdAt).toLocaleDateString('pt-BR')}
+                                            {new Date(orcamentoToView.createdAt).toLocaleDateString('pt-BR')}
                                         </p>
                                     </div>
                                     {orcamentoToView.numeroSequencial && (
@@ -4556,10 +4549,22 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     )}
                                     {orcamentoToView.empresaCNPJ && (
                                         <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-dark-border">
-                                            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">CNPJ da Empresa Executora</h4>
-                                            <p className="text-gray-900 dark:text-dark-text font-medium">{orcamentoToView.empresaCNPJ}</p>
+                                            <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Empresa Executora</h4>
+                                            <p className="text-gray-900 dark:text-dark-text font-medium">
+                                                {(() => {
+                                                    const cnpjNorm = (orcamentoToView.empresaCNPJ || '').replace(/\D/g, '');
+                                                    const emp = empresasFiscais.find(ef => (ef.cnpj || '').replace(/\D/g, '') === cnpjNorm);
+                                                    return emp ? (emp.nomeFantasia || emp.razaoSocial || orcamentoToView.empresaCNPJ) : orcamentoToView.empresaCNPJ;
+                                                })()}
+                                            </p>
                                         </div>
                                     )}
+                                    <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-4 rounded-xl border-2 border-purple-300 dark:border-purple-700">
+                                        <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-400 uppercase mb-1 flex items-center gap-1">
+                                            <span>👤</span> Orçamento Gerado Por
+                                        </h4>
+                                        <p className="text-purple-900 dark:text-purple-300 font-bold text-lg">{orcamentoToView.orcamentistaNome || 'Não identificado'}</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -4648,12 +4653,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         const isBancoFrio = isItemBancoFrio(item);
                                                         const mostrarDescricao = shouldShowDescricao(item);
                                                         const tipo = item.tipo || 'Material';
-                                                        const unidade = item.unidadeMedida || 'UN';
+                                                        const unidadeBruta = item.unidadeVenda || item.unidadeMedida || 'UN';
+                                                        const unidade = formatarUnidadeOrcamento(unidadeBruta);
                                                         const quantidade = item.quantidade || 0;
                                                         const custoUnit = item.custoUnit || item.custoUnitario || 0;
                                                         const precoUnit = item.precoUnit || item.precoUnitario || 0;
                                                         const subtotal = item.subtotal || (precoUnit * quantidade);
-                                                        
+
                                                         return (
                                                             <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                                                 <td className="px-6 py-4">
@@ -4674,6 +4680,11 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                                 })() : <span className="text-blue-600 dark:text-blue-400">• Sem data</span>}
                                                                             </div>
                                                                         )}
+                                                                        {(item as any).vendaDiretaFornecedor && (
+                                                                            <div className="mt-2 inline-flex items-center px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded-lg text-xs font-medium" title="Não entra em contas a receber, estoque nem NF-e">
+                                                                                Venda direta fornecedor
+                                                                            </div>
+                                                                        )}
                                                                         {/* Botão para ver itens do kit customizado */}
                                                                         {tipo === 'KIT' && (() => {
                                                                             // Verificar se tem itensDoKit (pode ser array ou objeto JSON)
@@ -4682,21 +4693,18 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                                 (Array.isArray(itensDoKit) && itensDoKit.length > 0) ||
                                                                                 (typeof itensDoKit === 'object' && Object.keys(itensDoKit).length > 0)
                                                                             );
-                                                                            
+
                                                                             if (!temItensDoKit) return null;
-                                                                            
+
                                                                             const itensArray = Array.isArray(itensDoKit) ? itensDoKit : [itensDoKit];
-                                                                            
+
                                                                             return (
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={(e) => {
                                                                                         e.preventDefault();
                                                                                         e.stopPropagation();
-                                                                                        // Aplicar BDI do orçamento aos itens do kit antes de exibir
-                                                                                        const bdiOrcamento = orcamentoToView?.bdi || 0;
-                                                                                        const itensComBdi = aplicarBdiAosItensKit(itensArray, bdiOrcamento);
-                                                                                        setItensKitParaVisualizar(itensComBdi);
+                                                                                        setItensKitParaVisualizar(itensArray);
                                                                                         setNomeKitParaVisualizar(itemNome);
                                                                                         setShowModalItensKit(true);
                                                                                     }}
@@ -4723,17 +4731,17 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                 </td>
                                                                 <td className="px-4 py-4 text-right">
                                                                     <span className="text-gray-700 dark:text-dark-text font-medium">
-                                                                        R$ {custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        R$ {custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                     </span>
                                                                 </td>
                                                                 <td className="px-4 py-4 text-right">
                                                                     <span className="text-gray-700 dark:text-dark-text font-medium">
-                                                                        R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                     </span>
                                                                 </td>
                                                                 <td className="px-6 py-4 text-right">
                                                                     <span className="font-bold text-blue-700 dark:text-blue-400 text-base">
-                                                                        R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                     </span>
                                                                 </td>
                                                             </tr>
@@ -4752,16 +4760,53 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     <span className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center text-yellow-600 dark:text-yellow-400">💰</span>
                                     Totais
                                 </h3>
-                                <div className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border-2 border-blue-300 dark:border-blue-700 p-6 rounded-xl">
-                                    <div className="flex justify-between items-center">
-                                        <div>
-                                            <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 uppercase mb-1">Total do Orçamento</h4>
-                                            <p className="text-xs text-gray-600 dark:text-gray-400">Valor total de venda</p>
-                                        </div>
-                                        <p className="text-4xl font-bold text-blue-700 dark:text-blue-400">
-                                            R$ {orcamentoToView.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}
-                                        </p>
-                                    </div>
+                                <div className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border-2 border-blue-300 dark:border-blue-700 p-6 rounded-xl space-y-3">
+                                    {(() => {
+                                        const subtotalItens = (orcamentoToView.items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
+                                        const desconto = Number(orcamentoToView.descontoValor) || 0;
+                                        const valorFinal = Number(orcamentoToView.precoVenda) || 0;
+                                        const totalVendaDireta = (orcamentoToView.items || [])
+                                            .filter((it: any) => Boolean(it.vendaDiretaFornecedor))
+                                            .reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
+                                        const valorEmpresaRecebe = Math.max(0, valorFinal - totalVendaDireta);
+                                        return (
+                                            <>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-sm font-medium text-blue-800 dark:text-blue-300">Valor do orçamento (subtotal dos itens)</span>
+                                                    <span className="text-lg font-semibold text-blue-800 dark:text-blue-200">R$ {subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                </div>
+                                                {desconto > 0 && (
+                                                    <div className="flex justify-between items-center text-amber-700 dark:text-amber-400">
+                                                        <span className="text-sm font-medium">Desconto</span>
+                                                        <span className="text-lg font-semibold">- R$ {desconto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                                    </div>
+                                                )}
+                                                {totalVendaDireta > 0 && (
+                                                    <div className="flex justify-between items-center text-blue-800 dark:text-blue-300">
+                                                        <span className="text-sm font-semibold">Valor total do orçamento</span>
+                                                        <span className="text-lg font-bold text-blue-900 dark:text-blue-200">
+                                                            R$ {valorFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                <div className="flex justify-between items-center pt-2 border-t-2 border-blue-300 dark:border-blue-600">
+                                                    <div>
+                                                        <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 uppercase">
+                                                            {totalVendaDireta > 0 ? 'Valor final do orçamento (empresa)' : 'Valor final do orçamento'}
+                                                        </h4>
+                                                        <p className="text-xs text-gray-600 dark:text-gray-400">
+                                                            {totalVendaDireta > 0
+                                                                ? 'Valor que entra para a empresa (exclui itens de venda direta)'
+                                                                : `Subtotal ${desconto > 0 ? '- Desconto' : ''} (+ impostos se houver)`}
+                                                        </p>
+                                                    </div>
+                                                    <p className="text-4xl font-bold text-blue-700 dark:text-blue-400">
+                                                        R$ {(totalVendaDireta > 0 ? valorEmpresaRecebe : valorFinal).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                    </p>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
 
@@ -4777,6 +4822,19 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
                             )}
+
+                            {orcamentoToView.venda?.id && (
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                                        <span className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300">🧪</span>
+                                        Referência Técnica (DEV)
+                                    </h3>
+                                    <div className="bg-slate-50 dark:bg-slate-900/30 border border-slate-200 dark:border-slate-700 p-4 rounded-xl">
+                                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">UUID do Pedido de Venda</p>
+                                        <p className="text-sm font-mono text-slate-800 dark:text-slate-200 break-all">{orcamentoToView.venda.id}</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Rodapé com Ações */}
@@ -4785,14 +4843,13 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 {/* Status Atual */}
                                 <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-2">
-                                        <div className={`w-3 h-3 rounded-full ${
-                                            orcamentoToView.status === 'Aprovado' ? 'bg-green-500' :
-                                            orcamentoToView.status === 'Pendente' ? 'bg-yellow-500' :
-                                            orcamentoToView.status === 'Enviado ao Cliente' ? 'bg-blue-500' :
-                                            orcamentoToView.status === 'Declinado' ? 'bg-gray-900' :
-                                            orcamentoToView.status === 'Cancelado' ? 'bg-gray-500' :
-                                            'bg-red-500'
-                                        }`}></div>
+                                        <div className={`w-3 h-3 rounded-full ${orcamentoToView.status === 'Aprovado' ? 'bg-green-500' :
+                                                orcamentoToView.status === 'Pendente' ? 'bg-yellow-500' :
+                                                    orcamentoToView.status === 'Enviado ao Cliente' ? 'bg-blue-500' :
+                                                        orcamentoToView.status === 'Declinado' ? 'bg-gray-900' :
+                                                            orcamentoToView.status === 'Cancelado' ? 'bg-gray-500' :
+                                                                'bg-red-500'
+                                            }`}></div>
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                             Status: <strong>{orcamentoToView.status}</strong>
                                         </span>
@@ -4827,18 +4884,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 </svg>
                                                 Aprovar
                                             </button>
-                                            <button
-                                                onClick={() => {
-                                                    handleRecusarOrcamento(orcamentoToView.id);
-                                                    setOrcamentoToView(null);
-                                                }}
-                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-red-500 text-white rounded-xl hover:from-red-700 hover:to-red-600 transition-all shadow-medium font-semibold"
-                                            >
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                                Recusar
-                                            </button>
                                         </>
                                     )}
                                     {orcamentoToView.status === 'Enviado ao Cliente' && (
@@ -4856,10 +4901,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 Aprovar
                                             </button>
                                             <button
-                                                onClick={() => {
-                                                    handleChangeStatus(orcamentoToView.id, 'Declinado');
-                                                    setOrcamentoToView(null);
-                                                }}
+                                                onClick={() => handleDeclinarOrcamento(orcamentoToView, true)}
                                                 className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl hover:from-gray-800 hover:to-gray-700 transition-all shadow-medium font-semibold"
                                             >
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4869,49 +4911,41 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             </button>
                                         </>
                                     )}
-                                    {orcamentoToView.status === 'Aprovado' && (
-                                        <button
-                                            onClick={() => {
-                                                handleChangeStatus(orcamentoToView.id, 'Declinado');
-                                                setOrcamentoToView(null);
-                                            }}
-                                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                            </svg>
-                                            Declinar
-                                        </button>
+                                    {orcamentoToView.status === 'Aprovado' && !orcamentoToView.venda?.id && !orcamentoToView.pedidoFaturado && (
+                                        <>
+                                            <button
+                                                onClick={() => {
+                                                    // Navegar para página de vendas com orçamento pré-selecionado
+                                                    navigate('/vendas', { state: { orcamentoId: orcamentoToView.id } });
+                                                    setOrcamentoToView(null);
+                                                }}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.5v15m7.5-7.5h-15" />
+                                                </svg>
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                                                </svg>
+                                                Gerar Pedido de Venda
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeclinarOrcamento(orcamentoToView, true)}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                                Declinar
+                                            </button>
+                                        </>
                                     )}
                                     <button
                                         onClick={async () => {
                                             // Copiar orçamento
                                             const orcData = orcamentoToView;
-                                            // Mapear items corretamente garantindo que o nome seja preservado
-                                            const itemsMapeados = (orcData.items || []).map((item: any) => ({
-                                                tipo: item.tipo,
-                                                materialId: item.materialId,
-                                                kitId: item.kitId,
-                                                cotacaoId: item.cotacaoId,
-                                                servicoNome: item.servicoNome,
-                                                descricao: item.descricao,
-                                                // Buscar data da cotação de múltiplas fontes possíveis
-                                                dataAtualizacaoCotacao: item.dataAtualizacaoCotacao || 
-                                                                      item.cotacao?.dataAtualizacao || 
-                                                                      item.cotacao?.updatedAt || 
-                                                                      item.cotacao?.createdAt,
-                                                nome: item.nome || item.material?.nome || item.kit?.nome || item.cotacao?.nome || item.servicoNome || 'Item sem nome',
-                                                unidadeMedida: item.unidadeMedida,
-                                                unidadeVenda: item.unidadeVenda,
-                                                tipoMaterial: item.tipoMaterial,
-                                                quantidade: item.quantidade,
-                                                custoUnit: item.custoUnit,
-                                                precoBase: item.precoBase,
-                                                precoUnit: item.precoUnit,
-                                                subtotal: item.subtotal,
-                                                precoEditadoManual: item.precoEditadoManual
-                                            }));
-                                            
+                                            const itemsMapeados = mapItensOrcamentoParaCopia(orcData.items || []);
+
                                             const orcamentoCopia = {
                                                 empresaCNPJ: orcData.empresaCNPJ,
                                                 titulo: orcData.titulo,
@@ -5012,7 +5046,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         <span>💰</span>
                                         Total
                                     </h3>
-                                    <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">R$ {orcamentoToView.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}</p>
+                                    <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">R$ {orcamentoToView.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0,00'}</p>
                                 </div>
                                 {/* Validade - mostrar como histórico se aprovado */}
                                 {orcamentoToView.status === 'Aprovado' ? (
@@ -5031,10 +5065,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                 📅 Validade Original (Dado Histórico):
                                             </p>
                                             <p className="text-sm text-gray-700 dark:text-gray-300">
-                                                {new Date(orcamentoToView.validade).toLocaleDateString('pt-BR')}
+                                                {new Date(orcamentoToView.validade ?? orcamentoToView.createdAt ?? Date.now()).toLocaleDateString('pt-BR')}
                                             </p>
                                             <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
-                                                ⚠️ Este orçamento foi aprovado. A validade original é mantida apenas como registro histórico. 
+                                                ⚠️ Este orçamento foi aprovado. A validade original é mantida apenas como registro histórico.
                                                 Os preços e condições estão congelados na data de aprovação.
                                             </p>
                                         </div>
@@ -5045,7 +5079,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             <span>📅</span>
                                             Validade
                                         </h3>
-                                        <p className="text-gray-900 dark:text-white font-medium">{new Date(orcamentoToView.validade).toLocaleDateString('pt-BR')}</p>
+                                        <p className="text-gray-900 dark:text-white font-medium">{new Date(orcamentoToView.validade ?? orcamentoToView.createdAt ?? Date.now()).toLocaleDateString('pt-BR')}</p>
                                     </div>
                                 )}
                             </div>
@@ -5057,10 +5091,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     Data de Geração do Orçamento
                                 </h3>
                                 <p className="text-gray-900 dark:text-white font-medium">
-                                    {orcamentoToView.createdAt 
-                                        ? new Date(orcamentoToView.createdAt).toLocaleDateString('pt-BR', { 
-                                            day: '2-digit', 
-                                            month: '2-digit', 
+                                    {orcamentoToView.createdAt
+                                        ? new Date(orcamentoToView.createdAt).toLocaleDateString('pt-BR', {
+                                            day: '2-digit',
+                                            month: '2-digit',
                                             year: 'numeric',
                                             hour: '2-digit',
                                             minute: '2-digit'
@@ -5142,7 +5176,8 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                         const isBancoFrio = isItemBancoFrio(item);
                                                         const mostrarDescricao = shouldShowDescricao(item);
                                                         const tipo = getItemTipo(item);
-                                                        const unidade = item.unidadeMedida || 'UN';
+                                                        const unidadeBruta = item.unidadeVenda || item.unidadeMedida || 'UN';
+                                                        const unidade = formatarUnidadeOrcamento(unidadeBruta);
                                                         const quantidade = item.quantidade || 0;
                                                         const custoUnit = item.custoUnit || item.custo || 0;
                                                         const precoVendaUnit = item.precoUnit || item.precoUnitario || 0;
@@ -5152,11 +5187,16 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                             <tr key={index} className="hover:bg-gray-50 transition-colors">
                                                                 <td className="px-4 py-3 align-top">
                                                                     <div className="flex flex-col gap-1">
-                                                                        <div className="flex items-center gap-2">
+                                                                        <div className="flex items-center gap-2 flex-wrap">
                                                                             <p className="font-semibold text-gray-900">{itemNome}</p>
                                                                             {isBancoFrio && (
                                                                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800">
                                                                                     ❄️ Banco Frio
+                                                                                </span>
+                                                                            )}
+                                                                            {(item as any).vendaDiretaFornecedor && (
+                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800" title="Não entra em contas a receber, estoque nem NF-e">
+                                                                                    Venda direta fornecedor
                                                                                 </span>
                                                                             )}
                                                                         </div>
@@ -5175,10 +5215,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                                 onClick={(e) => {
                                                                                     e.preventDefault();
                                                                                     e.stopPropagation();
-                                                                                    // Aplicar BDI do orçamento aos itens do kit antes de exibir
-                                                                                    const bdiOrcamento = orcamentoToView?.bdi || 0;
-                                                                                    const itensComBdi = aplicarBdiAosItensKit(item.itensDoKit, bdiOrcamento);
-                                                                                    setItensKitParaVisualizar(itensComBdi);
+                                                                                    setItensKitParaVisualizar(item.itensDoKit);
                                                                                     setNomeKitParaVisualizar(itemNome);
                                                                                     setShowModalItensKit(true);
                                                                                 }}
@@ -5208,14 +5245,14 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                                                     {quantidade}
                                                                 </td>
                                                                 <td className="px-3 py-3 text-right align-top text-xs text-gray-700">
-                                                                    R$ {custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                    R$ {custoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                 </td>
                                                                 <td className="px-3 py-3 text-right align-top text-xs font-semibold text-gray-900">
-                                                                    R$ {precoVendaUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                    R$ {precoVendaUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-right align-top">
                                                                     <span className="text-sm font-bold text-purple-700">
-                                                                        R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                                     </span>
                                                                 </td>
                                                             </tr>
@@ -5276,15 +5313,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                         >
                                             ✅ Aprovar Orçamento
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                handleRecusarOrcamento(orcamentoToView.id);
-                                                setOrcamentoToView(null);
-                                            }}
-                                            className="flex-1 bg-gradient-to-r from-red-600 to-red-500 text-white px-4 py-2.5 rounded-xl hover:from-red-700 hover:to-red-600 transition-all shadow-medium font-semibold"
-                                        >
-                                            ❌ Recusar
-                                        </button>
                                     </>
                                 )}
                                 {orcamentoToView.status === 'Enviado ao Cliente' && (
@@ -5299,10 +5327,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                             ✅ Aprovar Orçamento
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                handleChangeStatus(orcamentoToView.id, 'Declinado');
-                                                setOrcamentoToView(null);
-                                            }}
+                                            onClick={() => handleDeclinarOrcamento(orcamentoToView, true)}
                                             className="flex-1 bg-gradient-to-r from-gray-900 to-gray-800 text-white px-4 py-2.5 rounded-xl hover:from-gray-800 hover:to-gray-700 transition-all shadow-medium font-semibold"
                                         >
                                             🔻 Declinar
@@ -5311,10 +5336,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                 )}
                                 {orcamentoToView.status === 'Aprovado' && (
                                     <button
-                                        onClick={() => {
-                                            handleChangeStatus(orcamentoToView.id, 'Declinado');
-                                            setOrcamentoToView(null);
-                                        }}
+                                        onClick={() => handleDeclinarOrcamento(orcamentoToView, true)}
                                         className="flex-1 bg-gradient-to-r from-orange-600 to-orange-500 text-white px-4 py-2.5 rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
                                     >
                                         🔻 Declinar
@@ -5324,26 +5346,6 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                         </div>
                     </div>
                 </div>
-            )}
-
-            {/* Modal de Customização de PDF */}
-            {showPDFCustomization && orcamentoForPDF && (
-                <PDFCustomizationModal
-                    isOpen={showPDFCustomization}
-                    onClose={() => {
-                        setShowPDFCustomization(false);
-                        setOrcamentoForPDF(null);
-                    }}
-                    orcamentoId={orcamentoForPDF.id}
-                    orcamentoData={prepararDadosParaPDF(orcamentoForPDF)}
-                    onGeneratePDF={() => {
-                        console.log('✅ PDF gerado com sucesso!');
-                        toast.success('PDF personalizado gerado com sucesso!');
-                        // Fechar modal após gerar (opcional)
-                        setShowPDFCustomization(false);
-                        setOrcamentoForPDF(null);
-                    }}
-                />
             )}
 
             {/* Modal de Preview de Importação */}
@@ -5507,7 +5509,7 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                                     <>
                                         ✅ Confirmar Importação
                                     </>
-                                )}    
+                                )}
                             </button>
                         </div>
                     </div>
@@ -5529,126 +5531,33 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                 variant="success"
             />
 
-            {/* Modal de Visualização de Itens do Kit */}
-            {showModalItensKit && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
-                        {/* Header */}
-                        <div className="bg-gradient-to-r from-blue-600 to-blue-500 p-6 flex items-center justify-between">
-                            <div>
-                                <h2 className="text-2xl font-bold text-white">Itens do Kit: {nomeKitParaVisualizar}</h2>
-                                <p className="text-blue-100 text-sm mt-1">
-                                    {itensKitParaVisualizar.length} {itensKitParaVisualizar.length === 1 ? 'item' : 'itens'}
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => {
-                                    setShowModalItensKit(false);
-                                    setItensKitParaVisualizar([]);
-                                    setNomeKitParaVisualizar('');
-                                }}
-                                className="p-2 text-white hover:bg-white/20 rounded-lg transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
+            <ModalItensKit
+                open={showModalItensKit}
+                onClose={() => {
+                    setShowModalItensKit(false);
+                    setItensKitParaVisualizar([]);
+                    setNomeKitParaVisualizar('');
+                }}
+                itens={itensKitParaVisualizar}
+                nomeKit={nomeKitParaVisualizar}
+                empresas={empresas}
+                empresaCNPJ={orcamentoToView?.empresaCNPJ || formState.empresaCNPJ}
+            />
 
-                        {/* Body */}
-                        <div className="flex-1 overflow-y-auto p-6">
-                            <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Nome</th>
-                                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Código</th>
-                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Tipo</th>
-                                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Quantidade</th>
-                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Valor de Venda</th>
-                                            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Subtotal</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-100">
-                                        {itensKitParaVisualizar.map((itemKit: any, index: number) => {
-                                            const valorVenda = itemKit.valorVenda || 0;
-                                            const quantidade = itemKit.quantidade || 1;
-                                            const subtotal = valorVenda * quantidade;
-                                            const tipoItem = itemKit.tipo || 'MATERIAL';
-                                            
-                                            return (
-                                                <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                                    <td className="px-4 py-3">
-                                                        <p className="font-medium text-gray-900">{itemKit.nome || 'Item sem nome'}</p>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <p className="text-sm text-gray-600">{itemKit.codigo || '-'}</p>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                                            {formatarTipoItem(tipoItem)}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-center">
-                                                        <p className="text-sm font-medium text-gray-900">
-                                                            {quantidade} {itemKit.unidadeMedida || 'UN'}
-                                                        </p>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right">
-                                                        <p className="text-sm font-medium text-gray-900">
-                                                            R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                        {itemKit.valorVendaOriginal && itemKit.valorVendaOriginal !== valorVenda && (
-                                                            <p className="text-xs text-gray-500 line-through">
-                                                                R$ {itemKit.valorVendaOriginal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            </p>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right">
-                                                        <p className="text-sm font-bold text-purple-700">
-                                                            R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                    <tfoot className="bg-gray-50">
-                                        <tr>
-                                            <td colSpan={5} className="px-4 py-3 text-right font-semibold text-gray-900">
-                                                Total do Kit:
-                                            </td>
-                                            <td className="px-4 py-3 text-right">
-                                                <p className="text-lg font-bold text-purple-700">
-                                                    R$ {itensKitParaVisualizar.reduce((sum: number, item: any) => {
-                                                        const valorVenda = item.valorVenda || 0;
-                                                        const quantidade = item.quantidade || 1;
-                                                        return sum + (valorVenda * quantidade);
-                                                    }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </p>
-                                            </td>
-                                        </tr>
-                                    </tfoot>
-                                </table>
-                            </div>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="border-t border-gray-200 p-4 flex justify-end">
-                            <button
-                                onClick={() => {
-                                    setShowModalItensKit(false);
-                                    setItensKitParaVisualizar([]);
-                                    setNomeKitParaVisualizar('');
-                                }}
-                                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
-                            >
-                                Fechar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* AlertDialog de Confirmação de Declínio */}
+            <AlertDialog
+                isOpen={showDeclinarDialog}
+                onClose={() => {
+                    setShowDeclinarDialog(false);
+                    setOrcamentoToDeclinar(null);
+                }}
+                onConfirm={handleConfirmarDeclinio}
+                title={`Tem certeza que deseja declinar o orçamento #${orcamentoToDeclinar?.numeroSequencial || orcamentoToDeclinar?.id?.substring(0, 8) || 'N/A'}?`}
+                message="O orçamento será marcado como declinado."
+                confirmText="Sim, declinar"
+                cancelText="Cancelar"
+                variant="warning"
+            />
 
             {/* AlertDialog de Confirmação de Exclusão */}
             <AlertDialog
@@ -5659,10 +5568,10 @@ const Orcamentos: React.FC<OrcamentosProps> = ({ toggleSidebar }) => {
                     setDeletePermanent(false);
                 }}
                 onConfirm={handleDeleteOrcamento}
-                title={deletePermanent 
+                title={deletePermanent
                     ? `Excluir permanentemente orçamento #${orcamentoToDelete?.numeroSequencial || orcamentoToDelete?.id?.substring(0, 8) || 'N/A'}?`
                     : `Cancelar orçamento #${orcamentoToDelete?.numeroSequencial || orcamentoToDelete?.id?.substring(0, 8) || 'N/A'}?`}
-                message={deletePermanent 
+                message={deletePermanent
                     ? `Tem certeza que deseja excluir permanentemente o orçamento "${orcamentoToDelete?.titulo}"? Esta ação não pode ser desfeita e removerá o registro do banco de dados.`
                     : `Tem certeza que deseja cancelar o orçamento "${orcamentoToDelete?.titulo}"? O orçamento será marcado como cancelado.`}
                 confirmText={deletePermanent ? "Excluir Permanentemente" : "Cancelar Orçamento"}

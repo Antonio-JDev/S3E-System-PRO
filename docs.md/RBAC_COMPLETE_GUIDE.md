@@ -6,9 +6,12 @@
 
 ## 📊 Visão Geral do Sistema
 
-O **Sistema RBAC (Role-Based Access Control)** foi implementado de ponta a ponta, do frontend ao backend, garantindo controle granular de acesso baseado em 6 perfis de usuário distintos.
+O **Sistema RBAC (Role-Based Access Control)** foi implementado de ponta a
+ponta, do frontend ao backend, garantindo controle granular de acesso baseado em
+6 perfis de usuário distintos.
 
 ### 🎯 Objetivos Alcançados:
+
 - ✅ Controle de acesso baseado em roles
 - ✅ Permissões granulares por funcionalidade
 - ✅ Página exclusiva para eletricistas (Tarefas da Obra)
@@ -22,7 +25,9 @@ O **Sistema RBAC (Role-Based Access Control)** foi implementado de ponta a ponta
 ## 👥 Perfis de Usuário (Roles)
 
 ### 1. 💻 Desenvolvedor (`desenvolvedor`)
+
 **Acesso**: UNIVERSAL a TUDO
+
 - ✅ Página **Logs** (exclusivo)
 - ✅ **Tarefas da Obra** (visualiza todas)
 - ✅ Deletar permanentemente qualquer recurso
@@ -30,48 +35,61 @@ O **Sistema RBAC (Role-Based Access Control)** foi implementado de ponta a ponta
 - ✅ Bypass automático em todos os middlewares de permissão
 
 **Credenciais de Teste**:
+
 ```
 Email: antoniojrtech@gmail.com
 Senha: 134679@Aj
 ```
 
 ### 2. 👑 Administrador (`admin`)
+
 **Acesso**: Todas as páginas EXCETO Logs
+
 - ✅ Financeiro, NF-e, Gerenciamento Empresarial (completo)
 - ✅ CRUD completo + DELETE permanente
 - ❌ SEM acesso a Logs (desenvolvedor apenas)
 
 **Credenciais de Teste**:
+
 ```
 Email: admin@s3e.com.br
 Senha: 123456
 ```
 
 ### 3. 📊 Gerente (`gerente`)
+
 **Acesso**: Igual ao Admin
+
 - ✅ Todas as páginas exceto Logs
 - ✅ CRUD completo + DELETE permanente
 
 ### 4. 🛒 Comprador (`comprador`)
+
 **Acesso**: Operacional sem Financeiro
+
 - ✅ Obras, Movimentações, Catálogo, Comparação de Preços
 - ✅ Gerenciamento: APENAS **Frota**
 - ⚠️ Apenas DESATIVAR (não deletar)
 - ❌ SEM Financeiro, NF-e, outras páginas de Ger. Empresarial
 
 ### 5. ⚙️ Engenheiro (`engenheiro`)
+
 **Acesso**: Operacional e Projetos
+
 - ✅ Obras, Movimentações, Catálogo, Projetos
 - ⚠️ Apenas DESATIVAR (não deletar)
 - ❌ SEM Financeiro, NF-e, Gerenciamento Empresarial
 
 ### 6. ⚡ Eletricista (`eletricista`)
+
 **Acesso**: LIMITADO a campo
+
 - ✅ **Tarefas da Obra** (registro de atividades) 🆕
 - ✅ **Movimentações** (baixas de materiais)
 - ❌ SEM acesso a TODAS as outras páginas (incluindo Obras)
 
 **Credenciais de Teste**:
+
 ```
 Email: eletricista1@s3e.com ou eletricista2@s3e.com
 Senha: eletricista123
@@ -92,6 +110,7 @@ A página **Tarefas da Obra** permite que eletricistas:
 5. **Acompanhem** histórico de atividades
 
 ### 📸 Upload de Fotos:
+
 - **Formatos**: JPG, PNG, GIF, WEBP
 - **Tamanho máximo**: 10MB por foto
 - **Quantidade**: Até 10 fotos por registro
@@ -121,6 +140,7 @@ A página **Tarefas da Obra** permite que eletricistas:
 ### Frontend (`frontend/`)
 
 #### Arquivos Criados:
+
 1. **`src/utils/permissions.ts`**
    - Sistema de verificação de permissões
    - Funções: `hasPermission`, `canDelete`, `canOnlyDeactivate`
@@ -136,6 +156,7 @@ A página **Tarefas da Obra** permite que eletricistas:
    - Documentação completa do frontend
 
 #### Arquivos Modificados:
+
 - `src/constants/index.tsx` - Links com permissões
 - `src/components/Sidebar.tsx` - Filtros RBAC
 - `src/App.tsx` - Nova rota Tarefas da Obra
@@ -143,6 +164,7 @@ A página **Tarefas da Obra** permite que eletricistas:
 ### Backend (`backend/`)
 
 #### Arquivos Criados:
+
 1. **`src/middlewares/rbac.ts`**
    - Middleware de validação de permissões
    - `checkPermission(...permissions)`
@@ -164,11 +186,13 @@ A página **Tarefas da Obra** permite que eletricistas:
    - Documentação técnica do backend
 
 #### Arquivos Modificados:
+
 - `prisma/schema.prisma` - Campo `imagens` em RegistroAtividade
 - `src/app.ts` - Integração das rotas de tarefas
 - `prisma/seed.ts` - Eletricistas de exemplo
 
 #### Migrações:
+
 - ✅ `20251112025607_add_imagens_to_registro_atividade`
 
 ---
@@ -250,22 +274,23 @@ DELETE http://localhost:3000/api/projetos/{id}?permanent=true
 
 ### Tarefas da Obra:
 
-| Método | Endpoint | Permissão | Descrição |
-|--------|----------|-----------|-----------|
-| GET | `/api/obras/tarefas` | `view_tarefas_obra` | Listar minhas tarefas |
-| POST | `/api/obras/tarefas` | `create_obra` | Criar nova tarefa |
-| GET | `/api/obras/tarefas/:id` | `view_tarefas_obra` | Buscar tarefa |
-| PUT | `/api/obras/tarefas/:id` | `update_obra` | Atualizar tarefa |
-| DELETE | `/api/obras/tarefas/:id` | `delete_obra` | Excluir tarefa |
-| POST | `/api/obras/tarefas/resumo` | `view_tarefas_obra` | Salvar resumo + fotos |
-| GET | `/api/obras/:obraId/tarefas` | `view_obras` | Tarefas de uma obra |
-| GET | `/api/obras/tarefas/registros/:id` | `view_tarefas_obra` | Histórico de registros |
+| Método | Endpoint                           | Permissão           | Descrição              |
+| ------ | ---------------------------------- | ------------------- | ---------------------- |
+| GET    | `/api/obras/tarefas`               | `view_tarefas_obra` | Listar minhas tarefas  |
+| POST   | `/api/obras/tarefas`               | `create_obra`       | Criar nova tarefa      |
+| GET    | `/api/obras/tarefas/:id`           | `view_tarefas_obra` | Buscar tarefa          |
+| PUT    | `/api/obras/tarefas/:id`           | `update_obra`       | Atualizar tarefa       |
+| DELETE | `/api/obras/tarefas/:id`           | `delete_obra`       | Excluir tarefa         |
+| POST   | `/api/obras/tarefas/resumo`        | `view_tarefas_obra` | Salvar resumo + fotos  |
+| GET    | `/api/obras/:obraId/tarefas`       | `view_obras`        | Tarefas de uma obra    |
+| GET    | `/api/obras/tarefas/registros/:id` | `view_tarefas_obra` | Histórico de registros |
 
 ---
 
 ## 🔒 Segurança Implementada
 
 ### Validações de Acesso:
+
 1. ✅ **JWT Authentication**: Todas as rotas protegidas
 2. ✅ **Role Validation**: Middleware RBAC em cada endpoint
 3. ✅ **Data Isolation**: Eletricista só vê suas tarefas
@@ -275,6 +300,7 @@ DELETE http://localhost:3000/api/projetos/{id}?permanent=true
 7. ✅ **Size Limits**: 10MB por arquivo
 
 ### Audit Logs Gerados:
+
 - `REGISTRO_TAREFA` - Eletricista salva resumo
 - `CREATE` - Criação de tarefa
 - `UPDATE` - Atualização de tarefa
@@ -323,12 +349,12 @@ S3E-System-PRO/
 
 ### Usuários Criados no Seed:
 
-| Role | Email | Senha | Páginas Acessíveis |
-|------|-------|-------|-------------------|
-| **Desenvolvedor** | antoniojrtech@gmail.com | `134679@Aj` | TODAS + Logs |
-| **Admin** | admin@s3e.com.br | `123456` | Todas exceto Logs |
-| **Eletricista 1** | eletricista1@s3e.com | `eletricista123` | Obras + Tarefas + Mov. |
-| **Eletricista 2** | eletricista2@s3e.com | `eletricista123` | Obras + Tarefas + Mov. |
+| Role              | Email                     | Senha            | Páginas Acessíveis     |
+| ----------------- | ------------------------- | ---------------- | ---------------------- |
+| **Desenvolvedor** | <antoniojrtech@gmail.com> | `134679@Aj`      | TODAS + Logs           |
+| **Admin**         | <admin@s3e.com.br>        | `123456`         | Todas exceto Logs      |
+| **Eletricista 1** | <eletricista1@s3e.com>    | `eletricista123` | Obras + Tarefas + Mov. |
+| **Eletricista 2** | <eletricista2@s3e.com>    | `eletricista123` | Obras + Tarefas + Mov. |
 
 ---
 
@@ -341,6 +367,7 @@ S3E-System-PRO/
    - Preencha os dados e salve
 
 2. **Criar Tarefa** (via API ou futuro UI)
+
    ```bash
    POST /api/obras/tarefas
    {
@@ -377,6 +404,7 @@ S3E-System-PRO/
 ### Sidebar - Adaptação por Role:
 
 **Eletricista** vê:
+
 ```
 📊 Dashboard
 📋 Tarefas da Obra ← NOVO
@@ -384,6 +412,7 @@ S3E-System-PRO/
 ```
 
 **Desenvolvedor** vê:
+
 ```
 📊 Dashboard
 👥 Clientes
@@ -393,6 +422,7 @@ S3E-System-PRO/
 ```
 
 **Admin** vê:
+
 ```
 (Todas as páginas exceto Logs)
 ```
@@ -450,6 +480,7 @@ S3E-System-PRO/
 ## 🔄 API Reference - Tarefas da Obra
 
 ### 1. Listar Minhas Tarefas
+
 ```http
 GET /api/obras/tarefas
 Authorization: Bearer {token}
@@ -475,6 +506,7 @@ Response 200:
 ```
 
 ### 2. Salvar Resumo com Fotos
+
 ```http
 POST /api/obras/tarefas/resumo
 Authorization: Bearer {token}
@@ -504,6 +536,7 @@ Response 200:
 ```
 
 ### 3. Criar Nova Tarefa (Gerente/Engenheiro)
+
 ```http
 POST /api/obras/tarefas
 Authorization: Bearer {token}
@@ -536,6 +569,7 @@ Response 200:
 ### Testes de Permissão:
 
 #### ✅ Deve Permitir:
+
 - Desenvolvedor acessar Logs
 - Eletricista acessar Tarefas da Obra
 - Admin deletar projetos
@@ -543,6 +577,7 @@ Response 200:
 - Comprador acessar Frota
 
 #### ❌ Deve Bloquear:
+
 - Admin acessar Logs → 403
 - Eletricista acessar Financeiro → 403
 - Comprador deletar materiais → 403
@@ -553,14 +588,19 @@ Response 200:
 
 ```typescript
 // Frontend - Verificar permissão
-if (hasPermission(user?.role, 'view_financeiro')) {
+if (hasPermission(user?.role, "view_financeiro")) {
   // Mostra página
 } else {
   // Mostra "Acesso Negado"
 }
 
 // Backend - Middleware automático
-router.get('/rota', authenticate, checkPermission('view_financeiro'), controller);
+router.get(
+  "/rota",
+  authenticate,
+  checkPermission("view_financeiro"),
+  controller
+);
 ```
 
 ---
@@ -568,6 +608,7 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 ## 📊 Estatísticas do Sistema
 
 ### Código Implementado:
+
 - **Frontend**: 3 arquivos novos + 3 modificados
 - **Backend**: 3 arquivos novos + 3 modificados
 - **Linhas de Código**: ~1.200 linhas
@@ -576,6 +617,7 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 - **Roles**: 6 perfis configurados
 
 ### Funcionalidades:
+
 - ✅ Controle de acesso granular
 - ✅ Upload de fotos (múltiplas)
 - ✅ Audit logging completo
@@ -588,6 +630,7 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 ## 🎓 Documentação Adicional
 
 ### Arquivos de Referência:
+
 - **Frontend RBAC**: `frontend/RBAC_SYSTEM.md`
 - **Backend RBAC**: `backend/RBAC_BACKEND_IMPLEMENTATION.md`
 - **Design System**: `frontend/DESIGN_SYSTEM.md`
@@ -595,6 +638,7 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 - **Este Guia**: `RBAC_COMPLETE_GUIDE.md`
 
 ### Conceitos Importantes:
+
 - **RBAC**: Role-Based Access Control
 - **JWT**: JSON Web Token para autenticação
 - **Multer**: Middleware para upload de arquivos
@@ -606,6 +650,7 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 ## 🚀 Status Final
 
 ### ✅ Implementação Completa:
+
 - [x] Frontend: 100%
 - [x] Backend: 100%
 - [x] Database: 100%
@@ -615,9 +660,13 @@ router.get('/rota', authenticate, checkPermission('view_financeiro'), controller
 
 ### 🎉 Sistema Pronto para Uso!
 
-O sistema RBAC está **totalmente funcional** e pronto para uso em produção. Todos os perfis de usuário foram configurados conforme especificado, com controle granular de acesso e funcionalidades específicas para cada tipo de usuário.
+O sistema RBAC está **totalmente funcional** e pronto para uso em produção.
+Todos os perfis de usuário foram configurados conforme especificado, com
+controle granular de acesso e funcionalidades específicas para cada tipo de
+usuário.
 
 **Próximos Passos Opcionais**:
+
 1. Implementar notificações push para eletricistas
 2. Criar dashboard de produtividade por eletricista
 3. Gerar relatórios PDF de atividades mensais
@@ -630,4 +679,3 @@ O sistema RBAC está **totalmente funcional** e pronto para uso em produção. T
 **Versão**: 2.0.0  
 **Status**: ✅ COMPLETO E OPERACIONAL  
 **Desenvolvedor**: Sistema S3E Engineering Pro
-

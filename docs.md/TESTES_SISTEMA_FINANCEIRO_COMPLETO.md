@@ -2,7 +2,8 @@
 
 ## 🎯 Objetivo
 
-Testar **todas as funcionalidades** do módulo financeiro do sistema S3E, incluindo vendas, contas a receber, contas a pagar, estoque e relatórios.
+Testar **todas as funcionalidades** do módulo financeiro do sistema S3E,
+incluindo vendas, contas a receber, contas a pagar, estoque e relatórios.
 
 ---
 
@@ -30,6 +31,7 @@ curl -X POST http://localhost:3001/api/auth/login \
 ```
 
 **Salve o token:**
+
 ```bash
 export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
@@ -45,6 +47,7 @@ curl -X GET http://localhost:3001/api
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "message": "S3E System API",
@@ -71,6 +74,7 @@ curl -X GET "http://localhost:3001/api/vendas/estoque/ORC-2025-001" \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -109,6 +113,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -145,6 +150,7 @@ curl -X GET "http://localhost:3001/api/vendas?page=1&limit=10" \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -181,6 +187,7 @@ curl -X PUT "http://localhost:3001/api/vendas/contas/ID_DA_CONTA/pagar" \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -212,6 +219,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -219,7 +227,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
   "data": {
     "id": "...",
     "descricao": "Aluguel Escritório - Novembro/2025",
-    "valorParcela": 5000.00,
+    "valorParcela": 5000.0,
     "status": "Pendente"
   }
 }
@@ -237,6 +245,7 @@ curl -X GET "http://localhost:3001/api/contas-pagar?status=Pendente" \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -266,6 +275,7 @@ curl -X PUT "http://localhost:3001/api/contas-pagar/ID_DA_CONTA/pagar" \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -289,6 +299,7 @@ curl -X GET http://localhost:3001/api/relatorios/financeiro \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -322,6 +333,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
@@ -379,15 +391,32 @@ curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "success": true,
   "message": "4 contas a pagar criadas com sucesso",
   "data": [
-    { "numeroParcela": 1, "valorParcela": 3000.00, "dataVencimento": "2025-11-15" },
-    { "numeroParcela": 2, "valorParcela": 3000.00, "dataVencimento": "2025-12-15" },
-    { "numeroParcela": 3, "valorParcela": 3000.00, "dataVencimento": "2026-01-14" },
-    { "numeroParcela": 4, "valorParcela": 3000.00, "dataVencimento": "2026-02-13" }
+    {
+      "numeroParcela": 1,
+      "valorParcela": 3000.0,
+      "dataVencimento": "2025-11-15"
+    },
+    {
+      "numeroParcela": 2,
+      "valorParcela": 3000.0,
+      "dataVencimento": "2025-12-15"
+    },
+    {
+      "numeroParcela": 3,
+      "valorParcela": 3000.0,
+      "dataVencimento": "2026-01-14"
+    },
+    {
+      "numeroParcela": 4,
+      "valorParcela": 3000.0,
+      "dataVencimento": "2026-02-13"
+    }
   ]
 }
 ```
@@ -406,34 +435,39 @@ cd backend
 npx prisma studio
 ```
 
-**Abrir:** http://localhost:5555
+**Abrir:** <http://localhost:5555>
 
 ---
 
 ### Verificações Visuais
 
 #### 1. Tabela `vendas`
+
 - ✅ Ver venda criada
 - ✅ Verificar `numeroVenda`, `valorTotal`, `status`
 - ✅ Verificar `orcamentoId` (vínculo)
 
 #### 2. Tabela `contas_receber`
+
 - ✅ Ver 3 contas criadas
 - ✅ Verificar `vendaId` (vínculo com venda)
 - ✅ Verificar `valorParcela`, `numeroParcela`
 - ✅ Verificar `status` ("Pendente" ou "Pago")
 
 #### 3. Tabela `contas_pagar`
+
 - ✅ Ver conta de aluguel
 - ✅ Ver contas parceladas (4x)
 - ✅ Verificar status
 
 #### 4. Tabela `materiais`
+
 - ✅ Ver estoque **reduzido** após venda
 - ✅ Comparar com estoque anterior
 - ✅ Conferir quantidades
 
 #### 5. Tabela `movimentacoes_estoque`
+
 - ✅ Ver registros de SAIDA
 - ✅ Verificar `motivo`: "VENDA"
 - ✅ Verificar `referencia`: ID da venda
@@ -486,6 +520,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "error": "Erro ao processar estoque: Estoque insuficiente:\nDisjuntor 20A: faltam 50 unidades..."
@@ -505,6 +540,7 @@ curl -X GET http://localhost:3001/api/vendas \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "error": "Token inválido"
@@ -525,6 +561,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "error": "Acesso negado. Permissão insuficiente."
@@ -547,6 +584,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 **Deve retornar:**
+
 ```json
 {
   "error": "Dados obrigatórios ausentes: orcamentoId, clienteId, valorTotal"
@@ -668,11 +706,13 @@ curl -X GET "http://localhost:3001/api/relatorios/vendas?meses=6" \
 ### V1: Transação Atômica Funciona?
 
 **Teste:**
+
 1. Criar venda com estoque insuficiente
 2. Deve dar erro
 3. Verificar no banco: venda NÃO deve existir
 
 **Como verificar:**
+
 ```bash
 # No Prisma Studio:
 http://localhost:5555
@@ -688,6 +728,7 @@ http://localhost:5555
 ### V2: Kits São Expandidos?
 
 **Teste:**
+
 1. Criar venda com orçamento que tem kit
 2. Ver na resposta: `baixaEstoque.materiaisProcessados > 1`
 3. Ver em `movimentacoes_estoque`: múltiplos materiais
@@ -699,6 +740,7 @@ http://localhost:5555
 ### V3: Materiais Repetidos São Agrupados?
 
 **Teste:**
+
 1. Orçamento com:
    - 50x MAT-001 (direto)
    - 1x KIT-X (que contém 30x MAT-001)
@@ -711,6 +753,7 @@ http://localhost:5555
 ### V4: Relatórios Usam Contas PAGAS?
 
 **Teste:**
+
 1. Criar conta a receber mas NÃO pagar
 2. Ver relatório: receita = 0
 3. Pagar conta
@@ -751,18 +794,23 @@ http://localhost:5555
 ## 🐛 Troubleshooting
 
 ### Problema 1: "Estoque insuficiente"
+
 **Solução:** Comprar materiais antes de vender
 
 ### Problema 2: "Orçamento não encontrado"
+
 **Solução:** Verificar se ID está correto e se orçamento existe
 
 ### Problema 3: "Conta já está paga"
+
 **Solução:** Não pode pagar conta que já foi paga
 
 ### Problema 4: "Token inválido"
+
 **Solução:** Fazer login novamente
 
 ### Problema 5: "EADDRINUSE: porta em uso"
+
 **Solução:** `taskkill //F //IM node.exe` e rodar novamente
 
 ---
@@ -772,6 +820,7 @@ http://localhost:5555
 Após todos os testes, você deve ter:
 
 ### No Banco de Dados
+
 - ✅ 1+ vendas criadas
 - ✅ 3+ contas a receber
 - ✅ 5+ contas a pagar
@@ -779,12 +828,14 @@ Após todos os testes, você deve ter:
 - ✅ Estoque reduzido
 
 ### Nos Relatórios
+
 - ✅ Dados de receitas (contas pagas)
 - ✅ Dados de despesas (contas pagas)
 - ✅ Lucro calculado
 - ✅ Gráficos com valores reais
 
 ### Na API
+
 - ✅ 22 endpoints funcionando
 - ✅ Autenticação OK
 - ✅ Autorização OK
@@ -812,4 +863,3 @@ Status: PRONTO PARA PRODUÇÃO! 🚀
 
 **Guia de Testes criado em 20/10/2025** 🧪  
 **Sistema S3E Engenharia Elétrica** ⚡💰📊
-

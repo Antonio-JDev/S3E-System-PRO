@@ -2,7 +2,9 @@
 
 ## ✅ Implementação Final
 
-O Sistema S3E agora possui o **módulo financeiro mais completo** para empresas de engenharia elétrica, com integração total entre Vendas, Estoque, Contas a Receber, Contas a Pagar e Relatórios Gerenciais.
+O Sistema S3E agora possui o **módulo financeiro mais completo** para empresas
+de engenharia elétrica, com integração total entre Vendas, Estoque, Contas a
+Receber, Contas a Pagar e Relatórios Gerenciais.
 
 ---
 
@@ -136,26 +138,26 @@ O Sistema S3E agora possui o **módulo financeiro mais completo** para empresas 
 
 ### Arquivos Criados/Modificados
 
-| Categoria | Arquivos | Linhas de Código |
-|-----------|----------|------------------|
-| **Serviços** | 4 | ~1.200 |
-| **Controllers** | 4 | ~800 |
-| **Rotas** | 4 | ~300 |
-| **Tipos** | 1 | ~50 |
-| **Documentação** | 15 | ~5.000 |
-| **Total** | **28** | **~7.350** |
+| Categoria        | Arquivos | Linhas de Código |
+| ---------------- | -------- | ---------------- |
+| **Serviços**     | 4        | ~1.200           |
+| **Controllers**  | 4        | ~800             |
+| **Rotas**        | 4        | ~300             |
+| **Tipos**        | 1        | ~50              |
+| **Documentação** | 15       | ~5.000           |
+| **Total**        | **28**   | **~7.350**       |
 
 ---
 
 ### Endpoints Implementados
 
-| Módulo | Endpoints | Total |
-|--------|-----------|-------|
-| Vendas | 7 | 7 |
-| Contas a Receber | 1 (via vendas) | 1 |
-| Contas a Pagar | 9 | 9 |
-| Relatórios | 5 | 5 |
-| **TOTAL** | - | **22** |
+| Módulo           | Endpoints      | Total  |
+| ---------------- | -------------- | ------ |
+| Vendas           | 7              | 7      |
+| Contas a Receber | 1 (via vendas) | 1      |
+| Contas a Pagar   | 9              | 9      |
+| Relatórios       | 5              | 5      |
+| **TOTAL**        | -              | **22** |
 
 ---
 
@@ -263,24 +265,24 @@ O Sistema S3E agora possui o **módulo financeiro mais completo** para empresas 
 
 ### Matriz Completa
 
-| Operação | admin | gerente | financeiro | comercial |
-|----------|-------|---------|------------|-----------|
-| **Vendas** |
-| Realizar venda | ✅ | ✅ | ❌ | ✅ |
-| Ver vendas | ✅ | ✅ | ✅ | ✅ |
-| Cancelar venda | ✅ | ❌ | ❌ | ❌ |
-| Verificar estoque | ✅ | ✅ | ✅ | ✅ |
+| Operação             | admin | gerente | financeiro | comercial |
+| -------------------- | ----- | ------- | ---------- | --------- |
+| **Vendas**           |
+| Realizar venda       | ✅    | ✅      | ❌         | ✅        |
+| Ver vendas           | ✅    | ✅      | ✅         | ✅        |
+| Cancelar venda       | ✅    | ❌      | ❌         | ❌        |
+| Verificar estoque    | ✅    | ✅      | ✅         | ✅        |
 | **Contas a Receber** |
-| Pagar conta | ✅ | ✅ | ✅ | ❌ |
-| Ver contas | ✅ | ✅ | ✅ | ✅ |
-| **Contas a Pagar** |
-| Criar conta | ✅ | ❌ | ✅ | ❌ |
-| Pagar conta | ✅ | ❌ | ✅ | ❌ |
-| Ver contas | ✅ | ✅ | ✅ | ❌ |
-| **Relatórios** |
-| Dashboard | ✅ | ✅ | ❌ | ❌ |
-| Financeiro | ✅ | ✅ | ✅ | ❌ |
-| Vendas | ✅ | ✅ | ❌ | ✅ |
+| Pagar conta          | ✅    | ✅      | ✅         | ❌        |
+| Ver contas           | ✅    | ✅      | ✅         | ✅        |
+| **Contas a Pagar**   |
+| Criar conta          | ✅    | ❌      | ✅         | ❌        |
+| Pagar conta          | ✅    | ❌      | ✅         | ❌        |
+| Ver contas           | ✅    | ✅      | ✅         | ❌        |
+| **Relatórios**       |
+| Dashboard            | ✅    | ✅      | ❌         | ❌        |
+| Financeiro           | ✅    | ✅      | ✅         | ❌        |
+| Vendas               | ✅    | ✅      | ❌         | ✅        |
 
 ---
 
@@ -290,45 +292,45 @@ O Sistema S3E agora possui o **módulo financeiro mais completo** para empresas 
 
 ```tsx
 const RealizarVenda = () => {
-    const [orcamento, setOrcamento] = useState(null);
-    const [estoqueOK, setEstoqueOK] = useState(false);
-    const [verificacao, setVerificacao] = useState(null);
-    
-    // Ao selecionar orçamento
-    const handleSelecionarOrcamento = async (orcId) => {
-        setOrcamento(orcId);
-        
-        // Verificar estoque automaticamente
-        const res = await fetch(`/api/vendas/estoque/${orcId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        const { data } = await res.json();
-        setVerificacao(data);
-        setEstoqueOK(data.disponivel);
-    };
-    
-    // Realizar venda
-    const handleRealizarVenda = async () => {
-        if (!estoqueOK) {
-            alert('Estoque insuficiente! Não é possível realizar a venda.');
-            return;
-        }
-        
-        try {
-            const res = await fetch('/api/vendas/realizar', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(vendaForm)
-            });
-            
-            const { data } = await res.json();
-            
-            // Mostrar sucesso com detalhes da baixa
-            alert(`
+  const [orcamento, setOrcamento] = useState(null);
+  const [estoqueOK, setEstoqueOK] = useState(false);
+  const [verificacao, setVerificacao] = useState(null);
+
+  // Ao selecionar orçamento
+  const handleSelecionarOrcamento = async (orcId) => {
+    setOrcamento(orcId);
+
+    // Verificar estoque automaticamente
+    const res = await fetch(`/api/vendas/estoque/${orcId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const { data } = await res.json();
+    setVerificacao(data);
+    setEstoqueOK(data.disponivel);
+  };
+
+  // Realizar venda
+  const handleRealizarVenda = async () => {
+    if (!estoqueOK) {
+      alert("Estoque insuficiente! Não é possível realizar a venda.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/vendas/realizar", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(vendaForm),
+      });
+
+      const { data } = await res.json();
+
+      // Mostrar sucesso com detalhes da baixa
+      alert(`
                 ✅ Venda realizada com sucesso!
                 
                 Venda: ${data.venda.numeroVenda}
@@ -336,68 +338,69 @@ const RealizarVenda = () => {
                 Materiais processados: ${data.baixaEstoque.materiaisProcessados}
                 Itens baixados: ${data.baixaEstoque.totalItens}
             `);
-            
-        } catch (error) {
-            alert('Erro ao realizar venda');
-        }
-    };
-    
-    return (
-        <div>
-            {/* Seletor de Orçamento */}
-            <select onChange={(e) => handleSelecionarOrcamento(e.target.value)}>
-                {orcamentos.map(orc => (
-                    <option value={orc.id}>{orc.projectName}</option>
+    } catch (error) {
+      alert("Erro ao realizar venda");
+    }
+  };
+
+  return (
+    <div>
+      {/* Seletor de Orçamento */}
+      <select onChange={(e) => handleSelecionarOrcamento(e.target.value)}>
+        {orcamentos.map((orc) => (
+          <option value={orc.id}>{orc.projectName}</option>
+        ))}
+      </select>
+
+      {/* Indicador de Estoque */}
+      {verificacao && (
+        <div
+          className={`p-4 rounded-lg border-2 ${
+            estoqueOK
+              ? "bg-green-50 border-green-200"
+              : "bg-red-50 border-red-200"
+          }`}
+        >
+          {estoqueOK ? (
+            <>
+              <h4 className="font-bold text-green-900">
+                ✅ Estoque Disponível
+              </h4>
+              <p className="text-sm text-green-700">
+                Todos os {verificacao.resumo.totalItens} itens estão em estoque.
+              </p>
+            </>
+          ) : (
+            <>
+              <h4 className="font-bold text-red-900">
+                ❌ Estoque Insuficiente
+              </h4>
+              <ul className="mt-2 space-y-1">
+                {verificacao.itensSemEstoque.map((item) => (
+                  <li key={item.materialId} className="text-sm text-red-700">
+                    {item.nome}: faltam {item.falta} unidades
+                  </li>
                 ))}
-            </select>
-            
-            {/* Indicador de Estoque */}
-            {verificacao && (
-                <div className={`p-4 rounded-lg border-2 ${
-                    estoqueOK 
-                        ? 'bg-green-50 border-green-200' 
-                        : 'bg-red-50 border-red-200'
-                }`}>
-                    {estoqueOK ? (
-                        <>
-                            <h4 className="font-bold text-green-900">
-                                ✅ Estoque Disponível
-                            </h4>
-                            <p className="text-sm text-green-700">
-                                Todos os {verificacao.resumo.totalItens} itens estão em estoque.
-                            </p>
-                        </>
-                    ) : (
-                        <>
-                            <h4 className="font-bold text-red-900">
-                                ❌ Estoque Insuficiente
-                            </h4>
-                            <ul className="mt-2 space-y-1">
-                                {verificacao.itensSemEstoque.map(item => (
-                                    <li key={item.materialId} className="text-sm text-red-700">
-                                        {item.nome}: faltam {item.falta} unidades
-                                    </li>
-                                ))}
-                            </ul>
-                        </>
-                    )}
-                </div>
-            )}
-            
-            {/* Botão de Venda */}
-            <button
-                onClick={handleRealizarVenda}
-                disabled={!estoqueOK}
-                className={`px-6 py-2 rounded-lg ${
-                    estoqueOK
-                        ? 'bg-brand-blue text-white hover:bg-blue-700'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-            >
-                {estoqueOK ? '💰 Realizar Venda' : '❌ Sem Estoque'}
-            </button>
+              </ul>
+            </>
+          )}
         </div>
-    );
+      )}
+
+      {/* Botão de Venda */}
+      <button
+        onClick={handleRealizarVenda}
+        disabled={!estoqueOK}
+        className={`px-6 py-2 rounded-lg ${
+          estoqueOK
+            ? "bg-brand-blue text-white hover:bg-blue-700"
+            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+        }`}
+      >
+        {estoqueOK ? "💰 Realizar Venda" : "❌ Sem Estoque"}
+      </button>
+    </div>
+  );
 };
 ```
 
@@ -410,6 +413,7 @@ const RealizarVenda = () => {
 **Dados Iniciais:**
 
 **Estoque:**
+
 ```
 MAT-001 (Disjuntor 20A): 200 unidades
 MAT-002 (Cabo 2.5mm²): 100 metros
@@ -417,6 +421,7 @@ MAT-003 (Quadro): 20 unidades
 ```
 
 **Kit de Medição:**
+
 ```
 KIT-001 contém:
 - 1x MAT-003 (Quadro)
@@ -425,21 +430,22 @@ KIT-001 contém:
 ```
 
 **Orçamento ORC-2025-050:**
+
 ```json
 {
   "items": [
     {
       "tipo": "MATERIAL",
       "materialId": "MAT-001",
-      "quantidade": 50  // 50 disjuntores diretos
+      "quantidade": 50 // 50 disjuntores diretos
     },
     {
       "tipo": "KIT",
       "kitId": "KIT-001",
-      "quantidade": 10  // 10 kits de medição
+      "quantidade": 10 // 10 kits de medição
     }
   ],
-  "total": 85000.00
+  "total": 85000.0
 }
 ```
 
@@ -452,6 +458,7 @@ GET /api/vendas/estoque/ORC-2025-050
 ```
 
 **Sistema calcula:**
+
 ```
 Material direto:
 - MAT-001: 50 unidades
@@ -473,6 +480,7 @@ Verificação:
 ```
 
 **Resposta:**
+
 ```json
 {
   "disponivel": false,
@@ -511,6 +519,7 @@ POST /api/compras
 ```
 
 **Estoque atualizado:**
+
 ```
 MAT-002 (Cabo 2.5mm²): 100 → 250  (+150)
 ```
@@ -524,6 +533,7 @@ GET /api/vendas/estoque/ORC-2025-050
 ```
 
 **Resposta:**
+
 ```json
 {
   "disponivel": true,  ✅
@@ -583,6 +593,7 @@ POST /api/vendas/realizar
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -607,12 +618,13 @@ POST /api/vendas/realizar
 
 ```sql
 -- Ver histórico do MAT-001 (Disjuntor 20A)
-SELECT * FROM movimentacoes_estoque 
-WHERE materialId = 'MAT-001' 
+SELECT * FROM movimentacoes_estoque
+WHERE materialId = 'MAT-001'
 ORDER BY data DESC;
 ```
 
 **Resultado:**
+
 ```
 data       | tipo    | qtd | motivo  | referencia
 -----------|---------|-----|---------|----------------
@@ -623,6 +635,7 @@ data       | tipo    | qtd | motivo  | referencia
 ```
 
 **Análise:**
+
 - ✅ Saldo atual calculável
 - ✅ Rastreamento de cada movimentação
 - ✅ Auditoria completa
@@ -637,7 +650,7 @@ data       | tipo    | qtd | motivo  | referencia
 ```typescript
 // ANTES de dar baixa
 if (material.estoque < quantidade) {
-    throw new Error('Estoque insuficiente');
+  throw new Error("Estoque insuficiente");
 }
 
 // Transação é revertida automaticamente
@@ -647,11 +660,11 @@ if (material.estoque < quantidade) {
 
 ```typescript
 await prisma.$transaction(async (tx) => {
-    // Se QUALQUER operação falhar:
-    // - Venda não é criada
-    // - Contas não são criadas
-    // - Estoque não é alterado
-    // Tudo reverte!
+  // Se QUALQUER operação falhar:
+  // - Venda não é criada
+  // - Contas não são criadas
+  // - Estoque não é alterado
+  // Tudo reverte!
 });
 ```
 
@@ -670,8 +683,8 @@ await prisma.$transaction(async (tx) => {
 const estoque = await verificarEstoque(orcamentoId);
 
 if (!estoque.disponivel) {
-    // Desabilita botão de venda
-    // Mostra itens faltantes
+  // Desabilita botão de venda
+  // Mostra itens faltantes
 }
 ```
 
@@ -681,12 +694,12 @@ if (!estoque.disponivel) {
 
 ### Performance
 
-| Operação | Tempo Médio | Queries |
-|----------|-------------|---------|
-| Verificar estoque | ~300ms | 5-10 |
-| Realizar venda | ~800ms | 15-20 |
-| Expandir kit | ~50ms | 2-3 |
-| Dar baixa material | ~100ms | 2 |
+| Operação           | Tempo Médio | Queries |
+| ------------------ | ----------- | ------- |
+| Verificar estoque  | ~300ms      | 5-10    |
+| Realizar venda     | ~800ms      | 15-20   |
+| Expandir kit       | ~50ms       | 2-3     |
+| Dar baixa material | ~100ms      | 2       |
 
 ### Precisão
 
@@ -700,6 +713,7 @@ if (!estoque.disponivel) {
 ## 🚀 Benefícios do Sistema
 
 ### 1. Automação Total
+
 ```
 ❌ ANTES:
 - Realizar venda (manual)
@@ -715,6 +729,7 @@ if (!estoque.disponivel) {
 ```
 
 ### 2. Prevenção de Erros
+
 ```
 ❌ ANTES:
 - Vender sem ter estoque
@@ -729,6 +744,7 @@ if (!estoque.disponivel) {
 ```
 
 ### 3. Controle Preciso
+
 ```
 ✅ Sabe exatamente o que tem
 ✅ Sabe exatamente o que vendeu
@@ -737,6 +753,7 @@ if (!estoque.disponivel) {
 ```
 
 ### 4. Relatórios Reais
+
 ```
 ✅ Estoque em tempo real
 ✅ Custo real das vendas (CMRV)
@@ -783,6 +800,7 @@ curl -X GET http://localhost:3001/api/movimentacoes \
 ## ✅ Checklist Final
 
 ### Backend
+
 - [x] Serviço de estoque
 - [x] Baixa de material
 - [x] Expansão de kits
@@ -797,6 +815,7 @@ curl -X GET http://localhost:3001/api/movimentacoes \
 - [x] Rollback automático
 
 ### Funcionalidades
+
 - [x] Vendas dão baixa automática
 - [x] Kits são expandidos
 - [x] Materiais são agrupados
@@ -812,6 +831,7 @@ curl -X GET http://localhost:3001/api/movimentacoes \
 ## 🎓 Tecnologias e Padrões
 
 ### Tecnologias
+
 - ✅ TypeScript (type safety)
 - ✅ Prisma ORM (transações)
 - ✅ PostgreSQL (ACID)
@@ -819,6 +839,7 @@ curl -X GET http://localhost:3001/api/movimentacoes \
 - ✅ JWT (autenticação)
 
 ### Padrões
+
 - ✅ Service Layer Pattern
 - ✅ Repository Pattern
 - ✅ Transaction Pattern
@@ -878,4 +899,3 @@ Status: PRODUÇÃO READY! 🚀
 **Sistema S3E - Módulo Financeiro Completo**  
 **Implementado em 20/10/2025** 🎊  
 **O sistema financeiro mais avançado para engenharia elétrica!** ⚡💰📊
-

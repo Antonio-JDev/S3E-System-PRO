@@ -57,6 +57,13 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [equipeParaRenomear, setEquipeParaRenomear] = useState<EquipeDTO | null>(null);
   const [novoNome, setNovoNome] = useState('');
+  const [showMembersDialog, setShowMembersDialog] = useState(false);
+  const [equipeParaVerMembros, setEquipeParaVerMembros] = useState<EquipeDTO | null>(null);
+
+  const getMembroId = (m: any): string => (typeof m === 'string' ? m : String(m?.id ?? ''));
+  const getMembroNome = (m: any): string => (typeof m === 'string' ? m : (m?.nome ?? m?.name ?? 'Sem nome'));
+  const getMembroEmail = (m: any): string => (typeof m === 'string' ? '' : (m?.email ?? ''));
+  const getMembroFuncao = (m: any): string => (typeof m === 'string' ? '' : (m?.funcao ?? m?.role ?? ''));
 
   useEffect(() => {
     if (isOpen) {
@@ -259,14 +266,14 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
   };
 
   const criarEquipe = async () => {
-    if (!nomeEquipe.trim() || selecionados.length === 0) return;
+    if (!nomeEquipe.trim()) return;
     try {
       setLoading(true);
       setError(null);
       const res = await equipeService.createEquipe({
         nome: nomeEquipe.trim(),
         tipo: tipoEquipe,
-        membrosIds: selecionados
+        membrosIds: selecionados.length > 0 ? selecionados : []
       });
       if (res.success && res.data) {
         // Recarregar tudo para garantir sincronização
@@ -467,7 +474,7 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl max-h-[92vh] overflow-hidden flex flex-col">
         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <div>
             <h3 className="text-xl font-bold text-gray-900">Gestão de Equipes de Obra</h3>
@@ -496,11 +503,27 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">
-              {editingEquipeId ? 'Eletricistas Disponíveis para Adicionar' : 'Eletricistas Disponíveis'}
-            </h4>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6 flex-1 overflow-hidden">
+          {/* Coluna esquerda: Eletricistas */}
+          <div className="flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h4 className="font-semibold text-gray-900">
+                  {editingEquipeId ? 'Eletricistas (seleção para a equipe)' : 'Eletricistas Disponíveis'}
+                </h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  {editingEquipeId
+                    ? 'Mostra disponíveis + membros atuais da equipe em edição.'
+                    : 'Mostra apenas eletricistas que não estão em equipes ativas.'}
+                </p>
+              </div>
+              <button
+                onClick={() => Promise.all([loadEletricistas(), loadEquipes()])}
+                className="shrink-0 px-3 py-2 bg-white border-2 border-brand-blue text-brand-blue font-semibold rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                Atualizar
+              </button>
+            </div>
             
             {editingEquipeId && (
               <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -522,10 +545,9 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
                 placeholder="Buscar por nome, email ou função"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
-              <button onClick={() => Promise.all([loadEletricistas(), loadEquipes()])} className="px-3 py-2 bg-white border-2 border-brand-blue text-brand-blue font-semibold rounded-lg hover:bg-blue-50 transition-colors">Atualizar</button>
             </div>
 
-            <div className="border border-gray-200 rounded-xl max-h-80 overflow-auto">
+            <div className="border border-gray-200 rounded-xl flex-1 overflow-auto">
               {loading ? (
                 <div className="p-4 text-sm text-gray-600">Carregando eletricistas...</div>
               ) : error ? (
@@ -599,8 +621,17 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
             </div>
           </div>
 
-          <div>
-            <h4 className="font-semibold text-gray-900 mb-3">Nova Equipe</h4>
+          {/* Coluna direita: CRUD */}
+          <div className="flex flex-col overflow-hidden">
+            <div className="mb-3">
+              <h4 className="font-semibold text-gray-900">
+                {editingEquipeId ? 'Editar Equipe' : 'Nova Equipe'}
+              </h4>
+              <p className="text-xs text-gray-500 mt-1">
+                {editingEquipeId ? 'Ajuste nome/tipo e membros selecionados na coluna da esquerda.' : 'Defina nome/tipo e selecione membros na coluna da esquerda.'}
+              </p>
+            </div>
+
             <div className="space-y-3">
               <input
                 value={nomeEquipe}
@@ -624,7 +655,6 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
                   <button
                     onClick={salvarEdicao}
                     className="px-4 py-2 bg-brand-blue text-white rounded-lg hover:bg-brand-blue/90 font-semibold"
-                    disabled={selecionados.length === 0}
                   >
                     Salvar Alterações
                   </button>
@@ -639,28 +669,68 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
                 <button
                   onClick={criarEquipe}
                   className="px-4 py-2 bg-brand-blue text-white rounded-lg hover:bg-brand-blue/90 font-semibold"
-                  disabled={!nomeEquipe.trim() || selecionados.length === 0}
+                  disabled={!nomeEquipe.trim()}
                 >
                   Criar Equipe
                 </button>
               )}
 
-              <h4 className="font-semibold text-gray-900 mt-6">Equipes Criadas</h4>
-              <div className="space-y-2">
+              <div className="pt-4 border-t border-gray-200" />
+
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="font-semibold text-gray-900">Equipes Criadas</h4>
+                <span className="text-xs text-gray-500">{equipes.length} equipe(s)</span>
+              </div>
+
+              <div className="space-y-2 overflow-auto pr-1" style={{ maxHeight: 'calc(92vh - 360px)' }}>
                 {equipes.length === 0 && (
                   <div className="text-sm text-gray-600">Nenhuma equipe criada ainda.</div>
                 )}
                 {equipes.map(eq => (
-                  <div key={eq.id} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium text-gray-900">{eq.nome}</div>
-                      <div className="text-xs text-gray-600">Membros: {eq.membros?.length || 0}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => iniciarEdicao(eq)} className="px-3 py-1.5 text-sm bg-white border-2 border-brand-blue text-brand-blue rounded-lg hover:bg-blue-50">Editar membros</button>
-
-                      <button onClick={() => abrirDialogRenomear(eq)} className="px-3 py-1.5 text-sm bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50">Renomear</button>
-                      <button onClick={() => abrirDialogExcluir(eq.id)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Excluir</button>
+                  <div key={eq.id} className="border border-gray-200 rounded-xl p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate">{eq.nome}</div>
+                        <div className="text-xs text-gray-600 mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-700 font-semibold">
+                            {eq.tipo}
+                          </span>
+                          <span>Membros: {eq.membros?.length || 0}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            setEquipeParaVerMembros(eq);
+                            setShowMembersDialog(true);
+                          }}
+                          className="px-3 py-1.5 text-sm bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50"
+                          title="Visualizar integrantes"
+                        >
+                          Ver membros
+                        </button>
+                        <button
+                          onClick={() => iniciarEdicao(eq)}
+                          className="px-3 py-1.5 text-sm bg-white border-2 border-brand-blue text-brand-blue rounded-lg hover:bg-blue-50"
+                          title="Editar membros"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => abrirDialogRenomear(eq)}
+                          className="px-3 py-1.5 text-sm bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50"
+                          title="Renomear equipe"
+                        >
+                          Renomear
+                        </button>
+                        <button
+                          onClick={() => abrirDialogExcluir(eq.id)}
+                          className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
+                          title="Excluir equipe"
+                        >
+                          Excluir
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -746,6 +816,77 @@ const ModalEquipesDeObra: React.FC<ModalEquipesDeObraProps> = ({ isOpen, onClose
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: visualizar integrantes */}
+      <Dialog
+        open={showMembersDialog}
+        onOpenChange={(open) => {
+          setShowMembersDialog(open);
+          if (!open) setEquipeParaVerMembros(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>👥 Integrantes da Equipe</DialogTitle>
+            <DialogDescription>
+              {equipeParaVerMembros ? (
+                <>
+                  Equipe <strong>"{equipeParaVerMembros.nome}"</strong> • {equipeParaVerMembros.membros?.length || 0} membro(s)
+                </>
+              ) : (
+                '—'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            {!equipeParaVerMembros || !equipeParaVerMembros.membros || equipeParaVerMembros.membros.length === 0 ? (
+              <div className="text-sm text-gray-600">Nenhum membro nesta equipe.</div>
+            ) : (
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="max-h-80 overflow-auto divide-y divide-gray-200">
+                  {equipeParaVerMembros.membros.map((m: any) => {
+                    const id = getMembroId(m);
+                    const nome = getMembroNome(m);
+                    const email = getMembroEmail(m);
+                    const funcao = getMembroFuncao(m);
+                    return (
+                      <div key={id || nome} className="p-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 truncate">{nome}</div>
+                          {(email || funcao) && (
+                            <div className="text-xs text-gray-600 mt-0.5 flex items-center gap-2 flex-wrap">
+                              {email && <span className="truncate">{email}</span>}
+                              {funcao && (
+                                <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">
+                                  {funcao}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {id && <div className="text-[11px] text-gray-400 mt-1 font-mono truncate">{id}</div>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <button
+              onClick={() => {
+                setShowMembersDialog(false);
+                setEquipeParaVerMembros(null);
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              Fechar
             </button>
           </DialogFooter>
         </DialogContent>

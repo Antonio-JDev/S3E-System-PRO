@@ -1,6 +1,7 @@
 # Exemplos de Uso da API - S3E System
 
 ## 🔗 Base URL
+
 ```
 http://localhost:3000/api
 ```
@@ -10,6 +11,7 @@ http://localhost:3000/api
 ## 🔐 Autenticação
 
 ### Registrar Usuário
+
 ```http
 POST /api/auth/register
 Content-Type: application/json
@@ -23,6 +25,7 @@ Content-Type: application/json
 ```
 
 **Resposta:**
+
 ```json
 {
   "message": "Usuário criado com sucesso",
@@ -37,6 +40,7 @@ Content-Type: application/json
 ```
 
 ### Login
+
 ```http
 POST /api/auth/login
 Content-Type: application/json
@@ -50,6 +54,7 @@ Content-Type: application/json
 **Resposta:** Mesma do registro
 
 ### Obter Dados do Usuário
+
 ```http
 GET /api/auth/me
 Authorization: Bearer SEU_TOKEN_AQUI
@@ -60,22 +65,26 @@ Authorization: Bearer SEU_TOKEN_AQUI
 ## 📦 Materiais
 
 ### Listar Todos os Materiais
+
 ```http
 GET /api/materiais
 Authorization: Bearer SEU_TOKEN
 ```
 
 **Query params (opcional):**
+
 - `categoria=MaterialEletrico`
 - `ativo=true`
 
 ### Buscar Material por ID
+
 ```http
 GET /api/materiais/uuid-do-material
 Authorization: Bearer SEU_TOKEN
 ```
 
 ### Criar Material
+
 ```http
 POST /api/materiais
 Authorization: Bearer SEU_TOKEN
@@ -97,6 +106,7 @@ Content-Type: application/json
 ```
 
 ### Atualizar Material
+
 ```http
 PUT /api/materiais/uuid-do-material
 Authorization: Bearer SEU_TOKEN
@@ -109,6 +119,7 @@ Content-Type: application/json
 ```
 
 ### Registrar Movimentação de Estoque
+
 ```http
 POST /api/materiais/movimentacao
 Authorization: Bearer SEU_TOKEN
@@ -128,6 +139,7 @@ Content-Type: application/json
 **Motivos:** `COMPRA`, `VENDA`, `PROJETO`, `DEVOLUCAO`, `AJUSTE`
 
 ### Obter Histórico de Movimentações
+
 ```http
 GET /api/materiais/movimentacoes/historico
 Authorization: Bearer SEU_TOKEN
@@ -141,6 +153,7 @@ GET /api/materiais/movimentacoes/historico?materialId=uuid-do-material
 ## 🛒 Compras
 
 ### Listar Compras
+
 ```http
 GET /api/compras
 Authorization: Bearer SEU_TOKEN
@@ -150,6 +163,7 @@ GET /api/compras?status=Pendente
 ```
 
 ### Criar Compra
+
 ```http
 POST /api/compras
 Authorization: Bearer SEU_TOKEN
@@ -187,6 +201,7 @@ Content-Type: application/json
 **Se status for "Recebido":** Materiais entram automaticamente no estoque!
 
 ### Parse de XML
+
 ```http
 POST /api/compras/parse-xml
 Authorization: Bearer SEU_TOKEN
@@ -200,6 +215,7 @@ Content-Type: application/json
 **Resposta:** Dados extraídos (fornecedor, itens, totais)
 
 ### Atualizar Status da Compra
+
 ```http
 PATCH /api/compras/uuid-da-compra/status
 Authorization: Bearer SEU_TOKEN
@@ -217,6 +233,7 @@ Content-Type: application/json
 ## 📋 Orçamentos
 
 ### Listar Orçamentos
+
 ```http
 GET /api/orcamentos
 Authorization: Bearer SEU_TOKEN
@@ -227,14 +244,17 @@ GET /api/orcamentos?clienteId=uuid-do-cliente
 ```
 
 ### Buscar Orçamento Completo
+
 ```http
 GET /api/orcamentos/uuid-do-orcamento
 Authorization: Bearer SEU_TOKEN
 ```
 
-**Retorna:** Orçamento com cliente, items expandidos (materiais e kits), e projeto (se aprovado)
+**Retorna:** Orçamento com cliente, items expandidos (materiais e kits), e
+projeto (se aprovado)
 
 ### Criar Orçamento
+
 ```http
 POST /api/orcamentos
 Authorization: Bearer SEU_TOKEN
@@ -273,6 +293,7 @@ Content-Type: application/json
 **Sistema calcula automaticamente:** custoTotal e precoVenda
 
 ### Aprovar Orçamento (Gera Projeto!)
+
 ```http
 PATCH /api/orcamentos/uuid-do-orcamento/status
 Authorization: Bearer SEU_TOKEN
@@ -292,6 +313,7 @@ Content-Type: application/json
 ### Fluxo 1: Compra com XML → Estoque
 
 1. **Importar XML** (frontend ou API)
+
 ```http
 POST /api/compras/parse-xml
 Authorization: Bearer TOKEN
@@ -300,6 +322,7 @@ Content-Type: application/json
 ```
 
 2. **Criar Compra com Dados Parseados**
+
 ```http
 POST /api/compras
 # Usar dados retornados do parse
@@ -310,11 +333,13 @@ POST /api/compras
 ### Fluxo 2: Orçamento → Projeto → NF-e
 
 1. **Criar Orçamento**
+
 ```http
 POST /api/orcamentos
 ```
 
 2. **Aprovar Orçamento**
+
 ```http
 PATCH /api/orcamentos/{id}/status
 { "status": "Aprovado" }
@@ -323,6 +348,7 @@ PATCH /api/orcamentos/{id}/status
 3. **Backend Cria Projeto Automaticamente**
 
 4. **Emitir NF-e** (futuro)
+
 ```http
 POST /api/nfe
 {
@@ -338,11 +364,13 @@ POST /api/nfe
 ## 🧪 Exemplos com cURL
 
 ### 1. Health Check
+
 ```bash
 curl http://localhost:3000/health
 ```
 
 ### 2. Registrar e Fazer Login
+
 ```bash
 # Registrar
 curl -X POST http://localhost:3000/api/auth/register \
@@ -356,12 +384,14 @@ curl -X POST http://localhost:3000/api/auth/login \
 ```
 
 ### 3. Listar Materiais (com token)
+
 ```bash
 curl http://localhost:3000/api/materiais \
   -H "Authorization: Bearer SEU_TOKEN_AQUI"
 ```
 
 ### 4. Criar Material
+
 ```bash
 curl -X POST http://localhost:3000/api/materiais \
   -H "Content-Type: application/json" \
@@ -395,31 +425,34 @@ curl -X POST http://localhost:3000/api/materiais \
 ## 🎓 Boas Práticas
 
 ### 1. Sempre Use HTTPS em Produção
+
 ```typescript
 // Produção
-const API_URL = 'https://api.s3e.com.br';
+const API_URL = "https://api.s3e.com.br";
 ```
 
 ### 2. Trate Erros
+
 ```typescript
 try {
-  const response = await fetch('/api/materiais', {
-    headers: { 'Authorization': `Bearer ${token}` }
+  const response = await fetch("/api/materiais", {
+    headers: { Authorization: `Bearer ${token}` },
   });
-  
+
   if (!response.ok) {
-    throw new Error('Erro na requisição');
+    throw new Error("Erro na requisição");
   }
-  
+
   const data = await response.json();
   return data;
 } catch (error) {
-  console.error('Erro:', error);
-  alert('Erro ao buscar materiais');
+  console.error("Erro:", error);
+  alert("Erro ao buscar materiais");
 }
 ```
 
 ### 3. Renove o Token Antes de Expirar
+
 ```typescript
 // Verificar se token está próximo de expirar
 const decoded = jwt_decode(token);
@@ -431,4 +464,3 @@ if (decoded.exp < Date.now() / 1000 + 3600) {
 ---
 
 **API S3E - Pronta para Automação!** 🚀
-

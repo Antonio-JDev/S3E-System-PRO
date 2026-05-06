@@ -5,6 +5,8 @@ export interface AuthRequest extends Request {
   user?: {
     userId: string;
     role: string;
+    isAdmin?: boolean;
+    name?: string;
   };
 }
 
@@ -32,7 +34,12 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
     // Verificar e decodificar token
     const decoded = verifyToken(token);
     console.log('✅ Token válido, usuário:', decoded);
-    (req as AuthRequest).user = decoded;
+    (req as AuthRequest).user = {
+      userId: decoded.userId,
+      role: decoded.role,
+      isAdmin: decoded.isAdmin,
+      name: decoded.name
+    };
     
     next();
   } catch (error) {
@@ -47,7 +54,9 @@ export const authenticateToken = authenticate;
 
 export const authorize = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = (req as AuthRequest).user?.role;
+    const user = (req as AuthRequest).user;
+    const userRole = user?.role;
+    const isAdminUser = user?.isAdmin === true;
     
     // DESENVOLVEDOR tem acesso UNIVERSAL a tudo
     if (userRole?.toLowerCase() === 'desenvolvedor') {
@@ -61,10 +70,15 @@ export const authorize = (...roles: string[]) => {
       return;
     }
     
-    // Comparação case-insensitive
-    const userRoleLower = userRole.toLowerCase();
+    // Usuário com isAdmin tem as mesmas permissões que role 'admin' (acesso às rotas que permitem admin)
     const rolesLower = roles.map(r => r.toLowerCase());
+    if (isAdminUser && rolesLower.includes('admin')) {
+      console.log('🔓 Usuário admin (isAdmin) detectado - Acesso concedido');
+      next();
+      return;
+    }
     
+    const userRoleLower = userRole.toLowerCase();
     if (!rolesLower.includes(userRoleLower)) {
       res.status(403).json({ error: 'Acesso negado' });
       return;

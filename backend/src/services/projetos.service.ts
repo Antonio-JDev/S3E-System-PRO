@@ -1,6 +1,5 @@
-import { PrismaClient, ProjetoStatus } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { ProjetoStatus } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
 export class ProjetosService {
   /**
@@ -64,30 +63,43 @@ export class ProjetosService {
       updateData.dataFim = new Date();
     }
 
-    // 🔍 SE MUDAR PARA APROVADO, VERIFICAR ESTOQUE E DAR BAIXA
+    // 🔍 SE MUDAR PARA APROVADO: APENAS VALIDAR ESTOQUE (sem dar baixa).
+    // A baixa no estoque ocorre somente ao clicar em "Iniciar obra" (gerar obra), quando os materiais são alocados.
     if (novoStatus === 'APROVADO' && projeto.status !== 'APROVADO') {
-      console.log('🔍 Validando aprovação do projeto - Verificando estoque...');
+      console.log('🔍 Validando aprovação do projeto - Verificando disponibilidade de estoque (sem dar baixa)...');
       
       if (!projeto.orcamento) {
         throw new Error('Projeto sem orçamento vinculado');
       }
 
       const itemsFrios: any[] = [];
-      const itemsReservados: any[] = [];
 
-      // Verificar estoque de todos os items
+      // Verificar estoque de todos os items (MATERIAL e COTACAO vinculada ao estoque)
       for (const item of projeto.orcamento.items) {
-        if (item.tipo === 'MATERIAL' && item.materialId) {
+        // Regra: itens marcados como venda direta do fornecedor não usam estoque
+        // (tratá-los como item de serviço para não gerar falta/compra).
+        if ((item as any).vendaDiretaFornecedor) {
+          continue;
+        }
+
+        // Material direto ou item do banco frio já vinculado a um material do estoque (materialId salvo)
+        const materialIdParaBaixa = (item.tipo === 'MATERIAL' && item.materialId)
+          ? item.materialId
+          : (item.tipo === 'COTACAO' && item.materialId)
+            ? item.materialId
+            : null;
+
+        if (materialIdParaBaixa) {
           const material = await prisma.material.findUnique({
-            where: { id: item.materialId }
+            where: { id: materialIdParaBaixa }
           });
 
           if (!material) {
-          itemsFrios.push({
-            nome: (item as any).nome || 'Material não identificado',
-            quantidade: item.quantidade,
-            motivo: 'Material não encontrado no catálogo'
-          });
+            itemsFrios.push({
+              nome: (item as any).nome || (item as any).cotacao?.nome || 'Material não identificado',
+              quantidade: item.quantidade,
+              motivo: 'Material não encontrado no catálogo'
+            });
           } else if (material.estoque < item.quantidade) {
             itemsFrios.push({
               materialId: material.id,
@@ -96,13 +108,6 @@ export class ProjetosService {
               quantidadeNecessaria: item.quantidade,
               quantidadeDisponivel: material.estoque,
               quantidadeFaltante: item.quantidade - material.estoque
-            });
-          } else {
-            itemsReservados.push({
-              materialId: material.id,
-              nome: material.nome,
-              quantidade: item.quantidade,
-              estoqueAtual: material.estoque
             });
           }
         }
@@ -122,34 +127,7 @@ export class ProjetosService {
         );
       }
 
-      // ✅ DAR BAIXA NO ESTOQUE (Reservar materiais)
-      console.log(`✅ Todos os ${itemsReservados.length} items disponíveis. Dando baixa no estoque...`);
-      
-      for (const item of itemsReservados) {
-        await prisma.material.update({
-          where: { id: item.materialId },
-          data: {
-            estoque: {
-              decrement: item.quantidade
-            }
-          }
-        });
-
-        // Registrar movimentação de estoque
-        await prisma.movimentacaoEstoque.create({
-          data: {
-            materialId: item.materialId,
-            tipo: 'SAIDA',
-            quantidade: item.quantidade,
-            motivo: `Reserva para projeto: ${projeto.titulo}`,
-            referencia: projeto.id
-          }
-        });
-
-        console.log(`✅ Baixa realizada: ${item.nome} - ${item.quantidade} unidades`);
-      }
-
-      console.log(`✅ Estoque atualizado! ${itemsReservados.length} materiais reservados.`);
+      console.log('✅ Validação de estoque OK. A baixa será feita ao iniciar a obra.');
     }
 
     const atualizado = await prisma.projeto.update({ where: { id: projetoId }, data: updateData });
@@ -167,6 +145,12 @@ export class ProjetosService {
 
       // Verificar estoque de todos os items do orçamento
       for (const item of projeto.orcamento.items) {
+        // Regra: itens marcados como venda direta do fornecedor não entram na lista de falta
+        // (não bloquear execução e não contar como necessidade de estoque).
+        if ((item as any).vendaDiretaFornecedor) {
+          continue;
+        }
+
         // Pular itens do tipo SERVIÇO, QUADRO_PRONTO e CUSTO_EXTRA - não precisam de estoque
         if (item.tipo === 'SERVICO' || item.tipo === 'QUADRO_PRONTO' || item.tipo === 'CUSTO_EXTRA') {
           continue;

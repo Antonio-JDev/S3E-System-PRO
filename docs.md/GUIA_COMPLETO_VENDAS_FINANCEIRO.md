@@ -2,7 +2,8 @@
 
 ## 🎯 Visão Geral
 
-Sistema completo de **Vendas**, **Contas a Receber**, **Contas a Pagar** e **Relatórios Financeiros** para o sistema S3E Engenharia Elétrica.
+Sistema completo de **Vendas**, **Contas a Receber**, **Contas a Pagar** e
+**Relatórios Financeiros** para o sistema S3E Engenharia Elétrica.
 
 ---
 
@@ -22,6 +23,7 @@ Sistema completo de **Vendas**, **Contas a Receber**, **Contas a Pagar** e **Rel
 ## 🗄️ Modelos de Dados
 
 ### 1. Venda
+
 ```prisma
 model Venda {
   id              String   @id @default(uuid())
@@ -50,6 +52,7 @@ model Venda {
 ```
 
 **Campos Principais:**
+
 - `numeroVenda`: Gerado automaticamente (ex: VND-1729436789012)
 - `orcamentoId`: Vínculo **único** com orçamento aprovado
 - `status`: Pendente → Concluida (após criação) ou Cancelada
@@ -59,6 +62,7 @@ model Venda {
 ---
 
 ### 2. ContaReceber
+
 ```prisma
 model ContaReceber {
   id             String   @id @default(uuid())
@@ -82,6 +86,7 @@ model ContaReceber {
 ```
 
 **Campos Principais:**
+
 - `vendaId`: Vínculo com a venda
 - `valorParcela`: Valor desta parcela específica
 - `dataVencimento`: Quando deve ser paga
@@ -91,6 +96,7 @@ model ContaReceber {
 ---
 
 ### 3. ContaPagar
+
 ```prisma
 model ContaPagar {
   id             String   @id @default(uuid())
@@ -120,26 +126,26 @@ model ContaPagar {
 
 ### Vendas (`/api/vendas`)
 
-| Método | Endpoint | Descrição | Permissões | Body/Params |
-|--------|----------|-----------|------------|-------------|
-| `POST` | `/realizar` | Criar venda + contas | admin, comercial | VendaPayload |
-| `GET` | `/` | Listar vendas | admin, comercial | ?page, ?limit |
-| `GET` | `/:id` | Buscar venda | admin, comercial | - |
-| `GET` | `/dashboard` | Dados dashboard | admin, comercial | - |
-| `PUT` | `/:id/cancelar` | Cancelar venda | admin | - |
-| `PUT` | `/contas/:id/pagar` | Pagar conta | admin, financeiro | - |
+| Método | Endpoint            | Descrição            | Permissões        | Body/Params   |
+| ------ | ------------------- | -------------------- | ----------------- | ------------- |
+| `POST` | `/realizar`         | Criar venda + contas | admin, comercial  | VendaPayload  |
+| `GET`  | `/`                 | Listar vendas        | admin, comercial  | ?page, ?limit |
+| `GET`  | `/:id`              | Buscar venda         | admin, comercial  | -             |
+| `GET`  | `/dashboard`        | Dados dashboard      | admin, comercial  | -             |
+| `PUT`  | `/:id/cancelar`     | Cancelar venda       | admin             | -             |
+| `PUT`  | `/contas/:id/pagar` | Pagar conta          | admin, financeiro | -             |
 
 ---
 
 ### Relatórios (`/api/relatorios`)
 
-| Método | Endpoint | Descrição | Permissões | Params |
-|--------|----------|-----------|------------|--------|
-| `GET` | `/dashboard` | Dashboard completo | admin, gerente | - |
-| `GET` | `/financeiro` | Dados mensais (12 meses) | admin, financeiro | - |
-| `GET` | `/financeiro/resumo` | Resumo geral | admin, gerente, financeiro | - |
-| `GET` | `/vendas` | Estatísticas de vendas | admin, gerente, comercial | ?meses |
-| `GET` | `/clientes/top` | Top clientes | admin, gerente, comercial | ?limite |
+| Método | Endpoint             | Descrição                | Permissões                 | Params  |
+| ------ | -------------------- | ------------------------ | -------------------------- | ------- |
+| `GET`  | `/dashboard`         | Dashboard completo       | admin, gerente             | -       |
+| `GET`  | `/financeiro`        | Dados mensais (12 meses) | admin, financeiro          | -       |
+| `GET`  | `/financeiro/resumo` | Resumo geral             | admin, gerente, financeiro | -       |
+| `GET`  | `/vendas`            | Estatísticas de vendas   | admin, gerente, comercial  | ?meses  |
+| `GET`  | `/clientes/top`      | Top clientes             | admin, gerente, comercial  | ?limite |
 
 ---
 
@@ -232,7 +238,8 @@ Parcela 3: valorParcela                    // 16.666,67
 SOMA = 41.666,67 + 16.666,67 + 16.666,67 = 75.000,01
 ```
 
-**⚠️ Arredondamento:** Pode haver diferença de 1 centavo devido a arredondamentos.
+**⚠️ Arredondamento:** Pode haver diferença de 1 centavo devido a
+arredondamentos.
 
 ---
 
@@ -258,24 +265,26 @@ Parcela 3: 20/Out/2025 + 90 dias = 18/Jan/2026
 ### Agregação Mensal
 
 **Critérios:**
+
 - ✅ Apenas contas com `status = 'Pago'`
 - ✅ Agregação por `dataPagamento` (não vencimento!)
 - ✅ Últimos 12 meses
 
 **Exemplo:**
+
 ```json
 [
   {
     "mes": "Jan/2025",
-    "receita": 45000.00,    // Soma de ContaReceber pagas em Jan
-    "despesa": 25000.00,    // Soma de ContaPagar pagas em Jan
-    "lucro": 20000.00       // receita - despesa
+    "receita": 45000.0, // Soma de ContaReceber pagas em Jan
+    "despesa": 25000.0, // Soma de ContaPagar pagas em Jan
+    "lucro": 20000.0 // receita - despesa
   },
   {
     "mes": "Fev/2025",
-    "receita": 52000.00,
-    "despesa": 28000.00,
-    "lucro": 24000.00
+    "receita": 52000.0,
+    "despesa": 28000.0,
+    "lucro": 24000.0
   }
   // ... até 12 meses
 ]
@@ -287,12 +296,12 @@ Parcela 3: 20/Out/2025 + 90 dias = 18/Jan/2026
 
 ```json
 {
-  "totalReceitas": 450000.00,        // Total de receitas pagas (histórico)
-  "totalDespesas": 250000.00,        // Total de despesas pagas (histórico)
-  "lucroTotal": 200000.00,           // Lucro acumulado
-  "contasReceberPendentes": 85000.00, // Ainda não recebido
-  "contasPagarPendentes": 35000.00,   // Ainda não pago
-  "contasEmAtraso": 15000.00          // Vencidas e não pagas
+  "totalReceitas": 450000.0, // Total de receitas pagas (histórico)
+  "totalDespesas": 250000.0, // Total de despesas pagas (histórico)
+  "lucroTotal": 200000.0, // Lucro acumulado
+  "contasReceberPendentes": 85000.0, // Ainda não recebido
+  "contasPagarPendentes": 35000.0, // Ainda não pago
+  "contasEmAtraso": 15000.0 // Vencidas e não pagas
 }
 ```
 
@@ -303,6 +312,7 @@ Parcela 3: 20/Out/2025 + 90 dias = 18/Jan/2026
 ### Página de Vendas
 
 #### Estrutura
+
 ```tsx
 <Vendas>
   <Header />
@@ -311,17 +321,17 @@ Parcela 3: 20/Out/2025 + 90 dias = 18/Jan/2026
     <Card>A Receber</Card>
     <Card>Em Atraso</Card>
   </CardsResumo>
-  
+
   <Tabs>
     <Tab id="dashboard">
       <VendasPorStatus />
       <ContasAReceber />
     </Tab>
-    
+
     <Tab id="lista">
       <TabelaVendas />
     </Tab>
-    
+
     <Tab id="nova">
       <FormularioVenda>
         <Select>Orçamento Aprovado</Select>
@@ -391,14 +401,14 @@ const response = await fetch('/api/vendas/realizar', {
 
 ### Controle de Acesso
 
-| Recurso | admin | gerente | financeiro | comercial | user |
-|---------|-------|---------|------------|-----------|------|
-| Criar venda | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Ver vendas | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Cancelar venda | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Pagar conta | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Ver relatórios | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Dashboard | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Recurso        | admin | gerente | financeiro | comercial | user |
+| -------------- | ----- | ------- | ---------- | --------- | ---- |
+| Criar venda    | ✅    | ✅      | ❌         | ✅        | ❌   |
+| Ver vendas     | ✅    | ✅      | ✅         | ✅        | ❌   |
+| Cancelar venda | ✅    | ❌      | ❌         | ❌        | ❌   |
+| Pagar conta    | ✅    | ✅      | ✅         | ❌        | ❌   |
+| Ver relatórios | ✅    | ✅      | ✅         | ❌        | ❌   |
+| Dashboard      | ✅    | ✅      | ❌         | ❌        | ❌   |
 
 ---
 
@@ -409,8 +419,8 @@ const response = await fetch('/api/vendas/realizar', {
 router.post('/realizar', authenticate, ...);
 
 // Autorização (rotas específicas)
-router.post('/realizar', 
-    authenticate, 
+router.post('/realizar',
+    authenticate,
     authorize('admin', 'comercial'),  // ✅
     VendasController.realizarVenda
 );
@@ -443,6 +453,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 **Resultado:**
+
 - 1 venda
 - 1 conta a receber de R$ 25.000,00
 - Vencimento em 30 dias
@@ -466,6 +477,7 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 **Resultado:**
+
 - Restante: R$ 100.000,00
 - 12 parcelas de R$ 8.333,33
 - Parcela 1: R$ 28.333,33 (entrada + 1ª)
@@ -497,125 +509,122 @@ curl -X GET http://localhost:3001/api/relatorios/financeiro \
 ### Componente Sugerido
 
 ```tsx
-import React, { useEffect, useState } from 'react';
-import { Bar } from 'react-chartjs-2';
-import { useAuth } from '../hooks/useAuth';
+import React, { useEffect, useState } from "react";
+import { Bar } from "react-chartjs-2";
+import { useAuth } from "../hooks/useAuth";
 
 const DashboardFinanceiro = () => {
-    const { fetchWithAuth } = useAuth();
-    const [dashboard, setDashboard] = useState(null);
-    const [loading, setLoading] = useState(true);
+  const { fetchWithAuth } = useAuth();
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        carregarDashboard();
-    }, []);
+  useEffect(() => {
+    carregarDashboard();
+  }, []);
 
-    const carregarDashboard = async () => {
-        try {
-            const response = await fetchWithAuth('/api/relatorios/dashboard');
-            const data = await response.json();
-            setDashboard(data.data);
-        } catch (error) {
-            console.error('Erro:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
+  const carregarDashboard = async () => {
+    try {
+      const response = await fetchWithAuth("/api/relatorios/dashboard");
+      const data = await response.json();
+      setDashboard(data.data);
+    } catch (error) {
+      console.error("Erro:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    if (loading) return <Loading />;
+  if (loading) return <Loading />;
 
-    const { financeiro, vendas, topClientes } = dashboard;
+  const { financeiro, vendas, topClientes } = dashboard;
 
-    return (
-        <div className="p-8">
-            {/* Cards de Resumo */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <CardResumo
-                    titulo="Total Receitas"
-                    valor={financeiro.resumo.totalReceitas}
-                    cor="green"
-                    icone="💰"
-                />
-                <CardResumo
-                    titulo="Total Despesas"
-                    valor={financeiro.resumo.totalDespesas}
-                    cor="red"
-                    icone="💸"
-                />
-                <CardResumo
-                    titulo="Lucro Total"
-                    valor={financeiro.resumo.lucroTotal}
-                    cor="blue"
-                    icone="📈"
-                />
-            </div>
+  return (
+    <div className="p-8">
+      {/* Cards de Resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <CardResumo
+          titulo="Total Receitas"
+          valor={financeiro.resumo.totalReceitas}
+          cor="green"
+          icone="💰"
+        />
+        <CardResumo
+          titulo="Total Despesas"
+          valor={financeiro.resumo.totalDespesas}
+          cor="red"
+          icone="💸"
+        />
+        <CardResumo
+          titulo="Lucro Total"
+          valor={financeiro.resumo.lucroTotal}
+          cor="blue"
+          icone="📈"
+        />
+      </div>
 
-            {/* Gráfico Principal */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-                <h2 className="text-xl font-bold mb-4">
-                    Fluxo de Caixa - Últimos 12 Meses
-                </h2>
-                <Bar
-                    data={{
-                        labels: financeiro.mensais.map(m => m.mes),
-                        datasets: [
-                            {
-                                label: 'Receitas',
-                                data: financeiro.mensais.map(m => m.receita),
-                                backgroundColor: 'rgba(34, 197, 94, 0.6)',
-                                borderColor: 'rgb(34, 197, 94)',
-                                borderWidth: 2
-                            },
-                            {
-                                label: 'Despesas',
-                                data: financeiro.mensais.map(m => m.despesa),
-                                backgroundColor: 'rgba(239, 68, 68, 0.6)',
-                                borderColor: 'rgb(239, 68, 68)',
-                                borderWidth: 2
-                            }
-                        ]
-                    }}
-                    options={{
-                        responsive: true,
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                ticks: {
-                                    callback: (value) => 
-                                        'R$ ' + value.toLocaleString('pt-BR')
-                                }
-                            }
-                        }
-                    }}
-                />
-            </div>
+      {/* Gráfico Principal */}
+      <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+        <h2 className="text-xl font-bold mb-4">
+          Fluxo de Caixa - Últimos 12 Meses
+        </h2>
+        <Bar
+          data={{
+            labels: financeiro.mensais.map((m) => m.mes),
+            datasets: [
+              {
+                label: "Receitas",
+                data: financeiro.mensais.map((m) => m.receita),
+                backgroundColor: "rgba(34, 197, 94, 0.6)",
+                borderColor: "rgb(34, 197, 94)",
+                borderWidth: 2,
+              },
+              {
+                label: "Despesas",
+                data: financeiro.mensais.map((m) => m.despesa),
+                backgroundColor: "rgba(239, 68, 68, 0.6)",
+                borderColor: "rgb(239, 68, 68)",
+                borderWidth: 2,
+              },
+            ],
+          }}
+          options={{
+            responsive: true,
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: (value) => "R$ " + value.toLocaleString("pt-BR"),
+                },
+              },
+            },
+          }}
+        />
+      </div>
 
-            {/* Top Clientes */}
-            <div className="bg-white rounded-xl shadow-lg p-6">
-                <h2 className="text-xl font-bold mb-4">
-                    Top 5 Clientes
-                </h2>
-                <table className="w-full">
-                    <thead>
-                        <tr>
-                            <th>Cliente</th>
-                            <th>Compras</th>
-                            <th>Valor Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {topClientes.map(cliente => (
-                            <tr key={cliente.clienteId}>
-                                <td>{cliente.clienteNome}</td>
-                                <td>{cliente.quantidadeCompras}</td>
-                                <td>R$ {cliente.valorTotal.toLocaleString('pt-BR')}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    );
+      {/* Top Clientes */}
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <h2 className="text-xl font-bold mb-4">Top 5 Clientes</h2>
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Compras</th>
+              <th>Valor Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topClientes.map((cliente) => (
+              <tr key={cliente.clienteId}>
+                <td>{cliente.clienteNome}</td>
+                <td>{cliente.quantidadeCompras}</td>
+                <td>R$ {cliente.valorTotal.toLocaleString("pt-BR")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 };
 ```
 
@@ -628,13 +637,14 @@ const DashboardFinanceiro = () => {
 **Causa:** Cada orçamento pode ter apenas 1 venda (relação 1:1)
 
 **Solução:** Verificar se o orçamento já foi vendido antes
+
 ```typescript
 const vendaExistente = await prisma.venda.findUnique({
-    where: { orcamentoId: 'ORC-2025-001' }
+  where: { orcamentoId: "ORC-2025-001" },
 });
 
 if (vendaExistente) {
-    throw new Error('Orçamento já possui venda vinculada');
+  throw new Error("Orçamento já possui venda vinculada");
 }
 ```
 
@@ -645,9 +655,10 @@ if (vendaExistente) {
 **Causa:** Validação de negócio
 
 **Código:**
+
 ```typescript
 if (valorEntrada >= valorTotal) {
-    throw new Error('Valor de entrada deve ser menor que o valor total');
+  throw new Error("Valor de entrada deve ser menor que o valor total");
 }
 ```
 
@@ -658,6 +669,7 @@ if (valorEntrada >= valorTotal) {
 **Causa:** Arredondamento decimal
 
 **Solução:** Ajustar última parcela
+
 ```typescript
 // Calcular diferença
 const somaCalculada = contasReceber.reduce((sum, c) => sum + c.valorParcela, 0);
@@ -672,6 +684,7 @@ contasReceber[contasReceber.length - 1].valorParcela += diferenca;
 ## 🎓 Boas Práticas
 
 ### 1. Usar Transações
+
 ```typescript
 await prisma.$transaction(async (tx) => {
     // Operações atômicas
@@ -686,46 +699,49 @@ await prisma.$transaction(async (tx) => {
 ---
 
 ### 2. Validar Dados
+
 ```typescript
 // Controller
 if (!data.orcamentoId) {
-    return res.status(400).json({ error: 'Campo obrigatório' });
+  return res.status(400).json({ error: "Campo obrigatório" });
 }
 
 // Service
 if (valorTotal <= 0) {
-    throw new Error('Valor deve ser positivo');
+  throw new Error("Valor deve ser positivo");
 }
 ```
 
 ---
 
 ### 3. Tratar Erros
+
 ```typescript
 try {
-    const resultado = await VendasService.realizarVenda(data);
-    res.status(201).json({ success: true, data: resultado });
+  const resultado = await VendasService.realizarVenda(data);
+  res.status(201).json({ success: true, data: resultado });
 } catch (error) {
-    console.error('Erro:', error);
-    res.status(500).json({ 
-        error: 'Erro interno',
-        message: error.message 
-    });
+  console.error("Erro:", error);
+  res.status(500).json({
+    error: "Erro interno",
+    message: error.message,
+  });
 }
 ```
 
 ---
 
 ### 4. Usar Enums
+
 ```typescript
 export enum VendaStatus {
-    Pendente = 'Pendente',
-    Concluida = 'Concluida',
-    Cancelada = 'Cancelada'
+  Pendente = "Pendente",
+  Concluida = "Concluida",
+  Cancelada = "Cancelada",
 }
 
 // Uso
-status: VendaStatus.Concluida  // ✅ Type-safe
+status: VendaStatus.Concluida; // ✅ Type-safe
 ```
 
 ---
@@ -747,24 +763,24 @@ status: VendaStatus.Concluida  // ✅ Type-safe
 ```typescript
 // Taxa de conversão
 const orcamentosAprovados = await prisma.orcamento.count({
-    where: { status: 'Aprovado' }
+  where: { status: "Aprovado" },
 });
 const vendas = await prisma.venda.count();
 const taxaConversao = (vendas / orcamentosAprovados) * 100;
 
 // Ticket médio
 const totalVendas = await prisma.venda.aggregate({
-    _avg: { valorTotal: true },
-    _count: true
+  _avg: { valorTotal: true },
+  _count: true,
 });
 const ticketMedio = totalVendas._avg.valorTotal;
 
 // Inadimplência
 const contasAtrasadas = await prisma.contaReceber.count({
-    where: {
-        status: 'Pendente',
-        dataVencimento: { lt: new Date() }
-    }
+  where: {
+    status: "Pendente",
+    dataVencimento: { lt: new Date() },
+  },
 });
 const totalContas = await prisma.contaReceber.count();
 const taxaInadimplencia = (contasAtrasadas / totalContas) * 100;
@@ -775,24 +791,28 @@ const taxaInadimplencia = (contasAtrasadas / totalContas) * 100;
 ## 🚀 Roadmap de Melhorias
 
 ### Fase 1: Automações
+
 - [ ] Email automático ao criar venda
 - [ ] Lembrete de vencimento (3 dias antes)
 - [ ] Alerta de atraso
 - [ ] Atualização automática de status (Pendente → Atrasado)
 
 ### Fase 2: Relatórios Avançados
+
 - [ ] Exportação para PDF/Excel
 - [ ] Gráficos de pizza (distribuição)
 - [ ] Análise de sazonalidade
 - [ ] Previsão de faturamento
 
 ### Fase 3: Integrações
+
 - [ ] Gateway de pagamento (PIX, boleto)
 - [ ] Emissão automática de NF-e
 - [ ] Integração com contabilidade
 - [ ] Sincronização bancária (OFX)
 
 ### Fase 4: BI e Analytics
+
 - [ ] Dashboard executivo
 - [ ] Análise preditiva
 - [ ] Machine Learning (previsão de inadimplência)
@@ -803,6 +823,7 @@ const taxaInadimplencia = (contasAtrasadas / totalContas) * 100;
 ## 📞 Comandos Úteis
 
 ### Desenvolvimento
+
 ```bash
 # Backend
 cd backend
@@ -818,6 +839,7 @@ npx prisma studio
 ```
 
 ### Migrations
+
 ```bash
 # Criar nova migration
 dotenv -e .env.development -- npx prisma migrate dev --name "nome_da_migration"
@@ -830,6 +852,7 @@ npx prisma migrate reset
 ```
 
 ### Testes
+
 ```bash
 # Rodar testes (quando implementados)
 npm test
@@ -855,6 +878,7 @@ npm run test:coverage
 ## ✅ Checklist de Implementação
 
 ### Backend
+
 - [x] Modelo Venda no Prisma
 - [x] Modelo ContaReceber no Prisma
 - [x] Modelo ContaPagar no Prisma
@@ -871,6 +895,7 @@ npm run test:coverage
 - [x] Integração no app.ts
 
 ### Frontend
+
 - [x] Componente Vendas
 - [x] Formulário de nova venda
 - [x] Seleção de orçamento
@@ -883,6 +908,7 @@ npm run test:coverage
 - [x] Navegação por setores
 
 ### Documentação
+
 - [x] Guias técnicos
 - [x] Exemplos de API
 - [x] Fluxos de negócio
@@ -912,4 +938,3 @@ npm run test:coverage
 **Sistema S3E Engenharia Elétrica** ⚡🔌  
 **Desenvolvido com excelência** 🎯  
 **Data: 20/10/2025** 📅
-

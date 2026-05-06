@@ -1,29 +1,35 @@
 # ✅ Migration PDF Templates - Concluída com Sucesso!
 
 ## 🎯 Objetivo
-Adicionar tabela `pdf_templates` ao banco de dados para armazenar templates de customização de PDF.
+
+Adicionar tabela `pdf_templates` ao banco de dados para armazenar templates de
+customização de PDF.
 
 ---
 
 ## ✅ O Que Foi Feito
 
 ### 1. **Tabela Adicionada ao Schema Prisma**
+
 - ✅ Modelo `PDFTemplate` criado
 - ✅ Relacionamento com `User` estabelecido
 - ✅ Campos completos para armazenar customizações
 
 ### 2. **Migration Criada**
+
 - ✅ Arquivo: `prisma/migrations/20251107032838_add_pdf_templates/migration.sql`
 - ✅ Nome: `add_pdf_templates`
 - ✅ Data: 07/11/2024 03:28:38
 
 ### 3. **Banco de Dados Atualizado**
+
 - ✅ Reset executado (dados de teste removidos)
 - ✅ Todas as migrations reaplicadas
 - ✅ Nova tabela `pdf_templates` criada
 - ✅ Prisma Client regenerado
 
 ### 4. **Controller Atualizado**
+
 - ✅ Migrado de arquivos JSON para Prisma
 - ✅ CRUD completo implementado
 - ✅ Segurança: Templates isolados por usuário
@@ -49,10 +55,10 @@ CREATE TABLE "pdf_templates" (
 
 CREATE INDEX "pdf_templates_userId_idx" ON "pdf_templates"("userId");
 
-ALTER TABLE "pdf_templates" 
-ADD CONSTRAINT "pdf_templates_userId_fkey" 
-FOREIGN KEY ("userId") REFERENCES "users"("id") 
-ON DELETE CASCADE 
+ALTER TABLE "pdf_templates"
+ADD CONSTRAINT "pdf_templates_userId_fkey"
+FOREIGN KEY ("userId") REFERENCES "users"("id")
+ON DELETE CASCADE
 ON UPDATE CASCADE;
 ```
 
@@ -60,22 +66,23 @@ ON UPDATE CASCADE;
 
 ## 🔍 Campos da Tabela
 
-| Campo | Tipo | Descrição | Obrigatório |
-|-------|------|-----------|-------------|
-| `id` | UUID | Identificador único | ✅ |
-| `userId` | UUID | ID do usuário dono | ✅ |
-| `templateName` | String | Nome do template | ✅ |
-| `description` | String | Descrição opcional | ❌ |
-| `customization` | JSONB | Configurações completas | ✅ |
-| `isDefault` | Boolean | Se é template padrão | ✅ (default: false) |
-| `createdAt` | DateTime | Data de criação | ✅ (auto) |
-| `updatedAt` | DateTime | Data de atualização | ✅ (auto) |
+| Campo           | Tipo     | Descrição               | Obrigatório         |
+| --------------- | -------- | ----------------------- | ------------------- |
+| `id`            | UUID     | Identificador único     | ✅                  |
+| `userId`        | UUID     | ID do usuário dono      | ✅                  |
+| `templateName`  | String   | Nome do template        | ✅                  |
+| `description`   | String   | Descrição opcional      | ❌                  |
+| `customization` | JSONB    | Configurações completas | ✅                  |
+| `isDefault`     | Boolean  | Se é template padrão    | ✅ (default: false) |
+| `createdAt`     | DateTime | Data de criação         | ✅ (auto)           |
+| `updatedAt`     | DateTime | Data de atualização     | ✅ (auto)           |
 
 ---
 
 ## 🔗 Relacionamentos
 
 ### User ↔ PDFTemplate
+
 - **Tipo**: 1 para N (One-to-Many)
 - **Cascade**: Deletar usuário → deleta seus templates
 - **Index**: Criado em `userId` para performance
@@ -93,6 +100,7 @@ user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 ## 💾 Exemplo de Dados Armazenados
 
 ### Registro na Tabela
+
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -131,7 +139,7 @@ user User @relation(fields: [userId], references: [id], onDelete: Cascade)
     "content": {
       "showCompanyHeader": true,
       "showTechnicalDescriptions": true,
-      "showImages": true,
+      "showImages": true
       // ... outros campos
     },
     "metadata": {
@@ -151,22 +159,27 @@ user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 ## 🔄 Controller Migrado para Prisma
 
 ### ANTES (Arquivos JSON)
+
 ```typescript
 // ❌ Armazenamento em arquivos
-const templateFile = path.join(__dirname, '../../data/pdf-templates/${userId}_${id}.json');
+const templateFile = path.join(
+  __dirname,
+  "../../data/pdf-templates/${userId}_${id}.json"
+);
 fs.writeFileSync(templateFile, JSON.stringify(template));
 ```
 
 ### DEPOIS (Prisma/PostgreSQL)
+
 ```typescript
 // ✅ Armazenamento no banco
 const template = await prisma.pDFTemplate.create({
-    data: {
-        userId,
-        templateName,
-        customization,
-        isDefault: false
-    }
+  data: {
+    userId,
+    templateName,
+    customization,
+    isDefault: false,
+  },
 });
 ```
 
@@ -175,6 +188,7 @@ const template = await prisma.pDFTemplate.create({
 ## 🎯 Operações Disponíveis
 
 ### CREATE - Salvar Template
+
 ```typescript
 POST /api/pdf-customization/templates
 Body: {
@@ -185,18 +199,21 @@ Body: {
 ```
 
 ### READ - Listar Templates
+
 ```typescript
-GET /api/pdf-customization/templates
+GET / api / pdf - customization / templates;
 // Retorna: todos os templates do usuário autenticado
 ```
 
 ### READ - Carregar Template Específico
+
 ```typescript
 GET /api/pdf-customization/templates/:id
 // Retorna: template específico (se pertencer ao usuário)
 ```
 
 ### UPDATE - Atualizar Template
+
 ```typescript
 PUT /api/pdf-customization/templates/:id
 Body: {
@@ -207,6 +224,7 @@ Body: {
 ```
 
 ### DELETE - Deletar Template
+
 ```typescript
 DELETE /api/pdf-customization/templates/:id
 // Deleta: template (se pertencer ao usuário)
@@ -217,15 +235,18 @@ DELETE /api/pdf-customization/templates/:id
 ## 🔐 Segurança Implementada
 
 ### Autenticação
+
 - ✅ Todas as rotas requerem token JWT
 - ✅ Middleware `authenticate` aplicado
 
 ### Isolamento de Dados
+
 - ✅ `userId` obrigatório em todas as operações
 - ✅ Templates de um usuário não são visíveis para outros
 - ✅ Verificação de ownership antes de UPDATE/DELETE
 
 ### Cascade Delete
+
 - ✅ Deletar usuário → deleta automaticamente seus templates
 - ✅ Integridade referencial mantida
 
@@ -278,6 +299,7 @@ await prisma.pDFTemplate.delete({ where: { id } });
 ## 🎉 Resultado Final
 
 ### ✅ Sistema Completo Funcionando
+
 - ✅ Tabela no banco de dados criada
 - ✅ Controller usando Prisma
 - ✅ CRUD completo implementado
@@ -287,6 +309,7 @@ await prisma.pDFTemplate.delete({ where: { id } });
 - ✅ Prisma Client atualizado
 
 ### 📁 Estrutura de Dados
+
 ```
 User (users)
   └─ hasMany PDFTemplate (pdf_templates)
@@ -305,6 +328,7 @@ User (users)
 ## 🚀 Próximos Passos
 
 ### O Sistema Está Pronto Para:
+
 1. ✅ **Salvar templates** de customização de PDF
 2. ✅ **Carregar templates salvos** do banco
 3. ✅ **Listar todos os templates** do usuário
@@ -312,6 +336,7 @@ User (users)
 5. ✅ **Deletar templates** não utilizados
 
 ### Como Usuário Vai Usar:
+
 1. Personalizar PDF (marca d'água, cores, etc.)
 2. Clicar em "Salvar como Template"
 3. Template é salvo no banco de dados
@@ -323,11 +348,13 @@ User (users)
 ## 💡 Observação Importante
 
 ### Dados de Teste
+
 - ❌ **Perdidos no reset** (clientes, orçamentos, materiais, etc.)
 - ✅ Mas você pode cadastrar novamente via interface
 - ✅ Estrutura completa está preservada
 
 ### Migrations
+
 - ✅ **Todas preservadas** em `prisma/migrations/`
 - ✅ **Código SQL intacto**
 - ✅ Banco pode ser recriado a qualquer momento
@@ -365,7 +392,8 @@ npx prisma generate
 
 ## 🎊 Status: IMPLEMENTAÇÃO 100% COMPLETA!
 
-**Sistema de Templates de PDF totalmente funcional com banco de dados PostgreSQL!**
+**Sistema de Templates de PDF totalmente funcional com banco de dados
+PostgreSQL!**
 
 ---
 
@@ -373,4 +401,3 @@ npx prisma generate
 **Migration**: `20251107032838_add_pdf_templates`  
 **Status**: ✅ **Aplicada com Sucesso**  
 **Prisma Client**: v6.18.0 ✅ **Gerado**
-

@@ -1,42 +1,52 @@
 # ✅ Implementação Completa - Sistema de Gestão de Materiais e Projetos
 
 ## 🎯 Objetivo
-Implementar sistema completo de gestão de estoque, orçamentos e projetos com controle de materiais "frios" (sem estoque) e reserva automática de materiais.
+
+Implementar sistema completo de gestão de estoque, orçamentos e projetos com
+controle de materiais "frios" (sem estoque) e reserva automática de materiais.
 
 ---
 
 ## 📋 Problemas Resolvidos
 
 ### 1. ✅ Valores Unitários R$ 0,00 no Modal de Edição
+
 **Problema:** Ao editar orçamento, valores unitários apareciam como R$ 0,00
 
 **Solução:**
-- **Frontend** (`Orcamentos.tsx`): Modificado carregamento de items para buscar preço do material vinculado
-- **Backend** (`orcamentosController.ts`): Atualizado `getOrcamentoById` para incluir dados do material (`include: { material: true }`)
+
+- **Frontend** (`Orcamentos.tsx`): Modificado carregamento de items para buscar
+  preço do material vinculado
+- **Backend** (`orcamentosController.ts`): Atualizado `getOrcamentoById` para
+  incluir dados do material (`include: { material: true }`)
 
 **Código alterado:**
+
 ```typescript
 // frontend/src/components/Orcamentos.tsx - Linha 289-321
 const mappedItems = (orcamento.items || []).map((item: any) => {
-    let custoUnitFinal = item.custoUnitario || item.custoUnit || 0;
-    let precoUnitFinal = item.precoUnitario || item.precoUnit || 0;
-    
-    // Se ainda estiver zerado, buscar do material vinculado
-    if (custoUnitFinal === 0 && item.material) {
-        custoUnitFinal = item.material.preco || 0;
-        precoUnitFinal = custoUnitFinal * (1 + (orcamento.bdi || 0) / 100);
-    }
-    
-    return { ...item, custoUnit: custoUnitFinal, precoUnit: precoUnitFinal };
+  let custoUnitFinal = item.custoUnitario || item.custoUnit || 0;
+  let precoUnitFinal = item.precoUnitario || item.precoUnit || 0;
+
+  // Se ainda estiver zerado, buscar do material vinculado
+  if (custoUnitFinal === 0 && item.material) {
+    custoUnitFinal = item.material.preco || 0;
+    precoUnitFinal = custoUnitFinal * (1 + (orcamento.bdi || 0) / 100);
+  }
+
+  return { ...item, custoUnit: custoUnitFinal, precoUnit: precoUnitFinal };
 });
 ```
 
 ---
 
 ### 2. ✅ Verificação de Estoque ao Aprovar Orçamento
-**Implementação:** Sistema verifica disponibilidade de materiais em estoque ao aprovar orçamento
+
+**Implementação:** Sistema verifica disponibilidade de materiais em estoque ao
+aprovar orçamento
 
 **Fluxo:**
+
 1. Usuário clica em "Aprovar Orçamento"
 2. Sistema verifica estoque de TODOS os items
 3. Identifica "items frios" (sem estoque suficiente)
@@ -44,6 +54,7 @@ const mappedItems = (orcamento.items || []).map((item: any) => {
 5. Exibe notificação detalhada
 
 **Código alterado:**
+
 ```typescript
 // backend/src/controllers/orcamentosController.ts - Linha 300-342
 const itemsFrios: any[] = [];
@@ -72,40 +83,51 @@ for (const item of orcamento.items) {
 ---
 
 ### 3. ✅ Notificação de Items Frios
-**Implementação:** Notificação visual detalhada ao aprovar orçamento com items sem estoque
+
+**Implementação:** Notificação visual detalhada ao aprovar orçamento com items
+sem estoque
 
 **Comportamento:**
+
 - ✅ **Items disponíveis:** Mensagem de sucesso verde
 - ⚠️ **Items frios:** Mensagem de alerta laranja com lista detalhada
 - 📋 **Ação:** Botão "Ver Detalhes" com informações completas
 
 **Código alterado:**
+
 ```typescript
 // frontend/src/components/Orcamentos.tsx - Linha 549-564
 if (itemsFrios.length > 0) {
-    const listaItemsFrios = itemsFrios.map((item: any) => 
+  const listaItemsFrios = itemsFrios
+    .map(
+      (item: any) =>
         `• ${item.nome} - Faltam: ${item.quantidadeFaltante} unidades`
-    ).join('\n');
-    
-    toast.warning('⚠️ Orçamento aprovado com restrições', {
-        description: `${itemsFrios.length} item(ns) sem estoque:\n${listaItemsFrios}\n\n📦 Realize a compra antes de aprovar o projeto.`,
-        duration: 10000
-    });
+    )
+    .join("\n");
+
+  toast.warning("⚠️ Orçamento aprovado com restrições", {
+    description: `${itemsFrios.length} item(ns) sem estoque:\n${listaItemsFrios}\n\n📦 Realize a compra antes de aprovar o projeto.`,
+    duration: 10000,
+  });
 }
 ```
 
 ---
 
 ### 4. ✅ Bloqueio de Aprovação de Projeto com Items Frios
-**Implementação:** Projeto NÃO pode ser aprovado enquanto houver materials sem estoque
+
+**Implementação:** Projeto NÃO pode ser aprovado enquanto houver materials sem
+estoque
 
 **Fluxo:**
+
 1. Usuário tenta aprovar projeto
 2. Sistema verifica estoque de TODOS os items do orçamento vinculado
 3. Se houver items frios → **BLOQUEIA** com mensagem de erro
 4. Se todos disponíveis → Aprova e reserva materiais
 
 **Código alterado:**
+
 ```typescript
 // backend/src/services/projetos.service.ts - Linha 104-160
 if (novoStatus === 'APROVADO' && projeto.status !== 'APROVADO') {
@@ -129,9 +151,12 @@ if (novoStatus === 'APROVADO' && projeto.status !== 'APROVADO') {
 ---
 
 ### 5. ✅ Baixa Automática de Estoque ao Aprovar Projeto
-**Implementação:** Materiais são RESERVADOS (baixa de estoque) automaticamente ao aprovar projeto
+
+**Implementação:** Materiais são RESERVADOS (baixa de estoque) automaticamente
+ao aprovar projeto
 
 **Fluxo:**
+
 1. Projeto validado → Usuário clica "Aprovar Projeto"
 2. Sistema verifica estoque (se houver items frios, BLOQUEIA)
 3. Para cada material disponível:
@@ -141,24 +166,25 @@ if (novoStatus === 'APROVADO' && projeto.status !== 'APROVADO') {
 4. Projeto aprovado e materiais reservados
 
 **Código alterado:**
+
 ```typescript
 // backend/src/services/projetos.service.ts - Linha 162-187
 for (const item of itemsReservados) {
   // Dar baixa no estoque
   await prisma.material.update({
     where: { id: item.materialId },
-    data: { estoque: { decrement: item.quantidade } }
+    data: { estoque: { decrement: item.quantidade } },
   });
 
   // Registrar movimentação
   await prisma.movimentacaoEstoque.create({
     data: {
       materialId: item.materialId,
-      tipo: 'SAIDA',
+      tipo: "SAIDA",
       quantidade: item.quantidade,
       motivo: `Reserva para projeto: ${projeto.titulo}`,
-      referencia: projeto.id
-    }
+      referencia: projeto.id,
+    },
   });
 }
 ```
@@ -166,9 +192,12 @@ for (const item of itemsReservados) {
 ---
 
 ### 6. ✅ Atualização Automática ao Receber Compras
-**Implementação:** Quando compra é recebida, sistema notifica projetos que estavam bloqueados
+
+**Implementação:** Quando compra é recebida, sistema notifica projetos que
+estavam bloqueados
 
 **Fluxo:**
+
 1. Material chega (compra marcada como "Recebida")
 2. Sistema incrementa estoque
 3. Busca projetos em PROPOSTA que usam esse material
@@ -176,21 +205,22 @@ for (const item of itemsReservados) {
 5. Projeto pode ser aprovado agora
 
 **Código alterado:**
+
 ```typescript
 // backend/src/services/compras.service.ts - Linha 599-637
 // Após dar entrada no estoque
 const projetosBloqueados = await tx.projeto.findMany({
   where: {
-    status: 'PROPOSTA',
+    status: "PROPOSTA",
     orcamento: {
       items: {
         some: {
           materialId: materialIdFinal,
-          tipo: 'MATERIAL'
-        }
-      }
-    }
-  }
+          tipo: "MATERIAL",
+        },
+      },
+    },
+  },
 });
 
 if (projetosBloqueados.length > 0) {
@@ -199,8 +229,8 @@ if (projetosBloqueados.length > 0) {
     await tx.projeto.update({
       where: { id: proj.id },
       data: {
-        observacoes: `${proj.observacoes}\n\n✅ Material recebido: ${item.nomeProduto}`
-      }
+        observacoes: `${proj.observacoes}\n\n✅ Material recebido: ${item.nomeProduto}`,
+      },
     });
   }
 }
@@ -209,14 +239,16 @@ if (projetosBloqueados.length > 0) {
 ---
 
 ### 7. ✅ Tratamento de Erros no Frontend
+
 **Implementação:** Mensagens personalizadas para aprovação de projeto bloqueada
 
 **Código alterado:**
+
 ```typescript
 // frontend/src/components/ModalVizualizacaoProjeto.tsx - Linha 189-202
 catch (error: any) {
   const mensagemErro = error?.response?.data?.message || ...;
-  
+
   if (mensagemErro.includes('BLOQUEADA') || mensagemErro.includes('sem estoque')) {
     toast.error('⚠️ Aprovação Bloqueada!', {
       description: mensagemErro,
@@ -235,6 +267,7 @@ catch (error: any) {
 ## 🔄 Fluxo Completo do Sistema
 
 ### Cenário 1: Orçamento com TODOS os Items em Estoque
+
 ```
 1. Criar Orçamento → Adicionar Items (todos em estoque)
 2. Aprovar Orçamento → ✅ Projeto criado com status PROPOSTA
@@ -245,6 +278,7 @@ catch (error: any) {
 ```
 
 ### Cenário 2: Orçamento com Items Frios (sem estoque)
+
 ```
 1. Criar Orçamento → Adicionar Items (alguns sem estoque)
 2. Aprovar Orçamento → ⚠️ Notificação: "2 item(ns) sem estoque"
@@ -264,23 +298,34 @@ catch (error: any) {
 ## 📊 Resumo das Alterações
 
 ### Frontend
-- ✅ `frontend/src/components/Orcamentos.tsx`: Carregamento de items com preços corretos
+
+- ✅ `frontend/src/components/Orcamentos.tsx`: Carregamento de items com preços
+  corretos
 - ✅ `frontend/src/components/Orcamentos.tsx`: Notificação de items frios
-- ✅ `frontend/src/components/ModalVizualizacaoProjeto.tsx`: Tratamento de erros de bloqueio
-- ✅ `frontend/src/components/ProjetosModerno.tsx`: Lista de responsáveis técnicos corrigida
-- ✅ `frontend/src/components/ModalVizualizacaoProjeto.tsx`: Filtro de usuários técnicos no Kanban
+- ✅ `frontend/src/components/ModalVizualizacaoProjeto.tsx`: Tratamento de erros
+  de bloqueio
+- ✅ `frontend/src/components/ProjetosModerno.tsx`: Lista de responsáveis
+  técnicos corrigida
+- ✅ `frontend/src/components/ModalVizualizacaoProjeto.tsx`: Filtro de usuários
+  técnicos no Kanban
 
 ### Backend
-- ✅ `backend/src/controllers/orcamentosController.ts`: Verificação de estoque ao aprovar
-- ✅ `backend/src/services/projetos.service.ts`: Bloqueio de aprovação + baixa de estoque
-- ✅ `backend/src/services/compras.service.ts`: Notificação de projetos desbloqueados
-- ✅ `backend/src/controllers/orcamentosController.ts`: Include de materiais nos endpoints
+
+- ✅ `backend/src/controllers/orcamentosController.ts`: Verificação de estoque
+  ao aprovar
+- ✅ `backend/src/services/projetos.service.ts`: Bloqueio de aprovação + baixa
+  de estoque
+- ✅ `backend/src/services/compras.service.ts`: Notificação de projetos
+  desbloqueados
+- ✅ `backend/src/controllers/orcamentosController.ts`: Include de materiais nos
+  endpoints
 
 ---
 
 ## 🧪 Testando a Implementação
 
 ### Teste 1: Aprovar Orçamento com Items Disponíveis
+
 1. Criar orçamento com materiais em estoque
 2. Aprovar → Deve mostrar: "✅ Todos os X item(ns) estão disponíveis"
 3. Ir em Projetos → Projeto criado com status PROPOSTA
@@ -288,8 +333,10 @@ catch (error: any) {
 5. Aprovar → Estoque deve ser baixado automaticamente
 
 ### Teste 2: Aprovar Orçamento com Items Frios
+
 1. Criar orçamento com materiais SEM estoque
-2. Aprovar → Deve mostrar: "⚠️ 2 item(ns) sem estoque: • Material X - Faltam: 10 unidades"
+2. Aprovar → Deve mostrar: "⚠️ 2 item(ns) sem estoque: • Material X - Faltam: 10
+   unidades"
 3. Ir em Projetos → Projeto criado com status PROPOSTA
 4. Tentar Aprovar Projeto → Deve BLOQUEAR com mensagem de erro
 5. Realizar compra dos materiais
@@ -324,6 +371,7 @@ catch (error: any) {
 ## 🔧 Arquivos Modificados
 
 ### Frontend (6 arquivos)
+
 1. `frontend/src/components/Orcamentos.tsx`
 2. `frontend/src/components/ModalVizualizacaoProjeto.tsx`
 3. `frontend/src/components/ProjetosModerno.tsx`
@@ -332,6 +380,7 @@ catch (error: any) {
 6. `frontend/src/components/GestaoObras.tsx`
 
 ### Backend (4 arquivos)
+
 1. `backend/src/controllers/orcamentosController.ts`
 2. `backend/src/services/projetos.service.ts`
 3. `backend/src/services/compras.service.ts`
@@ -368,6 +417,4 @@ catch (error: any) {
 
 ---
 
-**Data da Implementação:** 11/11/2025
-**Status:** ✅ COMPLETO E TESTADO
-
+**Data da Implementação:** 11/11/2025 **Status:** ✅ COMPLETO E TESTADO

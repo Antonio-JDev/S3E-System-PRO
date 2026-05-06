@@ -26,6 +26,7 @@ Pelos logs do backend:
 ## ✅ **CORREÇÕES APLICADAS:**
 
 ### **1. Backend (app.ts)**
+
 ```typescript
 // ✅ Adicionado rotas de upload na exceção do body parser
 const uploadRoutes = [
@@ -36,14 +37,15 @@ const uploadRoutes = [
 ```
 
 ### **2. Frontend (ComparacaoPrecos.tsx)**
+
 ```typescript
 // ✅ Criando objeto LIMPO antes de salvar
 const dadosLimpos = {
-    versao: templateData.versao,
-    geradoEm: templateData.geradoEm,
-    empresa: templateData.empresa,
-    instrucoes: templateData.instrucoes,
-    materiais: templateData.materiais  // SEM wrappers!
+  versao: templateData.versao,
+  geradoEm: templateData.geradoEm,
+  empresa: templateData.empresa,
+  instrucoes: templateData.instrucoes,
+  materiais: templateData.materiais, // SEM wrappers!
 };
 
 const jsonString = JSON.stringify(dadosLimpos, null, 2);
@@ -66,6 +68,7 @@ npm run dev
 ```
 
 **Aguarde ver:**
+
 ```
 ✅ Servidor iniciado na porta 3000
 ```
@@ -237,13 +240,13 @@ Apenas o 1 item alterado será atualizado.
 
 ## 📝 **CHECKLIST FINAL:**
 
-- [  ] Backend reiniciado
+- [ ] Backend reiniciado
 - [ ] Frontend com cache limpo
 - [ ] Cliquei "📄 JSON"
 - [ ] Arquivo baixou
 - [ ] Abri no Bloco de Notas
 - [ ] Primeira linha é `{` (não `{ "success": true`)
-- [ ] Segunda linha é `  "versao": "1.0"`
+- [ ] Segunda linha é `"versao": "1.0"`
 - [ ] Tem campo `"materiais": [`
 - [ ] Importei sem editar
 - [ ] Mensagem: "Nenhuma alteração"
@@ -267,6 +270,7 @@ Apenas o 1 item alterado será atualizado.
 ```
 
 **✅ CORRETO:**
+
 ```
 {
   "versao": "1.0",
@@ -274,6 +278,7 @@ Apenas o 1 item alterado será atualizado.
 ```
 
 **❌ ERRADO (tem wrapper):**
+
 ```
 {
   "success": true,
@@ -282,6 +287,7 @@ Apenas o 1 item alterado será atualizado.
 ```
 
 **Se ainda mostrar wrapper:**
+
 - Force refresh no navegador (Ctrl+Shift+R)
 - Limpe cache completamente
 - Feche e abra navegador novamente
@@ -297,4 +303,3 @@ Se ainda der erro após reiniciar backend, me envie:
 3. **Log do backend** quando clicar "Processar"
 
 **Com isto, resolvo imediatamente! 🚀**
-

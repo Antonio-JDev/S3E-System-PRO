@@ -1,6 +1,41 @@
 import { axiosApiService } from './axiosApi';
 import { ENDPOINTS } from '../config/api';
 
+export interface MovimentacaoCaixaItem {
+  id: string;
+  tipo: 'ENTRADA' | 'SAIDA';
+  dataPagamento: string;
+  descricao: string;
+  categoria: string;
+  valor: number;
+  valorBase?: number;
+  valorJuros?: number;
+  valorDesconto?: number;
+  meioPagamento: string | null;
+  origem: string;
+  referenciaId: string;
+  tipoCategoria?: string; // FORNECEDOR, RH, etc. para edição de saídas
+  observacoes?: string | null; // Justificativa/descrição (ex.: desconto por falta)
+  /** true quando a entrada vem do histórico de recebimentos parciais (id = recebimento parcial) */
+  recebimentoParcial?: boolean;
+}
+
+export interface AtualizarMovimentacaoPayload {
+  dataPagamento?: string;
+  descricao?: string;
+  categoria?: string;
+  valor?: number;
+  valorJuros?: number;
+  valorDesconto?: number;
+  meioPagamento?: string;
+}
+
+export interface ResumoMovimentacoes {
+  entradasTotal: number;
+  saidasTotal: number;
+  saldoConta: number;
+}
+
 export interface ContaReceber {
   id: string;
   vendaId: string;
@@ -59,7 +94,10 @@ export interface FinanceiroFilters {
   dataInicio?: string;
   dataFim?: string;
   status?: string;
-  tipo?: 'receber' | 'pagar';
+  tipo?: 'receber' | 'pagar' | 'FORNECEDOR' | 'RH' | 'DESPESA_FIXA' | 'FROTA';
+  valorExato?: number;
+  valorMin?: number;
+  valorMax?: number;
 }
 
 class FinanceiroService {
@@ -108,39 +146,49 @@ class FinanceiroService {
   }
 
   /**
-   * Listar contas a receber
+   * Listar contas a receber (vendas + manuais via GET /api/contas-receber)
    */
-  async listarContasReceber(filters?: FinanceiroFilters): Promise<{ success: boolean; data?: ContaReceber[]; error?: string }> {
+  async listarContasReceber(filters?: FinanceiroFilters): Promise<{ success: boolean; data?: any[]; error?: string }> {
     try {
       console.log('📥 Carregando contas a receber...', filters);
-      
-      // As contas a receber vêm das vendas
-      const response = await axiosApiService.get<any[]>('/api/vendas', filters);
-      
+
+      const response = await axiosApiService.get<any>('/api/contas-receber', filters);
+
       if (response.success && response.data) {
-        // Extrair contas a receber das vendas
-        const contas: ContaReceber[] = [];
-        const vendas = Array.isArray(response.data) ? response.data : response.data?.vendas || [];
-        
-        vendas.forEach((venda: any) => {
-          if (venda.contasReceber && Array.isArray(venda.contasReceber)) {
-            // Adicionar referência da venda a cada conta
-            const contasComVenda = venda.contasReceber.map((conta: any) => ({
-              ...conta,
-              venda: venda // Incluir objeto venda completo com orcamento
-            }));
-            contas.push(...contasComVenda);
-          }
-        });
-        
+        const contas = Array.isArray(response.data) ? response.data : response.data?.data ?? [];
         console.log(`✅ ${contas.length} contas a receber carregadas`);
         return { success: true, data: contas };
-      } else {
-        console.warn('⚠️ Erro ao carregar contas a receber:', response);
-        return { success: false, error: response.error || 'Erro ao carregar contas a receber' };
       }
+      console.warn('⚠️ Erro ao carregar contas a receber:', response);
+      return { success: false, error: response.error || 'Erro ao carregar contas a receber' };
     } catch (error) {
       console.error('❌ Erro ao carregar contas a receber:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Criar conta a receber manual (Entradas / Outras Receitas)
+   */
+  async criarContaReceber(data: {
+    tipo: 'ENTRADA' | 'OUTRAS_RECEITAS';
+    pagadorNome?: string;
+    descricao: string;
+    valorParcela: number;
+    dataVencimento: string;
+    observacoes?: string;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log('📝 Criando conta a receber...', data);
+      const response = await axiosApiService.post<any>('/api/contas-receber', data);
+      if (response.success && response.data) {
+        const created = response.data?.data ?? response.data;
+        console.log('✅ Conta a receber criada:', created);
+        return { success: true, data: created };
+      }
+      return { success: false, error: response.error || 'Erro ao criar conta a receber' };
+    } catch (error) {
+      console.error('❌ Erro ao criar conta a receber:', error);
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }
@@ -177,7 +225,7 @@ class FinanceiroService {
   /**
    * Pagar conta a pagar
    */
-  async pagarContaPagar(id: string, data: { dataPagamento: string; valorPago: number; observacoes?: string }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
+  async pagarContaPagar(id: string, data: { dataPagamento: string; valorPago: number; observacoes?: string; meioPagamento?: string }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
     try {
       console.log(`💳 Pagando conta a pagar ${id}...`, data);
       
@@ -201,11 +249,21 @@ class FinanceiroService {
    */
   async criarContaPagar(data: {
     fornecedorId?: string;
+    origemCadastro?: 'FORNECEDOR_CADASTRADO' | 'FORNECEDOR_NOVO' | 'RH' | 'DESPESA_FIXA';
     fornecedorNome?: string;
+    credorNome?: string; // Nome do credor para contas manuais (sem compra)
+    tipo?: string; // FORNECEDOR, RH, DESPESA_FIXA, FROTA
+    subtipo?: 'ADIANTAMENTO' | 'VALE' | 'SALARIO';
+    funcionarioId?: string;
+    descontoFolhaTipo?: 'UMA_VEZ' | 'PARCELADO';
+    descontoFolhaParcelas?: number;
+    descontoFolhaReferenciaAno?: number;
+    descontoFolhaReferenciaMes?: number;
     descricao: string;
     valor: number;
     dataVencimento: string;
     observacoes?: string;
+    classificacao?: string; // Impostos, TRT-ART, Serviço mão de obra eletricista, Brindes, etc.
   }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
     try {
       console.log('📝 Criando conta a pagar...', data);
@@ -278,6 +336,7 @@ class FinanceiroService {
     dataPagamento: string;
     valorRecebido: number;
     observacoes?: string;
+    meioPagamento?: string;
   }): Promise<{ success: boolean; data?: ContaReceber; error?: string }> {
     try {
       console.log(`💳 Dando baixa em conta a receber ${contaId}...`, data);
@@ -293,6 +352,97 @@ class FinanceiroService {
       }
     } catch (error) {
       console.error('❌ Erro ao dar baixa em conta a receber:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Histórico de recebimentos parciais de uma duplicata (conta a receber)
+   */
+  async historicoRecebimentos(contaId: string): Promise<{
+    success: boolean;
+    data?: { conta: any; recebimentos: Array<{ id: string; valorPago: number; dataPagamento: string; observacoes?: string; meioPagamento?: string; createdAt: string }> };
+    error?: string;
+  }> {
+    try {
+      const response = await axiosApiService.get<any>(`/api/contas-receber/${contaId}/historico`);
+      if (response.success && response.data) {
+        const data = response.data?.data ?? response.data;
+        return { success: true, data };
+      }
+      return { success: false, error: response.error || 'Erro ao carregar histórico' };
+    } catch (error) {
+      console.error('❌ Erro ao buscar histórico de recebimentos:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Listar movimentações de caixa (extrato: entradas e saídas realizadas)
+   */
+  async listarMovimentacoesCaixa(filtros?: {
+    dataInicio?: string;
+    dataFim?: string;
+    categoria?: string;
+    busca?: string;
+  }): Promise<{
+    success: boolean;
+    data?: { movimentacoes: MovimentacaoCaixaItem[]; resumo: ResumoMovimentacoes };
+    error?: string;
+  }> {
+    try {
+      const params = new URLSearchParams();
+      if (filtros?.dataInicio) params.set('dataInicio', filtros.dataInicio);
+      if (filtros?.dataFim) params.set('dataFim', filtros.dataFim);
+      if (filtros?.categoria) params.set('categoria', filtros.categoria);
+      if (filtros?.busca) params.set('busca', filtros.busca);
+      const query = params.toString();
+      const url = ENDPOINTS.MOVIMENTACOES_CAIXA + (query ? `?${query}` : '');
+      const response = await axiosApiService.get<{ movimentacoes: MovimentacaoCaixaItem[]; resumo: ResumoMovimentacoes }>(url);
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao carregar movimentações' };
+    } catch (error) {
+      console.error('❌ Erro ao carregar movimentações de caixa:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Atualizar movimentação (conciliação bancária) - dataPagamento, descricao, categoria, valor, juros, desconto, meioPagamento
+   */
+  async atualizarMovimentacao(
+    id: string,
+    payload: AtualizarMovimentacaoPayload
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const response = await axiosApiService.put<any>(`/api/movimentacoes-caixa/${id}`, payload);
+      if (response.success) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao atualizar movimentação' };
+    } catch (error) {
+      console.error('❌ Erro ao atualizar movimentação:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Desfazer pagamento (contaReceber ou contaPagar)
+   */
+  async desfazerPagamento(id: string, motivo?: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      console.log(`🧾 Desfazendo pagamento ${id} motivo: ${motivo}`);
+      const response = await axiosApiService.delete<any>(`/api/movimentacoes-caixa/${id}`, {
+        data: { motivo }
+      });
+      if (response.success) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao desfazer pagamento' };
+    } catch (error) {
+      console.error('❌ Erro ao desfazer pagamento:', error);
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }

@@ -122,7 +122,7 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
     const authContext = useContext(AuthContext);
     const user = authContext?.user;
     const userRole = user?.role?.toLowerCase();
-    const isAdminOrDev = userRole === 'admin' || userRole === 'desenvolvedor';
+    const isAdminOrDev = userRole === 'admin' || userRole === 'desenvolvedor' || user?.isAdmin === true;
     
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'Todos'>('Todos');
@@ -210,11 +210,8 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
             const response = await axiosApiService.get<any[]>('/api/configuracoes/usuarios');
             if (response.success && response.data) {
                 const usuariosArray = Array.isArray(response.data) ? response.data : [];
-                // Filtrar apenas roles técnicas
-                const usuariosFiltrados = usuariosArray.filter((u: any) => 
-                    ['admin', 'gerente', 'engenheiro', 'orcamentista'].includes(u.role?.toLowerCase())
-                );
-                setUsuarios(usuariosFiltrados);
+                // Listar todos os usuários para atribuição (independente do role - qualquer um pode atribuir tarefas)
+                setUsuarios(usuariosArray);
             }
         } catch (error) {
             console.error('Erro ao carregar usuários:', error);
@@ -524,16 +521,16 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
     };
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Obras</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie projetos e acompanhe execução</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Obras</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie projetos e acompanhe execução</p>
                     </div>
                 </div>
                 <button
@@ -914,7 +911,7 @@ const Obras: React.FC<ObrasProps> = ({ toggleSidebar, onViewProject, projects, s
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
                     <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header do Modal */}
-                        <div className="modal-header bg-gradient-to-r from-amber-600 to-amber-500 dark:from-amber-700 dark:to-amber-600">
+                        <div className="modal-header bg-[#0a1a2f]">
                             <div className="flex justify-between items-center">
                                 <div className="flex items-center gap-4">
                                     <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">

@@ -207,19 +207,15 @@ const CriacaoQuadroModular: React.FC<CriacaoQuadroModularProps> = ({ isOpen, onC
         ];
         
         if (!searchTerm) {
-            // Sem busca: retornar materiais com estoque + todas as cotações
-            return todosItens.filter(m => 
-                (m as any)._isCotacao || m.estoque > 0
-            );
+            // Sem busca: retornar todos os itens (materiais e cotações)
+            return todosItens;
         }
         
-        // Com busca: filtrar por nome ou ID
-        return todosItens.filter(m => {
-            const temEstoque = (m as any)._isCotacao || m.estoque > 0;
-            return temEstoque &&
-                (matchCrossSearch(searchTerm, m.nome) ||
-                 m.id.toLowerCase().includes(searchTerm.toLowerCase()));
-        });
+        // Com busca: filtrar por nome ou ID (ignorar estoque)
+        return todosItens.filter(m =>
+            matchCrossSearch(searchTerm, m.nome) ||
+            m.id.toLowerCase().includes(searchTerm.toLowerCase())
+        );
     };
 
     // Filtros separados para cada campo (Policarbonato - Etapa 1)

@@ -1,16 +1,15 @@
 # ============================================
 # S3E System PRO - Docker Compose (Desenvolvimento com Hot Reload)
 # ============================================
-# Este arquivo é para desenvolvimento local com hot reload
-# Mantém as mesmas configurações de produção, mas com volumes montados
-# 
-# Para usar:
-# 1. Certifique-se de ter o arquivo .env configurado
-# 2. Execute: docker-compose up --build
-# 3. Frontend: http://localhost:5173 (Vite dev server)
-# 4. Backend: http://localhost:3001
+# Este arquivo é para desenvolvimento local com hot reload.
+# Nenhuma senha ou dado sensível deve ficar aqui (vai para o GitHub).
 #
-# Para produção, use: docker-compose -f docker-compose.prod.yml up
+# Para usar:
+# 1. Crie o arquivo .env a partir de .env.example e preencha
+# 2. Execute: docker-compose up --build
+# 3. Frontend: http://localhost:5173 | Backend: http://localhost:3001
+#
+# Para produção: docker-compose -f docker-compose.prod.yml --env-file .env.production up -d
 # ============================================
 
 services:
@@ -20,74 +19,154 @@ services:
     container_name: s3e-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-s3e_prod}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-s3e_prod_password_2024}
-      POSTGRES_DB: ${DB_NAME:-s3e_producao}
+      TZ: America/Sao_Paulo
+      POSTGRES_USER: ${DB_USER:-s3e_dev}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_local}
+      POSTGRES_DB: ${DB_NAME:-s3e_dev}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups  # Pasta para backups manuais
+      - ./backups:/backups # Pasta para backups manuais
+      - ./docker/postgres/02-evolution-database.sql:/docker-entrypoint-initdb.d/02-evolution-database.sql:ro
     networks:
       - s3e-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-s3e_prod} -d ${DB_NAME:-s3e_producao}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-s3e_dev} -d ${DB_NAME:-s3e_dev}" ]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Evolution API v2 (documentação: https://doc.evolution-api.com ). Mantém o nome do serviço `whatsapp-provider`
+  # para o backend continuar usando WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080
+  whatsapp-provider:
+    image: evoapicloud/evolution-api:v2.3.5
+    container_name: s3e-whatsapp-provider-dev
+    restart: unless-stopped
+    # Tempo para o Node/Baileys encerrar antes do Docker enviar SIGKILL (evita npm "signal SIGTERM" ruidoso em restart/stop).
+    stop_grace_period: 60s
+    # Chrome/Baileys: aumente se ficar preso em state "connecting" (Docker Desktop / WSL2).
+    shm_size: "2gb"
+    # DNS explícito evita falha intermitente de resolução no WSL2 → socket WhatsApp não completa.
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: America/Sao_Paulo
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      # URL interna na rede Docker (webhooks / links gerados entre containers)
+      SERVER_URL: http://whatsapp-provider:8080
+      # Evolution v2 exige PostgreSQL; sem isso o container reinicia com "Database provider invalid"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/${EVOLUTION_DATABASE_NAME:-evolution}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: ${EVOLUTION_DATABASE_CLIENT_NAME:-s3e_evolution_dev}
+      AUTHENTICATION_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-s3e-whatsapp-api-key-production}
+      LANGUAGE: pt-BR
+      CORS_ORIGIN: "*"
+      CORS_METHODS: POST,GET,PUT,DELETE
+      CORS_CREDENTIALS: "true"
+      # Sem Redis dedicado no compose dev: cache em memória (suficiente para um nó)
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      # Evolution: aumenta janela de leitura do QR antes de gerar outro
+      QRCODE_LIMIT: ${WHATSAPP_PROVIDER_QRCODE_LIMIT:-60}
+      QRCODE_TIMEOUT: 60000
+      # Webhook global → CRM S3E (porta interna do backend = 3001 em dev)
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_URL: http://backend:3001/api/webhooks/whatsapp
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPDATE: "true"
+      WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+    ports:
+      - "${WHATSAPP_PROVIDER_HTTP_PORT:-3333}:8080"
+    volumes:
+      - whatsapp_provider_sessions_dev:/evolution/instances
+    networks:
+      - s3e-network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   # Backend API - Desenvolvimento com Hot Reload
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-      target: development  # ✅ Usa stage de desenvolvimento para hot reload
+      target: development # ✅ Usa stage de desenvolvimento para hot reload
     container_name: s3e-backend-dev
     restart: unless-stopped
     environment:
-      NODE_ENV: development  # ✅ Modo desenvolvimento
+      NODE_ENV: development # ✅ Modo desenvolvimento
+      TZ: America/Sao_Paulo # Horário Brasília (evita rejeição 703 na NF-e)
       PORT: 3001
-      DATABASE_URL: postgresql://${DB_USER:-s3e_prod}:${DB_PASSWORD:-s3e_prod_password_2024}@postgres:5432/${DB_NAME:-s3e_producao}?schema=public
-      JWT_SECRET: ${JWT_SECRET:-s3e-super-secret-jwt-key-production-change-in-real-production}
+      DATABASE_URL: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/${DB_NAME:-s3e_dev}?schema=public&connection_limit=10
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-change-in-production}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:80,http://localhost:3000}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
-      # Email/SMTP - Configuração UOL
-      # Configure as variáveis no arquivo .env ou defina aqui diretamente
-      SMTP_HOST: ${SMTP_HOST:-smtps.uhserver.com}
+      SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-465}
       SMTP_SECURE: ${SMTP_SECURE:-true}
-      SMTP_USER: ${SMTP_USER:-contato@s3eengenharia.com.br}
+      SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-contato@s3eengenharia.com.br}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FISCAL_HOST: ${SMTP_FISCAL_HOST:-}
+      SMTP_FISCAL_PORT: ${SMTP_FISCAL_PORT:-465}
+      SMTP_FISCAL_SECURE: ${SMTP_FISCAL_SECURE:-true}
+      SMTP_FISCAL_USER: ${SMTP_FISCAL_USER:-}
+      SMTP_FISCAL_PASS: ${SMTP_FISCAL_PASS:-}
+      SMTP_FISCAL_FROM: ${SMTP_FISCAL_FROM:-}
+      NFSE_XSD_PATH: /app/nfse-xsd
+      WHATSAPP_PROVIDER_KIND: ${WHATSAPP_PROVIDER_KIND:-evolution}
+      WHATSAPP_PROVIDER_BASE_URL: http://whatsapp-provider:8080
+      WHATSAPP_PROVIDER_SESSION: testeCellJR
+      WHATSAPP_PROVIDER_INTEGRATION: ${WHATSAPP_PROVIDER_INTEGRATION:-WHATSAPP-BAILEYS}
+      # Mesmo valor que AUTHENTICATION_API_KEY da Evolution (dev: default alinhado ao whatsapp-provider)
+      WHATSAPP_PROVIDER_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-s3e-dev-change-me}
+      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-http://localhost:3333/manager}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:-}
     ports:
       - "3001:3001"
+      - "5555:5555"
     volumes:
       # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
-      - ./backend/src:/app/src  # Código fonte (rw para hot reload)
-      - ./backend/prisma:/app/prisma  # Schema Prisma
+      - ./backend/src:/app/src # Código fonte (rw para hot reload)
+      - ./backend/prisma:/app/prisma # Schema Prisma
       - ./backend/package.json:/app/package.json
+      - ./backend/package-lock.json:/app/package-lock.json
       - ./backend/tsconfig.json:/app/tsconfig.json
       - ./backend/tsconfig.build.json:/app/tsconfig.build.json
-      - backend_uploads:/app/uploads  # Uploads persistentes
-      - backend_logs:/app/logs        # Logs da aplicação
-      # node_modules usa os da imagem (já instalados durante o build)
-      # Não montamos volume para evitar sobrescrever dependências instaladas
+      - backend_uploads:/app/uploads # Uploads persistentes
+      - backend_logs:/app/logs # Logs da aplicação
+      - ./nfse-xsd:/app/nfse-xsd:ro
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro # XSDs de validação NF-e
+      - ./backend/certs:/app/certs:ro # CA bundle ICP-Brasil para mTLS SEFAZ
+      - ./backend:/app/backend      # node_modules usa os da imagem (já instalados durante o build)     # Não montamos volume para evitar sobrescrever dependências instaladas
+      - /etc/localtime:/etc/localtime:ro # Horário Brasília
     depends_on:
       postgres:
         condition: service_healthy
+      whatsapp-provider:
+        condition: service_started
     networks:
       - s3e-network
-    # ✅ Comando de desenvolvimento: aplica migrações automaticamente e inicia em modo watch
-    # 1. Gera Prisma Client
-    # 2. Resolve migrações falhadas conhecidas (marca como aplicadas)
-    # 3. Aplica todas as migrações pendentes (se falhar, resolve e tenta novamente)
-    # 4. Inicia servidor em modo watch (tsx watch) para hot reload
-    command: sh -c "npx prisma generate && (npx prisma migrate resolve --applied 20250115000000_add_audit_logs_hash_fields 2>/dev/null || true) && (npx prisma migrate resolve --applied 20251210182632_add_ncm_orcamento_and_agendamento_pagamento 2>/dev/null || true) && (npx prisma migrate deploy || (npx prisma migrate resolve --applied 20251210182632_add_ncm_orcamento_and_agendamento_pagamento 2>/dev/null && npx prisma migrate deploy)) && npm run dev"
+    # ✅ Comando de desenvolvimento: sincroniza node_modules com package.json (novas deps, ex.: xlsx), depois Prisma e watch
+    # Sem "npm install" na subida, dependências adicionadas no host podem faltar na imagem antiga (Cannot find module 'xlsx').
+    command: sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -98,7 +177,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      target: development  # ✅ Usa stage de desenvolvimento para hot reload
+      target: development # ✅ Usa stage de desenvolvimento para hot reload
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     container_name: s3e-frontend-dev
@@ -106,34 +185,36 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
-      - "5173:5173"  # ✅ Porta do Vite dev server (hot reload)
+      - "5173:5173" # ✅ Porta do Vite dev server (hot reload)
     volumes:
       # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
-      - ./frontend/src:/app/src  # Código fonte (rw para hot reload)
-      - ./frontend/public:/app/public  # Arquivos públicos
+      - ./frontend/src:/app/src # Código fonte (rw para hot reload)
+      - ./frontend/public:/app/public # Arquivos públicos
       - ./frontend/index.html:/app/index.html
-      - ./frontend/package.json:/app/package.json
+      - ./frontend/package.json:/app/package.json # Para npm install ver deps atualizadas
       - ./frontend/vite.config.ts:/app/vite.config.ts
       - ./frontend/tsconfig.json:/app/tsconfig.json
       - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
       - ./frontend/tailwind.config.js:/app/tailwind.config.js
       - ./frontend/postcss.config.js:/app/postcss.config.js
-      - frontend_node_modules:/app/node_modules  # node_modules isolado
+      # Volume isolado: npm install no startup instala binários Linux (rollup, etc.)
+      - frontend_node_modules:/app/node_modules
     networks:
       - s3e-network
     depends_on:
       - backend
-    # ✅ Comando de desenvolvimento: Vite monitora mudanças e recarrega automaticamente
+    # Instala deps (binários Linux) no startup, depois inicia Vite
+    command: sh -c "npm install --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
     # Não precisa de healthcheck no modo dev, Vite já tem seu próprio sistema
 
-  # PgAdmin (Opcional)
+    # PgAdmin (Opcional - configure no .env)
   pgadmin:
     image: dpage/pgadmin4:8.11
     container_name: s3e-pgadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@s3e.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
     ports:
       - "5050:80"
@@ -153,8 +234,9 @@ volumes:
     driver: local
   frontend_node_modules:
     driver: local
-    # ✅ Volume isolado para node_modules do frontend (evita conflitos com host)
   pgadmin_data:
+    driver: local
+  whatsapp_provider_sessions_dev:
     driver: local
 
 networks:

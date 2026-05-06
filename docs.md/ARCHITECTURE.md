@@ -2,7 +2,8 @@
 
 ## 📐 Visão Geral
 
-O S3E System PRO segue uma arquitetura de nível sênior, separando claramente o frontend e backend em módulos independentes mas integrados.
+O S3E System PRO segue uma arquitetura de nível sênior, separando claramente o
+frontend e backend em módulos independentes mas integrados.
 
 ## 🏛️ Arquitetura Geral
 
@@ -127,7 +128,7 @@ components/
 
 ```typescript
 // routes/budget.routes.ts
-router.post('/budgets', validate(budgetSchema), budgetController.create);
+router.post("/budgets", validate(budgetSchema), budgetController.create);
 ```
 
 #### 2. Controllers Layer
@@ -240,7 +241,7 @@ Clients ─┬─< Projects
          └─< Interactions
 
 Projects ─┬─< Materials
-          ├─< Services  
+          ├─< Services
           └─< Stages
 
 Products ─┬─< BudgetItems

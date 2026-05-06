@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "nfse" ADD COLUMN IF NOT EXISTS "tomadorRazaoSocial" TEXT;
+ALTER TABLE "nfse" ADD COLUMN IF NOT EXISTS "tomadorEmail" TEXT;
+ALTER TABLE "nfse" ADD COLUMN IF NOT EXISTS "valorTotal" DECIMAL(15,2);

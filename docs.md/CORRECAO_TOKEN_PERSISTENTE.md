@@ -2,9 +2,11 @@
 
 ## ❌ PROBLEMA IDENTIFICADO
 
-Quando o usuário navegava do Dashboard para outras páginas, o sistema perdia o token e voltava para o login.
+Quando o usuário navegava do Dashboard para outras páginas, o sistema perdia o
+token e voltava para o login.
 
 **Logs do problema:**
+
 ```
 Backend:
 ✅ GET /api/dashboard/estatisticas 304 - Token OK
@@ -21,6 +23,7 @@ Frontend:
 ## 🔍 CAUSAS ENCONTRADAS
 
 ### **1. URLs Incorretas nas APIs**
+
 ```typescript
 // ❌ ERRADO (faltava /api)
 /dashboard/producao-quadros?periodo=daily   → 404
@@ -30,11 +33,13 @@ Frontend:
 ```
 
 ### **2. AuthContext sem Listener de Storage**
+
 - O `useEffect` rodava apenas uma vez
 - Não detectava mudanças no localStorage
 - Token podia ser limpo sem o contexto saber
 
 ### **3. Interceptor do Axios sem Debug Suficiente**
+
 - Não mostrava qual URL estava sem token
 - Difícil debugar onde estava falhando
 
@@ -43,6 +48,7 @@ Frontend:
 ## ✅ CORREÇÕES APLICADAS
 
 ### **1. AuthContext com Storage Listener**
+
 ```typescript
 // ANTES:
 useEffect(() => {
@@ -52,24 +58,25 @@ useEffect(() => {
 // DEPOIS:
 useEffect(() => {
   checkAuth();
-  
+
   // Listener para detectar mudanças no localStorage
   const handleStorageChange = (e: StorageEvent) => {
-    if (e.key === 'token') {
-      console.log('🔄 Token mudou no localStorage, recarregando...');
+    if (e.key === "token") {
+      console.log("🔄 Token mudou no localStorage, recarregando...");
       checkAuth();
     }
   };
-  
-  window.addEventListener('storage', handleStorageChange);
-  
+
+  window.addEventListener("storage", handleStorageChange);
+
   return () => {
-    window.removeEventListener('storage', handleStorageChange);
+    window.removeEventListener("storage", handleStorageChange);
   };
 }, []);
 ```
 
 **Benefícios:**
+
 - ✅ Detecta mudanças em outras abas
 - ✅ Sincroniza token entre janelas
 - ✅ Recarrega autenticação automaticamente
@@ -77,16 +84,23 @@ useEffect(() => {
 ---
 
 ### **2. Axios com Debug Melhorado**
+
 ```typescript
 // ANTES:
-console.log('🔐 Enviando token:', token.substring(0, 20) + '...');
+console.log("🔐 Enviando token:", token.substring(0, 20) + "...");
 
 // DEPOIS:
-console.log('🔐 [AxiosApi] Enviando token para:', config.url, '| Token:', token.substring(0, 20) + '...');
-console.warn('⚠️ [AxiosApi] Token não encontrado para requisição:', config.url);
+console.log(
+  "🔐 [AxiosApi] Enviando token para:",
+  config.url,
+  "| Token:",
+  token.substring(0, 20) + "..."
+);
+console.warn("⚠️ [AxiosApi] Token não encontrado para requisição:", config.url);
 ```
 
 **Benefícios:**
+
 - ✅ Mostra qual URL está sem token
 - ✅ Mais fácil identificar problemas
 - ✅ Debug mais detalhado
@@ -94,26 +108,28 @@ console.warn('⚠️ [AxiosApi] Token não encontrado para requisição:', confi
 ---
 
 ### **3. Proteção Contra Loop de Redirecionamento**
+
 ```typescript
 // ANTES:
 if (status === 401) {
   this.clearToken();
-  window.location.href = '/login';
+  window.location.href = "/login";
 }
 
 // DEPOIS:
 if (status === 401) {
-  console.warn('⚠️ [AxiosApi] Erro 401 - Redirecionando para login...');
+  console.warn("⚠️ [AxiosApi] Erro 401 - Redirecionando para login...");
   this.clearToken();
-  
+
   // Evitar loop infinito
-  if (!window.location.pathname.includes('/login')) {
-    window.location.href = '/login';
+  if (!window.location.pathname.includes("/login")) {
+    window.location.href = "/login";
   }
 }
 ```
 
 **Benefícios:**
+
 - ✅ Não redireciona se já estiver no login
 - ✅ Evita loops infinitos
 - ✅ Melhor UX
@@ -121,6 +137,7 @@ if (status === 401) {
 ---
 
 ### **4. URLs Corrigidas nos Serviços**
+
 ```typescript
 // ❌ ANTES:
 await axiosApiService.get(`/dashboard/evolucao-obras?periodo=${periodo}`);
@@ -134,6 +151,7 @@ await axiosApiService.get(`/api/dashboard/exportar?formato=${formato}`);
 ```
 
 **Resultado:**
+
 - ✅ Todas as rotas agora começam com `/api`
 - ✅ Endpoints encontrados corretamente
 - ✅ Sem mais 404
@@ -143,6 +161,7 @@ await axiosApiService.get(`/api/dashboard/exportar?formato=${formato}`);
 ## 🧪 COMO TESTAR
 
 ### **1. Teste de Navegação:**
+
 ```
 1. Faça login no sistema
 2. Vá para Dashboard
@@ -153,6 +172,7 @@ await axiosApiService.get(`/api/dashboard/exportar?formato=${formato}`);
 ```
 
 **Resultado esperado:**
+
 - ✅ Token mantido em todas as páginas
 - ✅ Nenhum erro 401
 - ✅ Não redireciona para login
@@ -161,9 +181,10 @@ await axiosApiService.get(`/api/dashboard/exportar?formato=${formato}`);
 ---
 
 ### **2. Teste de Token no Console:**
+
 ```javascript
 // No console do navegador
-localStorage.getItem('token')
+localStorage.getItem("token");
 // Deve mostrar: "eyJhbGciOiJIUzI1NiIs..."
 
 // Em todas as páginas!
@@ -172,6 +193,7 @@ localStorage.getItem('token')
 ---
 
 ### **3. Verificar Logs do Backend:**
+
 ```
 Deve mostrar:
 ✅ 🔐 Token encontrado: eyJhbGciOiJIUzI1NiIs...
@@ -188,6 +210,7 @@ NÃO deve mostrar:
 ---
 
 ### **4. Verificar Logs do Frontend:**
+
 ```
 Deve mostrar:
 ✅ 🔐 [AxiosApi] Enviando token para: /api/clientes | Token: eyJhbGciOi...
@@ -203,6 +226,7 @@ NÃO deve mostrar:
 ## 🔧 FLUXO DE AUTENTICAÇÃO CORRIGIDO
 
 ### **Ao Fazer Login:**
+
 ```
 1. Usuário digita email/senha
 2. POST /api/auth/login
@@ -214,6 +238,7 @@ NÃO deve mostrar:
 ```
 
 ### **Ao Navegar Entre Páginas:**
+
 ```
 1. Usuário clica em "Clientes"
 2. Componente Clientes monta
@@ -226,6 +251,7 @@ NÃO deve mostrar:
 ```
 
 ### **Se Token Expirar:**
+
 ```
 1. Requisição enviada com token expirado
 2. Backend retorna 401
@@ -240,14 +266,14 @@ NÃO deve mostrar:
 
 ## 📊 ANTES vs DEPOIS
 
-| Situação | ANTES | DEPOIS |
-|----------|-------|--------|
-| **Navegar entre páginas** | ❌ Perde token | ✅ Token mantido |
-| **Token no localStorage** | ❌ Às vezes null | ✅ Sempre presente |
-| **Erro 401** | ❌ Frequente | ✅ Só se token expirar |
-| **Logs de debug** | ❌ Pouco detalhado | ✅ Muito informativo |
-| **URLs da API** | ❌ Faltava /api | ✅ Todas corretas |
-| **Loop de login** | ❌ Possível | ✅ Prevenido |
+| Situação                  | ANTES              | DEPOIS                 |
+| ------------------------- | ------------------ | ---------------------- |
+| **Navegar entre páginas** | ❌ Perde token     | ✅ Token mantido       |
+| **Token no localStorage** | ❌ Às vezes null   | ✅ Sempre presente     |
+| **Erro 401**              | ❌ Frequente       | ✅ Só se token expirar |
+| **Logs de debug**         | ❌ Pouco detalhado | ✅ Muito informativo   |
+| **URLs da API**           | ❌ Faltava /api    | ✅ Todas corretas      |
+| **Loop de login**         | ❌ Possível        | ✅ Prevenido           |
 
 ---
 
@@ -273,6 +299,7 @@ NÃO deve mostrar:
 ## 🚀 RESULTADO
 
 Agora o sistema:
+
 - ✅ **Mantém o token** ao navegar entre páginas
 - ✅ **Não redireciona** indevidamente para login
 - ✅ **Debug claro** de onde está o problema (se houver)
@@ -281,4 +308,3 @@ Agora o sistema:
 - ✅ **Sincronização** entre abas do navegador
 
 **Token persistente e sistema estável!** 🎉
-

@@ -9,7 +9,9 @@
 
 ## 🎯 Objetivo da Implementação
 
-Permitir que a S3E Engenharia gerencie **múltiplos CNPJs** (matriz, filiais, ou empresas distintas) com seus respectivos **certificados digitais A1**, de forma segura e intuitiva, para emissão de NF-e.
+Permitir que a S3E Engenharia gerencie **múltiplos CNPJs** (matriz, filiais, ou
+empresas distintas) com seus respectivos **certificados digitais A1**, de forma
+segura e intuitiva, para emissão de NF-e.
 
 ---
 
@@ -18,6 +20,7 @@ Permitir que a S3E Engenharia gerencie **múltiplos CNPJs** (matriz, filiais, ou
 ### Backend (5 arquivos novos + 1 modificado)
 
 #### 1. **Modelo de Dados**
+
 **Arquivo:** `backend/prisma/schema.prisma`
 
 ```prisma
@@ -47,14 +50,17 @@ model EmpresaFiscal {
 ```
 
 **Campos-chave:**
+
 - `certificadoPath` → Caminho do arquivo .pfx no servidor
 - `certificadoSenha` → Hash bcrypt da senha (NUNCA a senha em texto puro)
 - `certificadoValidade` → Data de expiração do certificado
 
 #### 2. **Controller**
+
 **Arquivo:** `backend/src/controllers/configFiscalController.ts` (294 linhas)
 
 **Endpoints implementados:**
+
 - `GET /api/configuracoes-fiscais` - Listar todas
 - `GET /api/configuracoes-fiscais/:id` - Buscar específica
 - `POST /api/configuracoes-fiscais` - Criar nova
@@ -62,6 +68,7 @@ model EmpresaFiscal {
 - `DELETE /api/configuracoes-fiscais/:id` - Deletar
 
 **Funcionalidades especiais:**
+
 ```typescript
 // 1. Armazenamento seguro do certificado
 await fs.writeFile(certificadoPath, buffer);
@@ -77,37 +84,44 @@ const { certificadoSenha: _, ...configSafe } = config;
 ```
 
 #### 3. **Rotas**
+
 **Arquivo:** `backend/src/routes/configFiscal.ts`
 
 ```typescript
-router.get('/', authorize('admin', 'gerente'), getConfiguracoes);
-router.get('/:id', authorize('admin', 'gerente'), getConfiguracaoById);
-router.post('/', authorize('admin'), createConfiguracao);
-router.put('/:id', authorize('admin'), updateConfiguracao);
-router.delete('/:id', authorize('admin'), deleteConfiguracao);
+router.get("/", authorize("admin", "gerente"), getConfiguracoes);
+router.get("/:id", authorize("admin", "gerente"), getConfiguracaoById);
+router.post("/", authorize("admin"), createConfiguracao);
+router.put("/:id", authorize("admin"), updateConfiguracao);
+router.delete("/:id", authorize("admin"), deleteConfiguracao);
 ```
 
 **Proteção RBAC:**
+
 - ✅ Visualização: `admin` e `gerente`
 - ✅ Criação/Edição/Exclusão: apenas `admin`
 
 #### 4. **Migração**
-**Arquivo:** `backend/prisma/migrations/20251015214530_add_empresa_fiscal/migration.sql`
+
+**Arquivo:**
+`backend/prisma/migrations/20251015214530_add_empresa_fiscal/migration.sql`
 
 Criou tabela `empresas_fiscais` com todos os campos necessários.
 
 #### 5. **Atualização do App**
+
 **Arquivo:** `backend/src/app.ts`
 
 Adicionou rota:
+
 ```typescript
-import configFiscalRoutes from './routes/configFiscal.js';
-app.use('/api/configuracoes-fiscais', configFiscalRoutes);
+import configFiscalRoutes from "./routes/configFiscal.js";
+app.use("/api/configuracoes-fiscais", configFiscalRoutes);
 ```
 
 ### Frontend (1 arquivo reescrito)
 
 #### **Componente Principal**
+
 **Arquivo:** `frontend/src/components/EmissaoNFe.tsx` (748 linhas)
 
 **Estrutura completa:**
@@ -147,6 +161,7 @@ handleCertificadoChange()
 ```
 
 **Comportamento:**
+
 - Botão ativo: Gradiente + sombra
 - Botão inativo: Cinza com hover
 - Transições suaves
@@ -154,6 +169,7 @@ handleCertificadoChange()
 ### 2. **Seção "Configurar Empresas"**
 
 #### Estado Vazio
+
 ```
 ┌────────────────────────────────────────┐
 │         [Ícone de Prédio]              │
@@ -164,6 +180,7 @@ handleCertificadoChange()
 ```
 
 #### Com Empresas
+
 ```
 ┌─────────────────┐  ┌─────────────────┐
 │ S3E ENGENHARIA  │  │ S3E FILIAL PR   │
@@ -210,6 +227,7 @@ handleCertificadoChange()
 ### 1. **Armazenamento de Certificados**
 
 **Fluxo:**
+
 ```
 Upload .pfx (Frontend)
     ↓
@@ -225,6 +243,7 @@ Salvamento apenas do PATH no banco
 ```
 
 **Localização:**
+
 ```
 backend/
 └── data/
@@ -237,11 +256,13 @@ backend/
 ### 2. **Criptografia de Senha**
 
 **Antes:**
+
 ```
 senha: "minhasenha123"
 ```
 
 **Depois (no banco):**
+
 ```
 certificadoSenha: "$2a$10$rOZUKq7MwZxGvQF8..."
 ```
@@ -253,19 +274,22 @@ certificadoSenha: "$2a$10$rOZUKq7MwZxGvQF8..."
 ### 3. **Proteção de Rotas**
 
 **Middleware de Autenticação:**
+
 ```typescript
 router.use(authenticate); // JWT obrigatório
 ```
 
 **Autorização por Role:**
+
 ```typescript
-router.post('/', authorize('admin'), createConfiguracao);
+router.post("/", authorize("admin"), createConfiguracao);
 // Apenas admins podem criar/editar/excluir
 ```
 
 ### 4. **Dados Não Expostos**
 
 **API Response:**
+
 ```json
 {
   "cnpj": "12.345.678/0001-90",
@@ -282,7 +306,7 @@ router.post('/', authorize('admin'), createConfiguracao);
 
 ### Frontend
 
-✅ Campos obrigatórios marcados com *  
+✅ Campos obrigatórios marcados com \*  
 ✅ Aceita apenas .pfx ou .p12  
 ✅ Feedback visual ao selecionar arquivo  
 ✅ Confirmação antes de excluir  
@@ -383,12 +407,14 @@ router.post('/', authorize('admin'), createConfiguracao);
 ### Teste 2: Com Backend Integrado
 
 **Passo 1: Preparar certificado de teste**
+
 ```bash
 # Criar arquivo .pfx vazio para teste
 echo "teste" > certificado-teste.pfx
 ```
 
 **Passo 2: Fazer login**
+
 ```bash
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
@@ -396,14 +422,16 @@ curl -X POST http://localhost:3000/api/auth/login \
 ```
 
 **Passo 3: Converter certificado para Base64**
+
 ```javascript
-const fs = require('fs');
-const buffer = fs.readFileSync('certificado-teste.pfx');
-const base64 = buffer.toString('base64');
+const fs = require("fs");
+const buffer = fs.readFileSync("certificado-teste.pfx");
+const base64 = buffer.toString("base64");
 console.log(base64);
 ```
 
 **Passo 4: Criar configuração**
+
 ```bash
 curl -X POST http://localhost:3000/api/configuracoes-fiscais \
   -H "Content-Type: application/json" \
@@ -426,6 +454,7 @@ curl -X POST http://localhost:3000/api/configuracoes-fiscais \
 ```
 
 **Passo 5: Listar configurações**
+
 ```bash
 curl http://localhost:3000/api/configuracoes-fiscais \
   -H "Authorization: Bearer SEU_TOKEN"
@@ -465,12 +494,14 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ### Paleta de Cores
 
 **Configuração de Empresas:**
+
 - Primária: `bg-gradient-to-r from-blue-600 to-blue-700` (azul)
 - Cartões: `border-blue-400` com hover
 - Status válido: `bg-green-50 text-green-700`
 - Status expirado: `bg-red-50 text-red-700`
 
 **Modal:**
+
 - Seção Empresa: `from-gray-50 to-gray-100`
 - Seção Endereço: `from-purple-50 to-pink-50`
 - Seção Certificado: `from-orange-50 to-amber-50`
@@ -488,43 +519,48 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 
 ## 📈 Métricas de Implementação
 
-| Métrica | Valor |
-|---------|-------|
-| **Linhas de Código (Backend)** | ~350 |
-| **Linhas de Código (Frontend)** | ~600 |
-| **Endpoints API** | 5 |
-| **Campos no Formulário** | 14 |
-| **Estados React** | 7 |
-| **Handlers** | 5 |
-| **Validações** | 12 |
-| **Tempo de Implementação** | ~2 horas |
-| **Erros de Compilação** | 0 ✅ |
-| **Cobertura de Segurança** | 95% ✅ |
+| Métrica                         | Valor    |
+| ------------------------------- | -------- |
+| **Linhas de Código (Backend)**  | ~350     |
+| **Linhas de Código (Frontend)** | ~600     |
+| **Endpoints API**               | 5        |
+| **Campos no Formulário**        | 14       |
+| **Estados React**               | 7        |
+| **Handlers**                    | 5        |
+| **Validações**                  | 12       |
+| **Tempo de Implementação**      | ~2 horas |
+| **Erros de Compilação**         | 0 ✅     |
+| **Cobertura de Segurança**      | 95% ✅   |
 
 ---
 
 ## 🏆 Diferenciais da Implementação
 
 ### 1. **Multi-Empresa desde o Início**
+
 - Suporta N CNPJs simultaneamente
 - Não limita a 1 empresa como outros ERPs
 
 ### 2. **Segurança de Nível Bancário**
+
 - Bcrypt para senhas
 - Certificados isolados
 - Dados sensíveis nunca expostos
 
 ### 3. **UI Profissional**
+
 - Cards visuais
 - Status em tempo real
 - Feedback imediato
 
 ### 4. **Type-Safe Completo**
+
 - TypeScript em 100% do código
 - Interfaces para todas as estruturas
 - Zero `any` desnecessários
 
 ### 5. **Pronto para Produção**
+
 - Validações robustas
 - Tratamento de erros
 - Rollback automático
@@ -536,15 +572,17 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ### Versão 2.0 (Planejado)
 
 1. **Validação de Certificado**
+
    ```typescript
-   import forge from 'node-forge';
-   
+   import forge from "node-forge";
+
    // Validar se certificado é válido
    // Extrair data de expiração real
    // Verificar se CNPJ do cert corresponde ao informado
    ```
 
 2. **Alertas de Expiração**
+
    ```typescript
    // Notificar 30 dias antes do vencimento
    // Email automático para admins
@@ -552,6 +590,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    ```
 
 3. **Auditoria Completa**
+
    ```typescript
    // Log de todas as ações:
    // - Quem criou/editou/excluiu
@@ -561,6 +600,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    ```
 
 4. **Seletor de CNPJ na Emissão**
+
    ```typescript
    <select>
      <option>12.345.678/0001-90 - S3E Matriz (✅ Válido)</option>
@@ -569,6 +609,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    ```
 
 5. **Renovação Simplificada**
+
    ```typescript
    // Botão "Renovar Certificado"
    // Mantém todos os dados
@@ -602,9 +643,11 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 
 ## 🎉 Conclusão
 
-A funcionalidade de **Configuração Fiscal Multi-CNPJ** está **100% implementada** e pronta para uso.
+A funcionalidade de **Configuração Fiscal Multi-CNPJ** está **100%
+implementada** e pronta para uso.
 
 **Destaques:**
+
 - ✅ Backend robusto e seguro
 - ✅ Frontend moderno e intuitivo
 - ✅ Segurança de nível empresarial
@@ -617,4 +660,3 @@ A funcionalidade de **Configuração Fiscal Multi-CNPJ** está **100% implementa
 
 **Desenvolvido com excelência para S3E Engenharia** ⚡  
 **"Automatizando a Engenharia Elétrica, um CNPJ por vez!"** 🏢
-

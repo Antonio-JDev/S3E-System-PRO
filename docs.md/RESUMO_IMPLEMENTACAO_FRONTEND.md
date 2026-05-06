@@ -3,6 +3,7 @@
 ## ✅ IMPLEMENTAÇÕES CONCLUÍDAS
 
 ### 1. Sistema de Autenticação JWT
+
 - ✅ AuthContext criado (`frontend/src/contexts/AuthContext.tsx`)
   - Login, logout, checkAuth
   - Gestão de token em localStorage
@@ -17,6 +18,7 @@
   - Providers (Auth e Theme)
 
 ### 2. Sistema de Temas (Claro/Escuro)
+
 - ✅ ThemeContext criado (`frontend/src/contexts/ThemeContext.tsx`)
   - Toggle light/dark
   - Persistência em localStorage
@@ -26,10 +28,12 @@
 - ✅ Cor brand-s3e (#0a1a2f) adicionada ao Tailwind config
 
 ### 3. Hooks Customizados
+
 - ✅ `frontend/src/hooks/useAuth.ts`
 - ✅ `frontend/src/hooks/useTheme.ts`
 
 ### 4. Tipos TypeScript Atualizados
+
 - ✅ AdminStage e AdminStageStatus adicionados
 - ✅ Project interface atualizada com `adminStages: AdminStage[]`
 - ✅ ProjectStage atualizado com `linkedAdminStageId?: string`
@@ -37,11 +41,13 @@
 - ✅ Theme e AuthState types criados
 
 ### 5. Mock Data Atualizado
+
 - ✅ Função `generateAdminStages()` criada
 - ✅ Todos os projetos agora possuem 10 etapas administrativas fixas
 - ✅ Prazo de 24h configurado para cada etapa
 
 ### 6. Sidebar Atualizada
+
 - ✅ Logo customizada (localStorage)
   - Exibição condicional
   - Listener para mudanças
@@ -50,6 +56,7 @@
 - ✅ Cor do ícone padrão alterada para brand-s3e
 
 ### 7. SettingsModal Completamente Reformulado
+
 - ✅ Header padronizado com cor #0a1a2f
 - ✅ 4 Abas organizadas:
   - **Meu Perfil**: Nome, email, telefone
@@ -72,12 +79,15 @@
 ### 8. Melhorias no Modal de Visualizar Projeto (Projetos.tsx)
 
 #### 8.1 Tamanho e Header
+
 - ⏳ Alterar `max-w-6xl` para `max-w-7xl` (linha 799)
 - ⏳ Adicionar header com gradiente #0a1a2f (similar aos outros modais)
 - ⏳ Ajustar altura para `max-h-[95vh]`
 
 #### 8.2 Nova Aba: "Etapas Administrativas"
-- ⏳ Adicionar botão de aba ao lado das existentes (Overview, Materiais, Etapas, Qualidade)
+
+- ⏳ Adicionar botão de aba ao lado das existentes (Overview, Materiais, Etapas,
+  Qualidade)
 - ⏳ Criar UI das 10 etapas fixas:
   1. Organizar Projeto
   2. Abertura de SR
@@ -92,11 +102,13 @@
 
 - ⏳ Implementar lógica de prazo de 24h:
   - Calcular tempo restante
-  - Status visual: verde (concluída), amarelo (em andamento), vermelho (atrasada)
+  - Status visual: verde (concluída), amarelo (em andamento), vermelho
+    (atrasada)
   - Checkbox para marcar como concluída
   - Botão "Estender Prazo" com modal de justificativa
 
 #### 8.3 Melhorias na Aba "Etapas (Kanban)"
+
 - ⏳ Adicionar campo no formulário de tarefa:
   - Dropdown "Vincular à Etapa Administrativa"
   - Opções: as 10 etapas + "Nenhuma"
@@ -104,20 +116,25 @@
 - ⏳ Diferenciar visualmente do Kanban de Obras
 
 #### 8.4 Atualizar Cálculo de Progresso
+
 - ⏳ Nova fórmula:
+
   ```typescript
   progress = (etapas admin concluídas + tasks kanban concluídas) / (10 + total de tasks)
   ```
+
 - ⏳ Atualizar automaticamente ao concluir etapa ou task
 - ⏳ Exibir na listagem de projetos e no modal
 
 ### 9. Padronização de Cores em Outros Modais
 
 #### 9.1 Modal Criar/Editar Projeto (Projetos.tsx)
+
 - ⏳ Substituir gradiente atual por cor sólida #0a1a2f
 - ⏳ Verificar visibilidade dos ícones (padding/size)
 
 #### 9.2 Outros Componentes
+
 - ⏳ Verificar e padronizar headers de modais em:
   - Orcamentos.tsx
   - Compras.tsx
@@ -125,6 +142,7 @@
   - Outros componentes com modais
 
 ### 10. Ajustes de Ícones Globais
+
 - ⏳ Revisar todos os emojis em modais
 - ⏳ Garantir classes consistentes:
   - Container: `p-3` (mínimo)
@@ -134,14 +152,19 @@
 ## 🔄 INTEGRAÇÕES BACKEND PENDENTES
 
 ### 11. Endpoints a Criar/Atualizar
+
 - ⏳ PUT `/api/auth/password` - Alterar senha
 - ⏳ PUT `/api/auth/profile` - Atualizar perfil (nome, email, phone)
-- ⏳ POST `/api/projects/:id/admin-stages/:stageId/complete` - Concluir etapa administrativa
-- ⏳ POST `/api/projects/:id/admin-stages/:stageId/extend` - Estender prazo com justificativa
-- ⏳ PUT `/api/projects/:id/tasks/:taskId` - Atualizar task (incluindo linkedAdminStageId)
+- ⏳ POST `/api/projects/:id/admin-stages/:stageId/complete` - Concluir etapa
+  administrativa
+- ⏳ POST `/api/projects/:id/admin-stages/:stageId/extend` - Estender prazo com
+  justificativa
+- ⏳ PUT `/api/projects/:id/tasks/:taskId` - Atualizar task (incluindo
+  linkedAdminStageId)
 - ⏳ GET `/api/projects/:id/progress` - Calcular progresso (backend-driven)
 
 ### 12. Funcionalidades Futuras (mencionadas no plano)
+
 - ⏳ Upload real de logo para servidor
 - ⏳ Upload real de anexos de projeto
 - ⏳ Notificações de etapas atrasadas
@@ -150,15 +173,19 @@
 ## 📝 NOTAS IMPORTANTES
 
 ### Prazo de 24h das Etapas Administrativas
-- Conforme esclarecido pelo usuário: **Todas as etapas começam a contar 24h simultaneamente quando o projeto inicia**
+
+- Conforme esclarecido pelo usuário: **Todas as etapas começam a contar 24h
+  simultaneamente quando o projeto inicia**
 - Se houver imprevisto, o prazo pode ser estendido com descrição/justificativa
 
 ### Tema Escuro
+
 - Gradiente: `#0a1a2f` → `#000000`
 - Aplicado ao `body.dark`
 - Toggle disponível em Configurações > Aparência
 
 ### Logo da Empresa
+
 - Atualmente salva apenas em localStorage (frontend-only)
 - Preparado para integração futura com backend
 - Suporta PNG, JPG, SVG (máx 2MB)
@@ -178,12 +205,14 @@
 6. **Testar upload de logo** e persistência
 
 ## 📦 DEPENDÊNCIAS INSTALADAS
+
 - ✅ `react-router-dom` (^6.x)
 - ✅ `@types/react-router-dom` (devDependency)
 
 ## 🛠️ ARQUIVOS CRIADOS/MODIFICADOS
 
 ### Criados:
+
 - `frontend/src/contexts/AuthContext.tsx`
 - `frontend/src/contexts/ThemeContext.tsx`
 - `frontend/src/hooks/useAuth.ts`
@@ -192,6 +221,7 @@
 - `frontend/src/components/ProtectedRoute.tsx`
 
 ### Modificados:
+
 - `frontend/package.json`
 - `frontend/index.html`
 - `frontend/src/App.tsx`
@@ -201,11 +231,11 @@
 - `frontend/src/data/mockData.ts`
 
 ### Pendente de Modificação:
+
 - `frontend/src/components/Projetos.tsx` (grande, ~1206 linhas)
 - Outros componentes com modais (Orcamentos, Compras, Materiais, etc.)
 
 ---
 
-**Última atualização**: 2025-10-16
-**Status**: Em Desenvolvimento (70% concluído)
-
+**Última atualização**: 2025-10-16 **Status**: Em Desenvolvimento (70%
+concluído)

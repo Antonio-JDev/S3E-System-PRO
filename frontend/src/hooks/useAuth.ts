@@ -4,6 +4,7 @@ import { axiosApiService } from '../services/axiosApi';
 export interface User {
   id: string;
   name: string;
+  setor?: string | null;
   email: string;
   role: string;
   active: boolean;

@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from './auditoria.service';
 
 export type NFeAuditAction =
   | 'NFE_EMISSAO_INICIADA'
@@ -26,11 +25,8 @@ interface NFeAuditParams {
 }
 
 /**
- * Serviço de auditoria específica de NF-e com hash em cadeia (imutável).
- * Usa a tabela genérica AuditLog, mas com:
- * - entity = 'NFe'
- * - chainId = chaveAcesso ou notaFiscalId/pedidoId
- * - hash / previousHash / sequence para encadear os eventos.
+ * Auditoria específica de NF-e com hash em cadeia (imutável).
+ * Persiste em `audit_logs` com entity = 'NFe', encadeando hash/previousHash/sequence por chainId.
  */
 export class NFeAuditService {
   static async registrarEvento(params: NFeAuditParams) {
@@ -47,34 +43,32 @@ export class NFeAuditService {
       metadata
     } = params;
 
-    // Identificador lógico da cadeia de auditoria desta NF-e
-    const chainId = chaveAcesso || notaFiscalId || pedidoId;
+    const chainId = chaveAcesso || notaFiscalId || pedidoId || null;
 
-    // Buscar último registro da cadeia (para previousHash e sequence)
     let previousHash: string | null = null;
-    let sequence: number | null = null;
+    let sequence = 1;
 
     if (chainId) {
-      const lastLog = await prisma.auditLog.findFirst({
-        where: { chainId },
-        orderBy: { sequence: 'desc' }
-      });
-
-      if (lastLog) {
-        previousHash = lastLog.hash || null;
-        sequence = (lastLog.sequence || 0) + 1;
-      } else {
-        sequence = 1;
+      try {
+        const last = await prisma.auditLog.findFirst({
+          where: { chainId, entity: 'NFe' },
+          orderBy: [{ sequence: 'desc' }, { createdAt: 'desc' }]
+        });
+        if (last?.hash) {
+          previousHash = last.hash;
+          sequence = (last.sequence ?? 0) + 1;
+        }
+      } catch {
+        // continua com sequence 1 se leitura falhar
       }
     }
 
     const now = new Date();
 
-    // Montar payload determinístico para o hash
     const payload = JSON.stringify({
       chainId: chainId || null,
-      previousHash: previousHash || null,
-      sequence: sequence || 1,
+      previousHash,
+      sequence,
       action,
       entity: 'NFe',
       entityId: notaFiscalId || chaveAcesso || null,
@@ -90,32 +84,33 @@ export class NFeAuditService {
 
     const hash = crypto.createHash('sha256').update(payload).digest('hex');
 
-    await prisma.auditLog.create({
-      data: {
+    try {
+      await AuditoriaService.registrarEvento({
         action,
         entity: 'NFe',
-        entityId: notaFiscalId || chaveAcesso || null,
+        entityId: notaFiscalId || chaveAcesso || undefined,
         description,
         metadata: {
-          ...metadata,
+          ...(metadata || {}),
           pedidoId: pedidoId || undefined,
           empresaFiscalId: empresaFiscalId || undefined,
           ambiente,
           status,
           modoEnvio,
           chaveAcesso: chaveAcesso || undefined,
-          notaFiscalId: notaFiscalId || undefined
-        },
-        hash,
-        previousHash: previousHash || null,
-        chainId: chainId || null,
-        sequence: sequence || 1,
-        createdAt: now
-      }
-    });
+          notaFiscalId: notaFiscalId || undefined,
+          hash,
+          previousHash,
+          chainId: chainId || undefined,
+          sequence,
+          createdAt: now.toISOString()
+        }
+      });
+    } catch (err) {
+      console.error('Erro ao registrar NFe audit:', err);
+    }
   }
 }
 
 export default NFeAuditService;
-
 

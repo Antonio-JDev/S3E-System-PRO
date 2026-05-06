@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { obrasService, type Obra, type ObraKanbanData } from '../services/obrasService';
 import { axiosApiService } from '../services/axiosApi';
@@ -47,6 +47,7 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
     const [loading, setLoading] = useState(true);
     const [draggedItem, setDraggedItem] = useState<Obra | null>(null);
     const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+    const [kanbanSearchTerm, setKanbanSearchTerm] = useState('');
 
     // Hub de Tarefas da Obra
     const [hubObraId, setHubObraId] = useState<string | null>(null);
@@ -57,6 +58,9 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
 
     // Modal de Obra de Manutenção
     const [modalManutencaoOpen, setModalManutencaoOpen] = useState(false);
+    const [clienteBuscaInput, setClienteBuscaInput] = useState('');
+    const [clienteListOpen, setClienteListOpen] = useState(false);
+    const clienteBlurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [clientes, setClientes] = useState<any[]>([]);
     const [formManutencao, setFormManutencao] = useState({
         clienteId: '',
@@ -75,10 +79,39 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
     const loadClientes = async () => {
         try {
             const response = await axiosApiService.get('/api/clientes');
-            setClientes(response.data || response || []);
+            const raw = response.data ?? response;
+            setClientes(Array.isArray(raw) ? raw : []);
         } catch (error) {
             console.error('Erro ao carregar clientes:', error);
         }
+    };
+
+    const filteredClientesModal = useMemo(() => {
+        if (!Array.isArray(clientes) || clientes.length === 0) return [];
+        const q = clienteBuscaInput.trim().toLowerCase();
+        const tokens = q.split(/\s+/).filter(Boolean);
+        let list = [...clientes];
+        if (tokens.length > 0) {
+            list = list.filter((c: { nome?: string; cpfCnpj?: string; email?: string }) => {
+                const hay = `${c.nome ?? ''} ${c.cpfCnpj ?? ''} ${c.email ?? ''}`.toLowerCase();
+                return tokens.every((tok) => hay.includes(tok));
+            });
+        } else {
+            list = list.slice(0, 80);
+        }
+        return list.sort((a: { nome?: string }, b: { nome?: string }) =>
+            (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })
+        );
+    }, [clientes, clienteBuscaInput]);
+
+    const fecharModalManutencao = () => {
+        if (clienteBlurTimeoutRef.current) {
+            clearTimeout(clienteBlurTimeoutRef.current);
+            clienteBlurTimeoutRef.current = null;
+        }
+        setModalManutencaoOpen(false);
+        setClienteBuscaInput('');
+        setClienteListOpen(false);
     };
 
     const handleAbrirModalManutencao = () => {
@@ -90,7 +123,16 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
             dataPrevistaInicio: new Date().toISOString().split('T')[0],
             dataPrevistaFim: ''
         });
+        setClienteBuscaInput('');
+        setClienteListOpen(false);
         setModalManutencaoOpen(true);
+    };
+
+    const selecionarClienteModal = (c: { id: string; nome?: string; cpfCnpj?: string }) => {
+        setFormManutencao((prev) => ({ ...prev, clienteId: c.id }));
+        const rotulo = `${c.nome ?? ''}${c.cpfCnpj ? ` — ${c.cpfCnpj}` : ''}`.trim();
+        setClienteBuscaInput(rotulo);
+        setClienteListOpen(false);
     };
 
     const handleCriarObraManutencao = async () => {
@@ -107,8 +149,8 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
             console.log('✅ Resposta da criação:', response);
             
             if (response.success || response.data) {
-                toast.success('✅ Obra de manutenção criada com sucesso no Backlog!');
-                setModalManutencaoOpen(false);
+                toast.success('✅ Obra criada com sucesso no Backlog!');
+                fecharModalManutencao();
                 await loadObrasKanban();
                 if (onRefresh) onRefresh();
             } else {
@@ -148,6 +190,22 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
             setLoading(false);
         }
     };
+
+    const filteredKanbanData = useMemo(() => {
+        const q = kanbanSearchTerm.trim().toLowerCase();
+        if (!q) return kanbanData;
+        const match = (o: Obra) => {
+            const nome = (o.nomeObra || '').toLowerCase();
+            const cliente = (o.clienteNome || '').toLowerCase();
+            return nome.includes(q) || cliente.includes(q);
+        };
+        return {
+            BACKLOG: kanbanData.BACKLOG.filter(match),
+            A_FAZER: kanbanData.A_FAZER.filter(match),
+            ANDAMENTO: kanbanData.ANDAMENTO.filter(match),
+            CONCLUIDO: kanbanData.CONCLUIDO.filter(match),
+        };
+    }, [kanbanData, kanbanSearchTerm]);
 
     // Excluir obra
     const handleDeleteObra = async () => {
@@ -344,28 +402,50 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
 
     return (
         <div className="space-y-6">
-            {/* Header com botão de Nova Obra de Manutenção */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Kanban de Obras</h2>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                        Arraste e solte para mover entre as etapas
-                    </p>
+            {/* Cabeçalho: título, busca e Obra Sem OS */}
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                <div className="flex flex-1 flex-col gap-3 min-w-0 lg:flex-row lg:items-end lg:gap-4">
+                    <div className="shrink-0">
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Kanban de Obras</h2>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Arraste e solte para mover entre as etapas
+                        </p>
+                    </div>
+                    <div className="relative w-full lg:max-w-sm xl:max-w-md">
+                        <svg
+                            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 pointer-events-none"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                        </svg>
+                        <input
+                            type="search"
+                            value={kanbanSearchTerm}
+                            onChange={(e) => setKanbanSearchTerm(e.target.value)}
+                            placeholder="Buscar por obra ou cliente..."
+                            className="w-full rounded-xl border-2 border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card py-2.5 pl-10 pr-3 text-sm text-gray-900 dark:text-dark-text placeholder:text-gray-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                            autoComplete="off"
+                        />
+                    </div>
                 </div>
                 <button
+                    type="button"
                     onClick={handleAbrirModalManutencao}
-                    className="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold flex items-center gap-2"
+                    className="shrink-0 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold flex items-center justify-center gap-2"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    🔧 Nova Obra de Manutenção
+                    Obra Sem OS
                 </button>
             </div>
 
             {/* Grid do Kanban */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {Object.entries(kanbanData).map(([status, obras]) => {
+            {Object.entries(filteredKanbanData).map(([status, obras]) => {
                 const config = getColumnConfig(status);
                 const isOver = dragOverColumn === status;
 
@@ -403,7 +483,7 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
             })}
             </div>
 
-            {/* Modal de Criar Obra de Manutenção */}
+            {/* Modal Obra Sem OS */}
             {modalManutencaoOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border-2 border-orange-200 dark:border-orange-800">
@@ -418,12 +498,13 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
                                         </svg>
                                     </div>
                                     <div>
-                                        <h3 className="text-xl font-bold text-white">Nova Obra de Manutenção</h3>
-                                        <p className="text-sm text-orange-100">Para clientes sem projeto</p>
+                                        <h3 className="text-xl font-bold text-white">Obra Sem OS</h3>
+                                        <p className="text-sm text-orange-100">Para clientes sem projeto (obra avulsa)</p>
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => setModalManutencaoOpen(false)}
+                                    type="button"
+                                    onClick={fecharModalManutencao}
                                     className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
                                 >
                                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -435,24 +516,62 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
 
                         {/* Formulário */}
                         <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-                            {/* Cliente */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            {/* Cliente (busca) */}
+                            <div className="relative">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2" htmlFor="obra-sem-os-cliente-busca">
                                     👤 Cliente *
                                 </label>
-                                <select
-                                    value={formManutencao.clienteId}
-                                    onChange={(e) => setFormManutencao(prev => ({ ...prev, clienteId: e.target.value }))}
+                                <input
+                                    id="obra-sem-os-cliente-busca"
+                                    type="search"
+                                    autoComplete="off"
+                                    value={clienteBuscaInput}
+                                    onChange={(e) => {
+                                        setClienteBuscaInput(e.target.value);
+                                        setFormManutencao((prev) => ({ ...prev, clienteId: '' }));
+                                        setClienteListOpen(true);
+                                    }}
+                                    onFocus={() => setClienteListOpen(true)}
+                                    onBlur={() => {
+                                        clienteBlurTimeoutRef.current = setTimeout(() => setClienteListOpen(false), 180);
+                                    }}
+                                    placeholder="Digite nome, CNPJ ou CPF — cada palavra restringe o filtro"
                                     className="w-full px-4 py-3 border-2 border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                                    required
-                                >
-                                    <option value="">Selecione um cliente</option>
-                                    {clientes.map(cliente => (
-                                        <option key={cliente.id} value={cliente.id}>
-                                            {cliente.nome} - {cliente.cpfCnpj}
-                                        </option>
-                                    ))}
-                                </select>
+                                />
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {clienteBuscaInput.trim()
+                                        ? `${filteredClientesModal.length} cliente(s) encontrado(s)`
+                                        : `Digite para filtrar entre ${clientes.length} cliente(s) (mostrando até 80 sem filtro)`}
+                                </p>
+                                {clienteListOpen && filteredClientesModal.length > 0 && (
+                                    <ul
+                                        className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-xl border-2 border-orange-200 dark:border-orange-900 bg-white dark:bg-dark-card shadow-xl"
+                                        role="listbox"
+                                    >
+                                        {filteredClientesModal.map((cliente: { id: string; nome?: string; cpfCnpj?: string }) => (
+                                            <li key={cliente.id} role="option">
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-orange-50 dark:hover:bg-orange-900/30 border-b border-gray-100 dark:border-dark-border last:border-0"
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => selecionarClienteModal(cliente)}
+                                                >
+                                                    <span className="font-medium text-gray-900 dark:text-white block truncate">
+                                                        {cliente.nome}
+                                                    </span>
+                                                    {cliente.cpfCnpj && (
+                                                        <span className="text-xs text-gray-600 dark:text-gray-400">{cliente.cpfCnpj}</span>
+                                                    )}
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                {clienteListOpen && clienteBuscaInput.trim() && filteredClientesModal.length === 0 && (
+                                    <p className="absolute z-20 left-0 right-0 mt-1 rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border bg-gray-50 dark:bg-dark-bg px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                                        Nenhum cliente encontrado para este termo.
+                                    </p>
+                                )}
                             </div>
 
                             {/* Nome da Obra */}
@@ -538,12 +657,14 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
                         {/* Footer */}
                         <div className="p-6 bg-gray-50 dark:bg-dark-bg border-t-2 border-gray-200 dark:border-dark-border flex justify-end gap-3">
                             <button
-                                onClick={() => setModalManutencaoOpen(false)}
+                                type="button"
+                                onClick={fecharModalManutencao}
                                 className="px-6 py-3 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all font-semibold"
                             >
                                 Cancelar
                             </button>
                             <button
+                                type="button"
                                 onClick={handleCriarObraManutencao}
                                 className="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
                             >

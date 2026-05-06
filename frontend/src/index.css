@@ -10,6 +10,15 @@
     font-family: 'Dancing Script', cursive;
 }
 
+/* Material Symbols (Google Icons) */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 20;
+}
+
 /* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
     width: 8px;
@@ -197,14 +206,48 @@ button:active {
 }
 
 /* ========== DARK THEME STYLES ========== */
-/* Aplica quando a classe 'dark' está no <html> (via Tailwind) */
+/* Aplica quando a classe 'dark' está no <html> (via ThemeContext ou script inline) */
+html.dark,
+.dark {
+  color-scheme: dark;
+}
+
+html.dark body,
 .dark body {
-  background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%);
+  background: linear-gradient(135deg, #0a1a2f 0%, #1E293B 50%, #0a1a2f 100%);
   min-height: 100vh;
 }
 
-.dark {
-  color-scheme: dark;
+/* Sidebar: forçar fundo e bordas no dark mode */
+.dark [data-sidebar="sidebar"] {
+  background-color: #0a1a2f !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+.dark [data-sidebar="header"],
+.dark [data-sidebar="footer"] {
+  border-color: #334155 !important;
+}
+
+/* Cards de estatísticas (ex.: Materiais) – forçar fundo escuro */
+.dark .rounded-2xl.shadow-soft.bg-white,
+.dark .rounded-2xl.shadow-medium.bg-white,
+.dark .rounded-2xl.border-2.bg-white {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+}
+
+/* card-primary (Materiais, Movimentações, etc.): garantir dark mesmo se Tailwind não aplicar */
+.dark .card-primary {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+}
+
+/* Garantir fundo escuro na área principal e em páginas inteiras (ex.: Movimentações) */
+.dark main.bg-white,
+.dark main[class*="dark:bg-dark-bg"],
+.dark .min-h-screen.bg-white {
+  background: linear-gradient(135deg, #0a1a2f 0%, #1E293B 50%, #0a1a2f 100%) !important;
 }
 
 /* Forçar dark mode em elementos comuns que não têm classes dark: */
@@ -213,7 +256,7 @@ button:active {
 }
 
 .dark .bg-gray-50:not([class*="dark:bg-"]) {
-  background-color: #0F172A !important; /* dark-bg */
+  background-color: #0a1a2f !important; /* dark-bg */
 }
 
 .dark .text-gray-900:not([class*="dark:text-"]) {
@@ -236,8 +279,14 @@ button:active {
   color: #CBD5E1 !important; /* dark-text-secondary */
 }
 
+/* Texto preto → branco no dark mode (qualquer elemento com text-black) */
+.dark .text-black {
+  color: #F8FAFC !important; /* dark-text / branco */
+}
+
 .dark .border-gray-200:not([class*="dark:border-"]),
-.dark .border-gray-300:not([class*="dark:border-"]) {
+.dark .border-gray-300:not([class*="dark:border-"]),
+.dark .border-gray-100:not([class*="dark:border-"]) {
   border-color: #334155 !important; /* dark-border */
 }
 
@@ -253,7 +302,7 @@ button:active {
 .dark input:not([class*="dark:"]),
 .dark select:not([class*="dark:"]),
 .dark textarea:not([class*="dark:"]) {
-  background-color: #0F172A !important; /* dark-bg */
+  background-color: #0a1a2f !important; /* dark-bg */
   border-color: #334155 !important; /* dark-border */
   color: #F8FAFC !important; /* dark-text */
 }
@@ -264,9 +313,41 @@ button:active {
   color: #CBD5E1 !important; /* dark-text-secondary */
 }
 
+/* Options de select no dark mode */
+.dark select option {
+  background-color: #0a1a2f;
+  color: #F8FAFC;
+}
+
+/* Cards/containers com rounded e shadow sem dark: (fallback extra) */
+.dark [class*="rounded-2xl"][class*="shadow"]:not([class*="dark:bg-"]) {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+}
+
+/* Cards shadcn (rounded-xl + border + shadow): forçar dark mesmo com dark: no classList
+   para quando o Tailwind dark: não estiver aplicando (ex.: build em cache). */
+.dark [class*="rounded-xl"][class*="border"][class*="shadow-sm"],
+.dark [class*="rounded-xl"][class*="border"][class*="shadow-md"],
+.dark [class*="rounded-xl"][class*="border"][class*="shadow-lg"] {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+
+/* Texto dentro dos cards em dark */
+.dark [class*="rounded-xl"][class*="border"][class*="shadow"] .text-gray-950,
+.dark [class*="rounded-xl"][class*="border"][class*="shadow"] .text-gray-900 {
+  color: #F8FAFC !important;
+}
+.dark [class*="rounded-xl"][class*="border"][class*="shadow"] .text-gray-600,
+.dark [class*="rounded-xl"][class*="border"][class*="shadow"] .text-gray-500 {
+  color: #CBD5E1 !important;
+}
+
 /* Hover states */
 .dark .hover\:bg-gray-50:hover:not([class*="dark:hover:"]) {
-  background-color: #0F172A !important;
+  background-color: #0a1a2f !important;
 }
 
 .dark .hover\:bg-gray-100:hover:not([class*="dark:hover:"]) {
@@ -312,6 +393,18 @@ button:active {
 .dark [class*="from-"][class*="-50"] button[class*="text-gray-400"]:hover {
   color: white !important;
   background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Legenda do Recharts em dark mode (texto invisível por padrão) */
+.dark .recharts-default-legend,
+.dark .recharts-legend-wrapper {
+  color: #F8FAFC !important;
+}
+.dark .recharts-default-legend li,
+.dark .recharts-default-legend span,
+.dark .recharts-legend-wrapper li,
+.dark .recharts-legend-wrapper span {
+  color: #F8FAFC !important;
 }
 
 /* Scrollbar no dark mode */
@@ -426,7 +519,7 @@ button:active {
 }
 
 .modal-header {
-  @apply p-6 border-b border-gray-200 dark:border-dark-border;
+  @apply p-6 border-b border-gray-200 dark:border-dark-border flex items-start justify-between gap-4;
 }
 
 .modal-body {
@@ -446,7 +539,7 @@ button:active {
 }
 
 .dark button.bg-white:hover:not(.btn-primary):not(.btn-success):not(.btn-danger):not(.btn-warning):not(.btn-info) {
-  background-color: #0F172A !important; /* dark-bg */
+  background-color: #0a1a2f !important; /* dark-bg */
 }
 
 /* Força fundos cinza claro em dark mode */
@@ -455,7 +548,7 @@ button:active {
 }
 
 .dark .bg-gray-50:not(.hover\:bg-gray-50) {
-  background-color: #0F172A !important; /* dark-bg */
+  background-color: #0a1a2f !important; /* dark-bg */
 }
 
 /* Labels em modais */
@@ -467,21 +560,49 @@ button:active {
   color: #CBD5E1 !important; /* dark-text-secondary */
 }
 
-/* Tabelas no dark mode */
-.dark thead.bg-gray-50 {
+/* Tabelas no dark mode - qualquer thead/tbody/tr */
+.dark thead.bg-gray-50,
+.dark thead:not([class*="dark:bg"]) {
   background-color: #1E293B !important;
+  border-color: #334155 !important;
 }
 
 .dark thead.bg-gradient-to-r {
   background: linear-gradient(to right, #1E293B, #334155) !important;
 }
 
-.dark tbody.bg-white {
-  background-color: #0F172A !important;
+.dark tbody.bg-white,
+.dark tbody:not([class*="dark:bg"]) {
+  background-color: #0a1a2f !important;
 }
 
-.dark tr.hover\:bg-gray-50:hover {
+.dark tr.hover\:bg-gray-50:hover,
+.dark tbody tr:hover {
   background-color: #1E293B !important;
+}
+
+/* Linhas de tabela sem classe - fundo escuro */
+.dark tbody tr {
+  background-color: #0a1a2f;
+}
+
+/* Texto em tabelas no dark mode - forçar legibilidade em todas as células */
+.dark thead th {
+  color: #E2E8F0 !important;
+}
+.dark tbody td {
+  color: #F8FAFC !important;
+}
+.dark tbody td .text-gray-500,
+.dark tbody td .text-gray-600,
+.dark tbody td .text-gray-700,
+.dark tbody td .text-gray-800,
+.dark tbody td .text-gray-900,
+.dark tbody td p.text-gray-900,
+.dark tbody td p.text-gray-600,
+.dark tbody td span.text-gray-600,
+.dark tbody td span.text-gray-500 {
+  color: #F8FAFC !important;
 }
 
 /* Força badges claros a terem cores apropriadas no dark */
@@ -532,4 +653,82 @@ button:active {
 
 .dark .text-orange-800 {
   color: #fdba74 !important; /* orange-300 */
+}
+
+
+
+/* ========== UI DESIGN TOKENS (shadcn-style) ========== */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.65rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    /* Sidebar (HSL para compatibilidade com Tailwind) */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+    /* Sidebar dark */
+    --sidebar-background: 222.2 84% 4.9%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217.2 91.2% 59.8%;
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+    --sidebar-accent: 217.2 32.6% 17.5%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217.2 32.6% 17.5%;
+    --sidebar-ring: 224.3 76.3% 48%;
+  }
 }

@@ -3,12 +3,16 @@ import { toast } from 'sonner';
 import { type MaterialItem, MaterialCategory } from '../types';
 import { materiaisService, Material } from '../services/materiaisService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { configuracoesService } from '../services/configuracoesService';
+import { empresasService, type Empresa } from '../services/empresasService';
 import { comprasService } from '../services/comprasService';
 import { movimentacoesService } from '../services/movimentacoesService';
+import { buscarNcmPorTermo, consultarNcmPorCodigo, type BrasilApiNcmItem } from '../services/brasilApiNcmService';
 import { axiosApiService } from '../services/axiosApi';
-import { getUploadUrl } from '../config/api';
+import { getBackendUrl, getUploadUrl } from '../config/api';
 import SupplierCombobox from './ui/SupplierCombobox';
 import ViewToggle from './ui/ViewToggle';
+import ActionsDropdown from './ui/ActionsDropdown';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { AuthContext } from '../contexts/AuthContext';
@@ -34,6 +38,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
+import { CabosPrecoBitolaModal } from './modals/CabosPrecoBitolaModal';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -109,13 +114,16 @@ interface MaterialFormState {
     valorVendaM: string; // Preço de venda em metros (para unidade M ou KG/M)
     valorVendaCM: string; // Preço de venda em centímetros (para unidade M ou KG/M)
     porcentagemLucro: string; // Porcentagem de lucro (calculado automaticamente)
+    percentualImposto: string; // Alíquota % sobre valor de venda (DAS), default 8
+    markupAplicado: string; // Markup (Fabricante 1.55 ou Revendedor 1.10)
+    ncm: string; // NCM (8 dígitos; busca auxiliar via Brasil API)
 }
 
 const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const authContext = useContext(AuthContext);
     const user = authContext?.user;
     const userRole = user?.role?.toLowerCase();
-    const isAdminOrDev = userRole === 'admin' || userRole === 'desenvolvedor';
+    const isAdminOrDev = userRole === 'admin' || userRole === 'desenvolvedor' || user?.isAdmin === true;
     
     const [materials, setMaterials] = useState<MaterialItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -156,16 +164,23 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const [comprasFracionamentoPendentes, setComprasFracionamentoPendentes] = useState<any[]>([]);
     const [modalFracionamentoPendente, setModalFracionamentoPendente] = useState(false);
     
-    // Estados para exportação/importação
-    const [menuExportarOpen, setMenuExportarOpen] = useState(false);
-    const [modalImportarOpen, setModalImportarOpen] = useState(false);
-    const [arquivoImportar, setArquivoImportar] = useState<File | null>(null);
-    const [processandoImportacao, setProcessandoImportacao] = useState(false);
+    // Estados para exportação/importação JSON
     const [importing, setImporting] = useState(false);
+    const [ncmSearchLoading, setNcmSearchLoading] = useState(false);
+    const [ncmSearchResults, setNcmSearchResults] = useState<BrasilApiNcmItem[]>([]);
+    const [ncmDescricaoPreview, setNcmDescricaoPreview] = useState<string | null>(null);
+
+    const [cabosPrecoModalOpen, setCabosPrecoModalOpen] = useState(false);
     const [showDialogFornecedor, setShowDialogFornecedor] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
     const [loadingFornecedores, setLoadingFornecedores] = useState(false);
+    const [configPrecificacao, setConfigPrecificacao] = useState<{
+        aliquotaImpostoPadrao: number;
+        markupFabricante: number;
+        markupRevendedor: number;
+    } | null>(null);
+    const [empresasAliquotas, setEmpresasAliquotas] = useState<Empresa[]>([]);
     
     // Estados para upload de imagem
     const [imagemSelecionada, setImagemSelecionada] = useState<File | null>(null);
@@ -191,7 +206,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         valorVenda: '', // Preço de venda (para unidades padrão)
         valorVendaM: '', // Preço de venda em metros (para unidade M ou KG/M)
         valorVendaCM: '', // Preço de venda em centímetros (para unidade M ou KG/M)
-        porcentagemLucro: '' // Porcentagem de lucro
+        porcentagemLucro: '', // Porcentagem de lucro
+        percentualImposto: '8', // Alíquota % sobre valor de venda (DAS), default 8
+        markupAplicado: '1.55', // Markup (Fabricante 1.55 ou Revendedor 1.10)
+        ncm: ''
     });
 
 
@@ -206,37 +224,40 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             
             if (response.success && response.data) {
                 // Converter dados da API para o formato do componente
-                const materialsData = response.data.map((material: Material) => ({
-                    id: material.id,
-                    name: material.nome || material.descricao,
-                    sku: material.sku || material.codigo || 'N/A', // ✅ Usar sku do backend
-                    type: material.tipo || material.categoria || 'Material',
-                    category: MaterialCategory.ELETRICO, // Mapear conforme necessário
-                    description: material.descricao,
-                    ncm: material.ncm, // ✅ NCM do material (dado fiscal)
-                    imagemUrl: material.imagemUrl, // ✅ URL da imagem do material
-                    stock: material.estoque,
-                    minStock: material.estoqueMinimo,
-                    unitOfMeasure: material.unidadeMedida || material.unidade || 'un', // ✅ Usar unidadeMedida do backend
-                    location: 'Estoque', // Campo não disponível na API
-
-                    price: material.preco || 0,
-                    valorVenda: material.valorVenda,
-                    valorVendaM: (material as any).valorVendaM,
-                    valorVendaCM: (material as any).valorVendaCM,
-                    porcentagemLucro: material.porcentagemLucro,
-                    supplier: material.fornecedor 
-                        ? { id: material.fornecedor.id, name: material.fornecedor.nome } 
-                        : { id: '', name: 'Sem fornecedor' },
-                    // ✅ Campos de fracionamento
-                    quantidadePorEmbalagem: material.quantidadePorEmbalagem,
-                    tipoEmbalagem: material.tipoEmbalagem,
-                    precoEmbalagem: material.precoEmbalagem,
-                    precoUnitario: material.precoUnitario
-                }));
+                const materialsData: MaterialItem[] = response.data.map((material: Material) => {
+                    const m = material as Material & { quantidadePorEmbalagem?: number; tipoEmbalagem?: string; precoEmbalagem?: number; precoUnitario?: number };
+                    return {
+                        id: material.id,
+                        nome: material.nome || material.descricao || '',
+                        name: material.nome || material.descricao || '',
+                        sku: material.sku || material.codigo || 'N/A',
+                        type: material.tipo || material.categoria || 'Material',
+                        category: (material.categoria as MaterialCategory) || MaterialCategory.ELETRICO,
+                        description: material.descricao ?? '',
+                        ncm: material.ncm,
+                        imagemUrl: material.imagemUrl,
+                        stock: material.estoque ?? 0,
+                        minStock: material.estoqueMinimo ?? 0,
+                        unitOfMeasure: material.unidadeMedida || material.unidade || 'un',
+                        location: 'Estoque',
+                        price: material.preco ?? 0,
+                        valorVenda: material.valorVenda,
+                        valorVendaM: (material as any).valorVendaM,
+                        valorVendaCM: (material as any).valorVendaCM,
+                        porcentagemLucro: material.porcentagemLucro,
+                        percentualImposto: (material as any).percentualImposto != null ? String((material as any).percentualImposto) : '8',
+                        supplier: material.fornecedor
+                            ? { id: material.fornecedor.id, nome: material.fornecedor.nome, name: material.fornecedor.nome }
+                            : { id: '', nome: 'Sem fornecedor', name: 'Sem fornecedor' },
+                        supplierClassificacao: (material.fornecedor as any)?.classificacao ?? null,
+                        quantidadePorEmbalagem: m.quantidadePorEmbalagem,
+                        tipoEmbalagem: m.tipoEmbalagem,
+                        precoEmbalagem: m.precoEmbalagem,
+                        precoUnitario: m.precoUnitario
+                    };
+                });
 
                 // ✅ CORREÇÃO: Exibir TODOS os materiais ativos, independente do estoque
-                // O filtro por estoque zerado pode ser aplicado depois pelo usuário
                 setMaterials(materialsData);
                 console.log(`✅ ${materialsData.length} materiais carregados`);
             } else {
@@ -256,6 +277,31 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         loadMaterials();
     }, []);
 
+    useEffect(() => {
+        configuracoesService.getConfiguracoes().then((res) => {
+            if (res.success && res.data) {
+                const d = res.data as any;
+                setConfigPrecificacao({
+                    aliquotaImpostoPadrao: d.aliquotaImpostoPadrao ?? d.percentualImpostoPadrao ?? 8,
+                    markupFabricante: d.markupFabricante ?? d.multiplicadorVenda ?? 1.55,
+                    markupRevendedor: d.markupRevendedor ?? 1.10
+                });
+            }
+        }).catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        if (isModalOpen) {
+            empresasService.listar({ ativo: true }).then((res) => {
+                if (res.success && res.data) {
+                    setEmpresasAliquotas(Array.isArray(res.data) ? res.data : []);
+                } else {
+                    setEmpresasAliquotas([]);
+                }
+            }).catch(() => setEmpresasAliquotas([]));
+        }
+    }, [isModalOpen]);
+
     // Filtros
     const filteredMaterials = useMemo(() => {
         let filtered = materials;
@@ -267,9 +313,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
         // Filtro por estoque
         if (stockFilter === 'Baixo') {
-            filtered = filtered.filter(material => material.stock > 0 && material.stock <= material.minStock);
+            filtered = filtered.filter(material => (material.stock ?? 0) > 0 && (material.stock ?? 0) <= (material.minStock ?? 0));
         } else if (stockFilter === 'Zerado') {
-            filtered = filtered.filter(material => material.stock === 0);
+            filtered = filtered.filter(material => (material.stock ?? 0) === 0);
         }
 
         // Filtro por busca
@@ -287,9 +333,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     // Estatísticas
     const stats = useMemo(() => {
         const totalItems = materials.length;
-        const lowStock = materials.filter(m => m.stock > 0 && m.stock <= m.minStock).length;
-        const outOfStock = materials.filter(m => m.stock === 0).length;
-        const totalValue = materials.reduce((acc, m) => acc + (m.stock * (m.price || 0)), 0);
+        const lowStock = materials.filter(m => (m.stock ?? 0) > 0 && (m.stock ?? 0) <= (m.minStock ?? 0)).length;
+        const outOfStock = materials.filter(m => (m.stock ?? 0) === 0).length;
+        const totalValue = materials.reduce((acc, m) => acc + ((m.stock ?? 0) * (m.price || 0)), 0);
 
         return { totalItems, lowStock, outOfStock, totalValue };
     }, [materials]);
@@ -349,19 +395,22 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     const handleOpenModal = (item: MaterialItem | null = null) => {
         // Carregar fornecedores quando abrir o modal
         loadFornecedores();
-        
+        setNcmSearchResults([]);
+        setNcmDescricaoPreview(null);
+        setNcmSearchLoading(false);
+
         if (item) {
             // ✅ Removida lógica automática que forçava unidade baseada no nome
             // Agora o usuário tem controle total sobre a unidade de medida
             setItemToEdit(item);
             setFormState({
-                name: item.name,
-                sku: item.sku || 'N/A', // ✅ Garantir que SKU seja exibido
-                type: item.type,
-                category: item.category,
-                description: item.description,
-                stock: item.stock.toString(),
-                minStock: item.minStock.toString(),
+                name: item.nome ?? item.name ?? '',
+                sku: item.sku || 'N/A',
+                type: item.type ?? '',
+                category: (item.category as MaterialCategory) ?? MaterialCategory.ELETRICO,
+                description: item.description ?? '',
+                stock: String(item.stock ?? 0),
+                minStock: String(item.minStock ?? 0),
                 unitOfMeasure: item.unitOfMeasure || 'un', // ✅ Usar unidade do item
                 location: item.location || '',
                 imageUrl: item.imageUrl,
@@ -375,7 +424,16 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 valorVendaCM: ((item as any).valorVendaCM || 0).toString(),
                 porcentagemLucro: (item.porcentagemLucro || (item.valorVenda && item.price
                     ? calcularPorcentagemLucro(item.price, item.valorVenda).toFixed(2)
-                    : '0')).toString()
+                    : '0')).toString(),
+                percentualImposto: ((item as any).percentualImposto != null ? String((item as any).percentualImposto) : '8'),
+                markupAplicado: (() => {
+                    const classificacao = (item as any).supplierClassificacao;
+                    const markupFab = configPrecificacao?.markupFabricante ?? 1.55;
+                    const markupRev = configPrecificacao?.markupRevendedor ?? 1.10;
+                    if (classificacao === 'Representante_Vendedor') return String(markupRev);
+                    return String(markupFab);
+                })(),
+                ncm: item.ncm ? String(item.ncm).replace(/\D/g, '').slice(0, 8) : ''
             });
         } else {
             setItemToEdit(null);
@@ -398,7 +456,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 valorVenda: '',
                 valorVendaM: '',
                 valorVendaCM: '',
-                porcentagemLucro: ''
+                porcentagemLucro: '',
+                percentualImposto: '8',
+                markupAplicado: '1.55',
+                ncm: ''
             });
         }
         setIsModalOpen(true);
@@ -409,6 +470,39 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         setItemToEdit(null);
         setImagemSelecionada(null);
         setPreviewImagem(null);
+        setNcmSearchResults([]);
+        setNcmDescricaoPreview(null);
+        setNcmSearchLoading(false);
+    };
+
+    const handleBuscarNcm = async () => {
+        const q = formState.ncm.trim();
+        if (q.length < 2) {
+            toast.error('Busca NCM', { description: 'Digite ao menos 2 caracteres (código ou palavra da descrição).' });
+            return;
+        }
+        setNcmSearchLoading(true);
+        setNcmSearchResults([]);
+        try {
+            const res = await buscarNcmPorTermo(q);
+            if (!res.success) {
+                toast.error(res.error || 'Erro ao buscar NCM');
+                return;
+            }
+            setNcmSearchResults(res.data);
+            if (res.data.length === 0) {
+                toast.info('Nenhum NCM encontrado para este termo.');
+            }
+        } finally {
+            setNcmSearchLoading(false);
+        }
+    };
+
+    const handleSelecionarNcm = (it: BrasilApiNcmItem) => {
+        const d = it.codigo.replace(/\D/g, '').slice(0, 8);
+        setFormState((prev) => ({ ...prev, ncm: d }));
+        setNcmDescricaoPreview(it.descricao.trim());
+        setNcmSearchResults([]);
     };
 
     // Funções para manipulação de imagem
@@ -503,10 +597,29 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             // Agora o usuário tem controle total sobre a unidade de medida
             const unidadeMedidaFinal = formState.unitOfMeasure;
 
+            const ncmRaw = formState.ncm.trim();
+            const ncmDigits = ncmRaw.replace(/\D/g, '');
+            let ncmGravar: string | null = null;
+            if (ncmRaw.length === 0) {
+                ncmGravar = null;
+            } else if (ncmDigits.length === 8) {
+                ncmGravar = ncmDigits;
+            } else {
+                toast.error('NCM inválido', {
+                    description: 'Informe exatamente 8 dígitos, deixe vazio ou use Buscar NCM e selecione um resultado.',
+                });
+                return;
+            }
+
+            const descricaoFinal =
+                (formState.description && formState.description.trim().length > 0)
+                    ? formState.description.trim()
+                    : formState.name;
+
             const materialData = {
                 sku: formState.sku, // ✅ Usar sku em vez de codigo
                 nome: formState.name, // ✅ Incluir nome
-                descricao: formState.name, // Manter descricao também
+                descricao: descricaoFinal, // ✅ Permitir descrição distinta do nome
                 unidadeMedida: unidadeMedidaFinal, // ✅ Usar unidadeMedida em vez de unidade
 
                 preco: precoCusto,
@@ -515,11 +628,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 valorVendaM: valorVendaM > 0 ? valorVendaM : undefined,
                 valorVendaCM: valorVendaCM > 0 ? valorVendaCM : undefined,
                 porcentagemLucro: porcentagemLucro > 0 ? porcentagemLucro : undefined,
+                percentualImposto: parseFloat(formState.percentualImposto || '8') || undefined,
                 estoque: parseFloat(formState.stock),
                 estoqueMinimo: parseFloat(formState.minStock),
                 categoria: formState.type,
                 tipo: formState.type, // ✅ Incluir tipo também
-                fornecedorId: fornecedorIdFinal || undefined
+                fornecedorId: fornecedorIdFinal || undefined,
+                ncm: ncmGravar
             };
 
             let materialId: string;
@@ -535,9 +650,26 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     return;
                 }
             } else {
-                // Criar novo material
-                const response = await materiaisService.createMaterial(materialData);
-                if (response.success) {
+                // Criar novo material (service espera codigo, descricao, unidade)
+                const createPayload = {
+                    // Preferir chaves novas (backend suporta), manter legado para compatibilidade
+                    sku: formState.sku,
+                    nome: formState.name,
+                    descricao: descricaoFinal,
+                    unidadeMedida: unidadeMedidaFinal,
+                    codigo: formState.sku,
+                    unidade: unidadeMedidaFinal,
+                    preco: precoCusto,
+                    valorVenda: valorVenda > 0 ? valorVenda : undefined,
+                    porcentagemLucro: porcentagemLucro > 0 ? porcentagemLucro : undefined,
+                    estoque: parseFloat(formState.stock),
+                    estoqueMinimo: parseFloat(formState.minStock),
+                    categoria: formState.type,
+                    fornecedorId: fornecedorIdFinal || undefined,
+                    ncm: ncmGravar || undefined
+                };
+                const response = await materiaisService.createMaterial(createPayload);
+                if (response.success && response.data) {
                     materialId = response.data.id;
                     toast.success('✅ Material criado com sucesso!');
                 } else {
@@ -667,7 +799,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 await loadMaterials();
             } else {
                 toast.error('Erro ao desativar material', {
-                    description: response.error || 'Não foi possível desativar o material.',
+                    description: (response as { message?: string }).message || 'Não foi possível desativar o material.',
                 });
             }
         } catch (error) {
@@ -695,12 +827,36 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const [materialIdRecalculando, setMaterialIdRecalculando] = useState<string | null>(null);
+    const handleRecalcularCustoUnitario = async (material: MaterialItem) => {
+        setMaterialIdRecalculando(material.id);
+        try {
+            const response = await axiosApiService.post(`/api/materiais/${material.id}/recalcular-custo`, { force: true });
+            if (response.success && (response as any).aplicado) {
+                const data = (response as any).data;
+                toast.success(
+                    data?.materialNome
+                        ? `Custo de "${data.materialNome}" corrigido (R$ ${data.valorUnitarioAnterior?.toFixed(2)} → R$ ${data.valorUnitarioNovo?.toFixed(2)}).`
+                        : 'Custo unitário recalculado.'
+                );
+                loadMaterials();
+            } else {
+                const res = response as { success?: boolean; data?: unknown; message?: string };
+                toast.error(res.message || 'Recálculo não aplicado.');
+            }
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Erro ao recalcular custo.');
+        } finally {
+            setMaterialIdRecalculando(null);
+        }
+    };
+
     const handleProcessarFracionamento = async () => {
         try {
             setProcessandoFracionamento(true);
             
             // Primeiro, buscar compras pendentes para mostrar ao usuário
-            const comprasPendentes = await comprasService.buscarComprasComFracionamentoPendente();
+            const comprasPendentes = await comprasService.buscarComprasComFracionamentoPendente() as { success?: boolean; data?: unknown[] };
             
             if (!comprasPendentes.success || !comprasPendentes.data || comprasPendentes.data.length === 0) {
                 toast.info('✅ Nenhuma compra com fracionamento pendente encontrada');
@@ -724,11 +880,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             setProcessandoFracionamento(true);
             setModalFracionamentoPendente(false);
             
-            const resultado = await comprasService.processarAtualizacoesFracionamento();
+            const resultado = await comprasService.processarAtualizacoesFracionamento() as { success?: boolean; comprasProcessadas?: number; itensAtualizados?: number; error?: string };
             
             if (resultado.success) {
                 toast.success('✅ Fracionamento processado com sucesso!', {
-                    description: `${resultado.comprasProcessadas} compra(s) processada(s), ${resultado.itensAtualizados} item(ns) atualizado(s)`
+                    description: `${resultado.comprasProcessadas ?? 0} compra(s) processada(s), ${resultado.itensAtualizados ?? 0} item(ns) atualizado(s)`
                 });
                 
                 // Recarregar materiais para mostrar estoque atualizado
@@ -808,12 +964,54 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const handleAtualizarValoresVenda = async () => {
+        const toastId = toast.loading('Atualizando valores de venda...', {
+            duration: 0 // Não desaparecer automaticamente
+        });
+        
+        try {
+            const response = await axiosApiService.post('/api/materiais/atualizar-valores-venda');
+            const data = response.data as { success?: boolean; data?: { totalMateriais?: number; materiaisAtualizados?: number; markup?: number; cobertura?: number; porcentagemLucro?: string } } | null;
+            
+            if (data?.success && data?.data) {
+                const { 
+                    totalMateriais = 0, 
+                    materiaisAtualizados = 0, 
+                    markup = 0, 
+                    cobertura = 0, 
+                    porcentagemLucro = '0' 
+                } = data.data;
+                
+                toast.success(
+                    `✅ Valores de venda atualizados!\n` +
+                    `📊 ${materiaisAtualizados}/${totalMateriais} materiais atualizados (${cobertura}%)\n` +
+                    `💰 Markup: ${markup}x (+${porcentagemLucro}% lucro)`, 
+                    { 
+                        id: toastId,
+                        duration: 6000 
+                    }
+                );
+                
+                // Recarregar a lista de materiais para mostrar os valores atualizados
+                await loadMaterials();
+            }
+        } catch (error: any) {
+            console.error('❌ Erro ao atualizar valores de venda:', error);
+            
+            const message = error.response?.data?.message || 'Erro interno do servidor';
+            toast.error(`Erro ao atualizar valores de venda: ${message}`, { 
+                id: toastId,
+                duration: 6000 
+            });
+        }
+    };
+
     // Exportar materiais críticos em PDF - abre em nova aba com botão imprimir
     const gerarPDFMateriaisCriticos = async (incluirFornecedor: boolean = true) => {
         try {
             // Buscar materiais críticos (estoque zerado ou abaixo do mínimo)
             const materiaisCriticos = materials.filter(m => 
-                m.stock === 0 || m.stock <= m.minStock
+                (m.stock ?? 0) === 0 || (m.stock ?? 0) <= (m.minStock ?? 0)
             );
 
             if (materiaisCriticos.length === 0) {
@@ -996,7 +1194,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
     const handleExportarPDF = async () => {
         try {
-            setMenuExportarOpen(false);
             setShowDialogFornecedor(true);
         } catch (error) {
             console.error('Erro ao exportar:', error);
@@ -1008,100 +1205,44 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
         gerarPDFMateriaisCriticos(incluirFornecedor);
     };
 
-    // Importar preços atualizados
-    const handleImportar = async () => {
-        if (!arquivoImportar) {
-
-            toast.warning('Nenhum arquivo selecionado', {
-                description: 'Por favor, selecione um arquivo XLSX ou CSV para importar.',
-            });
-            return;
-        }
-
-        const extensao = arquivoImportar.name.split('.').pop()?.toLowerCase();
-        if (!['xlsx', 'csv'].includes(extensao || '')) {
-
-            toast.error('Formato de arquivo inválido', {
-                description: 'Apenas arquivos XLSX ou CSV são permitidos. Selecione um arquivo válido.',
-            });
-            return;
-        }
-
-        try {
-            setProcessandoImportacao(true);
-            
-            const formData = new FormData();
-            formData.append('arquivo', arquivoImportar);
-
-            const response = await materiaisService.importarPrecos(formData);
-            
-            console.log('📥 Resposta da importação:', response);
-            
-            if (response.success) {
-                const atualizados = response.data?.atualizados || 0;
-                const erros = response.data?.erros || 0;
-                const total = response.data?.total || 0;
-                
-                if (atualizados > 0) {
-
-                    toast.success('Preços atualizados com sucesso!', {
-                        description: `${atualizados} de ${total} preço(s) atualizado(s).${erros > 0 ? ` ${erros} erro(s) encontrado(s).` : ''}`,
-                        duration: 5000,
-                    });
-                    await loadMaterials(); // Recarregar lista
-                    setModalImportarOpen(false);
-                    setArquivoImportar(null);
-                } else {
-
-                    toast.warning('Nenhum preço foi atualizado', {
-                        description: erros > 0 ? `${erros} erro(s) encontrado(s). Verifique o arquivo e tente novamente.` : 'Nenhum registro válido encontrado no arquivo.',
-                        duration: 5000,
-                    });
-                }
-            } else {
-                toast.error(response.error || '❌ Erro ao importar arquivo');
-            }
-        } catch (error: any) {
-            console.error('Erro ao importar preços:', error);
-            toast.error('❌ Erro ao processar arquivo');
-        } finally {
-            setProcessandoImportacao(false);
-        }
-    };
-
     // Funções de Exportação/Importação JSON
-    const handleExportTemplate = () => {
+    const handleExportTemplate = async () => {
         try {
-            setMenuExportarOpen(false);
-            const template = generateExampleTemplate('materiais');
+            const baseUrl = getBackendUrl();
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${baseUrl}/api/materiais/import/template`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+            const template = res.ok ? await res.json() : generateExampleTemplate('materiais');
             exportToJSON(template, `template_materiais_${new Date().toISOString().split('T')[0]}.json`);
             toast.success('✅ Template exportado com sucesso!');
         } catch (error) {
-            console.error('Erro ao exportar template:', error);
-            toast.error('❌ Erro ao exportar template');
+            try {
+                const template = generateExampleTemplate('materiais');
+                exportToJSON(template, `template_materiais_${new Date().toISOString().split('T')[0]}.json`);
+                toast.success('✅ Template exportado com sucesso!');
+            } catch (e) {
+                console.error('Erro ao exportar template:', e);
+                toast.error('❌ Erro ao exportar template');
+            }
         }
     };
 
     const handleExportJSON = () => {
         try {
-            setMenuExportarOpen(false);
             const template: ImportExportData = {
                 version: '1.0.0',
                 exportDate: new Date().toISOString(),
                 materiais: materials.map(material => ({
-                    sku: material.sku, // ✅ Usar sku
-                    codigo: material.sku, // Manter para compatibilidade
-                    descricao: material.name,
-                    nome: material.name, // ✅ Incluir nome também
-                    unidadeMedida: material.unitOfMeasure, // ✅ Usar unidadeMedida
-                    unidade: material.unitOfMeasure, // Manter para compatibilidade
-                    preco: material.price || 0,
-                    estoque: material.stock,
-                    estoqueMinimo: material.minStock,
-                    categoria: material.type || material.category,
-                    tipo: material.type, // ✅ Incluir tipo também
+                    codigo: material.sku ?? '',
+                    descricao: material.nome ?? material.name ?? '',
+                    unidade: material.unitOfMeasure ?? 'un',
+                    preco: material.price ?? 0,
+                    estoque: material.stock ?? 0,
+                    estoqueMinimo: material.minStock ?? 0,
+                    categoria: material.type ?? (typeof material.category === 'string' ? material.category : undefined),
                     fornecedorId: material.supplierId,
-                    fornecedorNome: material.supplierName || material.supplier?.name,
+                    fornecedorNome: material.supplier?.name,
                     ativo: material.ativo !== false,
                 })),
             };
@@ -1137,61 +1278,43 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                 return;
             }
 
-            let successCount = 0;
-            let errorCount = 0;
-
-            // Importar cada material
-            for (const materialTemplate of data.materiais) {
-                try {
-                    // Buscar fornecedor por nome se não tiver ID
-                    let fornecedorId = materialTemplate.fornecedorId;
-                    if (!fornecedorId && materialTemplate.fornecedorNome) {
-                        // Aqui você precisaria buscar o fornecedor pelo nome
-                        // Por enquanto, deixamos como opcional
-                        console.warn(`Fornecedor não encontrado: ${materialTemplate.fornecedorNome}`);
-                    }
-
-                    // Criar material
-                    const materialData = {
-                        sku: materialTemplate.sku || materialTemplate.codigo, // ✅ Usar sku, com fallback para codigo
-                        nome: materialTemplate.nome || materialTemplate.descricao, // ✅ Incluir nome
-                        descricao: materialTemplate.descricao,
-                        unidadeMedida: materialTemplate.unidadeMedida || materialTemplate.unidade || 'un', // ✅ Usar unidadeMedida, com fallback
-                        preco: materialTemplate.preco,
-                        estoque: materialTemplate.estoque,
-                        estoqueMinimo: materialTemplate.estoqueMinimo || 5,
-                        categoria: materialTemplate.categoria,
-                        tipo: materialTemplate.tipo || materialTemplate.categoria, // ✅ Incluir tipo
-                        fornecedorId,
-                    };
-
-                    const response = await materiaisService.createMaterial(materialData);
-                    if (response.success) {
-                        successCount++;
-                    } else {
-                        errorCount++;
-                        console.error('Erro ao criar material:', response.error || response.message);
-                    }
-                } catch (error) {
-                    errorCount++;
-                    console.error('Erro ao importar material:', error);
+            // Resolver fornecedor por nome quando não houver ID
+            const materiaisParaEnviar = data.materiais.map((mat: any) => {
+                let fornecedorId = mat.fornecedorId ?? undefined;
+                if (!fornecedorId && mat.fornecedorNome) {
+                    const encontrado = fornecedores.find(f => f.name?.toLowerCase() === String(mat.fornecedorNome).toLowerCase());
+                    if (encontrado) fornecedorId = encontrado.id;
                 }
-            }
+                return { ...mat, fornecedorId: fornecedorId || undefined };
+            });
 
-            // Limpar input
+            const response = await materiaisService.importMateriais(materiaisParaEnviar);
+
             if (fileInputRef.current) {
                 fileInputRef.current.value = '';
             }
 
-
-            if (successCount > 0) {
-                toast.success('Importação concluída!', {
-                    description: `${successCount} material(is) importado(s) com sucesso.${errorCount > 0 ? ` ${errorCount} erro(s) encontrado(s).` : ''}`,
-                    duration: 5000,
-                });
+            if (response.success && response.data) {
+                const dataRes = response.data as { criados?: number; erros?: number; mensagens?: string[] };
+                const criados = dataRes.criados ?? 0;
+                const erros = dataRes.erros ?? 0;
+                if (criados > 0) {
+                    toast.success('Importação concluída!', {
+                        description: `${criados} material(is) criado(s).${erros > 0 ? ` ${erros} erro(s).` : ''}`,
+                        duration: 5000,
+                    });
+                    if (Array.isArray(dataRes.mensagens) && dataRes.mensagens.length > 0) {
+                        console.warn('Detalhes dos erros na importação:', dataRes.mensagens);
+                    }
+                } else {
+                    toast.error('Nenhum material foi importado', {
+                        description: erros > 0 ? `${erros} erro(s). Verifique o arquivo.` : 'Nenhum registro válido.',
+                        duration: 5000,
+                    });
+                }
             } else {
-                toast.error('Nenhum material foi importado', {
-                    description: errorCount > 0 ? `${errorCount} erro(s) encontrado(s). Verifique o arquivo e tente novamente.` : 'Nenhum registro válido encontrado no arquivo.',
+                toast.error('Erro na importação', {
+                    description: response.message || 'Tente novamente.',
                     duration: 5000,
                 });
             }
@@ -1207,18 +1330,22 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     };
 
     const getStockStatusClass = (material: MaterialItem) => {
-        if (material.stock === 0) {
-            return 'bg-red-100 text-red-800 ring-1 ring-red-200';
-        } else if (material.stock <= material.minStock) {
-            return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
+        const stock = material.stock ?? 0;
+        const minStock = material.minStock ?? 0;
+        if (stock === 0) {
+            return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 ring-1 ring-red-200 dark:ring-red-800';
+        } else if (stock <= minStock) {
+            return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 ring-1 ring-yellow-200 dark:ring-yellow-800';
         }
-        return 'bg-green-100 text-green-800 ring-1 ring-green-200';
+        return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 ring-1 ring-green-200 dark:ring-green-800';
     };
 
     const getStockStatusText = (material: MaterialItem) => {
-        if (material.stock === 0) {
+        const stock = material.stock ?? 0;
+        const minStock = material.minStock ?? 0;
+        if (stock === 0) {
             return '❌ Esgotado';
-        } else if (material.stock <= material.minStock) {
+        } else if (stock <= minStock) {
             return '⚠️ Baixo';
         }
         return '✅ Normal';
@@ -1239,7 +1366,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
                     <p className="text-gray-600 dark:text-gray-300">Carregando estoque...</p>
@@ -1249,11 +1376,20 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-gray-900">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
+            {/* Input oculto para importação JSON */}
+            <input
+                type="file"
+                ref={fileInputRef}
+                accept=".json,application/json"
+                onChange={handleImportJSON}
+                className="hidden"
+                aria-label="Selecionar arquivo JSON para importar materiais"
+            />
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-white dark:hover:bg-gray-800 hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
@@ -1262,130 +1398,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                    <button
-                        onClick={handleAtualizarSKUsENCMs}
-                        disabled={atualizandoSKUs}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Gerar SKUs únicos e atualizar NCMs de materiais existentes"
-                    >
-                        {atualizandoSKUs ? (
-                            <>
-                                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Atualizando...
-                            </>
-                        ) : (
-                            <>
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                Atualizar SKUs/NCMs
-                            </>
-                        )}
-                    </button>
-                    <button
-
-                        onClick={() => setShowCorrigirNomesDialog(true)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all shadow-medium font-semibold"
-                        title="Atualizar nomes de produtos importados via XML"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        Atualizar Nomes
-                    </button>
-                    
-                    {/* Botões de Exportação */}
-                    <div className="relative group">
-                        <button
-                            onClick={() => setMenuExportarOpen(!menuExportarOpen)}
-                            className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            Exportar
-                        </button>
-                        
-                        {/* Menu Dropdown */}
-                        {menuExportarOpen && (
-                            <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-dark-card rounded-xl shadow-2xl border border-gray-200 dark:border-dark-border z-50 py-2 animate-fade-in">
-                                <button
-                                    onClick={handleExportarPDF}
-                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-3"
-                                >
-                                    <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                    </svg>
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">PDF (.pdf)</p>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Visualização impressa</p>
-                                    </div>
-                                </button>
-                                <div className="border-t border-gray-200 dark:border-dark-border my-2"></div>
-                                <button
-                                    onClick={handleExportTemplate}
-                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-3"
-                                >
-                                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                    </svg>
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">Template JSON</p>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Exportar template</p>
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={handleExportJSON}
-                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-3"
-                                >
-                                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                    </svg>
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">Exportar JSON</p>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Todos os materiais</p>
-                                    </div>
-                                </button>
-                                <button
-                                    onClick={handleImportClick}
-                                    disabled={importing}
-                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-3 disabled:opacity-50"
-                                >
-                                    <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                    </svg>
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{importing ? 'Importando...' : 'Importar JSON'}</p>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Importar materiais</p>
-                                    </div>
-                                </button>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".json"
-                                    onChange={handleImportJSON}
-                                    style={{ display: 'none' }}
-                                />
-                                <div className="border-t border-gray-200 dark:border-dark-border my-2"></div>
-                                <button
-                                    onClick={() => setModalImportarOpen(true)}
-                                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-3"
-                                >
-                                    <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                    </svg>
-                                    <div>
-                                        <p className="font-semibold text-gray-900 dark:text-dark-text">Importar Preços</p>
-                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Atualizar valores</p>
-                                    </div>
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                    
+                    {/* Botão Novo Material - Mantido separado por ser ação principal */}
                     <button
                         onClick={() => handleOpenModal()}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-700 hover:to-teal-600 transition-all shadow-medium font-semibold"
@@ -1394,27 +1407,119 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         Novo Material
                     </button>
                     
-                    {/* Botão de Atualizar Fracionamento */}
-                    <button
-                        onClick={handleProcessarFracionamento}
-                        disabled={processandoFracionamento}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-500 text-white rounded-xl hover:from-blue-700 hover:to-indigo-600 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Atualizar estoque com base em fracionamentos configurados nas compras"
-                    >
-                        {processandoFracionamento ? (
-                            <>
-                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                Processando...
-                            </>
-                        ) : (
-                            <>
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                Atualizar Fracionamento
-                            </>
-                        )}
-                    </button>
+                    {/* Botão de Ações com Dropdown */}
+                    <ActionsDropdown
+                        actions={[
+                            ...(isAdminOrDev ? [{
+                                label: 'Atualizar Valores de Venda',
+                                onClick: handleAtualizarValoresVenda,
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                ),
+                                variant: 'primary' as const
+                            }] : []),
+                            {
+                                label: 'Preço por bitola (cabos)',
+                                onClick: () => setCabosPrecoModalOpen(true),
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                    </svg>
+                                ),
+                                variant: 'primary' as const
+                            },
+                            {
+                                label: atualizandoSKUs ? 'Atualizando SKUs/NCMs...' : 'Atualizar SKUs/NCMs',
+                                onClick: handleAtualizarSKUsENCMs,
+                                disabled: atualizandoSKUs,
+                                icon: atualizandoSKUs ? (
+                                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ),
+                                variant: 'success'
+                            },
+                            {
+                                label: 'Atualizar Nomes',
+                                onClick: () => setShowCorrigirNomesDialog(true),
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ),
+                                variant: 'primary'
+                            },
+                            {
+                                label: processandoFracionamento ? 'Processando Fracionamento...' : 'Atualizar Fracionamento',
+                                onClick: handleProcessarFracionamento,
+                                disabled: processandoFracionamento,
+                                icon: processandoFracionamento ? (
+                                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                ),
+                                variant: 'primary'
+                            },
+                            {
+                                label: 'Exportar PDF',
+                                onClick: () => {
+                                    handleExportarPDF();
+                                },
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                    </svg>
+                                ),
+                                variant: 'default'
+                            },
+                            {
+                                label: 'Template JSON',
+                                onClick: handleExportTemplate,
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                ),
+                                variant: 'default'
+                            },
+                            {
+                                label: 'Exportar JSON',
+                                onClick: handleExportJSON,
+                                icon: (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                ),
+                                variant: 'default'
+                            },
+                            {
+                                label: importing ? 'Importando JSON...' : 'Importar JSON',
+                                onClick: handleImportClick,
+                                disabled: importing,
+                                icon: importing ? (
+                                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                ) : (
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                    </svg>
+                                ),
+                                variant: 'default'
+                            }
+                        ]}
+                        label="Ações"
+                    />
                 </div>
             </header>
 
@@ -1429,7 +1534,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* Cards de Estatísticas */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/50 dark:to-blue-800/50 flex items-center justify-center">
                             <CubeIcon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -1441,7 +1546,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/50 dark:to-orange-800/50 flex items-center justify-center">
                             <ExclamationTriangleIcon className="w-6 h-6 text-orange-600 dark:text-orange-400" />
@@ -1453,7 +1558,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/50 dark:to-red-800/50 flex items-center justify-center">
                             <XMarkIcon className="w-6 h-6 text-red-600 dark:text-red-400" />
@@ -1465,7 +1570,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/50 dark:to-green-800/50 flex items-center justify-center">
                             <span className="text-2xl">💰</span>
@@ -1481,7 +1586,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             </div>
 
             {/* Filtros */}
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-gray-700 mb-6">
+            <div className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
@@ -1491,7 +1596,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 placeholder="Buscar por nome, SKU ou tipo..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-teal-500 dark:focus:ring-teal-400 focus:border-teal-500 dark:focus:border-teal-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                className="input-field pl-10"
                             />
                         </div>
                     </div>
@@ -1500,7 +1605,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <select
                             value={categoryFilter}
                             onChange={(e) => setCategoryFilter(e.target.value as MaterialCategory | 'Todos')}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-teal-500 dark:focus:ring-teal-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="select-field"
                         >
                             <option value="Todos">Todas as Categorias</option>
                             <option value={MaterialCategory.ELETRICO}>Material Elétrico</option>
@@ -1514,7 +1619,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <select
                             value={stockFilter}
                             onChange={(e) => setStockFilter(e.target.value as 'Todos' | 'Baixo' | 'Zerado')}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-teal-500 dark:focus:ring-teal-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="select-field"
                         >
                             <option value="Todos">Todos os Estoques</option>
                             <option value="Baixo">Estoque Baixo</option>
@@ -1531,7 +1636,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-green-500 dark:bg-green-400 rounded-full"></div>
-                            <span className="text-xs text-gray-600 dark:text-gray-400">Normal: {materials.filter(m => m.stock > m.minStock).length}</span>
+                            <span className="text-xs text-gray-600 dark:text-gray-400">Normal: {materials.filter(m => (m.stock ?? 0) > (m.minStock ?? 0)).length}</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-yellow-500 dark:bg-yellow-400 rounded-full"></div>
@@ -1547,8 +1652,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* Grid de Materiais */}
             {filteredMaterials.length === 0 ? (
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-soft border border-gray-100 dark:border-gray-700 p-16 text-center">
-                    <div className="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border p-16 text-center">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-dark-card rounded-full flex items-center justify-center mx-auto mb-4">
                         <span className="text-4xl">📦</span>
                     </div>
                     <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Nenhum material encontrado</h3>
@@ -1568,11 +1673,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     )}
                 </div>
             ) : viewMode === 'grid' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {filteredMaterials.map((material) => (
-                        <div key={material.id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-soft hover:shadow-medium hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200">
-                            {/* Imagem do Material - Sempre visível */}
-                            <div className="w-full h-48 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center overflow-hidden">
+                        <div key={material.id} className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-teal-300 dark:hover:border-teal-600 transition-all duration-200 flex flex-col">
+                            {/* Imagem do Material - Compacta */}
+                            <div className="w-full h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center overflow-hidden">
                                 {material.imagemUrl ? (
                                     <img
                                         src={getUploadUrl(material.imagemUrl)}
@@ -1583,188 +1688,105 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             imgElement.style.display = 'none';
                                             const placeholder = document.createElement('div');
                                             placeholder.className = 'w-full h-full flex items-center justify-center';
-                                            placeholder.innerHTML = '<svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>';
+                                            placeholder.innerHTML = '<svg class="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>';
                                             imgElement.parentElement?.appendChild(placeholder);
                                         }}
                                     />
                                 ) : (
-                                    <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                     </svg>
                                 )}
                             </div>
                             
-                            {/* Conteúdo do Card */}
-                            <div className="p-6">
-                            {/* Header do Card */}
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex-1">
-
-                                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-1 line-clamp-2" title={material.name || ''}>
+                            {/* Conteúdo do Card - Compacto */}
+                            <div className="p-3 flex-1 flex flex-col">
+                                {/* Header do Card */}
+                                <div className="mb-2">
+                                    <h3 className="font-semibold text-sm text-gray-900 dark:text-white mb-1 line-clamp-2 leading-tight" title={material.name || ''}>
                                         {(material.name || '').includes('Produto importado via XML') 
                                             ? material.description || material.name || 'Sem nome'
                                             : material.name || 'Sem nome'}
                                     </h3>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300 ring-1 ring-teal-200 dark:ring-teal-700">
-                                            {getCategoryIcon(material.category)} {material.category}
+                                    <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                                        <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-teal-100 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300">
+                                            {getCategoryIcon((material.category as MaterialCategory) ?? MaterialCategory.OUTRO)} {material.category ?? 'N/A'}
                                         </span>
-                                        <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded font-mono">
-
-                                            {material.sku || 'N/A'}
+                                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${getStockStatusClass(material)}`}>
+                                            {getStockStatusText(material)}
                                         </span>
                                     </div>
-                                </div>
-                                <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStockStatusClass(material)}`}>
-                                    {getStockStatusText(material)}
-                                </span>
-                            </div>
-
-                            {/* Informações Principais */}
-                            <div className="space-y-3 mb-4">
-                                {/* Fornecedor - Destaque */}
-                                {material.supplier && (
-                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
-                                        <div className="flex items-center gap-2 text-sm">
-                                            <span>🏭</span>
-                                            <div className="flex-1">
-                                                <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Fornecedor</p>
-                                                <p className="font-bold text-blue-900 dark:text-blue-300 truncate">{material.supplier.name}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                
-                                {/* Localização - Destaque */}
-                                {material.location && (
-                                    <div className="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg p-2">
-                                        <div className="flex items-center gap-2 text-sm">
-                                            <span>📍</span>
-                                            <div className="flex-1">
-                                                <p className="text-xs text-purple-600 dark:text-purple-400 font-medium">Localização</p>
-                                                <p className="font-bold text-purple-900 dark:text-purple-300">{material.location}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                
-                                {/* Grid de Métricas */}
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                                        <p className="text-xs text-gray-600 dark:text-gray-400">📊 Quantidade</p>
-                                        <p className="font-bold text-gray-900 dark:text-white">
-                                            {material.stock} <span className="text-xs text-gray-500 dark:text-gray-400">{material.unitOfMeasure}</span>
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {material.minStock}</p>
-                                    </div>
-                                    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                                        <p className="text-xs text-gray-600 dark:text-gray-400">💰 Valor Unit.</p>
-                                        <p className="font-bold text-blue-700 dark:text-blue-400">
-                                            R$ {(material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Última compra</p>
-                                    </div>
-                                </div>
-                                
-                                {/* Valor de Venda */}
-                                <div className="bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 rounded-lg p-2 mt-2">
-                                    {(() => {
-                                        const valorVenda = getValorVendaExibicao(material);
-                                        return (
-                                            <>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-xs text-teal-600 dark:text-teal-400 font-medium">💵 Valor de Venda:</span>
-                                                    <span className="font-bold text-teal-700 dark:text-teal-400">
-                                                        R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        {valorVenda.unidade === 'm' && <span className="text-xs ml-1">/m</span>}
-                                                    </span>
-                                                </div>
-                                                {valorVenda.secundario && valorVenda.secundario > 0 && (
-                                                    <div className="flex justify-between items-center mt-1">
-                                                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">💵 Venda em cm:</span>
-                                                        <span className="text-sm font-semibold text-green-700 dark:text-green-400">
-                                                            R$ {valorVenda.secundario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/cm
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                {!valorVenda.temValor && (
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Usando preço de compra</p>
-                                                )}
-                                            </>
-                                        );
-                                    })()}
-                                </div>
-                            </div>
-
-                            {/* Valor Total em Estoque */}
-                            <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-3 rounded-xl mb-4">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-sm font-medium text-green-700 dark:text-green-400">💵 Valor Investido:</span>
-                                    <span className="font-bold text-green-700 dark:text-green-400 text-lg">
-                                        R$ {(material.stock * (material.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <span className="px-1.5 py-0.5 text-[10px] bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300 rounded font-mono">
+                                        {material.sku || 'N/A'}
                                     </span>
                                 </div>
-                            </div>
 
-                            {/* Botões de Ação */}
-                            <div className="grid grid-cols-2 gap-2 pt-4 border-t border-gray-100 dark:border-gray-700">
-                                <button
-                                    onClick={() => {
-                                        setMaterialParaVisualizar(material);
-                                        setViewModalOpen(true);
-                                    }}
-                                    className="flex items-center justify-center gap-1 px-3 py-2 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-colors text-sm font-semibold"
-                                    title="Visualizar detalhes do material"
-                                >
-                                    <EyeIcon className="w-4 h-4" />
-                                    Ver
-                                </button>
-                                <button
-                                    onClick={() => handleAbrirHistorico(material)}
-                                    className="flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors text-sm font-semibold"
-                                    title="Ver histórico de compras e preços"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                    </svg>
-                                    Histórico
-                                </button>
-                                <button
-                                    onClick={() => handleOpenModal(material)}
-                                    className="flex items-center justify-center gap-1 px-3 py-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors text-sm font-semibold"
-                                >
-                                    <PencilIcon className="w-4 h-4" />
-                                    Editar
-                                </button>
-                                {isAdminOrDev ? (
+                                {/* Informações Principais - Compactas */}
+                                <div className="space-y-1.5 mb-2 flex-1">
+                                    {/* Grid de Métricas Compacto */}
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        <div className="bg-gray-50 dark:bg-dark-card/50 rounded p-1.5">
+                                            <p className="text-[10px] text-gray-600 dark:text-gray-400">Estoque</p>
+                                            <p className="font-bold text-xs text-gray-900 dark:text-white">
+                                                {material.stock} <span className="text-[10px] text-gray-500">{material.unitOfMeasure}</span>
+                                            </p>
+                                        </div>
+                                        <div className="bg-gray-50 dark:bg-dark-card/50 rounded p-1.5">
+                                            <p className="text-[10px] text-gray-600 dark:text-gray-400">Preço</p>
+                                            <p className="font-bold text-xs text-blue-700 dark:text-blue-400">
+                                                R$ {(material.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Valor de Venda Compacto */}
+                                    <div className="bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800 rounded p-1.5">
+                                        {(() => {
+                                            const valorVenda = getValorVendaExibicao(material);
+                                            return (
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">Venda:</span>
+                                                    <span className="font-bold text-xs text-teal-700 dark:text-teal-400">
+                                                        R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        {valorVenda.unidade === 'm' && <span className="text-[10px]">/m</span>}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+
+                                {/* Botões de Ação - Compactos */}
+                                <div className="grid grid-cols-2 gap-1.5 pt-2 border-t border-gray-100 dark:border-dark-border">
                                     <button
-                                        onClick={() => handleOpenDeleteDialog(material)}
-                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors text-sm font-semibold"
-                                        title="Excluir material permanentemente (apenas admin/desenvolvedor)"
+                                        onClick={() => {
+                                            setMaterialParaVisualizar(material);
+                                            setViewModalOpen(true);
+                                        }}
+                                        className="flex items-center justify-center gap-1 px-2 py-1.5 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-colors text-[11px] font-semibold"
+                                        title="Visualizar detalhes"
                                     >
-                                        <TrashIcon className="w-4 h-4" />
-                                        Excluir
+                                        <EyeIcon className="w-3 h-3" />
+                                        Ver
                                     </button>
-                                ) : (
                                     <button
-                                        onClick={() => handleOpenDeleteDialog(material)}
-                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded-lg hover:bg-orange-200 dark:hover:bg-orange-900/70 transition-colors text-sm font-semibold"
-                                        title="Desativar material"
+                                        onClick={() => handleOpenModal(material)}
+                                        className="flex items-center justify-center gap-1 px-2 py-1.5 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors text-[11px] font-semibold"
+                                        title="Editar"
                                     >
-                                        <TrashIcon className="w-4 h-4" />
-                                        Desativar
+                                        <PencilIcon className="w-3 h-3" />
+                                        Editar
                                     </button>
-                                )}
-                            </div>
+                                </div>
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (
                 /* Visualização em Lista */
-                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-soft">
+                <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-2xl overflow-hidden shadow-soft">
                     <table className="w-full">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-dark-border">
                             <tr>
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Foto</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Material</th>
@@ -1778,21 +1800,21 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tbody className="bg-white dark:bg-dark-bg divide-y divide-gray-200 dark:divide-dark-border">
                             {filteredMaterials.map((material) => (
-                                <tr key={material.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                <tr key={material.id} className="bg-white dark:bg-dark-bg hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
                                     <td className="px-6 py-4 text-center">
                                         {material.imagemUrl ? (
                                             <img
                                                 src={getUploadUrl(material.imagemUrl)}
                                                 alt={material.name || 'Material'}
-                                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 dark:border-gray-600 mx-auto"
+                                                className="w-12 h-12 object-cover rounded-lg border border-gray-200 dark:border-dark-border mx-auto"
                                                 onError={(e) => {
                                                     (e.target as HTMLImageElement).src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"%3E%3Crect x="3" y="3" width="18" height="18" rx="2" ry="2"%3E%3C/rect%3E%3Ccircle cx="8.5" cy="8.5" r="1.5"%3E%3C/circle%3E%3Cpolyline points="21 15 16 10 5 21"%3E%3C/polyline%3E%3C/svg%3E';
                                                 }}
                                             />
                                         ) : (
-                                            <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center mx-auto">
+                                            <div className="w-12 h-12 bg-gray-100 dark:bg-dark-card rounded-lg flex items-center justify-center mx-auto">
                                                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                                 </svg>
@@ -1809,20 +1831,20 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         <p className="text-xs text-gray-500 dark:text-gray-400">{material.type || 'Sem tipo'}</p>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded font-mono">
+                                        <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300 rounded font-mono">
                                             {material.sku || 'N/A'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">
                                         <span className="px-3 py-1 text-xs font-bold rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300">
-                                            {getCategoryIcon(material.category)} {material.category}
+                                            {getCategoryIcon((material.category as MaterialCategory) ?? MaterialCategory.OUTRO)} {material.category ?? 'N/A'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <p className="font-bold text-gray-900 dark:text-white">
-                                            {material.stock} <span className="text-xs text-gray-500">{material.unitOfMeasure}</span>
+                                            {material.stock ?? 0} <span className="text-xs text-gray-500 dark:text-gray-400">{material.unitOfMeasure}</span>
                                         </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {material.minStock}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {material.minStock ?? 0}</p>
                                     </td>
                                     <td className="px-6 py-4 text-right">
                                         <p className="text-lg font-bold text-blue-700 dark:text-blue-400">
@@ -1836,7 +1858,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                                 <>
                                                     <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
                                                         R$ {valorVenda.principal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        {valorVenda.unidade === 'm' && <span className="text-xs text-gray-500 ml-1">/m</span>}
+                                                        {valorVenda.unidade === 'm' && <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">/m</span>}
                                                     </p>
                                                     {valorVenda.secundario && valorVenda.secundario > 0 && (
                                                         <p className="text-sm font-medium text-green-600 dark:text-green-400">
@@ -1879,6 +1901,16 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             >
                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                onClick={() => handleRecalcularCustoUnitario(material)}
+                                                disabled={materialIdRecalculando === material.id}
+                                                className="p-2 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
+                                                title="Recalcular Custo Unitário (KM→M)"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
                                                 </svg>
                                             </button>
                                             <button
@@ -1971,6 +2003,70 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     />
                                 </div>
 
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        NCM (8 dígitos)
+                                    </label>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                            type="text"
+                                            autoComplete="off"
+                                            value={formState.ncm}
+                                            onChange={(e) => {
+                                                setFormState({ ...formState, ncm: e.target.value });
+                                                setNcmDescricaoPreview(null);
+                                            }}
+                                            onBlur={async (e) => {
+                                                const d = e.target.value.replace(/\D/g, '');
+                                                if (d.length !== 8) {
+                                                    setNcmDescricaoPreview(null);
+                                                    return;
+                                                }
+                                                const res = await consultarNcmPorCodigo(d);
+                                                if (res.success && res.data) {
+                                                    setNcmDescricaoPreview(res.data.descricao.trim());
+                                                } else {
+                                                    setNcmDescricaoPreview(null);
+                                                }
+                                            }}
+                                            className="input-field flex-1"
+                                            placeholder="Ex: 85369010 ou digite palavras para Buscar NCM"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleBuscarNcm}
+                                            disabled={ncmSearchLoading}
+                                            className="px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-60 whitespace-nowrap"
+                                        >
+                                            {ncmSearchLoading ? 'Buscando…' : 'Buscar NCM'}
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                        Busca na Brasil API (código parcial ou palavra-chave). Ao escolher um resultado, o código é preenchido com 8 dígitos.
+                                    </p>
+                                    {ncmDescricaoPreview && (
+                                        <p className="text-sm text-gray-700 dark:text-gray-300 mt-2 border border-gray-200 dark:border-dark-border rounded-lg p-2 bg-gray-50 dark:bg-dark-bg/80">
+                                            {ncmDescricaoPreview}
+                                        </p>
+                                    )}
+                                    {ncmSearchResults.length > 0 && (
+                                        <ul className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-dark-border divide-y divide-gray-100 dark:divide-dark-border text-sm">
+                                            {ncmSearchResults.map((row) => (
+                                                <li key={`${row.codigo}-${row.data_inicio}`}>
+                                                    <button
+                                                        type="button"
+                                                        className="w-full text-left px-3 py-2 hover:bg-teal-50 dark:hover:bg-teal-900/30"
+                                                        onClick={() => handleSelecionarNcm(row)}
+                                                    >
+                                                        <span className="font-mono font-semibold text-teal-700 dark:text-teal-300">{row.codigo}</span>
+                                                        <span className="block text-gray-600 dark:text-gray-400 truncate">{row.descricao}</span>
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Tipo
@@ -2046,7 +2142,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             <img
                                                 src={previewImagem || getUploadUrl(itemToEdit?.imagemUrl || '')}
                                                 alt="Preview"
-                                                className="w-32 h-32 object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                                                className="w-32 h-32 object-cover rounded-lg border-2 border-gray-300 dark:border-dark-border shadow-sm"
                                             />
                                             <button
                                                 type="button"
@@ -2132,13 +2228,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                             </div>
 
 
-                            {/* Preços: Custo, Venda e Lucro */}
+                            {/* Preços: Simples Nacional — Preço Compra | (+) Imposto (R$) | (=) Custo Agregado | (×) Markup | (=) Valor Venda Final */}
                             <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
-                                <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-300 mb-4">💲 Informações de Preço</h3>
+                                <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-300 mb-4">Informações de Preço (Simples Nacional)</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                            Preço de Custo (R$) *
+                                            Preço Compra (R$) *
                                             <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Última compra</span>
                                         </label>
                                         <input
@@ -2147,21 +2243,19 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             onChange={(e) => {
                                                 const novoPreco = e.target.value;
                                                 const precoNum = parseFloat(novoPreco) || 0;
-                                                
-                                                // Calcular custoCM automaticamente se unidade for M ou KG/M
+                                                const markup = parseFloat(formState.markupAplicado || '1.55') || 1.55;
                                                 let novoCustoCM = formState.custoCM;
                                                 if ((formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && precoNum > 0) {
                                                     novoCustoCM = (precoNum / 100).toFixed(2);
                                                 }
-                                                
-                                                const valorVenda = parseFloat(formState.valorVenda) || 0;
-                                                const novaPorcentagem = valorVenda > 0 && precoNum > 0
-                                                    ? calcularPorcentagemLucro(precoNum, valorVenda)
-                                                    : 0;
+                                                const novoValorVenda = precoNum > 0 ? (precoNum * markup).toFixed(2) : formState.valorVenda;
+                                                const valorVendaNum = parseFloat(novoValorVenda) || 0;
+                                                const novaPorcentagem = valorVendaNum > 0 && precoNum > 0 ? calcularPorcentagemLucro(precoNum, valorVendaNum) : 0;
                                                 setFormState({
                                                     ...formState,
                                                     price: novoPreco,
                                                     custoCM: novoCustoCM,
+                                                    valorVenda: String(novoValorVenda),
                                                     porcentagemLucro: novaPorcentagem.toFixed(2)
                                                 });
                                             }}
@@ -2173,139 +2267,134 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         />
                                     </div>
 
-                                    {/* Custo por Centímetro - Mostrar apenas para M ou KG/M */}
-                                    {(formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Custo por Centímetro (R$/cm)
-                                                <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Calculado automaticamente (Custo / 100)</span>
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={formState.custoCM}
-                                                readOnly
-                                                min="0"
-                                                step="0.01"
-                                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-gray-800 cursor-not-allowed text-gray-700 dark:text-dark-text"
-                                                placeholder="0,00"
-                                            />
-                                        </div>
-                                    )}
-
-                                    {/* Valor de Venda - Mostrar campos diferentes baseado na unidade */}
-                                    {(formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') ? (
-                                        <>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                    Valor de Venda em Metro (R$/m)
-                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado quando vender em metros</span>
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    value={formState.valorVendaM}
-                                                    onChange={(e) => {
-                                                        const novoValorVendaM = e.target.value;
-                                                        const valorVendaMNum = parseFloat(novoValorVendaM) || 0;
-                                                        
-                                                        // Calcular valorVendaCM automaticamente (dividir por 100)
-                                                        const novoValorVendaCM = valorVendaMNum > 0 
-                                                            ? (valorVendaMNum / 100).toFixed(2) 
-                                                            : '';
-                                                        
-                                                        const precoCusto = parseFloat(formState.price) || 0;
-                                                        const novaPorcentagem = precoCusto > 0 && valorVendaMNum > 0
-                                                            ? calcularPorcentagemLucro(precoCusto, valorVendaMNum)
-                                                            : 0;
-                                                        setFormState({
-                                                            ...formState,
-                                                            valorVendaM: novoValorVendaM,
-                                                            valorVendaCM: novoValorVendaCM,
-                                                            porcentagemLucro: novaPorcentagem.toFixed(2)
-                                                        });
-                                                    }}
-                                                    min="0"
-                                                    step="0.01"
-                                                    className="input-field"
-                                                    placeholder="0,00"
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                    Valor de Venda em Centímetro (R$/cm)
-                                                    <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado quando vender em centímetros</span>
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    value={formState.valorVendaCM}
-                                                    onChange={(e) => {
-                                                        const novoValorVendaCM = e.target.value;
-                                                        const precoCusto = parseFloat(formState.price) || 0;
-                                                        // Para CM, calcular porcentagem baseado no valor em CM * 100 (equivalente a 1 metro)
-                                                        const valorCMEmMetro = parseFloat(novoValorVendaCM) * 100;
-                                                        const novaPorcentagem = precoCusto > 0 && valorCMEmMetro > 0
-                                                            ? calcularPorcentagemLucro(precoCusto, valorCMEmMetro)
-                                                            : 0;
-                                                        setFormState({
-                                                            ...formState,
-                                                            valorVendaCM: novoValorVendaCM,
-                                                            porcentagemLucro: novaPorcentagem.toFixed(2)
-                                                        });
-                                                    }}
-                                                    min="0"
-                                                    step="0.01"
-                                                    className="input-field"
-                                                    placeholder="0,00"
-                                                />
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Valor de Venda (R$)
-                                                <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado em orçamentos</span>
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={formState.valorVenda}
-                                                onChange={(e) => {
-                                                    const novoValorVenda = e.target.value;
-                                                    const precoCusto = parseFloat(formState.price) || 0;
-                                                    const novaPorcentagem = precoCusto > 0 && parseFloat(novoValorVenda) > 0
-                                                        ? calcularPorcentagemLucro(precoCusto, parseFloat(novoValorVenda) || 0)
-                                                        : 0;
-                                                    setFormState({
-                                                        ...formState,
-                                                        valorVenda: novoValorVenda,
-                                                        porcentagemLucro: novaPorcentagem.toFixed(2)
-                                                    });
-                                                }}
-                                                min="0"
-                                                step="0.01"
-                                                className="input-field"
-                                                placeholder="0,00"
-                                            />
-                                        </div>
-                                    )}
-
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                            Porcentagem de Lucro (%)
-                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Calculado automaticamente</span>
+                                            (×) Markup Aplicado
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Fabricante 1,55 ou Revendedor 1,10. Alterar atualiza Valor de Venda na hora.</span>
                                         </label>
                                         <input
                                             type="number"
-                                            value={formState.porcentagemLucro}
-                                            readOnly
-                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-gray-800 cursor-not-allowed text-gray-700 dark:text-dark-text"
+                                            min="1"
+                                            step="0.01"
+                                            value={formState.markupAplicado || '1.55'}
+                                            onChange={(e) => {
+                                                const novoMarkup = e.target.value;
+                                                const markup = parseFloat(novoMarkup) || 1.55;
+                                                const precoNum = parseFloat(formState.price) || 0;
+                                                const novoValorVenda = precoNum > 0 ? (precoNum * markup).toFixed(2) : formState.valorVenda;
+                                                const valorVendaNum = parseFloat(novoValorVenda) || 0;
+                                                const novaPorcentagem = valorVendaNum > 0 && precoNum > 0 ? calcularPorcentagemLucro(precoNum, valorVendaNum) : 0;
+                                                setFormState({
+                                                    ...formState,
+                                                    markupAplicado: novoMarkup,
+                                                    valorVenda: String(novoValorVenda),
+                                                    porcentagemLucro: novaPorcentagem.toFixed(2)
+                                                });
+                                            }}
+                                            className="input-field"
+                                            placeholder="1.55"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                            (=) Valor Venda Final (R$)
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Usado em orçamentos. Editável; ao alterar Preço ou Markup, recalcula na hora.</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={formState.valorVenda}
+                                            onChange={(e) => {
+                                                const novoValorVenda = e.target.value;
+                                                const precoCusto = parseFloat(formState.price) || 0;
+                                                const valorVendaNum = parseFloat(novoValorVenda) || 0;
+                                                const novaPorcentagem = valorVendaNum > 0 && precoCusto > 0 ? calcularPorcentagemLucro(precoCusto, valorVendaNum) : 0;
+                                                setFormState({
+                                                    ...formState,
+                                                    valorVenda: novoValorVenda,
+                                                    porcentagemLucro: novaPorcentagem.toFixed(2)
+                                                });
+                                            }}
+                                            min="0"
+                                            step="0.01"
+                                            className="input-field"
                                             placeholder="0,00"
                                         />
-                                        {parseFloat(formState.porcentagemLucro) > 0 && (
-                                            <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium">
-                                                Lucro de R$ {((parseFloat(formState.valorVenda) || 0) - (parseFloat(formState.price) || 0)).toFixed(2)}
-                                            </p>
-                                        )}
                                     </div>
+
+                                    <div className="md:col-span-3">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                            Alíquotas por empresa (Balanço de Alíquotas)
+                                            <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-normal block mt-1">Configuradas em Configurações → Balanço de Alíquotas. Somente visualização.</span>
+                                        </label>
+                                        <div className="rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg p-4 space-y-3">
+                                            {empresasAliquotas.length === 0 ? (
+                                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary">Nenhuma empresa cadastrada ou alíquotas não carregadas.</p>
+                                            ) : (
+                                                empresasAliquotas.map((emp) => (
+                                                    <div key={emp.id} className="flex flex-wrap items-center gap-4 py-2 border-b border-gray-200 dark:border-dark-border last:border-0 last:pb-0">
+                                                        <span className="font-medium text-gray-900 dark:text-dark-text">
+                                                            {emp.nomeFantasia || emp.razaoSocial}
+                                                        </span>
+                                                        <span className="text-xs text-gray-500 dark:text-dark-text-secondary font-mono">
+                                                            CNPJ {(String(emp.cnpj || '').replace(/\D/g, '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') || emp.cnpj)}
+                                                        </span>
+                                                        <span className="text-sm text-blue-700 dark:text-blue-300">
+                                                            Materiais: <strong>{(emp.aliquotaMaterial ?? 8).toFixed(1)}%</strong>
+                                                        </span>
+                                                        <span className="text-sm text-purple-700 dark:text-purple-300">
+                                                            Serviços: <strong>{(emp.aliquotaServico ?? 8).toFixed(1)}%</strong>
+                                                        </span>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {(() => {
+                                        const primeiraEmpresa = empresasAliquotas[0];
+                                        const aliquotaPct = primeiraEmpresa?.aliquotaMaterial ?? configPrecificacao?.aliquotaImpostoPadrao ?? 8;
+                                        const precoNum = parseFloat(formState.price) || 0;
+                                        const valorVendaNum = parseFloat(formState.valorVenda) || 0;
+                                        const valorImposto = valorVendaNum * (aliquotaPct / 100);
+                                        const custoAgregado = precoNum + valorImposto;
+                                        const lucroLiquido = valorVendaNum - custoAgregado;
+                                        const pctSobreVenda = valorVendaNum > 0 ? (lucroLiquido / valorVendaNum) * 100 : 0;
+                                        return (
+                                            <>
+                                                <div>
+                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">(+) Imposto (R$)</label>
+                                                    <input type="text" readOnly value={valorImposto.toFixed(2)} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-dark-card cursor-not-allowed text-gray-700 dark:text-dark-text" />
+                                                    <p className="text-xs text-gray-500 mt-1">Valor de venda × (alíquota/100)</p>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">(=) Custo Agregado (R$)</label>
+                                                    <input type="text" readOnly value={custoAgregado.toFixed(2)} className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-dark-card cursor-not-allowed text-gray-700 dark:text-dark-text" />
+                                                    <p className="text-xs text-gray-500 mt-1">Preço compra + Imposto</p>
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Lucro líquido e % sobre venda</label>
+                                                    <div className="flex flex-wrap gap-4 items-center p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                                        <span className="text-sm font-medium text-green-800 dark:text-green-300">Lucro líquido: R$ {lucroLiquido.toFixed(2)}</span>
+                                                        <span className="text-sm font-medium text-green-800 dark:text-green-300">% sobre valor de venda bruto: {pctSobreVenda.toFixed(2)}%</span>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
+                                {(formState.unitOfMeasure === 'm' || formState.unitOfMeasure === 'kg/m') && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Valor de Venda em Metro (R$/m)</label>
+                                            <input type="number" value={formState.valorVendaM} onChange={(e) => { const v = e.target.value; const num = parseFloat(v) || 0; setFormState({...formState, valorVendaM: v, valorVendaCM: num > 0 ? (num / 100).toFixed(2) : ''}); }} min="0" step="0.01" className="input-field" placeholder="0,00" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Valor de Venda em Centímetro (R$/cm)</label>
+                                            <input type="number" value={formState.valorVendaCM} onChange={(e) => setFormState({...formState, valorVendaCM: e.target.value})} min="0" step="0.01" className="input-field" placeholder="0,00" />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Localização e Fornecedor */}
@@ -2388,45 +2477,45 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         </p>
                                     </div>
                                     
-                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                                        <p className="text-sm font-semibold text-gray-800 mb-1">
+                                    <div className="bg-gray-50 dark:bg-dark-card/50 border border-gray-200 dark:border-dark-border rounded-lg p-3">
+                                        <p className="text-sm font-semibold text-gray-800 dark:text-dark-text mb-1">
                                             Material:
                                         </p>
-                                        <p className="text-sm text-gray-700">
+                                        <p className="text-sm text-gray-700 dark:text-dark-text-secondary">
                                             <strong>"{itemToDelete?.name}"</strong>
                                         </p>
                                         {itemToDelete?.sku && (
-                                            <p className="text-xs text-gray-600 mt-1">
+                                            <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1">
                                                 SKU: {itemToDelete.sku}
                                             </p>
                                         )}
                                     </div>
 
                                     {loadingMovimentacoes ? (
-                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                            <p className="text-sm text-yellow-700">
+                                        <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                                            <p className="text-sm text-yellow-700 dark:text-yellow-400">
                                                 🔍 Verificando movimentações relacionadas...
                                             </p>
                                         </div>
                                     ) : movimentacoesCount > 0 ? (
-                                        <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                                            <p className="text-sm font-semibold text-orange-800 mb-1">
+                                        <div className="bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
+                                            <p className="text-sm font-semibold text-orange-800 dark:text-orange-300 mb-1">
                                                 📦 Movimentações relacionadas:
                                             </p>
-                                            <p className="text-sm text-orange-700">
+                                            <p className="text-sm text-orange-700 dark:text-orange-400">
                                                 Este material possui <strong>{movimentacoesCount} movimentação(ões)</strong> de estoque que também serão excluídas permanentemente.
                                             </p>
                                         </div>
                                     ) : (
-                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                                            <p className="text-sm text-blue-700">
+                                        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                                            <p className="text-sm text-blue-700 dark:text-blue-400">
                                                 ℹ️ Nenhuma movimentação de estoque encontrada para este material.
                                             </p>
                                         </div>
                                     )}
 
-                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                        <p className="text-xs text-yellow-800">
+                                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                                        <p className="text-xs text-yellow-800 dark:text-yellow-400">
                                             <strong>Nota:</strong> O material permanecerá no histórico de compras e contas a pagar para manter a integridade dos registros financeiros.
                                         </p>
                                     </div>
@@ -2468,6 +2557,14 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <CabosPrecoBitolaModal
+                open={cabosPrecoModalOpen}
+                onOpenChange={setCabosPrecoModalOpen}
+                onApplied={() => {
+                    void loadMaterials();
+                }}
+            />
 
             {/* AlertDialog de Confirmação para Corrigir Nomes */}
             <AlertDialog open={showCorrigirNomesDialog} onOpenChange={setShowCorrigirNomesDialog}>
@@ -2532,10 +2629,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* MODAL DE HISTÓRICO DE COMPRAS */}
             {historicoModalOpen && materialSelecionado && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-dark-border">
                         {/* Header */}
-                        <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-600 to-indigo-600">
+                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-indigo-600">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
@@ -2563,36 +2660,36 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         <div className="p-6 space-y-6">
                             {/* Informações Resumidas */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                    <p className="text-sm text-blue-700 mb-1">🏭 Fornecedor Atual</p>
-                                    <p className="text-lg font-semibold text-blue-900">
+                                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                    <p className="text-sm text-blue-700 dark:text-blue-300 mb-1">🏭 Fornecedor Atual</p>
+                                    <p className="text-lg font-semibold text-blue-900 dark:text-blue-100">
                                         {materialSelecionado.supplier?.name || materialSelecionado.supplierName || 'Não informado'}
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 rounded-xl p-4">
-                                    <p className="text-sm text-gray-600 mb-1">📍 Localização</p>
-                                    <p className="text-lg font-semibold text-gray-900">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 rounded-xl p-4 border border-transparent dark:border-dark-border">
+                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-1">📍 Localização</p>
+                                    <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">
                                         {materialSelecionado.location || 'Não informado'}
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 rounded-xl p-4">
-                                    <p className="text-sm text-gray-600 mb-1">📦 Em Estoque</p>
-                                    <p className="text-lg font-semibold text-gray-900">
-                                        {materialSelecionado.stock} {materialSelecionado.unitOfMeasure}
+                                <div className="bg-gray-50 dark:bg-dark-card/50 rounded-xl p-4 border border-transparent dark:border-dark-border">
+                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-1">📦 Em Estoque</p>
+                                    <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">
+                                        {materialSelecionado.stock ?? 0} {materialSelecionado.unitOfMeasure}
                                     </p>
                                 </div>
-                                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                                    <p className="text-sm text-green-700 mb-1">💰 Valor Investido</p>
-                                    <p className="text-lg font-bold text-green-600">
-                                        R$ {(materialSelecionado.stock * (materialSelecionado.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-xl p-4">
+                                    <p className="text-sm text-green-700 dark:text-green-300 mb-1">💰 Valor Investido</p>
+                                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                                        R$ {((materialSelecionado.stock ?? 0) * (materialSelecionado.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>
 
 
                             {/* Informações de Preço: Custo, Venda e Lucro */}
-                            <div className="border-t border-gray-200 pt-6 mt-6">
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">💲 Informações de Preço</h3>
+                            <div className="border-t border-gray-200 dark:border-dark-border pt-6 mt-6">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">💲 Informações de Preço</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
                                         <p className="text-sm text-blue-700 dark:text-blue-300 mb-1">Preço de Custo</p>
@@ -2643,7 +2740,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                             </div>
 
                             {/* Histórico de Compras */}
-                            <div className="border-t border-gray-200 pt-6">
+                            <div className="border-t border-gray-200 dark:border-dark-border pt-6">
                                 <h4 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                                     <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2654,43 +2751,43 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 {loadingHistorico ? (
                                     <div className="text-center py-12">
                                         <div className="inline-block w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                                        <p className="text-gray-500 mt-4">Carregando histórico...</p>
+                                        <p className="text-gray-500 dark:text-gray-400 mt-4">Carregando histórico...</p>
                                     </div>
                                 ) : historicoCompras.length === 0 ? (
-                                    <div className="text-center py-12 bg-gray-50 rounded-xl">
-                                        <svg className="w-16 h-16 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <div className="text-center py-12 bg-gray-50 dark:bg-dark-card/50 rounded-xl">
+                                        <svg className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                         </svg>
-                                        <p className="text-gray-500 font-medium">Nenhuma compra registrada</p>
-                                        <p className="text-sm text-gray-400 mt-1">Este material ainda não foi comprado</p>
+                                        <p className="text-gray-500 dark:text-gray-400 font-medium">Nenhuma compra registrada</p>
+                                        <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Este material ainda não foi comprado</p>
                                     </div>
                                 ) : (
-                                    <div className="overflow-x-auto rounded-xl border border-gray-200">
+                                    <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-dark-border">
                                         <table className="w-full">
-                                            <thead className="bg-gray-50 border-b border-gray-200">
+                                            <thead className="bg-gray-50 dark:bg-dark-bg border-b border-gray-200 dark:border-dark-border">
                                                 <tr>
-                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Data da Compra</th>
-                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">NF</th>
-                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Fornecedor</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Quantidade</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor Unitário</th>
-                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor Total</th>
-                                                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
+                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Data da Compra</th>
+                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">NF</th>
+                                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Fornecedor</th>
+                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Quantidade</th>
+                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor Unitário</th>
+                                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor Total</th>
+                                                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-200">
+                                            <tbody className="divide-y divide-gray-200 dark:divide-dark-border">
                                                 {historicoCompras.map((compra, index) => (
-                                                    <tr key={index} className="hover:bg-gray-50 transition-colors">
-                                                        <td className="px-4 py-3 text-sm text-gray-900">
+                                                    <tr key={index} className="hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
+                                                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                                                             {new Date(compra.dataCompra).toLocaleDateString('pt-BR')}
                                                         </td>
-                                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
                                                             {compra.numeroNF}
                                                         </td>
-                                                        <td className="px-4 py-3 text-sm text-gray-900">
+                                                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                                                             {compra.fornecedor}
                                                         </td>
-                                                        <td className="px-4 py-3 text-sm text-gray-900 text-right">
+                                                        <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100 text-right">
                                                             {compra.quantidade}
                                                             {(compra as any).quantidadeFracionada && (
                                                                 <span className="ml-2 text-blue-600 font-medium">
@@ -2706,9 +2803,9 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                                         </td>
                                                         <td className="px-4 py-3 text-center">
                                                             <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${
-                                                                compra.status === 'Recebido' ? 'bg-green-100 text-green-700' :
-                                                                compra.status === 'Pendente' ? 'bg-yellow-100 text-yellow-700' :
-                                                                'bg-gray-100 text-gray-700'
+                                                                compra.status === 'Recebido' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                                                                compra.status === 'Pendente' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' :
+                                                                'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'
                                                             }`}>
                                                                 {compra.status}
                                                             </span>
@@ -2723,21 +2820,21 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 {/* Estatísticas do Histórico */}
                                 {historicoCompras.length > 0 && (
                                     <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                                            <p className="text-sm text-blue-700 mb-1">Última Compra</p>
-                                            <p className="text-lg font-bold text-blue-900">
+                                        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                            <p className="text-sm text-blue-700 dark:text-blue-300 mb-1">Última Compra</p>
+                                            <p className="text-lg font-bold text-blue-900 dark:text-blue-200">
                                                 {new Date(historicoCompras[0].dataCompra).toLocaleDateString('pt-BR')}
                                             </p>
                                         </div>
-                                        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-                                            <p className="text-sm text-green-700 mb-1">Último Preço Unitário</p>
-                                            <p className="text-lg font-bold text-green-600">
+                                        <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-xl p-4">
+                                            <p className="text-sm text-green-700 dark:text-green-300 mb-1">Último Preço Unitário</p>
+                                            <p className="text-lg font-bold text-green-600 dark:text-green-400">
                                                 R$ {parseFloat(historicoCompras[0].valorUnitario).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
-                                        <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                                            <p className="text-sm text-purple-700 mb-1">Total de Compras</p>
-                                            <p className="text-lg font-bold text-purple-900">
+                                        <div className="bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
+                                            <p className="text-sm text-purple-700 dark:text-purple-300 mb-1">Total de Compras</p>
+                                            <p className="text-lg font-bold text-purple-900 dark:text-purple-200">
                                                 {historicoCompras.length} registro(s)
                                             </p>
                                         </div>
@@ -2747,10 +2844,10 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                         </div>
 
                         {/* Footer */}
-                        <div className="p-6 border-t border-gray-200 bg-gray-50">
+                        <div className="p-6 border-t border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg">
                             <button
                                 onClick={handleFecharHistorico}
-                                className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all font-semibold"
+                                className="w-full px-6 py-3 bg-gray-100 dark:bg-dark-card text-gray-700 dark:text-gray-200 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-all font-semibold"
                             >
                                 Fechar
                             </button>
@@ -2762,8 +2859,8 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
             {/* MODAL DE VISUALIZAÇÃO */}
             {viewModalOpen && materialParaVisualizar && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30">
                             <div>
                                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Detalhes do Material</h2>
                                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Informações completas do item</p>
@@ -2786,21 +2883,21 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <img
                                         src={getUploadUrl(materialParaVisualizar.imagemUrl)}
                                         alt={materialParaVisualizar.name || 'Material'}
-                                        className="w-[100px] h-[100px] object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                                        className="w-[200px] h-[200px] object-cover rounded-lg border-2 border-gray-300 dark:border-dark-border shadow-sm"
                                         onError={(e) => {
                                             (e.target as HTMLImageElement).style.display = 'none';
                                         }}
                                     />
                                     <div>
                                         <p className="text-sm font-medium text-gray-600 dark:text-gray-400">📷 Imagem do Material</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">100x100 pixels</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">200x200 pixels</p>
                                     </div>
                                 </div>
                             )}
 
                             {/* Informações Principais */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">Nome</h3>
                                     <p className="text-gray-900 dark:text-white font-medium">
                                         {materialParaVisualizar.name.includes('Produto importado via XML') 
@@ -2808,11 +2905,11 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                             : materialParaVisualizar.name}
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">SKU</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">{materialParaVisualizar.sku}</p>
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">NCM</h3>
                                     <p className="text-gray-900 dark:text-white font-mono font-medium">
                                         {materialParaVisualizar.ncm || 'N/A'}
@@ -2821,13 +2918,13 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Nomenclatura Comum do Mercosul</p>
                                     )}
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">Categoria</h3>
                                     <span className="px-3 py-1.5 text-xs font-bold rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300 ring-1 ring-teal-200 dark:ring-teal-700">
-                                        {getCategoryIcon(materialParaVisualizar.category)} {materialParaVisualizar.category}
+                                        {getCategoryIcon((materialParaVisualizar.category as MaterialCategory) ?? MaterialCategory.OUTRO)} {materialParaVisualizar.category ?? 'N/A'}
                                     </span>
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">Tipo</h3>
                                     <p className="text-gray-900 dark:text-white font-medium">{materialParaVisualizar.type || 'N/A'}</p>
                                 </div>
@@ -2843,19 +2940,19 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
                             {/* Estoque */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">📊 Estoque Atual</h3>
                                     <p className="text-3xl font-bold text-gray-900 dark:text-white">
-                                        {materialParaVisualizar.stock} <span className="text-sm text-gray-500 dark:text-gray-400">{materialParaVisualizar.unitOfMeasure}</span>
+                                        {materialParaVisualizar.stock ?? 0} <span className="text-sm text-gray-500 dark:text-gray-400">{materialParaVisualizar.unitOfMeasure}</span>
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">⚠️ Estoque Mínimo</h3>
                                     <p className="text-3xl font-bold text-gray-900 dark:text-white">
                                         {materialParaVisualizar.minStock} <span className="text-sm text-gray-500 dark:text-gray-400">{materialParaVisualizar.unitOfMeasure}</span>
                                     </p>
                                 </div>
-                                <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                                <div className="bg-gray-50 dark:bg-dark-card/50 p-4 rounded-xl">
                                     <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-2">Status</h3>
                                     <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStockStatusClass(materialParaVisualizar)}`}>
                                         {getStockStatusText(materialParaVisualizar)}
@@ -2896,7 +2993,7 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 p-4 rounded-xl">
                                     <h3 className="font-semibold text-green-800 dark:text-green-300 mb-2">📦 Valor Total em Estoque</h3>
                                     <p className="text-3xl font-bold text-green-700 dark:text-green-400">
-                                        R$ {(materialParaVisualizar.stock * (materialParaVisualizar.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {((materialParaVisualizar.stock ?? 0) * (materialParaVisualizar.price || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
                                 </div>
                             </div>
@@ -2915,156 +3012,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                         <p className="text-lg font-bold text-purple-900 dark:text-purple-300">{materialParaVisualizar.location}</p>
                                     </div>
                                 )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* MODAL DE IMPORTAÇÃO DE PREÇOS */}
-            {modalImportarOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        {/* Header */}
-                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-orange-600 to-orange-500">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-                                        <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h3 className="text-2xl font-bold text-white">Importar Preços Atualizados</h3>
-                                        <p className="text-sm text-orange-100 mt-1">Atualização em massa de preços unitários</p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        setModalImportarOpen(false);
-                                        setArquivoImportar(null);
-                                    }}
-                                    className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
-                                >
-                                    <XMarkIcon className="w-6 h-6" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Body */}
-                        <div className="p-6 space-y-6">
-                            {/* Instruções */}
-                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                                <h4 className="font-semibold text-blue-900 dark:text-blue-300 mb-3">📋 Como funciona:</h4>
-                                <ol className="space-y-2 text-sm text-blue-800 dark:text-blue-300">
-                                    <li className="flex gap-2">
-                                        <span className="font-bold">1.</span>
-                                        <span>Clique em "Exportar" e escolha XLSX ou CSV para gerar o arquivo de cotação</span>
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="font-bold">2.</span>
-                                        <span>Envie o arquivo para o fornecedor preencher os preços na coluna "Preço Fornecedor"</span>
-                                    </li>
-                                    <li className="flex gap-2">
-                                        <span className="font-bold">3.</span>
-                                        <span>Após receber o arquivo preenchido, importe-o aqui para atualizar os preços automaticamente</span>
-                                    </li>
-                                </ol>
-                            </div>
-
-                            {/* Upload de Arquivo */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">
-                                    Selecionar Arquivo
-                                </label>
-                                <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-8 text-center hover:border-orange-400 dark:hover:border-orange-600 transition-colors">
-                                    <input
-                                        type="file"
-                                        id="arquivo-importar"
-                                        accept=".xlsx,.csv"
-                                        onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            if (file) {
-                                                setArquivoImportar(file);
-                                            }
-                                        }}
-                                        className="hidden"
-                                    />
-                                    <label htmlFor="arquivo-importar" className="cursor-pointer">
-                                        <svg className="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                        </svg>
-                                        {arquivoImportar ? (
-                                            <div>
-                                                <p className="text-lg font-semibold text-gray-900 dark:text-dark-text">{arquivoImportar.name}</p>
-                                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
-                                                    {(arquivoImportar.size / 1024).toFixed(2)} KB
-                                                </p>
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        setArquivoImportar(null);
-                                                    }}
-                                                    className="mt-2 text-red-600 hover:text-red-700 font-medium text-sm"
-                                                >
-                                                    Remover arquivo
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div>
-                                                <p className="text-lg font-semibold text-gray-700 dark:text-dark-text">
-                                                    Clique para selecionar o arquivo
-                                                </p>
-                                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
-                                                    Arquivos XLSX ou CSV até 10MB
-                                                </p>
-                                            </div>
-                                        )}
-                                    </label>
-                                </div>
-                            </div>
-
-                            {/* Avisos Importantes */}
-                            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
-                                <h4 className="font-semibold text-amber-900 dark:text-amber-300 mb-2 flex items-center gap-2">
-                                    <ExclamationTriangleIcon className="w-5 h-5" />
-                                    Avisos Importantes
-                                </h4>
-                                <ul className="space-y-1 text-sm text-amber-800 dark:text-amber-300">
-                                    <li>⚠️ O sistema identificará os materiais pelo código (SKU)</li>
-                                    <li>⚠️ Apenas preços válidos serão atualizados (números maiores que zero)</li>
-                                    <li>⚠️ Materiais não encontrados serão ignorados</li>
-                                    <li>⚠️ Esta ação não pode ser desfeita. Faça backup se necessário</li>
-                                </ul>
-                            </div>
-
-                            {/* Botões de Ação */}
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={handleImportar}
-                                    disabled={!arquivoImportar || processandoImportacao}
-                                    className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {processandoImportacao ? (
-                                        <>
-                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white inline-block mr-2"></div>
-                                            Processando...
-                                        </>
-                                    ) : (
-                                        <>🔄 Importar e Atualizar Preços</>
-                                    )}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setModalImportarOpen(false);
-                                        setArquivoImportar(null);
-                                    }}
-                                    disabled={processandoImportacao}
-                                    className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Cancelar
-                                </button>
                             </div>
                         </div>
                     </div>

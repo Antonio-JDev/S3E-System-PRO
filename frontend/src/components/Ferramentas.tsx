@@ -102,6 +102,7 @@ interface KitItem {
     quantidade: number;
     estadoEntrega: string;
     observacoes?: string;
+    dataAdicao?: string;
     ferramenta: Ferramenta;
 }
 
@@ -742,31 +743,31 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando ferramentas...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando ferramentas...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 animate-fade-in">
                 <div className="flex items-center gap-4">
                     <button 
                         onClick={toggleSidebar} 
-                        className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200"
+                        className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200"
                     >
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">
                             🔧 Gestão de Ferramentas
                         </h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">
                             Gerencie ferramentas e kits para eletricistas
                         </p>
                     </div>
@@ -1991,20 +1992,21 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                         </div>
 
                         <div className="p-6 space-y-6">
-                            {/* Informações do Kit */}
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">👤 Eletricista</p>
+                            {/* Informações do Kit - Data de entrega = criação do kit */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="bg-blue-50 p-5 rounded-xl border-2 border-blue-200 shadow-sm">
+                                    <p className="text-sm text-blue-700 font-semibold mb-1">👤 Eletricista</p>
                                     <p className="font-bold text-gray-900 text-lg">{kitVisualizando.eletricistaNome}</p>
                                 </div>
-                                <div className="bg-blue-50 p-4 rounded-xl">
-                                    <p className="text-xs text-blue-600 font-semibold mb-1">📅 Data de Entrega</p>
+                                <div className="bg-emerald-50 p-5 rounded-xl border-2 border-emerald-200 shadow-sm">
+                                    <p className="text-sm text-emerald-700 font-semibold mb-1">📅 Data de entrega do kit (criação)</p>
                                     <p className="font-bold text-gray-900 text-lg">
-                                        {new Date(kitVisualizando.dataEntrega).toLocaleDateString('pt-BR')}
+                                        {new Date(kitVisualizando.dataEntrega).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
                                     </p>
+                                    <p className="text-xs text-emerald-600 mt-0.5">Data em que o kit foi entregue ao colaborador</p>
                                 </div>
-                                <div className="bg-green-50 p-4 rounded-xl">
-                                    <p className="text-xs text-green-600 font-semibold mb-1">💰 Valor Total do Kit</p>
+                                <div className="bg-green-50 p-5 rounded-xl border-2 border-green-200 shadow-sm">
+                                    <p className="text-sm text-green-700 font-semibold mb-1">💰 Valor Total do Kit</p>
                                     <p className="font-bold text-green-700 text-lg">
                                         R$ {calcularPrecoTotalKit(kitVisualizando).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
@@ -2012,35 +2014,37 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             </div>
 
                             {kitVisualizando.descricao && (
-                                <div className="bg-gray-50 p-4 rounded-xl">
-                                    <p className="text-xs text-gray-600 font-semibold mb-2">📝 Descrição</p>
-                                    <p className="text-sm text-gray-700">{kitVisualizando.descricao}</p>
+                                <div className="bg-gray-50 p-5 rounded-xl border-2 border-gray-200">
+                                    <p className="text-sm text-gray-700 font-semibold mb-2">📝 Descrição do kit</p>
+                                    <p className="text-sm text-gray-800">{kitVisualizando.descricao}</p>
                                 </div>
                             )}
 
-                            {/* Lista de Ferramentas */}
+                            {/* Lista de Ferramentas - Data de adição e Observação em evidência */}
                             <div>
                                 <h3 className="font-bold text-gray-900 text-lg mb-4">🔧 Ferramentas do Kit ({kitVisualizando.itens.length})</h3>
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     {kitVisualizando.itens.map((item, index) => (
-                                        <div key={item.id} className="bg-gradient-to-r from-gray-50 to-white border-2 border-gray-200 rounded-xl p-4">
+                                        <div key={item.id} className="bg-white border-2 border-gray-200 rounded-xl p-5 shadow-sm">
                                             <div className="flex items-start gap-4">
-                                                <div className="w-10 h-10 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold">
+                                                <div className="w-11 h-11 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0">
                                                     {index + 1}
                                                 </div>
-                                                <div className="flex-1">
-                                                    <h4 className="font-bold text-gray-900 mb-1">{item.ferramenta.nome}</h4>
-                                                    <p className="text-xs text-gray-500 mb-2">
-                                                        Código: {item.ferramenta.codigo} | Categoria: {item.ferramenta.categoria}
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="font-bold text-gray-900 text-base mb-1">{item.ferramenta.nome}</h4>
+                                                    <p className="text-sm text-gray-600 mb-3">
+                                                        Código: <span className="font-medium text-gray-800">{item.ferramenta.codigo}</span>
+                                                        <span className="mx-2">|</span>
+                                                        Categoria: <span className="font-medium text-gray-800">{item.ferramenta.categoria}</span>
                                                     </p>
-                                                    <div className="flex items-center gap-4 text-sm flex-wrap">
+                                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm mb-2">
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-gray-600">Quantidade:</span>
+                                                            <span className="text-gray-600 font-medium">Quantidade:</span>
                                                             <span className="font-bold text-gray-900">x{item.quantidade}</span>
                                                         </div>
                                                         <div className="flex items-center gap-2">
-                                                            <span className="text-gray-600">Estado:</span>
-                                                            <span className={`px-2 py-1 rounded font-semibold text-xs ${
+                                                            <span className="text-gray-600 font-medium">Estado:</span>
+                                                            <span className={`px-2.5 py-1 rounded font-semibold text-xs ${
                                                                 item.estadoEntrega === 'Novo' ? 'bg-green-100 text-green-800' :
                                                                 item.estadoEntrega === 'Bom' ? 'bg-blue-100 text-blue-800' :
                                                                 item.estadoEntrega === 'Regular' ? 'bg-yellow-100 text-yellow-800' :
@@ -2049,17 +2053,30 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                                                 {item.estadoEntrega}
                                                             </span>
                                                         </div>
+                                                        {item.dataAdicao && (
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-600 font-medium">Adicionado ao kit em:</span>
+                                                                <span className="font-semibold text-gray-900">
+                                                                    {new Date(item.dataAdicao).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                                                </span>
+                                                            </div>
+                                                        )}
                                                         {item.ferramenta.valorCompra && (
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-gray-600">Subtotal:</span>
+                                                                <span className="text-gray-600 font-medium">Subtotal:</span>
                                                                 <span className="font-bold text-blue-700">
                                                                     R$ {(item.ferramenta.valorCompra * item.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </span>
                                                             </div>
                                                         )}
                                                     </div>
-                                                    {item.observacoes && (
-                                                        <p className="text-xs text-gray-600 mt-2 italic">💡 {item.observacoes}</p>
+                                                    {item.observacoes ? (
+                                                        <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                                            <p className="text-xs font-semibold text-amber-800 mb-1">💡 Observação</p>
+                                                            <p className="text-sm text-gray-700">{item.observacoes}</p>
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-gray-400 mt-2 italic">Sem observação</p>
                                                     )}
                                                 </div>
                                             </div>
@@ -2147,7 +2164,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalEditarKit && kitEditando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-amber-600 to-amber-500">
+                        <div className="modal-header bg-[#0a1a2f]">
                             <div>
                                 <h2 className="text-2xl font-bold text-white">✏️ Editar Kit de Ferramentas</h2>
                                 <p className="text-amber-100 text-sm mt-1">Atualize informações e gerencie ferramentas do kit</p>

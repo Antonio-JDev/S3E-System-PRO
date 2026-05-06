@@ -1,6 +1,7 @@
 # 🐳 Guia Docker - S3E System PRO
 
-Este guia explica como usar Docker e Docker Compose para desenvolver e fazer deploy do S3E System PRO.
+Este guia explica como usar Docker e Docker Compose para desenvolver e fazer
+deploy do S3E System PRO.
 
 ## 📋 Pré-requisitos
 
@@ -53,23 +54,23 @@ docker-compose up
 
 ### Desenvolvimento
 
-| Serviço | Porta | Descrição |
-|---------|-------|-----------|
-| frontend | 5173 | React App com Vite |
-| backend | 3000 | Node.js API |
-| postgres | 5432 | PostgreSQL Database |
-| redis | 6379 | Redis Cache |
-| pgadmin | 5050 | PostgreSQL Admin UI |
+| Serviço  | Porta | Descrição           |
+| -------- | ----- | ------------------- |
+| frontend | 5173  | React App com Vite  |
+| backend  | 3000  | Node.js API         |
+| postgres | 5432  | PostgreSQL Database |
+| redis    | 6379  | Redis Cache         |
+| pgadmin  | 5050  | PostgreSQL Admin UI |
 
 ### Produção
 
-| Serviço | Porta | Descrição |
-|---------|-------|-----------|
-| nginx  | 80/443 | Reverse Proxy |
-| frontend | - | React build servido pelo nginx |
-| backend  | - | API em produção |
-| postgres | - | Database |
-| redis    | - | Cache |
+| Serviço  | Porta  | Descrição                      |
+| -------- | ------ | ------------------------------ |
+| nginx    | 80/443 | Reverse Proxy                  |
+| frontend | -      | React build servido pelo nginx |
+| backend  | -      | API em produção                |
+| postgres | -      | Database                       |
+| redis    | -      | Cache                          |
 
 ## 🛠️ Comandos Principais
 
@@ -123,7 +124,7 @@ Os volumes estão configurados para hot reload automático:
 # Backend
 docker-compose exec backend npm install <pacote>
 
-# Frontend  
+# Frontend
 docker-compose exec frontend npm install <pacote>
 
 # Ou rebuildar

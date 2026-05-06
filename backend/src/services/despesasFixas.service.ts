@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export const DespesasFixasService = {
     // Listar todas as despesas fixas
@@ -63,9 +61,21 @@ export const DespesasFixasService = {
 
     // Deletar despesa fixa
     async deletarDespesa(id: string) {
-        return await prisma.despesaFixa.delete({
+        console.log(`🗑️ Iniciando exclusão da despesa fixa: ${id}`);
+        
+        // Primeiro, deletar todas as contas a pagar relacionadas
+        const contasDeleted = await prisma.contaPagar.deleteMany({
+            where: { despesaFixaId: id }
+        });
+        console.log(`✅ ${contasDeleted.count} conta(s) a pagar deletada(s)`);
+
+        // Depois, deletar a despesa fixa (os pagamentos serão deletados automaticamente devido ao cascade)
+        const despesaDeleted = await prisma.despesaFixa.delete({
             where: { id }
         });
+        console.log(`✅ Despesa fixa deletada com sucesso`);
+        
+        return despesaDeleted;
     },
 
     // Registrar pagamento de despesa fixa

@@ -153,13 +153,9 @@ const Projetos: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, onViewBu
                 setBudgets(budgetsRes.data);
             }
             if (usuariosRes.success && usuariosRes.data) {
-                // Filtrar apenas: admin, gerente, engenheiro, orcamentista (responsáveis técnicos)
-                const usuariosFiltrados = Array.isArray(usuariosRes.data) 
-                    ? usuariosRes.data.filter((u: any) => 
-                        ['admin', 'gerente', 'engenheiro', 'orcamentista'].includes(u.role?.toLowerCase())
-                    )
-                    : [];
-                setTeamMembers(usuariosFiltrados as User[]);
+                // Todos os usuários para atribuição/equipe (independente do role)
+                const usuariosArray = Array.isArray(usuariosRes.data) ? usuariosRes.data : [];
+                setTeamMembers(usuariosArray as User[]);
             }
         } catch (err) {
             setError('Erro ao carregar dados');

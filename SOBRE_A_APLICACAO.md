@@ -2,11 +2,17 @@
 
 ## 📋 Visão Geral
 
-O **S3E System PRO** é um sistema ERP (Enterprise Resource Planning) completo e profissional desenvolvido especificamente para empresas de engenharia elétrica. A aplicação oferece uma solução integrada para gerenciar todo o ciclo de vida de projetos elétricos, desde a criação de orçamentos até a execução de obras e controle financeiro.
+O **S3E System PRO** é um sistema ERP (Enterprise Resource Planning) completo e
+profissional desenvolvido especificamente para empresas de engenharia elétrica.
+A aplicação oferece uma solução integrada para gerenciar todo o ciclo de vida de
+projetos elétricos, desde a criação de orçamentos até a execução de obras e
+controle financeiro.
 
 ## 🎯 Objetivo
 
-O sistema foi desenvolvido para centralizar e automatizar os processos operacionais, administrativos e financeiros de empresas de engenharia elétrica, proporcionando:
+O sistema foi desenvolvido para centralizar e automatizar os processos
+operacionais, administrativos e financeiros de empresas de engenharia elétrica,
+proporcionando:
 
 - **Gestão completa de orçamentos** com geração automática de PDFs profissionais
 - **Controle de projetos e obras** com acompanhamento em tempo real
@@ -30,7 +36,9 @@ A aplicação segue uma arquitetura **full-stack** moderna:
 ## 📦 Módulos Principais
 
 ### 1. **Dashboard**
+
 Visão geral do sistema com métricas em tempo real:
+
 - Estatísticas de projetos, orçamentos e vendas
 - Alertas críticos (estoque baixo, contas vencidas)
 - Projetos em andamento
@@ -38,7 +46,9 @@ Visão geral do sistema com métricas em tempo real:
 - Ações rápidas
 
 ### 2. **Orçamentos**
+
 Sistema completo de criação e gestão de orçamentos:
+
 - Criação de orçamentos com materiais, kits, serviços e cotações
 - Cálculo automático de custos e margens (BDI)
 - Geração de PDFs profissionais com folha timbrada personalizável
@@ -48,7 +58,9 @@ Sistema completo de criação e gestão de orçamentos:
 - Fotos e descrições técnicas avançadas
 
 ### 3. **Catálogo de Materiais**
+
 Gestão completa do catálogo de produtos:
+
 - Cadastro de materiais elétricos com SKU, preços e estoque
 - Categorização (Material Elétrico, Insumo, Ferramenta)
 - Controle de estoque mínimo
@@ -57,20 +69,26 @@ Gestão completa do catálogo de produtos:
 - Vinculação com fornecedores
 
 ### 4. **Kits e Quadros Elétricos**
+
 Sistema de composição de kits:
+
 - Criação de kits modulares (medidores, comando, quadros elétricos, subestações)
 - Controle de estoque para kits
 - Identificação de itens faltantes
 - Quadros elétricos prontos com componentes pré-configurados
 
 ### 5. **Serviços**
+
 Cadastro de serviços oferecidos:
+
 - Tipos: Instalação, Manutenção, Consultoria, Laudo Técnico
 - Preços e unidades de medida (unidade, hora, m²)
 - Integração com orçamentos
 
 ### 6. **Projetos**
+
 Gestão completa do ciclo de vida de projetos:
+
 - Criação a partir de orçamentos aprovados
 - Status: Proposta, Validado, Aprovado, Execução, Concluído, Cancelado
 - Kanban board para acompanhamento visual
@@ -79,7 +97,9 @@ Gestão completa do ciclo de vida de projetos:
 - Tarefas de campo com status e progresso
 
 ### 7. **Obras**
+
 Controle operacional de obras em execução:
+
 - Status: Backlog, A Fazer, Andamento, Concluído
 - Tarefas de obra com atribuição de equipes ou eletricistas
 - Registros de atividades diárias com fotos
@@ -87,7 +107,9 @@ Controle operacional de obras em execução:
 - Gestão de equipes e alocações
 
 ### 8. **Gestão de Obras e Equipes**
+
 Sistema avançado de alocação de recursos:
+
 - Criação e gestão de equipes (Montagem, Campo, Distinta)
 - Calendário de alocações
 - Gráfico de Gantt para visualização de cronogramas
@@ -95,19 +117,25 @@ Sistema avançado de alocação de recursos:
 - Controle de disponibilidade
 
 ### 9. **Clientes**
+
 CRM básico para gestão de clientes:
+
 - Cadastro completo (CPF/CNPJ, contatos, endereço)
 - Histórico de orçamentos e projetos
 - Status ativo/inativo
 
 ### 10. **Fornecedores**
+
 Gestão de fornecedores:
+
 - Cadastro com CNPJ e dados de contato
 - Vinculação com materiais
 - Histórico de compras e cotações
 
 ### 11. **Compras**
+
 Controle de compras e entrada de materiais:
+
 - Registro de notas fiscais de compra
 - Importação de XML de NFe
 - Itens de compra vinculados a materiais
@@ -115,47 +143,59 @@ Controle de compras e entrada de materiais:
 - Atualização automática de estoque
 
 ### 12. **Estoque e Movimentações**
+
 Controle detalhado de estoque:
+
 - Movimentações (Entrada, Saída, Ajuste)
 - Histórico completo de movimentações
 - Rastreamento por material
 - Alertas de estoque mínimo
 
 ### 13. **Cotações (Banco Frio)**
+
 Sistema de banco de cotações:
+
 - Armazenamento de cotações de materiais
 - Data de atualização
 - Uso em orçamentos quando material não está em estoque
 - Vinculação com fornecedores
 
 ### 14. **Vendas**
+
 Gestão de vendas:
+
 - Criação a partir de orçamentos aprovados
 - Controle de parcelas e formas de pagamento
 - Geração automática de contas a receber
 - Status de venda
 
 ### 15. **Financeiro**
+
 Módulo financeiro completo:
 
 #### Contas a Receber
+
 - Parcelas de vendas
 - Controle de vencimentos
 - Status de pagamento
 
 #### Contas a Pagar
+
 - Contas de fornecedores
 - Despesas fixas (aluguel, energia, etc.)
 - Despesas de RH (salários)
 - Controle de vencimentos e pagamentos
 
 #### Despesas Fixas
+
 - Cadastro de despesas recorrentes
 - Controle mensal de pagamentos
 - Categorização (Aluguel, Energia, Água, Internet, etc.)
 
 ### 16. **Notas Fiscais Eletrônicas (NFe)**
+
 Emissão e gestão de NFes:
+
 - Integração com certificado digital
 - Emissão de NFe de produtos e serviços
 - Vinculação com projetos
@@ -164,43 +204,53 @@ Emissão e gestão de NFes:
 ### 17. **Gerenciamento Empresarial**
 
 #### Funcionários
+
 - Cadastro de funcionários
 - Controle de salários e admissões
 - Status (Ativo, Inativo, Férias, Afastado)
 
 #### Vales
+
 - Vale transporte
 - Vale alimentação
 - Adiantamentos
 - Controle por funcionário
 
 #### Frota de Veículos
+
 - Cadastro de veículos
 - Controle de quilometragem
 - Gastos (combustível, manutenção, seguro, IPVA, multas)
 - Vinculação com obras
 
 #### Planos Estratégicos
+
 - Gestão de planos e metas da empresa
 - Controle de prazos e responsáveis
 - Categorização e priorização
 
 ### 18. **Relatórios**
+
 Sistema de relatórios e análises:
+
 - Relatórios financeiros
 - Relatórios de estoque
 - Relatórios de projetos
 - Exportação em Excel/PDF
 
 ### 19. **Configurações**
+
 Personalização do sistema:
+
 - Configurações da empresa (logo, nome, contatos)
 - Tema claro/escuro
 - Templates de PDF personalizados
 - Configurações fiscais (empresas, certificados)
 
 ### 20. **Auditoria e Logs**
+
 Sistema completo de auditoria:
+
 - Logs de todas as ações dos usuários
 - Rastreamento de alterações
 - Histórico de acessos
@@ -208,7 +258,8 @@ Sistema completo de auditoria:
 
 ## 🔐 Segurança e Permissões
 
-O sistema implementa **RBAC (Role-Based Access Control)** com os seguintes perfis:
+O sistema implementa **RBAC (Role-Based Access Control)** com os seguintes
+perfis:
 
 - **Admin**: Acesso total ao sistema
 - **Orçamentista**: Criação e gestão de orçamentos
@@ -220,6 +271,7 @@ O sistema implementa **RBAC (Role-Based Access Control)** com os seguintes perfi
 ## 🚀 Funcionalidades Técnicas
 
 ### Geração de PDFs
+
 - Geração automática de PDFs de orçamentos
 - Folha timbrada personalizável
 - Marca d'água configurável
@@ -227,17 +279,20 @@ O sistema implementa **RBAC (Role-Based Access Control)** com os seguintes perfi
 - Exportação profissional
 
 ### Importação/Exportação
+
 - Importação de materiais via CSV/JSON
 - Exportação de templates de orçamento
 - Importação de XML de NFe
 - Exportação de relatórios
 
 ### Integrações
+
 - API REST completa
 - Integração com sistemas fiscais
 - Suporte a certificados digitais
 
 ### Performance
+
 - Dashboard com dados em tempo real
 - Cache de dados frequentes
 - Otimização de consultas ao banco
@@ -245,7 +300,8 @@ O sistema implementa **RBAC (Role-Based Access Control)** com os seguintes perfi
 
 ## 📊 Banco de Dados
 
-O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos principais:
+O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos
+principais:
 
 - Usuários e Autenticação
 - Clientes e Fornecedores
@@ -271,6 +327,7 @@ O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos 
 ## 📱 Tecnologias Utilizadas
 
 ### Frontend
+
 - React 18
 - TypeScript
 - Vite
@@ -282,6 +339,7 @@ O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos 
 - Lucide React (ícones)
 
 ### Backend
+
 - Node.js
 - Express
 - TypeScript
@@ -293,6 +351,7 @@ O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos 
 - Multer (upload de arquivos)
 
 ### DevOps
+
 - Docker
 - Docker Compose
 - Nginx (proxy reverso)
@@ -322,6 +381,7 @@ O sistema utiliza **PostgreSQL** com **Prisma ORM** e possui mais de 30 modelos 
 ## 🎯 Público-Alvo
 
 Empresas de engenharia elétrica que necessitam:
+
 - Gerenciar múltiplos projetos simultaneamente
 - Controlar estoque de materiais elétricos
 - Gerar orçamentos profissionais
@@ -334,4 +394,3 @@ Empresas de engenharia elétrica que necessitam:
 **Desenvolvido por**: Antonio Junior dos Santos  
 **Versão**: 1.0.0  
 **Licença**: Proprietária
-

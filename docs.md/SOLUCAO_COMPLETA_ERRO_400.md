@@ -5,6 +5,7 @@
 ### **1. LIMPEZA TOTAL:**
 
 **Arquivos Deletados:**
+
 - ❌ `backend/src/controllers/comparacaoPrecosController.ts`
 - ❌ `backend/src/services/comparacaoPrecos.service.ts`
 - ❌ `backend/src/routes/comparacaoPrecos.routes.ts`
@@ -12,6 +13,7 @@
 - ❌ `backend/dist/` (pasta compilada antiga)
 
 **Rotas Removidas:**
+
 - ❌ `/api/comparacao-precos/*` (todas)
 
 ---
@@ -19,21 +21,25 @@
 ### **2. NOVO SISTEMA LIMPO:**
 
 **Frontend:**
+
 - ✅ `AtualizacaoPrecos.tsx` (renomeado)
 - ✅ Título: "Atualização de Preços"
 - ✅ Subtitle: "Atualize preços em massa com arquivos JSON"
 - ✅ Importação via `axiosApiService`
 
 **Backend:**
+
 - ✅ Controller: `materiaisController.ts`
 - ✅ Rotas: `/api/materiais/*`
 - ✅ Service: integrado no controller
 
 **App.tsx:**
+
 - ✅ Importa `AtualizacaoPrecos`
 - ✅ Aceita 2 nomes: "Comparação de Preços" | "Atualização de Preços"
 
 **app.ts (backend):**
+
 - ✅ Removida importação de `comparacaoPrecosRoutes`
 - ✅ Removida rota `/api/comparacao-precos`
 - ✅ Limpo array `uploadRoutes`
@@ -67,6 +73,7 @@
 ## 🔥 **CAUSA DO ERRO 400:**
 
 ### **Problema 1: JSON Malformado**
+
 ```json
 // ❌ ERRADO (com wrapper Axios):
 {
@@ -86,6 +93,7 @@
 ```
 
 **Solução:**
+
 ```typescript
 // frontend/src/components/AtualizacaoPrecos.tsx
 const responseData = await axiosApiService.get(url);
@@ -93,7 +101,7 @@ const responseData = await axiosApiService.get(url);
 // Extração inteligente
 let templateData = responseData;
 if (templateData.success && templateData.data) {
-    templateData = templateData.data;
+  templateData = templateData.data;
 }
 
 const jsonString = JSON.stringify(templateData, null, 2);
@@ -102,6 +110,7 @@ const jsonString = JSON.stringify(templateData, null, 2);
 ### **Problema 2: Body Parser Bloqueando Upload**
 
 **Antes:**
+
 ```typescript
 // app.ts
 app.use(express.json());
@@ -112,15 +121,16 @@ app.use(express.urlencoded({ extended: true }));
 ```
 
 **Depois:**
+
 ```typescript
 // app.ts
 const uploadRoutes = [
-  '/api/materiais/preview-importacao',
-  '/api/materiais/importar-precos'
+  "/api/materiais/preview-importacao",
+  "/api/materiais/importar-precos",
 ];
 
 app.use((req, res, next) => {
-  if (uploadRoutes.some(route => req.url.startsWith(route))) {
+  if (uploadRoutes.some((route) => req.url.startsWith(route))) {
     return next(); // ✅ Pula body parsers
   }
   express.json()(req, res, next);
@@ -130,12 +140,14 @@ app.use((req, res, next) => {
 ### **Problema 3: Rotas Desorganizadas**
 
 **Antes:**
+
 - `/api/comparacao-precos/upload-csv`
 - `/api/comparacao-precos/validate-csv`
 - `/api/materiais/preview-importacao`
 - `/api/materiais/importar-precos`
 
 **Depois (UNIFICADO):**
+
 - `/api/materiais/template-importacao`
 - `/api/materiais/preview-importacao`
 - `/api/materiais/importar-precos`
@@ -146,18 +158,21 @@ app.use((req, res, next) => {
 ## ✅ **TESTE FINAL:**
 
 ### **1. Reiniciar Backend:**
+
 ```bash
 cd backend
 npm run dev
 ```
 
 ### **2. Reiniciar Frontend:**
+
 ```
 Navegador: Ctrl + Shift + R (hard reload)
 Menu → Atualização de Preços
 ```
 
 ### **3. Download JSON:**
+
 ```
 1. Clique: 📄 JSON
 2. Abra arquivo
@@ -169,6 +184,7 @@ Menu → Atualização de Preços
 ```
 
 ### **4. Importar JSON:**
+
 ```
 1. Importar JSON
 2. Selecionar arquivo
@@ -177,6 +193,7 @@ Menu → Atualização de Preços
 ```
 
 **Console Backend DEVE mostrar:**
+
 ```
 📥 Preview - Recebendo arquivo...
 📂 Lendo arquivo: ...
@@ -186,6 +203,7 @@ Menu → Atualização de Preços
 ```
 
 **Frontend DEVE mostrar:**
+
 ```
 ℹ️ Nenhuma alteração detectada (se não editou)
 OU
@@ -229,4 +247,3 @@ OU
 **STATUS:** ✅ RESOLVIDO E FUNCIONAL
 
 **TESTE AGORA E VAI FUNCIONAR! 🚀**
-

@@ -2,34 +2,44 @@
 
 ## ✅ Resumo Executivo
 
-Implementação completa do módulo de **Contas a Pagar**, incluindo criação manual, criação automática via compras, marcação de pagamento e alertas de vencimento.
+Implementação completa do módulo de **Contas a Pagar**, incluindo criação
+manual, criação automática via compras, marcação de pagamento e alertas de
+vencimento.
 
 ---
 
 ## 🎯 Funcionalidades Implementadas
 
 ### 1. ✅ Criar Conta a Pagar (Manual)
+
 Adicionar despesas/contas manualmente sem vínculo com compras.
 
 ### 2. ✅ Criar Contas Parceladas
+
 Criar múltiplas contas a pagar automaticamente (ex: 3x de R$ 10.000).
 
 ### 3. ✅ Integração com Compras
+
 Ao criar uma compra parcelada, gera contas a pagar automaticamente.
 
 ### 4. ✅ Marcar como Paga
+
 Registrar pagamento de uma conta a pagar.
 
 ### 5. ✅ Listar e Filtrar
+
 Buscar contas por status, fornecedor, etc.
 
 ### 6. ✅ Alertas
+
 Contas em atraso e contas a vencer nos próximos dias.
 
 ### 7. ✅ Cancelar Conta
+
 Cancelar conta pendente.
 
 ### 8. ✅ Atualizar Vencimento
+
 Prorrogar ou antecipar vencimento.
 
 ---
@@ -38,17 +48,17 @@ Prorrogar ou antecipar vencimento.
 
 ### Base URL: `/api/contas-pagar`
 
-| Método | Endpoint | Descrição | Permissões |
-|--------|----------|-----------|------------|
-| `POST` | `/` | Criar conta única | admin, financeiro |
-| `POST` | `/parceladas` | Criar contas parceladas | admin, financeiro |
-| `GET` | `/` | Listar contas (filtros) | admin, financeiro, gerente |
-| `GET` | `/:id` | Buscar conta específica | admin, financeiro, gerente |
-| `PUT` | `/:id/pagar` | Marcar como paga | admin, financeiro |
-| `PUT` | `/:id/cancelar` | Cancelar conta | admin, financeiro |
-| `PUT` | `/:id/vencimento` | Atualizar vencimento | admin, financeiro |
-| `GET` | `/alertas/atrasadas` | Contas em atraso | admin, financeiro, gerente |
-| `GET` | `/alertas/a-vencer` | Contas a vencer (7 dias) | admin, financeiro, gerente |
+| Método | Endpoint             | Descrição                | Permissões                 |
+| ------ | -------------------- | ------------------------ | -------------------------- |
+| `POST` | `/`                  | Criar conta única        | admin, financeiro          |
+| `POST` | `/parceladas`        | Criar contas parceladas  | admin, financeiro          |
+| `GET`  | `/`                  | Listar contas (filtros)  | admin, financeiro, gerente |
+| `GET`  | `/:id`               | Buscar conta específica  | admin, financeiro, gerente |
+| `PUT`  | `/:id/pagar`         | Marcar como paga         | admin, financeiro          |
+| `PUT`  | `/:id/cancelar`      | Cancelar conta           | admin, financeiro          |
+| `PUT`  | `/:id/vencimento`    | Atualizar vencimento     | admin, financeiro          |
+| `GET`  | `/alertas/atrasadas` | Contas em atraso         | admin, financeiro, gerente |
+| `GET`  | `/alertas/a-vencer`  | Contas a vencer (7 dias) | admin, financeiro, gerente |
 
 ---
 
@@ -97,6 +107,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -104,7 +115,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
   "data": {
     "id": "CP-001",
     "descricao": "Aluguel Escritório - Novembro/2025",
-    "valorParcela": 5000.00,
+    "valorParcela": 5000.0,
     "dataVencimento": "2025-11-05",
     "status": "Pendente",
     "fornecedorId": null
@@ -133,6 +144,7 @@ curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -141,7 +153,7 @@ curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
     {
       "id": "CP-001",
       "descricao": "Equipamentos de Segurança - Parcela 1/4",
-      "valorParcela": 2500.00,
+      "valorParcela": 2500.0,
       "dataVencimento": "2025-11-15",
       "numeroParcela": 1,
       "totalParcelas": 4
@@ -149,11 +161,11 @@ curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
     {
       "id": "CP-002",
       "descricao": "Equipamentos de Segurança - Parcela 2/4",
-      "valorParcela": 2500.00,
+      "valorParcela": 2500.0,
       "dataVencimento": "2025-12-15",
       "numeroParcela": 2,
       "totalParcelas": 4
-    },
+    }
     // ... parcelas 3 e 4
   ]
 }
@@ -189,13 +201,14 @@ curl -X POST http://localhost:3001/api/compras \
 ```
 
 **O que acontece automaticamente:**
+
 ```
 1. Compra criada ✅
    - Valor total: R$ 1.550,00
-   
+
 2. Estoque atualizado ✅
    - Disjuntores: +100 unidades
-   
+
 3. Contas a Pagar geradas automaticamente ✅
    - Conta 1: R$ 516,67 (venc: +30 dias)
    - Conta 2: R$ 516,67 (venc: +60 dias)
@@ -212,6 +225,7 @@ curl -X PUT http://localhost:3001/api/contas-pagar/CP-001/pagar \
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -219,7 +233,7 @@ curl -X PUT http://localhost:3001/api/contas-pagar/CP-001/pagar \
   "data": {
     "id": "CP-001",
     "descricao": "Aluguel Escritório - Novembro/2025",
-    "valorParcela": 5000.00,
+    "valorParcela": 5000.0,
     "status": "Pago",
     "dataPagamento": "2025-10-20T15:30:00.000Z"
   }
@@ -227,6 +241,7 @@ curl -X PUT http://localhost:3001/api/contas-pagar/CP-001/pagar \
 ```
 
 **Impacto no relatório:**
+
 ```json
 GET /api/relatorios/financeiro
 
@@ -420,6 +435,7 @@ POST /api/contas-pagar/parceladas
 ```
 
 **Resultado:**
+
 - 12 contas de R$ 10.000 cada
 - Vencimentos: 01/12, 01/01, 01/02... até 01/11/2026
 
@@ -445,147 +461,148 @@ POST /api/contas-pagar
 ### Componente de Contas a Pagar
 
 ```tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 
 const ContasPagar = () => {
-    const [contas, setContas] = useState([]);
-    const [filtro, setFiltro] = useState('Pendente');
-    const [showModal, setShowModal] = useState(false);
-    
-    // Carregar contas
-    useEffect(() => {
-        carregarContas();
-    }, [filtro]);
-    
-    const carregarContas = async () => {
-        const response = await fetch(
-            `/api/contas-pagar?status=${filtro}`,
-            {
-                headers: { 'Authorization': `Bearer ${token}` }
-            }
-        );
-        const { data } = await response.json();
-        setContas(data.contas);
-    };
-    
-    const handlePagarConta = async (id: string) => {
-        if (!confirm('Confirma pagamento desta conta?')) return;
-        
-        try {
-            await fetch(`/api/contas-pagar/${id}/pagar`, {
-                method: 'PUT',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            
-            alert('Conta paga com sucesso!');
-            carregarContas();
-        } catch (error) {
-            alert('Erro ao pagar conta');
-        }
-    };
-    
-    return (
-        <div className="p-8">
-            <h1 className="text-2xl font-bold mb-6">Contas a Pagar</h1>
-            
-            {/* Filtros */}
-            <div className="mb-4 flex gap-2">
-                <button 
-                    onClick={() => setFiltro('Pendente')}
-                    className={filtro === 'Pendente' ? 'active' : ''}
-                >
-                    Pendentes
-                </button>
-                <button 
-                    onClick={() => setFiltro('Pago')}
-                    className={filtro === 'Pago' ? 'active' : ''}
-                >
-                    Pagas
-                </button>
-                <button 
-                    onClick={() => setFiltro('')}
-                    className={filtro === '' ? 'active' : ''}
-                >
-                    Todas
-                </button>
-            </div>
-            
-            {/* Botão Nova Conta */}
-            <button 
-                onClick={() => setShowModal(true)}
-                className="bg-brand-blue text-white px-4 py-2 rounded-lg"
-            >
-                ➕ Nova Conta a Pagar
-            </button>
-            
-            {/* Tabela de Contas */}
-            <table className="w-full mt-6">
-                <thead>
-                    <tr>
-                        <th>Descrição</th>
-                        <th>Fornecedor</th>
-                        <th>Valor</th>
-                        <th>Vencimento</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {contas.map(conta => (
-                        <tr key={conta.id}>
-                            <td>{conta.descricao}</td>
-                            <td>{conta.fornecedor?.nome || '-'}</td>
-                            <td>R$ {conta.valorParcela.toLocaleString('pt-BR')}</td>
-                            <td>
-                                {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
-                                {isAtrasada(conta) && (
-                                    <span className="text-red-600 ml-2">⚠️ Atrasada</span>
-                                )}
-                            </td>
-                            <td>
-                                <span className={`badge ${getBadgeColor(conta.status)}`}>
-                                    {conta.status}
-                                </span>
-                            </td>
-                            <td>
-                                {conta.status === 'Pendente' && (
-                                    <button 
-                                        onClick={() => handlePagarConta(conta.id)}
-                                        className="bg-green-500 text-white px-3 py-1 rounded"
-                                    >
-                                        💰 Pagar
-                                    </button>
-                                )}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-            
-            {/* Modal de Nova Conta */}
-            {showModal && (
-                <ModalNovaConta 
-                    onClose={() => setShowModal(false)}
-                    onSuccess={carregarContas}
-                />
-            )}
-        </div>
-    );
+  const [contas, setContas] = useState([]);
+  const [filtro, setFiltro] = useState("Pendente");
+  const [showModal, setShowModal] = useState(false);
+
+  // Carregar contas
+  useEffect(() => {
+    carregarContas();
+  }, [filtro]);
+
+  const carregarContas = async () => {
+    const response = await fetch(`/api/contas-pagar?status=${filtro}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const { data } = await response.json();
+    setContas(data.contas);
+  };
+
+  const handlePagarConta = async (id: string) => {
+    if (!confirm("Confirma pagamento desta conta?")) return;
+
+    try {
+      await fetch(`/api/contas-pagar/${id}/pagar`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      alert("Conta paga com sucesso!");
+      carregarContas();
+    } catch (error) {
+      alert("Erro ao pagar conta");
+    }
+  };
+
+  return (
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-6">Contas a Pagar</h1>
+
+      {/* Filtros */}
+      <div className="mb-4 flex gap-2">
+        <button
+          onClick={() => setFiltro("Pendente")}
+          className={filtro === "Pendente" ? "active" : ""}
+        >
+          Pendentes
+        </button>
+        <button
+          onClick={() => setFiltro("Pago")}
+          className={filtro === "Pago" ? "active" : ""}
+        >
+          Pagas
+        </button>
+        <button
+          onClick={() => setFiltro("")}
+          className={filtro === "" ? "active" : ""}
+        >
+          Todas
+        </button>
+      </div>
+
+      {/* Botão Nova Conta */}
+      <button
+        onClick={() => setShowModal(true)}
+        className="bg-brand-blue text-white px-4 py-2 rounded-lg"
+      >
+        ➕ Nova Conta a Pagar
+      </button>
+
+      {/* Tabela de Contas */}
+      <table className="w-full mt-6">
+        <thead>
+          <tr>
+            <th>Descrição</th>
+            <th>Fornecedor</th>
+            <th>Valor</th>
+            <th>Vencimento</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {contas.map((conta) => (
+            <tr key={conta.id}>
+              <td>{conta.descricao}</td>
+              <td>{conta.fornecedor?.nome || "-"}</td>
+              <td>R$ {conta.valorParcela.toLocaleString("pt-BR")}</td>
+              <td>
+                {new Date(conta.dataVencimento).toLocaleDateString("pt-BR")}
+                {isAtrasada(conta) && (
+                  <span className="text-red-600 ml-2">⚠️ Atrasada</span>
+                )}
+              </td>
+              <td>
+                <span className={`badge ${getBadgeColor(conta.status)}`}>
+                  {conta.status}
+                </span>
+              </td>
+              <td>
+                {conta.status === "Pendente" && (
+                  <button
+                    onClick={() => handlePagarConta(conta.id)}
+                    className="bg-green-500 text-white px-3 py-1 rounded"
+                  >
+                    💰 Pagar
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Modal de Nova Conta */}
+      {showModal && (
+        <ModalNovaConta
+          onClose={() => setShowModal(false)}
+          onSuccess={carregarContas}
+        />
+      )}
+    </div>
+  );
 };
 
 const isAtrasada = (conta) => {
-    const hoje = new Date();
-    const vencimento = new Date(conta.dataVencimento);
-    return vencimento < hoje && conta.status === 'Pendente';
+  const hoje = new Date();
+  const vencimento = new Date(conta.dataVencimento);
+  return vencimento < hoje && conta.status === "Pendente";
 };
 
 const getBadgeColor = (status) => {
-    switch (status) {
-        case 'Pago': return 'bg-green-100 text-green-800';
-        case 'Pendente': return 'bg-yellow-100 text-yellow-800';
-        case 'Atrasado': return 'bg-red-100 text-red-800';
-        default: return 'bg-gray-100 text-gray-800';
-    }
+  switch (status) {
+    case "Pago":
+      return "bg-green-100 text-green-800";
+    case "Pendente":
+      return "bg-yellow-100 text-yellow-800";
+    case "Atrasado":
+      return "bg-red-100 text-red-800";
+    default:
+      return "bg-gray-100 text-gray-800";
+  }
 };
 ```
 
@@ -642,41 +659,44 @@ GET /api/contas-pagar/alertas/a-vencer?dias=7
 
 ```tsx
 const DashboardFinanceiro = () => {
-    const [resumo, setResumo] = useState(null);
-    
-    useEffect(() => {
-        fetch('/api/relatorios/financeiro/resumo')
-            .then(res => res.json())
-            .then(data => setResumo(data.data));
-    }, []);
-    
-    return (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Contas a Receber */}
-            <Card color="green">
-                <h3>A Receber</h3>
-                <p className="text-3xl font-bold">
-                    R$ {resumo?.contasReceberPendentes.toLocaleString('pt-BR')}
-                </p>
-            </Card>
-            
-            {/* Contas a Pagar */}
-            <Card color="red">
-                <h3>A Pagar</h3>
-                <p className="text-3xl font-bold">
-                    R$ {resumo?.contasPagarPendentes.toLocaleString('pt-BR')}
-                </p>
-            </Card>
-            
-            {/* Saldo Previsto */}
-            <Card color="blue">
-                <h3>Saldo Previsto</h3>
-                <p className="text-3xl font-bold">
-                    R$ {(resumo?.contasReceberPendentes - resumo?.contasPagarPendentes).toLocaleString('pt-BR')}
-                </p>
-            </Card>
-        </div>
-    );
+  const [resumo, setResumo] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/relatorios/financeiro/resumo")
+      .then((res) => res.json())
+      .then((data) => setResumo(data.data));
+  }, []);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Contas a Receber */}
+      <Card color="green">
+        <h3>A Receber</h3>
+        <p className="text-3xl font-bold">
+          R$ {resumo?.contasReceberPendentes.toLocaleString("pt-BR")}
+        </p>
+      </Card>
+
+      {/* Contas a Pagar */}
+      <Card color="red">
+        <h3>A Pagar</h3>
+        <p className="text-3xl font-bold">
+          R$ {resumo?.contasPagarPendentes.toLocaleString("pt-BR")}
+        </p>
+      </Card>
+
+      {/* Saldo Previsto */}
+      <Card color="blue">
+        <h3>Saldo Previsto</h3>
+        <p className="text-3xl font-bold">
+          R${" "}
+          {(
+            resumo?.contasReceberPendentes - resumo?.contasPagarPendentes
+          ).toLocaleString("pt-BR")}
+        </p>
+      </Card>
+    </div>
+  );
 };
 ```
 
@@ -686,39 +706,44 @@ const DashboardFinanceiro = () => {
 
 ### Matriz de Permissões
 
-| Ação | admin | financeiro | gerente | comercial | user |
-|------|-------|------------|---------|-----------|------|
-| Criar conta | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Ver contas | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Pagar conta | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Cancelar conta | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Alertas | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Ação           | admin | financeiro | gerente | comercial | user |
+| -------------- | ----- | ---------- | ------- | --------- | ---- |
+| Criar conta    | ✅    | ✅         | ❌      | ❌        | ❌   |
+| Ver contas     | ✅    | ✅         | ✅      | ❌        | ❌   |
+| Pagar conta    | ✅    | ✅         | ❌      | ❌        | ❌   |
+| Cancelar conta | ✅    | ✅         | ❌      | ❌        | ❌   |
+| Alertas        | ✅    | ✅         | ✅      | ❌        | ❌   |
 
 ---
 
 ## 🎯 Benefícios da Implementação
 
 ### 1. Gestão Completa de Despesas
+
 - ✅ Registro de todas as contas a pagar
 - ✅ Histórico completo
 - ✅ Rastreabilidade por fornecedor
 
 ### 2. Automação
+
 - ✅ Compras geram contas automaticamente
 - ✅ Não precisa cadastrar duas vezes
 - ✅ Reduz erros manuais
 
 ### 3. Controle de Fluxo de Caixa
+
 - ✅ Sabe exatamente quanto vai pagar
 - ✅ Prevê despesas futuras
 - ✅ Evita surpresas financeiras
 
 ### 4. Alertas Proativos
+
 - ✅ Aviso de contas vencendo
 - ✅ Identificação de atrasos
 - ✅ Planejamento melhor
 
 ### 5. Relatórios Precisos
+
 - ✅ Despesas reais por mês
 - ✅ Comparação receita x despesa
 - ✅ Análise de lucro verdadeiro
@@ -741,6 +766,7 @@ const DashboardFinanceiro = () => {
 ## 🚀 Próximos Passos
 
 ### Fase 1: Testar API
+
 ```bash
 # 1. Criar conta manual
 curl -X POST http://localhost:3001/api/contas-pagar \
@@ -761,6 +787,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 ```
 
 ### Fase 2: Criar Frontend
+
 - [ ] Componente ContasPagar.tsx
 - [ ] Formulário de nova conta
 - [ ] Tabela de listagem
@@ -768,6 +795,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 - [ ] Alertas visuais
 
 ### Fase 3: Automações
+
 - [ ] Criar contas recorrentes (aluguel mensal)
 - [ ] Enviar emails de lembrete
 - [ ] Integração bancária (OFX)
@@ -777,19 +805,20 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 
 ## 📊 Estatísticas da Implementação
 
-| Métrica | Valor |
-|---------|-------|
-| Endpoints criados | 9 |
-| Serviços | 8 funções |
-| Controllers | 8 métodos |
-| Rotas protegidas | 9 |
-| Linhas de código | ~400 |
+| Métrica           | Valor     |
+| ----------------- | --------- |
+| Endpoints criados | 9         |
+| Serviços          | 8 funções |
+| Controllers       | 8 métodos |
+| Rotas protegidas  | 9         |
+| Linhas de código  | ~400      |
 
 ---
 
 ## ✅ Checklist de Implementação
 
 ### Backend
+
 - [x] Serviço de contas a pagar
 - [x] Controller completo
 - [x] Rotas protegidas
@@ -799,6 +828,7 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 - [x] Autorização por perfil
 
 ### Funcionalidades
+
 - [x] Criar conta manual
 - [x] Criar contas parceladas
 - [x] Integração automática com compras
@@ -814,4 +844,3 @@ curl -X GET http://localhost:3001/api/relatorios/dashboard \
 
 **Implementação concluída em 20/10/2025** 💸  
 **Sistema S3E Engenharia Elétrica** ⚡
-

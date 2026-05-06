@@ -143,7 +143,7 @@ const ClienteCombobox: React.FC<ClienteComboboxProps> = ({
         <button
           type="button"
           onClick={onCreateNew}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition-colors whitespace-nowrap flex items-center gap-2 shadow-md"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors whitespace-nowrap flex items-center gap-2 shadow-md"
           title="Criar cliente rápido"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

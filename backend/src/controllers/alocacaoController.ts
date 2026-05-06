@@ -25,11 +25,13 @@ export class AlocacaoController {
       const data: CriarEquipeDTO = req.body;
 
       // Validações
-      if (!data.nome || !data.tipo || !data.membros || !Array.isArray(data.membros)) {
+      if (!data.nome || !data.tipo) {
         return res.status(400).json({
-          error: 'Dados obrigatórios ausentes: nome, tipo, membros (array)'
+          error: 'Dados obrigatórios ausentes: nome, tipo'
         });
       }
+
+      const membros = Array.isArray(data.membros) ? data.membros : [];
 
       if (!['MONTAGEM', 'CAMPO', 'DISTINTA'].includes(data.tipo)) {
         return res.status(400).json({
@@ -37,13 +39,10 @@ export class AlocacaoController {
         });
       }
 
-      if (data.membros.length === 0) {
-        return res.status(400).json({
-          error: 'A equipe deve ter pelo menos um membro'
-        });
-      }
-
-      const equipe = await alocacaoService.criarEquipe(data);
+      const equipe = await alocacaoService.criarEquipe({
+        ...data,
+        membros
+      });
 
       res.status(201).json({
         success: true,

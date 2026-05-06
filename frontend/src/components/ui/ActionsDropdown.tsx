@@ -5,7 +5,7 @@ interface ActionItem {
   label: string;
   icon?: React.ReactNode;
   onClick: () => void;
-  variant?: 'default' | 'danger' | 'primary' | 'success';
+  variant?: 'default' | 'danger' | 'primary' | 'success' | 'info';
   disabled?: boolean;
   show?: boolean; // Para controlar visibilidade condicional
 }
@@ -166,6 +166,8 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
         return 'text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20';
       case 'primary':
         return 'text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20';
+      case 'info':
+        return 'text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20';
       case 'success':
         return 'text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20';
       default:
@@ -180,7 +182,7 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
   const dropdownContent = isOpen ? (
     <div 
       ref={dropdownRef}
-      className="fixed w-48 bg-white dark:bg-gray-800 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 z-[9999] py-1 transition-all duration-200 ease-in-out max-h-[80vh] overflow-y-auto"
+      className="fixed w-48 bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border z-[9999] py-1 transition-all duration-200 ease-in-out max-h-[80vh] overflow-y-auto"
       style={{
         top: `${dropdownPosition.top}px`,
         left: `${dropdownPosition.left}px`,

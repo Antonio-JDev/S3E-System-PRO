@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import { LoginInput, RegisterInput } from '../validators/auth.validator';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from '../services/auditoria.service';
 
 /**
  * Controllers de Autenticação
@@ -44,21 +43,21 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     // Chamar service de autenticação
     const result = await authService.authenticateUser(email, password);
 
-    // Registrar login no audit log
+    // Registrar login (serviço de auditoria — DESATIVADO em produção)
     try {
-      await prisma.auditLog.create({
-        data: {
-          userId: result.user.id,
-          userName: result.user.name,
-          userRole: result.user.role,
-          action: 'LOGIN',
-          description: `Usuário ${result.user.name} fez login no sistema`,
+      await AuditoriaService.registrarEvento({
+        userId: result.user.id,
+        userName: result.user.name,
+        userRole: result.user.role,
+        action: 'LOGIN',
+        description: `Usuário ${result.user.name} fez login no sistema`,
+        metadata: {
           ipAddress: req.ip || req.socket.remoteAddress,
           userAgent: req.headers['user-agent']
         }
       });
     } catch (logError) {
-      console.error('Erro ao registrar login no audit log:', logError);
+      console.error('Erro ao registrar login (auditoria stub):', logError);
     }
 
     // Retornar sucesso
@@ -71,20 +70,16 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     // Tratamento de erros específicos
     const errorMessage = error instanceof Error ? error.message : 'Erro ao fazer login';
     
-    // Registrar tentativa de login falhada
+    // Registrar tentativa de login falhada (auditoria stub)
     try {
       const { email } = req.body as LoginInput;
-      await prisma.auditLog.create({
-        data: {
-          action: 'LOGIN_FAILED',
-          description: `Tentativa de login falhada para ${email}: ${errorMessage}`,
-          ipAddress: req.ip || req.socket.remoteAddress,
-          userAgent: req.headers['user-agent'],
-          metadata: { email, error: errorMessage }
-        }
+      await AuditoriaService.registrarEvento({
+        action: 'LOGIN_FAILED',
+        description: `Tentativa de login falhada para ${email}: ${errorMessage}`,
+        metadata: { email, error: errorMessage, ipAddress: req.ip || req.socket.remoteAddress, userAgent: req.headers['user-agent'] }
       });
     } catch (logError) {
-      console.error('Erro ao registrar falha de login:', logError);
+      console.error('Erro ao registrar falha de login (auditoria stub):', logError);
     }
     
     if (errorMessage === 'Credenciais inválidas') {
@@ -136,6 +131,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       email: body.email!,
       password: body.password!,
       name: body.name!,
+      setor: typeof (body as any).setor === 'string' ? (body as any).setor : undefined,
       role: body.role
     };
 
@@ -248,6 +244,67 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
     // Erro genérico
     console.error('Erro ao buscar usuários:', error);
     res.status(500).json({ error: 'Erro ao buscar usuários' });
+  }
+};
+
+/**
+ * GET /api/auth/permissions
+ * Retorna permissões efetivas do usuário autenticado (útil para frontend)
+ * Ex.: { canAccessAdminPages: true, role: 'financeiro', isAdmin: true }
+ */
+export const getPermissions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser) {
+      res.status(401).json({ error: 'Não autenticado' });
+      return;
+    }
+
+    const role = typeof authUser.role === 'string' ? authUser.role : '';
+    const isAdminFlag = !!authUser.isAdmin;
+
+    const roleLower = role.toLowerCase();
+    const canAccessAdminPages = isAdminFlag || roleLower === 'admin' || roleLower === 'desenvolvedor';
+
+    res.status(200).json({
+      canAccessAdminPages,
+      role,
+      isAdmin: isAdminFlag
+    });
+  } catch (error: any) {
+    console.error('Erro ao obter permissões do usuário:', error);
+    res.status(500).json({ error: 'Erro ao obter permissões' });
+  }
+};
+
+/**
+ * PATCH /api/auth/users/:id/is-admin
+ * Atualiza a flag isAdmin de um usuário (apenas admin pode chamar)
+ * Body: { isAdmin: boolean }
+ */
+export const setUserIsAdmin = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { isAdmin } = req.body as { isAdmin?: boolean };
+
+    if (typeof isAdmin !== 'boolean') {
+      res.status(400).json({ error: 'Campo isAdmin (boolean) é obrigatório' });
+      return;
+    }
+
+    // Verificar usuário existe
+    const user = await authService.getUserById(id);
+    if (!user) {
+      res.status(404).json({ error: 'Usuário não encontrado' });
+      return;
+    }
+
+    await authService.updateIsAdmin(id, isAdmin);
+
+    res.status(200).json({ success: true, message: `isAdmin atualizado para ${isAdmin}` });
+  } catch (error: any) {
+    console.error('Erro ao atualizar isAdmin do usuário:', error);
+    res.status(500).json({ error: 'Erro ao atualizar isAdmin do usuário' });
   }
 };
 

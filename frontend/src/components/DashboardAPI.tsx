@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { dashboardService, type Estatisticas, type Graficos, type Alertas } from '../services/dashboardService';
-import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
 import StatCard from './StatCard';
 import CriticalAlerts from './CriticalAlerts';
@@ -70,7 +69,14 @@ const DashboardAPI: React.FC<DashboardAPIProps> = ({ toggleSidebar, onNavigate }
     };
 
     if (loading) {
-        return <LoadingSpinner size="lg" text="Carregando dashboard..." />;
+        return (
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando dashboard...</p>
+                </div>
+            </div>
+        );
     }
 
     if (error) {
@@ -129,21 +135,21 @@ const DashboardAPI: React.FC<DashboardAPIProps> = ({ toggleSidebar, onNavigate }
     ] : [];
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
-            <div className="bg-white shadow">
+            <div className="bg-white dark:bg-dark-card shadow border-b border-gray-200 dark:border-dark-border">
                 <div className="px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center py-6">
                         <div className="flex items-center">
                             <button
                                 onClick={toggleSidebar}
-                                className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
+                                className="p-2 rounded-md text-gray-400 dark:text-dark-text-secondary hover:text-gray-500 dark:hover:text-dark-text hover:bg-gray-100 dark:hover:bg-dark-hover lg:hidden"
                             >
                                 <Bars3Icon className="h-6 w-6" />
                             </button>
                             <div className="ml-4">
-                                <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-                                <p className="text-sm text-gray-500">Visão geral do sistema</p>
+                                <h1 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Dashboard</h1>
+                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary">Visão geral do sistema</p>
                             </div>
                         </div>
                         <button

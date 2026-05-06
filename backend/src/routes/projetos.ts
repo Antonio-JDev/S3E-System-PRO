@@ -7,7 +7,12 @@ import {
   updateProjetoStatus,
   deleteProjeto,
   criarProjetoDeOrcamento,
-  listarProjetosAvancado
+  listarProjetosAvancado,
+  getProjetosProgresso,
+  getProjetosIdsComMinhasTarefas,
+  getProjetosIdsComMinhasTarefasAtrasadas,
+  getRelatorioKanbanUsuarios,
+  getRelatorioKanbanUsuarioAtrasadas
 } from '../controllers/projetosController';
 import {
   getTasksByProjeto,
@@ -22,7 +27,11 @@ import {
   visualizarDocumento,
   uploadDocumento
 } from '../controllers/projetoDocumentosController';
+import { getQualidade, putQualidade, aprovarInspecao } from '../controllers/qualidadeController';
 import { authenticate } from '../middlewares/auth';
+import PDFDocument from 'pdfkit';
+import path from 'path';
+import fs from 'fs';
 
 const router = Router();
 
@@ -38,6 +47,16 @@ router.use(authenticate);
 router.get('/', getProjetos);
 // endpoint com agregação/kanban opcional (?view=kanban)
 router.get('/_avancado', listarProjetosAvancado);
+// endpoint para retornar progresso de múltiplos projetos em uma chamada
+router.get('/progresso', getProjetosProgresso);
+// IDs dos projetos (OS) em que o usuário tem tarefas pendentes/em andamento no Kanban
+router.get('/ids-com-minhas-tarefas', getProjetosIdsComMinhasTarefas);
+// IDs dos projetos (OS) em que o usuário tem tarefas pendentes/em andamento atrasadas no Kanban
+router.get('/ids-com-minhas-tarefas-atrasadas', getProjetosIdsComMinhasTarefasAtrasadas);
+// Relatório por usuário (Admin/Dev): tempo de conclusão e atraso no Kanban
+router.get('/relatorios/kanban-usuarios', getRelatorioKanbanUsuarios);
+// Drilldown: tasks atrasadas por usuário no período (Admin/Dev)
+router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUsuarioAtrasadas);
 
 /**
  * @route GET /api/projetos/:id
@@ -48,7 +67,7 @@ router.get('/:id', getProjetoById);
 
 /**
  * @route POST /api/projetos
- * @desc Criar novo projeto vinculado a orçamento aprovado
+ * @desc Criar novo projeto (OS) vinculado ao orçamento; não exige PV nem status Aprovado (exceto Recusado/Declinado/Cancelado)
  * @access Private
  */
 router.post('/', createProjeto);
@@ -131,5 +150,184 @@ router.get('/:projetoId/documentos/:documentoId/visualizar', visualizarDocumento
  * @access Private
  */
 router.delete('/:projetoId/documentos/:documentoId', deletarDocumento);
+
+/**
+ * @route GET /api/projetos/:projetoId/qualidade
+ * @desc Dados da aba Qualidade (visita técnica, checklist, inspeções, fotos)
+ * @access Private
+ */
+router.get('/:projetoId/qualidade', getQualidade);
+
+/**
+ * @route PUT /api/projetos/:projetoId/qualidade
+ * @desc Salvar visita técnica, checklist e observações
+ * @access Private
+ */
+router.put('/:projetoId/qualidade', putQualidade);
+
+/**
+ * @route POST /api/projetos/:projetoId/qualidade/inspecoes/:tipo/aprovar
+ * @desc Aprovar uma inspeção (Inspeção Inicial, Aprovação Cliente, etc.)
+ * @access Private
+ */
+router.post('/:projetoId/qualidade/inspecoes/:tipo/aprovar', aprovarInspecao);
+
+/**
+ * @route POST /api/projetos/:projetoId/pdf-itens-faltantes
+ * @desc Gerar PDF "Solicitação de Compra" com materiais de estoque insuficiente
+ * @body { itens: Array<{ id, nome, quantidade, estoqueDisponivel?, sku?, ncm? }>, numeroOS, userName, userRole }
+ * @access Private
+ */
+router.post('/:projetoId/pdf-itens-faltantes', async (req, res) => {
+  try {
+    const { projetoId } = req.params;
+    const { itens, numeroOS, userName, userRole } = req.body;
+
+    if (!itens || !Array.isArray(itens)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Lista de itens é obrigatória'
+      });
+    }
+
+    const doc = new PDFDocument({
+      size: 'A4',
+      margin: 50
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    const nomeArquivoPdf = `PDF ordem de servico N° ${numeroOS || projetoId}.pdf`;
+    res.setHeader('Content-Disposition', `inline; filename="${nomeArquivoPdf}"`);
+
+    doc.pipe(res);
+
+    const margin = 50;
+    const topMargin = 22;
+    const pageWidth = 595;
+    const now = new Date();
+    const dataHora = now.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    const nomeSistema = 'S3E - Sistema de Gestão';
+
+    // Logo (canto esquerdo): tentar imagem da pasta uploads/logos
+    let logoPath: string | null = null;
+    const possibleLogoDirs = [
+      path.join(process.cwd(), 'uploads', 'logos'),
+      path.join(__dirname, '..', '..', 'uploads', 'logos')
+    ];
+    const preferredLogo = 'logo-1762806916991-250633582.png';
+    const fallbackLogos = ['logo-nome-azul.png', 'logo-branca.png'];
+    for (const dir of possibleLogoDirs) {
+      if (fs.existsSync(dir)) {
+        const fullPreferred = path.join(dir, preferredLogo);
+        if (fs.existsSync(fullPreferred)) {
+          logoPath = fullPreferred;
+          break;
+        }
+        for (const name of fallbackLogos) {
+          const full = path.join(dir, name);
+          if (fs.existsSync(full)) {
+            logoPath = full;
+            break;
+          }
+        }
+        if (!logoPath) {
+          const files = fs.readdirSync(dir).filter((f: string) => /\.(png|jpg|jpeg)$/i.test(f));
+          if (files.length > 0) logoPath = path.join(dir, files[0]);
+        }
+        if (logoPath) break;
+      }
+    }
+    if (logoPath) {
+      try {
+        doc.image(logoPath, margin, topMargin, { width: 62 });
+        doc.y = topMargin + 62 + 6;
+      } catch (_) {
+        // ignora se não conseguir carregar a imagem
+      }
+    } else {
+      doc.y = topMargin;
+    }
+    doc.font('Helvetica').fillColor('black');
+
+    // Título (bem no topo)
+    doc.fontSize(22).font('Helvetica-Bold').text('Solicitação de Compra', { align: 'center', width: pageWidth - 2 * margin });
+    doc.moveDown(0.25);
+
+    // Frase menor logo abaixo do título
+    doc.fontSize(10).font('Helvetica').fillColor('#374151');
+    doc.text(`Materiais referentes à Ordem de Serviço N° ${numeroOS ?? projetoId}`, { align: 'center' });
+    doc.moveDown(0.8);
+
+    // Tabela: NOME | QUANTIDADE (quantidade = a comprar)
+    const tableTop = doc.y;
+    const colNomeW = pageWidth - 2 * margin - 90;
+    const colQtdX = margin + colNomeW + 10;
+    const rowH = 22;
+    const headerH = 28;
+
+    // Cabeçalho da tabela
+    doc.rect(margin, tableTop, colNomeW + 90, headerH).fillAndStroke('#1e40af', '#1e40af');
+    doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff');
+    doc.text('NOME', margin + 8, tableTop + 8, { width: colNomeW - 16 });
+    doc.text('QUANTIDADE', colQtdX, tableTop + 8, { width: 80, align: 'right' });
+    doc.fillColor('black').font('Helvetica');
+
+    let yPos = tableTop + headerH;
+    let contador = 1;
+    for (const item of itens) {
+      const nome = item.nome || 'Item sem identificação';
+      const qtdNecessaria = Number(item.quantidade ?? 0);
+      const estoque = Number(item.estoqueDisponivel ?? 0);
+      const aComprar = Math.max(0, qtdNecessaria - estoque);
+
+      // Desenhar fundo alternado ANTES do stroke
+      if (contador % 2 === 0) {
+        doc.rect(margin, yPos, colNomeW + 90, rowH).fill('#f9fafb');
+      }
+      
+      // Desenhar borda da linha
+      doc.rect(margin, yPos, colNomeW + 90, rowH).stroke('#e5e7eb');
+      
+      // Configurar cor do texto
+      doc.fontSize(10).fillColor('#000000');
+      
+      // Adicionar conteúdo de texto
+      const nomeExibir = `${contador}. ${nome}`;
+      const nomeLinha = nomeExibir.length > 72 ? nomeExibir.substring(0, 69) + '...' : nomeExibir;
+      doc.text(nomeLinha, margin + 8, yPos + 6, { width: colNomeW - 16 });
+      doc.text(String(aComprar), colQtdX, yPos + 6, { width: 80, align: 'right' });
+
+      yPos += rowH;
+      contador++;
+    }
+
+    doc.y = yPos;
+
+    // Rodapé: sempre ao final do conteúdo, fora da tabela, centralizado (evita quebra em coluna)
+    const footerWidth = pageWidth - 2 * margin;
+    doc.moveDown(2);
+    doc.fontSize(9).fillColor('#4b5563');
+    doc.text(`Data e hora: ${dataHora}`, { align: 'center', width: footerWidth });
+    doc.moveDown(0.35);
+    doc.text(nomeSistema, { align: 'center', width: footerWidth });
+    doc.moveDown(0.35);
+    const linhaGeradoPor = `Gerado por: ${userName || 'Usuário'}${userRole ? ` - ${userRole}` : ''}`;
+    doc.text(linhaGeradoPor, { align: 'center', width: footerWidth });
+    doc.fillColor('black');
+
+    doc.end();
+  } catch (error: any) {
+    console.error('Erro ao gerar PDF de itens faltantes:', error);
+
+    if (res.headersSent) {
+      return res.end();
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Erro ao gerar PDF'
+    });
+  }
+});
 
 export default router;

@@ -6,9 +6,11 @@
 
 ## 📊 Visão Geral
 
-Sistema completo de geração de PDFs personalizáveis para orçamentos, com interface visual intuitiva e customizações em tempo real.
+Sistema completo de geração de PDFs personalizáveis para orçamentos, com
+interface visual intuitiva e customizações em tempo real.
 
 ### Principais Funcionalidades
+
 - 💧 **Marca d'água customizável** (logo, texto, design)
 - 🎨 **Design e cores personalizáveis** (4 templates + customização livre)
 - 📐 **Designs nos cantos** (4 estilos pré-definidos)
@@ -22,14 +24,18 @@ Sistema completo de geração de PDFs personalizáveis para orçamentos, com int
 ## 📁 Arquivos Criados
 
 ### Frontend (9 arquivos)
+
 1. ✅ `frontend/src/types/pdfCustomization.ts` - Types e interfaces completas
-2. ✅ `frontend/src/hooks/usePDFCustomization.ts` - Hook de gerenciamento de estado
+2. ✅ `frontend/src/hooks/usePDFCustomization.ts` - Hook de gerenciamento de
+   estado
 3. ✅ `frontend/src/services/pdfCustomizationService.ts` - Serviço de API
-4. ✅ `frontend/src/components/PDFCustomization/PDFCustomizationModal.tsx` - Componente principal
+4. ✅ `frontend/src/components/PDFCustomization/PDFCustomizationModal.tsx` -
+   Componente principal
 5. ✅ `frontend/SISTEMA_PDF_CUSTOMIZATION.md` - Documentação completa
 6. ✅ `frontend/EXEMPLO_INTEGRACAO_PDF.tsx` - Exemplos de integração
 
 ### Backend (4 arquivos)
+
 7. ✅ `backend/src/types/pdfCustomization.ts` - Types backend
 8. ✅ `backend/src/services/DynamicPDFService.ts` - Geração de PDF com Puppeteer
 9. ✅ `backend/src/controllers/pdfCustomizationController.ts` - Controller
@@ -37,6 +43,7 @@ Sistema completo de geração de PDFs personalizáveis para orçamentos, com int
 11. ✅ `backend/src/app.ts` - Integração das rotas (modificado)
 
 ### Documentação (2 arquivos)
+
 12. ✅ `SISTEMA_PDF_CUSTOMIZATION_RESUMO.md` - Este arquivo
 13. ✅ `frontend/SISTEMA_PDF_CUSTOMIZATION.md` - Documentação técnica detalhada
 
@@ -59,31 +66,45 @@ POST   /api/pdf-customization/upload-corner-design    → Upload design de canto
 ## 🎯 Como Usar (Desenvolvedor)
 
 ### 1. Importar componente e types
+
 ```typescript
-import PDFCustomizationModal from '../components/PDFCustomization/PDFCustomizationModal';
-import { OrcamentoPDFData } from '../types/pdfCustomization';
+import PDFCustomizationModal from "../components/PDFCustomization/PDFCustomizationModal";
+import { OrcamentoPDFData } from "../types/pdfCustomization";
 ```
 
 ### 2. Adicionar estado
+
 ```typescript
 const [showPDFCustomization, setShowPDFCustomization] = useState(false);
 ```
 
 ### 3. Preparar dados do orçamento
+
 ```typescript
 const orcamentoData: OrcamentoPDFData = {
-    numero: orcamento.id,
-    data: new Date().toLocaleDateString('pt-BR'),
-    validade: orcamento.validade,
-    cliente: { /* ... */ },
-    projeto: { /* ... */ },
-    items: [ /* ... */ ],
-    financeiro: { /* ... */ },
-    empresa: { /* ... */ }
+  numero: orcamento.id,
+  data: new Date().toLocaleDateString("pt-BR"),
+  validade: orcamento.validade,
+  cliente: {
+    /* ... */
+  },
+  projeto: {
+    /* ... */
+  },
+  items: [
+    /* ... */
+  ],
+  financeiro: {
+    /* ... */
+  },
+  empresa: {
+    /* ... */
+  },
 };
 ```
 
 ### 4. Adicionar botão
+
 ```typescript
 <button
     onClick={() => setShowPDFCustomization(true)}
@@ -94,6 +115,7 @@ const orcamentoData: OrcamentoPDFData = {
 ```
 
 ### 5. Renderizar modal
+
 ```typescript
 {showPDFCustomization && (
     <PDFCustomizationModal
@@ -110,6 +132,7 @@ const orcamentoData: OrcamentoPDFData = {
 ## 🎨 Interface do Usuário
 
 ### Estrutura do Modal
+
 ```
 ┌─────────────────────────────────────────────────┐
 │  🎨 Personalizar PDF                          ❌ │
@@ -133,6 +156,7 @@ const orcamentoData: OrcamentoPDFData = {
 ### Abas Disponíveis
 
 #### 💧 Marca d'Água
+
 - Tipo: Nenhuma | Logo | Texto | Design
 - Upload de imagem (JPG, PNG, SVG, WebP)
 - Texto personalizado com cor
@@ -142,6 +166,7 @@ const orcamentoData: OrcamentoPDFData = {
 - Rotação: -45° a 45°
 
 #### 🎨 Design & Cores
+
 - **Templates pré-definidos**:
   - S3E Engenharia (Indigo/Purple/Green)
   - Profissional (Blue Dark/Gray/Blue)
@@ -151,7 +176,9 @@ const orcamentoData: OrcamentoPDFData = {
 - **Designs nos cantos**: Geométrico, Curvas, Linhas, Custom
 
 #### 📄 Conteúdo
+
 Checkboxes para controlar visibilidade:
+
 - ✅ Cabeçalho da Empresa
 - ✅ Descrições Técnicas
 - ✅ Imagens dos Itens
@@ -163,6 +190,7 @@ Checkboxes para controlar visibilidade:
 - ✅ Rodapé da Empresa
 
 #### 👁️ Pré-visualização
+
 - Preview visual do PDF
 - Botão "Salvar como Template"
 - Botão "Restaurar Padrão"
@@ -172,12 +200,14 @@ Checkboxes para controlar visibilidade:
 ## 🔧 Tecnologias Utilizadas
 
 ### Frontend
+
 - React + TypeScript
 - Tailwind CSS
 - Axios (API calls)
 - Context API (localStorage)
 
 ### Backend
+
 - Node.js + Express + TypeScript
 - Puppeteer (geração de PDF)
 - Handlebars (templates HTML)
@@ -225,12 +255,14 @@ Checkboxes para controlar visibilidade:
 ## 💡 Casos de Uso
 
 ### 1. Orçamento Padrão da Empresa
+
 - Marca d'água: Logo da empresa (opacidade 15%)
 - Cores: Template "S3E Engenharia"
 - Conteúdo: Todos os campos ativos
 - **Salvar como**: "Template Padrão S3E"
 
 ### 2. Orçamento para Cliente Premium
+
 - Marca d'água: Logo + texto "CONFIDENCIAL"
 - Cores: Elegante (Purple/Rose)
 - Designs nos cantos: Curvas suaves
@@ -238,12 +270,14 @@ Checkboxes para controlar visibilidade:
 - **Salvar como**: "Template Premium"
 
 ### 3. Orçamento Simplificado
+
 - Marca d'água: Nenhuma
 - Cores: Profissional (Blue Dark)
 - Conteúdo: Apenas essencial (sem fotos, sem avisos)
 - **Salvar como**: "Template Simplificado"
 
 ### 4. Proposta Técnica Detalhada
+
 - Marca d'água: Texto "PROPOSTA TÉCNICA"
 - Cores: Técnico (Teal/Green/Amber)
 - Designs nos cantos: Linhas
@@ -255,16 +289,19 @@ Checkboxes para controlar visibilidade:
 ## ⚙️ Configurações
 
 ### Upload de Arquivos
+
 - **Tamanho máximo**: 5MB
 - **Formatos**: JPG, JPEG, PNG, SVG, WebP
 - **Diretório**: `backend/uploads/pdf-customization/`
 
 ### Templates
+
 - **Armazenamento**: Arquivos JSON (temporário)
 - **Localização**: `backend/data/pdf-templates/`
 - **Formato**: `{userId}_{templateId}.json`
 
 ### PDF
+
 - **Formatos**: A4, Letter
 - **Orientação**: Portrait (padrão)
 - **Margens**: 20mm (personalizável)
@@ -401,9 +438,11 @@ export default MinhaPaginaOrcamentos;
 
 Sistema **100% implementado e funcional**!
 
-**Pronto para ser integrado** em qualquer página que precise gerar orçamentos em PDF.
+**Pronto para ser integrado** em qualquer página que precise gerar orçamentos em
+PDF.
 
 **Benefícios**:
+
 - ✅ PDFs profissionais e personalizados
 - ✅ Identidade visual da empresa
 - ✅ Flexibilidade total de customização
@@ -417,4 +456,3 @@ Sistema **100% implementado e funcional**!
 **Data**: 06/11/2024  
 **Status**: ✅ COMPLETO E PRONTO PARA USO  
 **Versão**: 1.0.0
-

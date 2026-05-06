@@ -2,7 +2,8 @@
 
 ## 🏗️ Visão Geral da Arquitetura
 
-A arquitetura de emissão de NF-e foi implementada seguindo o padrão **MVC (Model-View-Controller)** com separação de responsabilidades em camadas:
+A arquitetura de emissão de NF-e foi implementada seguindo o padrão **MVC
+(Model-View-Controller)** com separação de responsabilidades em camadas:
 
 ```
 Frontend (React/TypeScript)
@@ -23,9 +24,11 @@ Backend (Express/TypeScript)
 ### Backend - Dependências Principais
 
 #### 1. **XML Processing**
+
 - **`fast-xml-parser`** (v5.3.2)
   - **Uso:** Parsing e geração de XML da NF-e
-  - **Localização:** `backend/src/controllers/comprasController.ts` (para parsing de XML recebido)
+  - **Localização:** `backend/src/controllers/comprasController.ts` (para
+    parsing de XML recebido)
   - **Função:** Converter XML string para objeto JavaScript e vice-versa
 
 - **`xml2js`** (v0.6.2)
@@ -33,6 +36,7 @@ Backend (Express/TypeScript)
   - **Status:** Instalado mas não utilizado ativamente
 
 #### 2. **Assinatura Digital (Planejado/Mock)**
+
 - **`xml-crypto`** (comentado)
   - **Uso previsto:** Assinatura digital do XML com certificado A1
   - **Status:** Não instalado, apenas referenciado em comentários
@@ -44,18 +48,21 @@ Backend (Express/TypeScript)
   - **Necessário para produção:** Sim
 
 #### 3. **Comunicação SOAP (Planejado/Mock)**
+
 - **`soap`** (comentado)
   - **Uso previsto:** Comunicação com webservices da SEFAZ via SOAP
   - **Status:** Não instalado, apenas referenciado em comentários
   - **Necessário para produção:** Sim
 
 #### 4. **Criptografia**
+
 - **`bcryptjs`** (v3.0.2)
   - **Uso:** Criptografar senha do certificado digital antes de salvar no banco
   - **Localização:** `backend/src/controllers/configFiscalController.ts`
   - **Função:** Hash da senha do certificado com salt rounds = 10
 
 #### 5. **ORM e Banco de Dados**
+
 - **`@prisma/client`** (v6.17.1)
   - **Uso:** Acesso ao banco de dados PostgreSQL
   - **Modelos relacionados:**
@@ -63,6 +70,7 @@ Backend (Express/TypeScript)
     - `EmpresaFiscal` - Armazena configurações fiscais e certificados
 
 #### 6. **Framework Web**
+
 - **`express`** (v4.18.2)
   - **Uso:** Servidor HTTP e rotas REST
   - **Middleware:** Autenticação JWT e autorização RBAC
@@ -209,6 +217,7 @@ O XML é gerado manualmente como string no método `generateNFeXML()`:
 ### Armazenamento do Certificado
 
 **Localização:**
+
 ```
 backend/data/certificados/
 ├── 12345678000190_1697398400000.pfx
@@ -216,6 +225,7 @@ backend/data/certificados/
 ```
 
 **Segurança:**
+
 - ✅ Arquivo salvo com nome único: `CNPJ_timestamp.pfx`
 - ✅ Senha criptografada com bcrypt (hash no banco)
 - ✅ Path do arquivo salvo no banco (não o arquivo em si)
@@ -240,16 +250,18 @@ model EmpresaFiscal {
 
 ### Status Atual: MOCK
 
-A integração com SEFAZ está **mockada** (simulada). Em produção, seria necessário:
+A integração com SEFAZ está **mockada** (simulada). Em produção, seria
+necessário:
 
 1. **Biblioteca SOAP:**
+
    ```typescript
-   import * as soap from 'soap';
-   
+   import * as soap from "soap";
+
    const client = await soap.createClient(wsdlUrl, {
      wsdl_options: {
        // Configurações de certificado para mTLS
-     }
+     },
    });
    ```
 
@@ -307,24 +319,24 @@ model NotaFiscal {
 
 ### Rotas de NF-e (`/api/nfe`)
 
-| Método | Rota | Descrição | Autenticação |
-|--------|------|-----------|--------------|
-| GET | `/api/nfe` | Listar NF-es | ✅ Auth |
-| GET | `/api/nfe/:id` | Buscar NF-e | ✅ Auth |
-| POST | `/api/nfe/emitir` | Emitir NF-e (SEFAZ) | ✅ Admin/Gerente |
-| POST | `/api/nfe/cancelar` | Cancelar NF-e | ✅ Admin/Gerente |
-| POST | `/api/nfe/corrigir` | Carta de Correção | ✅ Admin/Gerente |
-| GET | `/api/nfe/consultar/:chave` | Consultar na SEFAZ | ✅ Admin/Gerente |
-| POST | `/api/nfe/config` | Configurar certificado | ✅ Admin |
+| Método | Rota                        | Descrição              | Autenticação     |
+| ------ | --------------------------- | ---------------------- | ---------------- |
+| GET    | `/api/nfe`                  | Listar NF-es           | ✅ Auth          |
+| GET    | `/api/nfe/:id`              | Buscar NF-e            | ✅ Auth          |
+| POST   | `/api/nfe/emitir`           | Emitir NF-e (SEFAZ)    | ✅ Admin/Gerente |
+| POST   | `/api/nfe/cancelar`         | Cancelar NF-e          | ✅ Admin/Gerente |
+| POST   | `/api/nfe/corrigir`         | Carta de Correção      | ✅ Admin/Gerente |
+| GET    | `/api/nfe/consultar/:chave` | Consultar na SEFAZ     | ✅ Admin/Gerente |
+| POST   | `/api/nfe/config`           | Configurar certificado | ✅ Admin         |
 
 ### Rotas de Configuração Fiscal (`/api/configuracoes-fiscais`)
 
-| Método | Rota | Descrição | Autenticação |
-|--------|------|-----------|--------------|
-| GET | `/api/configuracoes-fiscais` | Listar empresas | ✅ Admin/Gerente |
-| POST | `/api/configuracoes-fiscais` | Criar empresa | ✅ Admin |
-| PUT | `/api/configuracoes-fiscais/:id` | Atualizar | ✅ Admin |
-| DELETE | `/api/configuracoes-fiscais/:id` | Deletar | ✅ Admin |
+| Método | Rota                             | Descrição       | Autenticação     |
+| ------ | -------------------------------- | --------------- | ---------------- |
+| GET    | `/api/configuracoes-fiscais`     | Listar empresas | ✅ Admin/Gerente |
+| POST   | `/api/configuracoes-fiscais`     | Criar empresa   | ✅ Admin         |
+| PUT    | `/api/configuracoes-fiscais/:id` | Atualizar       | ✅ Admin         |
+| DELETE | `/api/configuracoes-fiscais/:id` | Deletar         | ✅ Admin         |
 
 ---
 
@@ -375,30 +387,38 @@ model NotaFiscal {
 ### Para Implementar em Produção:
 
 1. **`xml-crypto`** ou **`xmldom` + `node-forge`**
+
    ```bash
    npm install xml-crypto xmldom node-forge
    ```
+
    - **Uso:** Assinar XML com certificado A1
    - **Função:** Implementar XML-DSig corretamente
 
 2. **`soap`** ou **`axios` com SOAP**
+
    ```bash
    npm install soap
    ```
+
    - **Uso:** Comunicação com webservices SEFAZ
    - **Função:** Enviar XML assinado e receber protocolo
 
 3. **`node-forge`**
+
    ```bash
    npm install node-forge @types/node-forge
    ```
+
    - **Uso:** Extrair chave privada do PFX
    - **Função:** Ler certificado .pfx e extrair dados
 
 4. **`moment`** ou **`date-fns`**
+
    ```bash
    npm install moment
    ```
+
    - **Uso:** Formatação de datas no formato SEFAZ
    - **Função:** Garantir formato correto de datas
 
@@ -407,24 +427,28 @@ model NotaFiscal {
 ## 🎯 Arquitetura de Camadas
 
 ### 1. **Camada de Apresentação (Frontend)**
+
 - React/TypeScript
 - Componentes de UI para emissão
 - Formulários de configuração fiscal
 - Visualização de NF-es emitidas
 
 ### 2. **Camada de API (Backend - Routes)**
+
 - Express Router
 - Middleware de autenticação
 - Middleware de autorização (RBAC)
 - Validação de entrada
 
 ### 3. **Camada de Controle (Controllers)**
+
 - `NFeController` - Lógica de requisições HTTP
 - Validação de parâmetros
 - Tratamento de erros
 - Respostas formatadas
 
 ### 4. **Camada de Serviço (Services)**
+
 - `NFeService` - Lógica de negócio
 - Geração de XML
 - Assinatura digital
@@ -432,6 +456,7 @@ model NotaFiscal {
 - Validações fiscais
 
 ### 5. **Camada de Dados (Models)**
+
 - Prisma ORM
 - Modelos: `NotaFiscal`, `EmpresaFiscal`
 - Queries e transações
@@ -470,6 +495,7 @@ model NotaFiscal {
 ## 🚧 O que Precisa ser Implementado para Produção
 
 ### 1. **Assinatura Digital Real**
+
 ```typescript
 // Substituir mock por implementação real
 import * as xmlCrypto from 'xml-crypto';
@@ -484,6 +510,7 @@ async signXML(xml: string, pfxPath: string, password: string) {
 ```
 
 ### 2. **Comunicação SOAP Real**
+
 ```typescript
 // Substituir mock por SOAP real
 import * as soap from 'soap';
@@ -494,16 +521,17 @@ async emitirNFe(xmlAssinado: string, certificado: Certificado) {
       // Configurar certificado para mTLS
     }
   });
-  
+
   const resultado = await client.NFeAutorizacao4({
     nfeDadosMsg: xmlAssinado
   });
-  
+
   return resultado;
 }
 ```
 
 ### 3. **Validação de Certificado**
+
 ```typescript
 // Validar certificado ao fazer upload
 import * as forge from 'node-forge';
@@ -520,6 +548,7 @@ async validarCertificado(pfxBase64: string, senha: string, cnpj: string) {
 ```
 
 ### 4. **Geração Correta de Chave de Acesso**
+
 ```typescript
 // Implementar algoritmo completo com dígito verificador
 private gerarChaveAcesso(...): string {
@@ -534,17 +563,20 @@ private gerarChaveAcesso(...): string {
 ## 📝 Resumo das Bibliotecas
 
 ### ✅ Instaladas e Usadas:
+
 - `fast-xml-parser` - Parsing de XML
 - `bcryptjs` - Criptografia de senhas
 - `@prisma/client` - ORM
 - `express` - Framework web
 
 ### ⚠️ Comentadas (Não Instaladas):
+
 - `xml-crypto` - Assinatura digital
 - `soap` - Comunicação SEFAZ
 - `node-forge` - Manipulação de certificados
 
 ### 📦 Necessárias para Produção:
+
 1. `xml-crypto` ou `xmldom` + `node-forge`
 2. `soap` ou `axios` com SOAP
 3. `node-forge` (obrigatório)
@@ -554,7 +586,9 @@ private gerarChaveAcesso(...): string {
 
 ## 🎓 Conclusão
 
-A arquitetura está **bem estruturada** e **preparada para evolução**, mas atualmente está em **modo MOCK** para desenvolvimento. Para produção, é necessário:
+A arquitetura está **bem estruturada** e **preparada para evolução**, mas
+atualmente está em **modo MOCK** para desenvolvimento. Para produção, é
+necessário:
 
 1. ✅ Instalar bibliotecas de assinatura e SOAP
 2. ✅ Implementar assinatura digital real
@@ -563,5 +597,5 @@ A arquitetura está **bem estruturada** e **preparada para evolução**, mas atu
 5. ✅ Implementar tratamento de erros da SEFAZ
 6. ✅ Adicionar logs e auditoria completos
 
-A base está sólida e a estrutura permite essa evolução sem grandes refatorações! 🚀
-
+A base está sólida e a estrutura permite essa evolução sem grandes refatorações!
+🚀

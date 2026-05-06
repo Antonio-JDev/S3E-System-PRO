@@ -9,7 +9,8 @@ Versão: 2.2
 
 ## 🎯 Funcionalidade Implementada
 
-Na **Etapa 4 - Disjuntores por Medidor**, agora aparece uma seção completa de **Cabos Calculados Automaticamente** logo abaixo da lista de disjuntores.
+Na **Etapa 4 - Disjuntores por Medidor**, agora aparece uma seção completa de
+**Cabos Calculados Automaticamente** logo abaixo da lista de disjuntores.
 
 ---
 
@@ -25,11 +26,13 @@ O sistema calcula automaticamente os cabos necessários baseado em:
 - ✅ **Quantidade de disjuntores por medidor**
 
 **Fórmula de Cálculo:**
+
 ```
 Metros Totais = Nº Medidores × Qtd. Disjuntores/Medidor × 2m (média por disjuntor)
 ```
 
 **Exemplo:**
+
 ```
 5 medidores × 2 disjuntores/medidor × 2m = 20 metros de cabo
 ```
@@ -40,15 +43,15 @@ Metros Totais = Nº Medidores × Qtd. Disjuntores/Medidor × 2m (média por disj
 
 O sistema determina a bitola correta baseado na amperagem:
 
-| Polaridade | Amperagem | Bitola | Tipo |
-|------------|-----------|--------|------|
-| Monopolar | 40-63A | 10mm² | HEPR Rígido |
-| Bipolar | 50-63A | 10mm² | HEPR Rígido |
-| Tripolar | 40-63A | 10mm² | HEPR Rígido |
-| Tripolar | 70A | 16mm² | HEPR Rígido |
-| Tripolar | 90A | 25mm² | HEPR Rígido |
-| Tripolar | 100A | 25mm² | HEPR (Flex/Rígido) |
-| Tripolar | 125A | 35mm² | HEPR (Flex/Rígido) |
+| Polaridade | Amperagem | Bitola | Tipo               |
+| ---------- | --------- | ------ | ------------------ |
+| Monopolar  | 40-63A    | 10mm²  | HEPR Rígido        |
+| Bipolar    | 50-63A    | 10mm²  | HEPR Rígido        |
+| Tripolar   | 40-63A    | 10mm²  | HEPR Rígido        |
+| Tripolar   | 70A       | 16mm²  | HEPR Rígido        |
+| Tripolar   | 90A       | 25mm²  | HEPR Rígido        |
+| Tripolar   | 100A      | 25mm²  | HEPR (Flex/Rígido) |
+| Tripolar   | 125A      | 35mm²  | HEPR (Flex/Rígido) |
 
 ---
 
@@ -59,6 +62,7 @@ Cada cabo exibido mostra:
 #### **A. Cabos Calculados Automaticamente (Badge Verde "Auto")**
 
 **Campos Visíveis:**
+
 - ✅ **Bitola:** Somente leitura com badge "Auto"
 - ✅ **Tipo:** Texto fixo (HEPR Rígido ou Flex/Rígido)
 - ✅ **Cor:** Texto padrão (Preto/Vermelho/Azul)
@@ -66,6 +70,7 @@ Cada cabo exibido mostra:
 - ✅ **Informação:** Explicação do cálculo abaixo
 
 **Exemplo de Card:**
+
 ```
 ┌──────────────────────────────────────────┐
 │ Bitola: 10mm² [Auto]   Tipo: HEPR Rígido │
@@ -78,6 +83,7 @@ Cada cabo exibido mostra:
 #### **B. Cabos Extras (Customizados)**
 
 **Campos Editáveis:**
+
 - ✏️ **Bitola:** Select com opções de 2.5mm² até 50mm²
 - ✏️ **Tipo:** Select (HEPR Rígido, HEPR Flexível, PP, Cordoalha)
 - ✏️ **Cor:** Campo de texto livre
@@ -85,6 +91,7 @@ Cada cabo exibido mostra:
 - 🗑️ **Botão Remover:** Ícone de lixeira
 
 **Opções de Bitola:**
+
 - 2.5mm²
 - 4mm²
 - 6mm²
@@ -95,6 +102,7 @@ Cada cabo exibido mostra:
 - 50mm²
 
 **Opções de Tipo:**
+
 - HEPR Rígido
 - HEPR Flexível
 - PP (Polipropileno)
@@ -113,6 +121,7 @@ No canto superior direito da seção:
 ```
 
 **Ao clicar:**
+
 - ✅ Adiciona um novo cabo customizado
 - ✅ Valores padrão: 10mm², Preto, HEPR Rígido, 1 metro
 - ✅ Totalmente editável
@@ -125,12 +134,14 @@ No canto superior direito da seção:
 ### **1. Card de Cabo**
 
 **Cabos Calculados:**
+
 - ✅ Badge verde "Auto" na bitola
 - ✅ Campos desabilitados (não editáveis)
 - ✅ Explicação do cálculo abaixo
 - ✅ Sem botão de remover
 
 **Cabos Extras:**
+
 - ✅ Todos os campos editáveis
 - ✅ Selects e inputs ativos
 - ✅ Botão de lixeira vermelho
@@ -139,6 +150,7 @@ No canto superior direito da seção:
 ### **2. Layout Responsivo**
 
 **Grid de 12 colunas:**
+
 - Col-span-3: Bitola
 - Col-span-3: Tipo
 - Col-span-3: Cor
@@ -146,6 +158,7 @@ No canto superior direito da seção:
 - Col-span-1: Ações (remover)
 
 **Estilo Moderno:**
+
 ```css
 - Cards brancos com bordas
 - Hover muda borda para azul
@@ -158,6 +171,7 @@ No canto superior direito da seção:
 ### **3. Dica Informativa**
 
 Card azul no final:
+
 ```
 ┌────────────────────────────────────────────┐
 │ 💡 Dica: Os cabos calculados automaticamente│
@@ -172,9 +186,11 @@ Card azul no final:
 
 ### **1. Agrupamento de Cabos**
 
-Se houver múltiplos disjuntores com a mesma bitola, o sistema **agrupa automaticamente**:
+Se houver múltiplos disjuntores com a mesma bitola, o sistema **agrupa
+automaticamente**:
 
 **Exemplo:**
+
 ```
 Disjuntor 1: 50A → 10mm² → 10 metros
 Disjuntor 2: 63A → 10mm² → 15 metros
@@ -194,14 +210,29 @@ const key = `${bitola}-${tipo}`;
 ### **3. Estado no KitConfiguration**
 
 Os cabos são armazenados em:
+
 ```typescript
 kitConfig.cabos.items = [
   // Cabos calculados (sem isCustom)
-  { id: 'calc-0', bitola: '10mm²', cor: 'Preto/Vermelho/Azul', tipo: 'HEPR Rígido', quantidade: 20, isCalculated: true },
-  
+  {
+    id: "calc-0",
+    bitola: "10mm²",
+    cor: "Preto/Vermelho/Azul",
+    tipo: "HEPR Rígido",
+    quantidade: 20,
+    isCalculated: true,
+  },
+
   // Cabos extras (com isCustom)
-  { id: '1234567890', bitola: '6mm²', cor: 'Verde', tipo: 'HEPR Flexível', quantidade: 5, isCustom: true }
-]
+  {
+    id: "1234567890",
+    bitola: "6mm²",
+    cor: "Verde",
+    tipo: "HEPR Flexível",
+    quantidade: 5,
+    isCustom: true,
+  },
+];
 ```
 
 ---
@@ -209,6 +240,7 @@ kitConfig.cabos.items = [
 ## 💡 Casos de Uso
 
 ### **Caso 1: Instalação Padrão**
+
 ```
 Usuário:
 1. Adiciona 3 disjuntores de 50A
@@ -220,6 +252,7 @@ Resultado: Rápido e sem erros!
 ```
 
 ### **Caso 2: Instalação com Extras**
+
 ```
 Usuário:
 1. Vê cabos calculados automaticamente
@@ -232,6 +265,7 @@ Resultado: Flexibilidade total!
 ```
 
 ### **Caso 3: Instalação Mista**
+
 ```
 Sistema calcula:
 - 2x Disjuntores 50A → 20m de 10mm²
@@ -249,6 +283,7 @@ Resultado: Visão completa de todos os cabos!
 ## 📊 Benefícios
 
 ### **Para o Usuário:**
+
 - ⚡ **+80%** mais rápido que calcular manualmente
 - 🎯 **100%** de precisão no cálculo
 - 👀 **Visualização clara** de todos os cabos
@@ -256,6 +291,7 @@ Resultado: Visão completa de todos os cabos!
 - 📋 **Rastreabilidade** completa
 
 ### **Para a Empresa:**
+
 - ✅ Padronização automática
 - ✅ Redução de erros
 - ✅ Melhor precificação
@@ -267,11 +303,13 @@ Resultado: Visão completa de todos os cabos!
 ## 🎓 Como Usar
 
 ### **Passo 1: Adicione Disjuntores**
+
 ```
 Etapa 4 → Escolha polaridade → Selecione disjuntores
 ```
 
 ### **Passo 2: Veja os Cabos Calculados**
+
 ```
 Automaticamente aparece abaixo:
 - Bitola correta
@@ -280,11 +318,13 @@ Automaticamente aparece abaixo:
 ```
 
 ### **Passo 3: (Opcional) Adicione Cabos Extras**
+
 ```
 Clique em "Adicionar Cabo Extra" → Preencha os dados
 ```
 
 ### **Passo 4: Confirme**
+
 ```
 Revise a lista completa → Avance para próxima etapa
 ```
@@ -299,28 +339,33 @@ Revise a lista completa → Avance para próxima etapa
 // Calcular cabos automaticamente
 const cabosCalculados = {};
 
-disjuntoresIndividuais.forEach(dj => {
-  const disjuntor = materialsData.find(m => m.id === dj.id);
+disjuntoresIndividuais.forEach((dj) => {
+  const disjuntor = materialsData.find((m) => m.id === dj.id);
   const amperage = disjuntor?.properties?.amperage || 0;
-  
+
   // Determinar bitola
-  let bitola = '10mm²';
-  if (polaridade === 'tripolar') {
-    if (amperage === 70) bitola = '16mm²';
-    else if (amperage === 90) bitola = '25mm²';
-    else if (amperage === 100) bitola = '25mm²';
-    else if (amperage === 125) bitola = '35mm²';
+  let bitola = "10mm²";
+  if (polaridade === "tripolar") {
+    if (amperage === 70) bitola = "16mm²";
+    else if (amperage === 90) bitola = "25mm²";
+    else if (amperage === 100) bitola = "25mm²";
+    else if (amperage === 125) bitola = "35mm²";
   }
-  
+
   // Calcular quantidade
   const quantidade = numMedidores * quantityPerMeter * 2; // 2m por disjuntor
-  
+
   // Agrupar
   const key = `${bitola}-${tipo}`;
   if (cabosCalculados[key]) {
     cabosCalculados[key].quantidade += quantidade;
   } else {
-    cabosCalculados[key] = { bitola, tipo, cor: 'Preto/Vermelho/Azul', quantidade };
+    cabosCalculados[key] = {
+      bitola,
+      tipo,
+      cor: "Preto/Vermelho/Azul",
+      quantidade,
+    };
   }
 });
 ```
@@ -352,40 +397,43 @@ disjuntoresIndividuais.forEach(dj => {
 ```javascript
 const defaultCaboExtra = {
   id: Date.now().toString(),
-  bitola: '10mm²',
-  cor: 'Preto',
-  tipo: 'HEPR Rígido',
+  bitola: "10mm²",
+  cor: "Preto",
+  tipo: "HEPR Rígido",
   quantidade: 1,
-  isCustom: true
+  isCustom: true,
 };
 ```
 
 ### **Cores Padrão por Função:**
 
-| Função | Cor Sugerida |
-|--------|--------------|
-| Fase | Preto/Vermelho/Branco |
-| Neutro | Azul |
-| Terra | Verde ou Verde/Amarelo |
-| Retorno | Branco |
+| Função  | Cor Sugerida           |
+| ------- | ---------------------- |
+| Fase    | Preto/Vermelho/Branco  |
+| Neutro  | Azul                   |
+| Terra   | Verde ou Verde/Amarelo |
+| Retorno | Branco                 |
 
 ---
 
 ## 🚀 Melhorias Futuras Possíveis
 
 ### **Curto Prazo:**
+
 1. 💾 **Salvar templates** de cabos frequentes
 2. 🎨 **Seletor visual de cores** (color picker)
 3. 📊 **Gráfico de distribuição** de bitolas
 4. 💰 **Preço estimado** por cabo
 
 ### **Médio Prazo:**
+
 1. 📦 **Sugestão de rolos** (50m, 100m, etc)
 2. 🔍 **Busca de cabos** no estoque
 3. 📋 **Impressão da lista** de cabos
 4. 🤖 **IA para otimização** de compra
 
 ### **Longo Prazo:**
+
 1. 🌐 **Integração com fornecedores**
 2. 📊 **Analytics de uso** de cabos
 3. 💡 **Sugestões inteligentes** baseadas em histórico
@@ -407,6 +455,7 @@ const defaultCaboExtra = {
 ## 📝 Exemplo Completo
 
 **Cenário Real:**
+
 ```
 Projeto: Condomínio Residencial - 8 apartamentos
 
@@ -438,17 +487,16 @@ A nova funcionalidade de **Gestão de Cabos Automática** traz:
 - ⚡ **Velocidade** no processo
 - 🎯 **Precisão** técnica
 
-Agora o usuário tem **controle total** sobre os cabos, com a **conveniência** do cálculo automático!
+Agora o usuário tem **controle total** sobre os cabos, com a **conveniência** do
+cálculo automático!
 
 ---
 
 **Desenvolvido para S3E Engenharia**  
-*Sistema de Gestão Integrada v2.2*  
+_Sistema de Gestão Integrada v2.2_  
 Data: Outubro 2025  
 Status: ✅ Implementado e Testado
 
 ---
 
 **⚡ Cabos calculados, tempo economizado!**
-
-

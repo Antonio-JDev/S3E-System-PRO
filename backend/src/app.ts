@@ -1,13 +1,21 @@
+// Verificação TLS: padrão '1' (ativada). Usamos certs ICP-Brasil (certs/ca-bundle-br.pem).
+// Só use NODE_TLS_REJECT_UNAUTHORIZED=0 em ambiente de teste se a SEFAZ falhar por CA (improvável).
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === undefined) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
+}
+
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+import { createServer } from 'http';
 import express from 'express';
+import { Server } from 'socket.io';
 import cors, { CorsOptions } from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
 import fs from 'fs';
-
+import { prisma } from './lib/prisma';
 
 // Routes
 import authRoutes from './routes/auth';
@@ -17,6 +25,7 @@ import orcamentosRoutes from './routes/orcamentos';
 import configFiscalRoutes from './routes/configFiscal';
 import vendasRoutes from './routes/vendas.routes';
 import contasPagarRoutes from './routes/contasPagar.routes';
+import contasReceberRoutes from './routes/contasReceber.routes';
 import relatoriosRoutes from './routes/relatorios.routes';
 import protectedRoutes from './routes/protected.routes';
 import alocacaoRoutes from './routes/alocacao.routes';
@@ -31,33 +40,101 @@ import servicosRoutes from './routes/servicos';
 import movimentacoesRoutes from './routes/movimentacoes';
 import historicoRoutes from './routes/historico';
 import nfeRoutes from './routes/nfe';
+import { authenticate } from './middlewares/auth';
+import { NFeController } from './controllers/nfeController';
+import nfseRoutes from './routes/nfse.routes';
 import empresasRoutes from './routes/empresas';
 import dashboardRoutes from './routes/dashboard';
 import quadrosRoutes from './routes/quadros.routes';
 import kitsRoutes from './routes/kits.routes';
 import configuracaoRoutes from './routes/configuracao.routes';
 import obraRoutes from './routes/obra.routes';
+import { obrasRoutes } from './routes/obras.routes';
 import pdfCustomizationRoutes from './routes/pdfCustomization.routes';
 import funcionariosRoutes from './routes/funcionarios.routes';
+import recursosHumanosRoutes from './routes/recursosHumanos.routes';
 import valesRoutes from './routes/vales.routes';
+import beneficiosRoutes from './routes/beneficios.routes';
+import rhRoutes from './routes/rh.routes';
+import pontoRoutes from './routes/ponto.routes';
 import veiculosRoutes from './routes/veiculos.routes';
 import gastosVeiculoRoutes from './routes/gastosVeiculo.routes';
 import planosRoutes from './routes/planos.routes';
 import despesasFixasRoutes from './routes/despesasFixas.routes';
 import logsRoutes from './routes/logs';
 import tarefasObraRoutes from './routes/tarefasObra';
+import tarefasInternasRoutes from './routes/tarefasInternas.routes';
 import diagnosticoRoutes from './routes/diagnostico';
 import ferramentasRoutes from './routes/ferramentas.routes';
 import kitsFerramentaRoutes from './routes/kits-ferramenta.routes';
 import biRoutes from './routes/bi.routes';
 import resumoAdministrativoRoutes from './routes/resumoAdministrativo.routes';
+import dreRoutes from './routes/dre.routes';
+import fluxoCaixaRoutes from './routes/fluxoCaixa.routes';
+import sincronizacaoDeployRoutes from './routes/sincronizacaoDeploy.routes';
+import movimentacoesCaixaRoutes from './routes/movimentacoesCaixa.routes';
+import receitaRoutes from './routes/receita.routes';
+import notificacoesRoutes from './routes/notificacoes.routes';
+import atendimentoCrmRoutes from './routes/atendimentoCrm.routes';
+import brasilApiNcmRoutes from './routes/brasilApiNcm.routes';
+import webhooksRoutes from './routes/webhooks.routes';
+import whatsappRoutes from './routes/whatsapp.routes';
 import { healthCheck } from './controllers/logsController';
+import { setSocketServer } from './lib/socket';
+import { verifyToken } from './services/jwt.service';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Tentativa segura de garantir colunas/índices esperados pela migration "add_audit_logs".
+// Não faz alterações destrutivas: apenas cria colunas/indexes se não existirem.
+// Em ambientes onde o banco não está disponível, falha silenciosamente.
+(async function ensureAuditLogsColumns() {
+  try {
+    // Executar cada statement individualmente para evitar erro de múltiplos comandos em prepared statement
+    const statements = [
+      `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS user_id uuid`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS entity_id text`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS chain_id text`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS created_at timestamptz`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_entityid ON audit_logs(entity, entity_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_chain_id ON audit_logs(chain_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`
+    ];
+
+    for (const stmt of statements) {
+      try {
+        await prisma.$executeRawUnsafe(stmt);
+      } catch {
+        // Ignorar erros por statement — manter compatibilidade e não quebrar bootstrap
+      }
+    }
+
+    console.log('🔧 Verificação audit_logs: tentativa concluída (não destrutiva).');
+  } catch (err) {
+    console.warn('⚠️ Não foi possível garantir colunas/índices audit_logs (possível ausência do DB neste momento):', err instanceof Error ? err.message : err);
+  }
+})();
 // Determinar origens permitidas para CORS
-const defaultOrigins = ['http://localhost', 'http://localhost:80', 'http://localhost:5173'];
+// Inclui domínios padrão de desenvolvimento e o host de produção conhecido (TrueNAS Scale)
+const defaultOrigins = [
+  'http://localhost',
+  'http://localhost:80',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://app.s3eengenharia.com.br:8080',
+  'http://app.s3eengenharia.com.br',
+  'http://app.s3eengenharia.com.br:3001',
+  'https://app.s3eengenharia.com.br:8080',
+  'https://app.s3eengenharia.com.br',
+  'https://app.s3eengenharia.com.br:3001'
+];
 const envOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
   : [];
@@ -66,32 +143,43 @@ const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 // Em desenvolvimento, permitir qualquer origem para facilitar testes (incluindo Tailscale)
 const isDevelopment = process.env.NODE_ENV === 'development';
 
+/** Mesma regra para Express CORS e Socket.io (evita handshake bloqueado em produção). */
+function allowOriginForBrowser(
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean) => void
+): void {
+  if (isDevelopment) {
+    console.log(`✅ CORS permitido (dev mode) para origem: ${origin || 'undefined'}`);
+    return callback(null, true);
+  }
+  if (!origin || allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  if (origin && /^https?:\/\/100\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin)) {
+    console.log(`✅ CORS permitido para IP Tailscale: ${origin}`);
+    return callback(null, true);
+  }
+  console.warn(`🚫 CORS bloqueado para origem: ${origin}`);
+  console.warn(`   Origens permitidas: ${allowedOrigins.join(', ')}`);
+  return callback(new Error('Not allowed by CORS'));
+}
+
 const corsOptions: CorsOptions = {
-  origin: (origin, callback) => {
-    // Em desenvolvimento, permitir qualquer origem (útil para Tailscale e testes locais)
-    if (isDevelopment) {
-      console.log(`✅ CORS permitido (dev mode) para origem: ${origin || 'undefined'}`);
-      return callback(null, true);
-    }
-    
-    // Browsers podem enviar origin undefined em requests como curl ou same-origin
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Verificar se é um IP do Tailscale (formato: http://100.x.x.x ou https://100.x.x.x)
-    if (origin && /^https?:\/\/100\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin)) {
-      console.log(`✅ CORS permitido para IP Tailscale: ${origin}`);
-      return callback(null, true);
-    }
-    
-    console.warn(`🚫 CORS bloqueado para origem: ${origin}`);
-    console.warn(`   Origens permitidas: ${allowedOrigins.join(', ')}`);
-    return callback(new Error('Not allowed by CORS'));
-  },
+  origin: (origin, callback) => allowOriginForBrowser(origin, callback),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  // Permitir headers comuns usados por browsers e axios (ex: cache-control em preflight)
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Cache-Control',
+    'Pragma',
+    'Expires',
+    'If-Modified-Since',
+    'If-None-Match',
+    'X-Requested-With',
+    'Accept'
+  ]
 };
 
 // Middlewares
@@ -203,7 +291,7 @@ app.use('/uploads', (req, res, next) => {
   // Permitir qualquer origem para uploads (funciona com IPs em produção)
   res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cache-Control, Pragma, Expires, If-Modified-Since, If-None-Match, X-Requested-With, Accept');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
@@ -214,12 +302,13 @@ app.use('/uploads', express.static(uploadsPath));
 // EXCEÇÃO: Não aplicar body parsers em rotas com upload de arquivos (multer)
 // Lista de rotas que PODEM usar multipart/form-data
 const uploadRoutes = [
-  '/api/materiais/preview-importacao',
-  '/api/materiais/importar-precos',
   '/api/cotacoes/importar',
   '/api/configuracoes/upload-logo',
   '/api/obras/tarefas/resumo', // Rota de upload de fotos de tarefas
-  '/api/projetos' // Rotas de upload de documentos de projetos
+  '/api/projetos', // Rotas de upload de documentos de projetos
+  '/api/atendimento-crm', // Upload conta de energia (contato-lead)
+  '/api/ponto', // Importação .xls do relógio de ponto
+  '/api/whatsapp/send-file', // Multipart envio WhatsApp (multer)
 ];
 
 // Body parsers COM EXCEÇÃO para rotas de upload (apenas se for multipart/form-data)
@@ -246,6 +335,9 @@ app.use((req, res, next) => {
 app.get('/api/health', healthCheck);
 app.get('/health', healthCheck);
 
+// Webhooks públicos (provedor WhatsApp → backend; opcional X-Webhook-Secret)
+app.use('/api/webhooks', webhooksRoutes);
+
 // API routes
 app.get('/api', (_req, res) => {
   res.json({
@@ -263,7 +355,6 @@ app.get('/api', (_req, res) => {
       relatorios: '/api/relatorios',
       configFiscal: '/api/configuracoes-fiscais',
       obras: '/api/obras',
-      atualizacaoPrecos: '/api/materiais/template-importacao',
       equipes: '/api/equipes',
       pdfCustomization: '/api/pdf-customization',
       clientes: '/api/clientes',
@@ -278,6 +369,9 @@ app.get('/api', (_req, res) => {
       quadros: '/api/quadros',
       configuracoes: '/api/configuracoes',
       funcionarios: '/api/funcionarios',
+      rh: '/api/rh',
+      ponto: '/api/ponto',
+      beneficios: '/api/beneficios',
       vales: '/api/vales',
       veiculos: '/api/veiculos',
       gastosVeiculo: '/api/gastos-veiculo',
@@ -285,7 +379,13 @@ app.get('/api', (_req, res) => {
       despesasFixas: '/api/despesas-fixas',
       logs: '/api/logs',
       tarefasObra: '/api/obras/tarefas',
-      bi: '/api/bi'
+      bi: '/api/bi',
+      dre: '/api/financeiro/dre',
+      fluxoCaixa: '/api/financeiro/fluxo-caixa',
+      movimentacoesCaixa: '/api/movimentacoes-caixa',
+      atendimentoCrm: '/api/atendimento-crm',
+      whatsapp: '/api/whatsapp',
+      webhooksWhatsapp: '/api/webhooks/whatsapp'
     }
   });
 });
@@ -294,10 +394,12 @@ app.get('/api', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/protected', protectedRoutes);
 app.use('/api/materiais', materiaisRoutes);
+app.use('/api/brasil-api', brasilApiNcmRoutes);
 app.use('/api/compras', comprasRoutes);
 app.use('/api/orcamentos', orcamentosRoutes);
 app.use('/api/vendas', vendasRoutes);
 app.use('/api/contas-pagar', contasPagarRoutes);
+app.use('/api/contas-receber', contasReceberRoutes);
 app.use('/api/relatorios', relatoriosRoutes);
 app.use('/api/configuracoes-fiscais', configFiscalRoutes);
 app.use('/api/obras', alocacaoRoutes);
@@ -311,17 +413,65 @@ app.use('/api/cotacoes', cotacoesRoutes);
 app.use('/api/servicos', servicosRoutes);
 app.use('/api/movimentacoes', movimentacoesRoutes);
 app.use('/api/historico', historicoRoutes);
+
+// Rotas compatíveis utilizadas pelo frontend (eventos / reprocessar / enviar-email / xml por nota)
+// Comentadas temporariamente em produção para evitar problemas de bootstrap/crash.
+// Reabilitar quando o controller e import circular forem validados.
+/*
+app.get('/api/nfe/notas/:id/eventos', authenticate, (req, res, next) => {
+  try {
+    const { NFeController } = require('./controllers/nfeController');
+    return NFeController.listarEventosNota(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+app.post('/api/nfe/notas/:id/reprocessar', authenticate, (req, res, next) => {
+  try {
+    const { NFeController } = require('./controllers/nfeController');
+    return NFeController.reprocessarNota(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+app.post('/api/nfe/notas/:id/enviar-email', authenticate, (req, res, next) => {
+  try {
+    const { NFeController } = require('./controllers/nfeController');
+    return NFeController.enviarEmailNota(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+app.get('/api/nfe/notas/:id/xml', authenticate, (req, res, next) => {
+  try {
+    const { NFeController } = require('./controllers/nfeController');
+    return NFeController.getXmlNota(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
+*/
 app.use('/api/nfe', nfeRoutes);
+app.use('/api/nfse', nfseRoutes);
 app.use('/api/empresas', empresasRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/quadros', quadrosRoutes);
 app.use('/api/kits', kitsRoutes);
 app.use('/api/configuracoes', configuracaoRoutes);
+app.use('/api/notificacoes', notificacoesRoutes);
+app.use('/api/atendimento-crm', atendimentoCrmRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/obras', tarefasObraRoutes); // Rotas de tarefas (prefixo /api/obras) - DEVE VIR ANTES!
+app.use('/api/obras', obrasRoutes); // Rotas de materiais e compras avulsas (getMateriaisObra, getComprasAvulsasObra)
 app.use('/api/obras', obraRoutes);
+app.use('/api/tarefas-internas', tarefasInternasRoutes);
 app.use('/api/pdf-customization', pdfCustomizationRoutes);
 app.use('/api/funcionarios', funcionariosRoutes);
+app.use('/api/recursos-humanos', recursosHumanosRoutes);
 app.use('/api/vales', valesRoutes);
+app.use('/api/beneficios', beneficiosRoutes);
+app.use('/api/rh', rhRoutes);
+app.use('/api/ponto', pontoRoutes);
 app.use('/api/veiculos', veiculosRoutes);
 app.use('/api/gastos-veiculo', gastosVeiculoRoutes);
 app.use('/api/planos', planosRoutes);
@@ -332,6 +482,12 @@ app.use('/api/ferramentas', ferramentasRoutes);
 app.use('/api/kits-ferramenta', kitsFerramentaRoutes);
 app.use('/api/bi', biRoutes);
 app.use('/api/resumo-administrativo', resumoAdministrativoRoutes);
+app.use('/api/financeiro/dre', dreRoutes);
+app.use('/api/financeiro/fluxo-caixa', fluxoCaixaRoutes);
+app.use('/api/sistema', sincronizacaoDeployRoutes);
+app.use('/api/movimentacoes-caixa', movimentacoesCaixaRoutes);
+// Proxy para consultas de CNPJ (resolve problema de CORS do receitaws)
+app.use('/api/external/receita', receitaRoutes);
 
 // Error handling middleware
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -347,10 +503,45 @@ app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Start server
-app.listen(PORT, () => {
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => allowOriginForBrowser(origin, callback),
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+});
+
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token || typeof token !== 'string') {
+      return next(new Error('unauthorized'));
+    }
+    verifyToken(token);
+    return next();
+  } catch {
+    return next(new Error('unauthorized'));
+  }
+});
+
+setSocketServer(io);
+
+httpServer.listen(PORT, () => {
   console.log(`🚀 Servidor Rodando na porta ${PORT} por favor acesse: http://localhost:${PORT}`);
   console.log(`📝 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  console.log('📡 Socket.io ativo (WhatsApp CRM)');
+
+  // Job diário: notificar financeiro sobre contas a pagar vencendo hoje
+  const runContasVencendoHoje = () => {
+    import('./services/notificacoes.service')
+      .then((m) => m.notificarContasAPagarVencendoHoje())
+      .then(() => console.log('✅ Job contas a pagar vencendo hoje executado'))
+      .catch((err) => console.error('❌ Job contas a pagar vencendo hoje:', err));
+  };
+  setTimeout(runContasVencendoHoje, 8000); // primeira execução 8s após subir
+  setInterval(runContasVencendoHoje, 24 * 60 * 60 * 1000); // depois a cada 24h
 });
 
 export default app;

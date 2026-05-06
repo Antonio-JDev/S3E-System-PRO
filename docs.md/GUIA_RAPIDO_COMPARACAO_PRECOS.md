@@ -3,12 +3,14 @@
 ## ⚡ Como Usar em 5 Passos
 
 ### **Passo 1: Acessar a Funcionalidade** 📊
+
 1. Faça login no S3E System
 2. Clique em **"Comparação de Preços"** na sidebar (ícone de carrinho)
 
 ---
 
 ### **Passo 2: Importar CSV** 📤
+
 1. Clique no botão **"Importar CSV"** (canto superior direito)
 2. Preencha o nome do fornecedor (ex: "Eletro Materiais XYZ")
 3. Clique em **"Clique para selecionar o arquivo"**
@@ -18,13 +20,16 @@
 ---
 
 ### **Passo 3: Analisar Comparação** 🔍
+
 Você verá 4 cards com estatísticas:
+
 - **Total de Itens**: Quantidade de materiais
 - **Valor Total**: Custo total da compra
 - **💰 Economia Total**: Quanto você economizaria (verde)
 - **📈 Aumento Total**: Quanto a mais você pagaria (vermelho)
 
 Abaixo, uma tabela mostra item por item:
+
 - 🟢 **Verde** = Preço menor que a última compra
 - 🔴 **Vermelho** = Preço maior que a última compra
 - 🔵 **Azul** = Preço igual
@@ -33,6 +38,7 @@ Abaixo, uma tabela mostra item por item:
 ---
 
 ### **Passo 4: Filtrar e Buscar** 🔎
+
 - **Busca**: Digite o nome ou código do material na barra de busca
 - **Filtro**: Selecione o status desejado no dropdown
   - "Preço Menor" = Mostra só os itens mais baratos
@@ -42,6 +48,7 @@ Abaixo, uma tabela mostra item por item:
 ---
 
 ### **Passo 5: Criar Orçamento** 📝
+
 1. Após analisar, clique em **"Criar Orçamento com Estes Preços"**
 2. O sistema te levará para a página de **Orçamentos**
 3. Os dados já estarão pré-preenchidos com os novos preços
@@ -51,9 +58,11 @@ Abaixo, uma tabela mostra item por item:
 
 ## 📋 Arquivo CSV de Exemplo
 
-Use o arquivo `exemplo_orcamento_fornecedor.csv` incluído no projeto para testar!
+Use o arquivo `exemplo_orcamento_fornecedor.csv` incluído no projeto para
+testar!
 
 **Formato esperado:**
+
 ```csv
 codigo,nome,unidade,quantidade,preco_unitario
 MAT-001,Cabo 2.5mm² - Rolo 100m,Rolo,5,295.00
@@ -61,6 +70,7 @@ MAT-002,Disjuntor 20A Bipolar,Unidade,10,42.50
 ```
 
 ### **Colunas obrigatórias:**
+
 - `codigo`: Código do material
 - `nome`: Nome/descrição
 - `unidade`: Unidade de medida (Unidade, Rolo, Barra, etc)
@@ -72,18 +82,21 @@ MAT-002,Disjuntor 20A Bipolar,Unidade,10,42.50
 ## 💡 Dicas de Uso
 
 ### **🎯 Quando usar:**
+
 - Ao receber orçamento de fornecedor
 - Para comparar preços de diferentes fornecedores
 - Antes de fazer compras grandes
 - Para análise de variação de preços
 
 ### **✅ Boas práticas:**
+
 - Sempre preencha o nome do fornecedor corretamente
 - Mantenha os códigos de material padronizados
 - Analise a justificativa de aumentos significativos
 - Compare múltiplos fornecedores importando vários CSVs
 
 ### **⚠️ Atenção:**
+
 - Apenas arquivos **.csv** são aceitos
 - Use **ponto** (.) como separador decimal, não vírgula
 - Os códigos devem corresponder aos do seu sistema
@@ -94,6 +107,7 @@ MAT-002,Disjuntor 20A Bipolar,Unidade,10,42.50
 ## 🔄 Histórico de Importações
 
 Todas as comparações ficam salvas! Para acessá-las:
+
 1. Clique em "Voltar" na tela de comparação
 2. Role para baixo até "Importações Anteriores"
 3. Clique na importação que deseja revisar
@@ -102,26 +116,29 @@ Todas as comparações ficam salvas! Para acessá-las:
 
 ## 🎨 Entendendo as Cores
 
-| Cor | Significado | Ação Sugerida |
-|-----|-------------|---------------|
-| 🟢 **Verde** | Preço menor | Bom momento para comprar! |
-| 🔴 **Vermelho** | Preço maior | Negociar com fornecedor |
-| 🔵 **Azul** | Preço igual | Preço estável |
-| ⚪ **Cinza** | Sem histórico | Primeiro pedido deste item |
+| Cor             | Significado   | Ação Sugerida              |
+| --------------- | ------------- | -------------------------- |
+| 🟢 **Verde**    | Preço menor   | Bom momento para comprar!  |
+| 🔴 **Vermelho** | Preço maior   | Negociar com fornecedor    |
+| 🔵 **Azul**     | Preço igual   | Preço estável              |
+| ⚪ **Cinza**    | Sem histórico | Primeiro pedido deste item |
 
 ---
 
 ## ❓ Problemas Comuns
 
 ### **Arquivo não é aceito**
+
 - ✅ Verifique se é .csv
 - ✅ Verifique se tem as colunas corretas
 
 ### **Preços não aparecem**
+
 - ✅ Use ponto (.) como decimal, não vírgula (,)
 - ✅ Não use símbolo de R$ no CSV
 
 ### **Códigos não batem**
+
 - ✅ Confira se os códigos do CSV correspondem aos do sistema
 - ✅ Padronize os códigos (ex: sempre "MAT-XXX")
 
@@ -132,20 +149,20 @@ Todas as comparações ficam salvas! Para acessá-las:
 ```
 1. ENGENHEIRO FAZ LEVANTAMENTO
    → Lista materiais necessários para obra
-   
+
 2. ENVIA PARA FORNECEDOR
    → CSV só com códigos e quantidades (sem preços)
-   
+
 3. FORNECEDOR PREENCHE PREÇOS
    → Retorna CSV com preços preenchidos
-   
+
 4. UPLOAD NO SISTEMA
    → Importar na tela "Comparação de Preços"
-   
+
 5. ANÁLISE
    → Ver quais itens subiram/baixaram
    → Decidir se aceita ou negocia
-   
+
 6. CRIAR ORÇAMENTO
    → Gerar orçamento para cliente final
    → Aguardar aprovação
@@ -155,10 +172,11 @@ Todas as comparações ficam salvas! Para acessá-las:
 
 ## 🎉 Exemplo Prático
 
-**Situação:**
-Você precisa comprar materiais para uma obra e recebeu orçamento do fornecedor "Eletro Materiais XYZ".
+**Situação:** Você precisa comprar materiais para uma obra e recebeu orçamento
+do fornecedor "Eletro Materiais XYZ".
 
 **Passos:**
+
 1. ✅ Abrir "Comparação de Preços"
 2. ✅ Clicar "Importar CSV"
 3. ✅ Fornecedor: "Eletro Materiais XYZ"
@@ -166,6 +184,7 @@ Você precisa comprar materiais para uma obra e recebeu orçamento do fornecedor
 5. ✅ Clicar "Processar e Comparar"
 
 **Resultado:**
+
 ```
 📊 COMPARAÇÃO REALIZADA
 
@@ -179,6 +198,7 @@ Diferença Líquida: +R$ 45,00 (1% de aumento)
 ```
 
 **Decisão:**
+
 - ✅ Cabos: Preço menor → Comprar!
 - ⚠️ Quadros: Preço maior → Negociar
 - 📝 Criar orçamento com valores ajustados
@@ -197,16 +217,19 @@ Diferença Líquida: +R$ 45,00 (1% de aumento)
 ## 📊 Entendendo os Cálculos
 
 ### **Diferença Percentual:**
+
 ```
 ((Novo Preço - Preço Atual) / Preço Atual) × 100
 ```
 
 ### **Economia/Aumento Total:**
+
 ```
 Soma de (Diferença × Quantidade) para cada item
 ```
 
 ### **Exemplo:**
+
 ```
 Item: Cabo 2,5mm²
 Preço Atual: R$ 285,00
@@ -222,6 +245,7 @@ Aumento Total: R$ 10,00 × 5 = R$ 50,00
 ## 🎓 Recursos Avançados
 
 ### **Comparar Múltiplos Fornecedores:**
+
 1. Importar CSV do Fornecedor A
 2. Voltar e importar CSV do Fornecedor B
 3. Voltar e importar CSV do Fornecedor C
@@ -229,6 +253,7 @@ Aumento Total: R$ 10,00 × 5 = R$ 50,00
 5. Escolher o melhor custo-benefício
 
 ### **Análise de Tendência:**
+
 - Compare importações do mesmo fornecedor ao longo do tempo
 - Identifique padrões de aumento/redução
 - Planeje compras estratégicas
@@ -252,12 +277,14 @@ Antes de criar o orçamento final:
 ## 🎁 Benefícios
 
 ### **Para o Comprador:**
+
 - ✅ Economia de tempo (comparação automática)
 - ✅ Decisões baseadas em dados
 - ✅ Controle de custos
 - ✅ Histórico rastreável
 
 ### **Para a Empresa:**
+
 - ✅ Redução de custos
 - ✅ Negociações informadas
 - ✅ Auditoria de preços
@@ -267,9 +294,10 @@ Antes de criar o orçamento final:
 
 **🎉 Pronto! Agora você está pronto para usar a Comparação de Preços!**
 
-💡 **Dica Final:** Mantenha seus códigos de material sempre padronizados para facilitar as comparações futuras!
+💡 **Dica Final:** Mantenha seus códigos de material sempre padronizados para
+facilitar as comparações futuras!
 
 ---
 
-**Dúvidas?** Consulte a documentação completa em `COMPARACAO_PRECOS_DOCUMENTACAO.md`
-
+**Dúvidas?** Consulte a documentação completa em
+`COMPARACAO_PRECOS_DOCUMENTACAO.md`

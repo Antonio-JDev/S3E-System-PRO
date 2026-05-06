@@ -9,27 +9,33 @@
 ### **Flag Visual em TODOS os Locais:**
 
 #### **1. Modal de Criar Orçamento (NovoOrcamentoPage)** ✅
+
 ```tsx
-{item.tipo === 'COTACAO' && item.dataAtualizacaoCotacao && (
-  <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
-    <span>📦 Banco Frio</span>
-    <span className="text-blue-600">
-      • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString('pt-BR')}
-    </span>
-  </div>
-)}
+{
+  item.tipo === "COTACAO" && item.dataAtualizacaoCotacao && (
+    <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
+      <span>📦 Banco Frio</span>
+      <span className="text-blue-600">
+        • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString("pt-BR")}
+      </span>
+    </div>
+  );
+}
 ```
 
 #### **2. Modal de Editar Orçamento (Orcamentos.tsx)** ✅
+
 ```tsx
-{item.tipo === 'COTACAO' && item.dataAtualizacaoCotacao && (
-  <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
-    <span>📦 Banco Frio</span>
-    <span className="text-blue-600">
-      • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString('pt-BR')}
-    </span>
-  </div>
-)}
+{
+  item.tipo === "COTACAO" && item.dataAtualizacaoCotacao && (
+    <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
+      <span>📦 Banco Frio</span>
+      <span className="text-blue-600">
+        • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString("pt-BR")}
+      </span>
+    </div>
+  );
+}
 ```
 
 ---
@@ -51,6 +57,7 @@
 ```
 
 **Características da Flag:**
+
 - 🔵 Fundo azul claro (`bg-blue-100`)
 - 🔵 Texto azul escuro (`text-blue-800`)
 - 📦 Ícone de caixa
@@ -64,6 +71,7 @@
 ## 🚀 **TESTE COMPLETO:**
 
 ### **Teste 1: Criar Novo Orçamento**
+
 ```
 1. Menu → Orçamentos → Novo Orçamento
 2. Adicionar Item → Aba "🏷️ Cotações"
@@ -77,6 +85,7 @@ Verificar:
 ```
 
 ### **Teste 2: Editar Orçamento Existente**
+
 ```
 1. Menu → Orçamentos → Editar (um orçamento)
 2. Adicionar Item → Aba "🏷️ Cotações"
@@ -90,6 +99,7 @@ Verificar:
 ```
 
 ### **Teste 3: Comparar com Item de Estoque**
+
 ```
 1. No mesmo orçamento
 2. Adicionar Item → Aba "📦 Material"
@@ -107,6 +117,7 @@ Verificar:
 ## 📊 **COMPARAÇÃO:**
 
 ### **Item de Estoque:**
+
 ```
 ┌────────────────────────┐
 │ Disjuntor 32A         │
@@ -117,6 +128,7 @@ Verificar:
 ```
 
 ### **Item de Cotação (Banco Frio):**
+
 ```
 ┌────────────────────────┐
 │ Cabo de Cobre 2,5mm   │
@@ -132,6 +144,7 @@ Verificar:
 ## ✅ **VERIFICAÇÕES:**
 
 ### **Visual:**
+
 ```
 ✓ Flag azul clara e legível
 ✓ Ícone 📦 presente
@@ -141,6 +154,7 @@ Verificar:
 ```
 
 ### **Funcional:**
+
 ```
 ✓ Aparece apenas em itens tipo 'COTACAO'
 ✓ Apenas se tiver dataAtualizacaoCotacao
@@ -150,6 +164,7 @@ Verificar:
 ```
 
 ### **Comportamento:**
+
 ```
 ✓ Flag em Criar Novo: OK
 ✓ Flag em Editar Existente: OK
@@ -184,17 +199,20 @@ Verificar:
 ## 📝 **CÓDIGO DA FLAG:**
 
 ```tsx
-{item.tipo === 'COTACAO' && item.dataAtualizacaoCotacao && (
-  <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
-    <span>📦 Banco Frio</span>
-    <span className="text-blue-600">
-      • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString('pt-BR')}
-    </span>
-  </div>
-)}
+{
+  item.tipo === "COTACAO" && item.dataAtualizacaoCotacao && (
+    <div className="mt-2 inline-flex items-center gap-2 px-2 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-medium">
+      <span>📦 Banco Frio</span>
+      <span className="text-blue-600">
+        • {new Date(item.dataAtualizacaoCotacao).toLocaleDateString("pt-BR")}
+      </span>
+    </div>
+  );
+}
 ```
 
 **Onde foi adicionado:**
+
 - ✅ `frontend/src/pages/NovoOrcamentoPage.tsx` (linha ~825)
 - ✅ `frontend/src/components/Orcamentos.tsx` (linha ~1354)
 
@@ -224,4 +242,3 @@ Verificar:
 
 **Data:** 12/11/2025  
 **Status:** ✅ IMPLEMENTADO EM TODOS OS MODAIS
-

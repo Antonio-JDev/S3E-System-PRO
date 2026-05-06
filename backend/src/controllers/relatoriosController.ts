@@ -356,14 +356,14 @@ export class RelatoriosController {
         if (incluirDetalhes && dados.contasReceber && dados.contasReceber.length > 0) {
             const sheetReceber = workbook.addWorksheet('Contas a Receber');
             
-            sheetReceber.addRow(['ID', 'Descrição', 'Valor', 'Data Vencimento', 'Status']);
+            sheetReceber.addRow(['Referência', 'Descrição', 'Valor', 'Data Vencimento', 'Status']);
             sheetReceber.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
             sheetReceber.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } };
             sheetReceber.getRow(1).height = 25;
             
             dados.contasReceber.forEach((conta: any) => {
                 sheetReceber.addRow([
-                    conta.id?.slice(0, 8) || '',
+                    conta.id || 'Conta Manual',
                     conta.descricao || '',
                     conta.valor || 0,
                     conta.dataVencimento ? new Date(conta.dataVencimento).toLocaleDateString('pt-BR') : '',
@@ -378,14 +378,14 @@ export class RelatoriosController {
         if (incluirDetalhes && dados.contasPagar && dados.contasPagar.length > 0) {
             const sheetPagar = workbook.addWorksheet('Contas a Pagar');
             
-            sheetPagar.addRow(['ID', 'Descrição', 'Valor', 'Data Vencimento', 'Status']);
+            sheetPagar.addRow(['Referência', 'Descrição', 'Valor', 'Data Vencimento', 'Status']);
             sheetPagar.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
             sheetPagar.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } };
             sheetPagar.getRow(1).height = 25;
             
             dados.contasPagar.forEach((conta: any) => {
                 sheetPagar.addRow([
-                    conta.id?.slice(0, 8) || '',
+                    conta.id || 'Conta Manual',
                     conta.descricao || '',
                     conta.valor || 0,
                     conta.dataVencimento ? new Date(conta.dataVencimento).toLocaleDateString('pt-BR') : '',

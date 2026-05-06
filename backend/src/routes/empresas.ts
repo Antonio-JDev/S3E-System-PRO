@@ -42,4 +42,11 @@ router.put('/:id', authorize('admin'), EmpresasController.atualizarEmpresa);
  */
 router.delete('/:id', authorize('admin'), EmpresasController.desativarEmpresa);
 
+/**
+ * @route PATCH /api/empresas/:id/numero-nfe
+ * @desc Atualiza ultimoNumeroNFe e serieNFe da empresa
+ * @access Admin only
+ */
+router.patch('/:id/numero-nfe', authorize('admin'), EmpresasController.configurarNumeracaoNFe);
+
 export default router;

@@ -32,14 +32,10 @@ export const DashboardIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
-// Ícone de Orçamentos (Documento com Cifrão/Calculadora)
+// Ícone de Orçamentos (file_export / documento com seta — Material-style)
 export const BudgetIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <path d="M14 2v6h6"/>
-        <path d="M12 18v-6"/>
-        <path d="M9.5 14.5a2.5 2.5 0 0 1 0-3"/>
-        <path d="M14.5 14.5a2.5 2.5 0 0 0 0-3"/>
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor">
+        <path d="M480-480ZM202-65l-56-57 118-118h-90v-80h226v226h-80v-89L202-65Zm278-15v-80h240v-440H520v-200H240v400h-80v-400q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H480Z" />
     </svg>
 );
 
@@ -101,19 +97,6 @@ export const ConstructionIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
-// Ícone de Métricas de Equipe (Calendário com Pessoas)
-export const TeamCalendarIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-        <line x1="16" y1="2" x2="16" y2="6"/>
-        <line x1="8" y1="2" x2="8" y2="6"/>
-        <line x1="3" y1="10" x2="21" y2="10"/>
-        <circle cx="9" cy="16" r="2"/>
-        <circle cx="15" cy="16" r="2"/>
-        <path d="M12 12v4"/>
-    </svg>
-);
-
 // Ícone de Ferramentas (Chave Inglesa)
 export const ToolsIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -138,15 +121,6 @@ export const SupplierIcon = (props: React.SVGProps<SVGSVGElement>) => (
         <path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2" />
         <circle cx="7" cy="18" r="2" />
         <circle cx="17" cy="18" r="2" />
-    </svg>
-);
-
-// Ícone de Serviços de Engenharia Elétrica (Raio dentro de engrenagem)
-export const ElectricalServiceIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="currentColor" opacity="0.3"/>
     </svg>
 );
 
@@ -212,6 +186,20 @@ export const PlusCircleIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+// Ícone Funil de Atendimento (CRM)
+export const FunnelAtendimentoIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+);
+
+// Ícone Chat / WhatsApp (comercial)
+export const WhatsAppChatNavIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.79-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+  </svg>
+);
+
 // Ícone de Documento/Arquivo
 export const DocumentIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -243,18 +231,6 @@ export const InvoiceIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
-// Ícone de Atualização de Preços (Balança/Comparação)
-export const CompareIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="8" cy="21" r="1"/>
-        <circle cx="19" cy="21" r="1"/>
-        <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>
-        <path d="M16 8V4"/>
-        <path d="M12 8V4"/>
-        <path d="M8 8V4"/>
-    </svg>
-);
-
 // Ícone de Etiqueta de Preço (Cotações)
 export const PriceTagIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -263,20 +239,16 @@ export const PriceTagIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
-// Ícone de Vendas/Financeiro (Nota Fiscal com Cifrão)
+// Ícone de Vendas (monetização) — equivalente ao "monetization_on" (outlined)
 export const SalesIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-        <polyline points="10 9 9 9 8 9"/>
-        <path d="M16 21V9"/>
-        <path d="M12 21V9"/>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v10" />
+        <path d="M15 9.25c0-1.24-1.34-2.25-3-2.25s-3 1.01-3 2.25S10.34 11.5 12 11.5s3 1.01 3 2.25S13.66 16 12 16s-3-1.01-3-2.25" />
     </svg>
 );
 
-// Ícone de Gerenciamento Empresarial (Prédio com Gráfico)
+// Ícone de Gestão empresarial (Prédio com Gráfico)
 export const ManagementIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
@@ -301,6 +273,24 @@ export const TaskListIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+// Ícone de Checklist (Material "checklist" — outlined)
+export const ChecklistIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 5h16v14H4z" />
+        <path d="M7 9l1.5 1.5L11 8" />
+        <path d="M13 9h5" />
+        <path d="M7 14l1.5 1.5L11 13" />
+        <path d="M13 14h5" />
+    </svg>
+);
+
+// Ícone de Execução/Engenharia de obra (Material "engineering" — outlined)
+export const EngineeringIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M9 15c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4m-6 4c.22-.72 3.31-2 6-2 2.7 0 5.8 1.29 6 2zM4.74 9H5c0 2.21 1.79 4 4 4s4-1.79 4-4h.26c.27 0 .49-.22.49-.49v-.02c0-.27-.22-.49-.49-.49H13c0-1.48-.81-2.75-2-3.45v.95c0 .28-.22.5-.5.5s-.5-.22-.5-.5V4.14C9.68 4.06 9.35 4 9 4s-.68.06-1 .14V5.5c0 .28-.22.5-.5.5S7 5.78 7 5.5v-.95C5.81 5.25 5 6.52 5 8h-.26c-.27 0-.49.22-.49.49v.03c0 .26.22.48.49.48M11 9c0 1.1-.9 2-2 2s-2-.9-2-2zm10.98-2.77.93-.83-.75-1.3-1.19.39c-.14-.11-.3-.2-.47-.27L20.25 3h-1.5l-.25 1.22q-.255.105-.48.27l-1.18-.39-.75 1.3.93.83c-.02.17-.02.35 0 .52l-.93.85.75 1.3 1.2-.38c.13.1.28.18.43.25l.28 1.23h1.5l.27-1.22c.16-.07.3-.15.44-.25l1.19.38.75-1.3-.93-.85c.03-.19.02-.36.01-.53M19.5 7.75c-.69 0-1.25-.56-1.25-1.25s.56-1.25 1.25-1.25 1.25.56 1.25 1.25-.56 1.25-1.25 1.25m-.1 3.04-.85.28c-.1-.08-.21-.14-.33-.19l-.18-.88h-1.07l-.18.87c-.12.05-.24.12-.34.19l-.84-.28-.54.93.66.59c-.01.13-.01.25 0 .37l-.66.61.54.93.86-.27c.1.07.2.13.31.18l.18.88h1.07l.19-.87c.11-.05.22-.11.32-.18l.85.27.54-.93-.66-.61c.01-.13.01-.25 0-.37l.66-.59zm-1.9 2.6c-.49 0-.89-.4-.89-.89s.4-.89.89-.89.89.4.89.89-.4.89-.89.89" />
+  </svg>
+);
+
 // ============================================
 // NAVEGAÇÃO PRINCIPAL DO SISTEMA
 // Organizada por Setores de Negócio com RBAC
@@ -322,27 +312,28 @@ export const navLinks: NavLink[] = [
     
     // ========== COMERCIAL / VENDAS ==========
     // Todas as páginas comerciais precisam de permissões (eletricista não vê)
+    { name: 'Funil de Atendimento', icon: FunnelAtendimentoIcon, requiredPermission: 'view_projetos' },
+    { name: 'Chat WhatsApp', icon: WhatsAppChatNavIcon, requiredPermission: 'view_projetos' },
     { name: 'Clientes', icon: ClientsIcon, requiredPermission: 'view_projetos' },
     { name: 'Orçamentos', icon: BudgetIcon, requiredPermission: 'view_projetos' },
     { name: 'Vendas', icon: SalesIcon, requiredPermission: 'view_vendas' },
     { name: 'Cotações', icon: PriceTagIcon, requiredPermission: 'view_projetos' },
     
     // ========== SUPRIMENTOS / ESTOQUE ==========
-    // Fornecedores, Compras, Estoque, Catálogo, Comparação precisam de permissões
+    // Fornecedores, Compras, Estoque, Catálogo precisam de permissões
     { name: 'Fornecedores', icon: SupplierIcon, requiredPermission: 'view_projetos' },
     { name: 'Compras', icon: ShoppingBagIcon, requiredPermission: 'view_projetos' },
     { name: 'Estoque', icon: CubeIcon, requiredPermission: 'view_catalogo' },
     { name: 'Movimentações', icon: MovementIcon, requiredPermission: 'view_movimentacoes' },
     { name: 'Catálogo', icon: CatalogIcon, requiredPermission: 'view_catalogo' },
-    { name: 'Atualização de Preços', icon: CompareIcon, requiredPermission: 'view_comparacao_precos' },
     
-    // ========== OPERACIONAL / ORDEM DE SERVIÇOS ==========
+    // ========== OPERACIONAL / TAREFAS INTERNAS + ORDEM DE SERVIÇOS ==========
+    { name: 'Tarefas Internas', icon: ChecklistIcon, requiredPermission: 'view_tarefas_internas' },
     { name: 'Ordem De Serviços', icon: BlueprintIcon, requiredPermission: 'view_projetos' },
-    { name: 'Obras', icon: ConstructionIcon, requiredPermission: 'view_obras' },
+    { name: 'Execução Obra', icon: EngineeringIcon, requiredPermission: 'view_obras' },
     { name: 'Tarefas da Obra', icon: TaskListIcon, requiredPermission: 'view_tarefas_obra' },
-    { name: 'Ferramentas', icon: ToolsIcon, requiredPermission: 'view_gestao_obras' },
-    { name: 'Métricas de Equipe', icon: TeamCalendarIcon, requiredPermission: 'view_gestao_obras' },
-    { name: 'Serviços', icon: ElectricalServiceIcon, requiredPermission: 'view_servicos' },
+    { name: 'Ferramentas', icon: ToolsIcon, requiredPermission: 'view_kit' },
+    { name: 'Serviços', icon: BoltIcon, requiredPermission: 'view_servicos' },
     
     // ========== FINANCEIRO / CONTÁBIL ==========
     { name: 'Financeiro', icon: FinanceIcon, requiredPermission: 'view_financeiro' },
@@ -350,5 +341,5 @@ export const navLinks: NavLink[] = [
     { name: 'Logs', icon: LogsIcon, devOnly: true, requiredPermission: 'view_logs' }, // Desenvolvedor apenas
     
     // ========== GERENCIAMENTO / ADMINISTRATIVO ==========
-    { name: 'Gerenciamento Empresarial', icon: ManagementIcon, requiredPermission: 'view_gerenciamento' },
+    { name: 'Gestão empresarial', icon: ManagementIcon, requiredPermission: 'view_gerenciamento' },
 ];

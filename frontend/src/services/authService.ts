@@ -17,6 +17,7 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  isAdmin?: boolean;
   active: boolean;
   createdAt: string;
 }

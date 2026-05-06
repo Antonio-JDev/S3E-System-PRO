@@ -7,6 +7,7 @@ import {
   updateCliente,
   deleteCliente,
   reativarCliente,
+  consultarCnpjCliente,
   previewImportacao,
   importarClientes,
   exportarTemplate,
@@ -21,6 +22,13 @@ const router = Router();
 router.use(authenticate);
 
 // ==================== ROTAS ESPECÍFICAS (DEVEM VIR PRIMEIRO) ====================
+
+/**
+ * @route GET /api/clientes/cnpj/:cnpj
+ * @desc Consulta CNPJ na CNPJ.ws (IE por UF, indIEDest)
+ * @access Private
+ */
+router.get('/cnpj/:cnpj', consultarCnpjCliente);
 
 /**
  * @route GET /api/clientes/template/download

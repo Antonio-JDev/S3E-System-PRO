@@ -13,14 +13,16 @@ router.use(authenticate);
  * @desc Gera uma obra a partir de um projeto aprovado
  * @access Admin/Gerente
  */
-router.post('/gerar', authorize('admin', 'gerente'), ObraController.gerarObra);
+// Permitido também para Engenheiro Eletricista e Desenhista Industrial (criar obras)
+router.post('/gerar', authorize('admin', 'gerente', 'engenheiro_eletricista', 'desenhista_industrial'), ObraController.gerarObra);
 
 /**
  * @route POST /api/obras/manutencao
  * @desc Cria uma obra de manutenção (sem projeto)
  * @access Admin/Gerente
  */
-router.post('/manutencao', authorize('admin', 'gerente'), ObraController.criarObraManutencao);
+// Permitido também para Engenheiro Eletricista e Desenhista Industrial
+router.post('/manutencao', authorize('admin', 'gerente', 'engenheiro_eletricista', 'desenhista_industrial'), ObraController.criarObraManutencao);
 
 /**
  * @route GET /api/obras/kanban

@@ -2,7 +2,9 @@
 
 ## 🎯 RESUMO
 
-Sistema completo de **10 Etapas Administrativas** implementado para gerenciamento de projetos, com contagem regressiva de 24h, extensão de prazos com justificativa, e cálculo automático de progresso.
+Sistema completo de **10 Etapas Administrativas** implementado para
+gerenciamento de projetos, com contagem regressiva de 24h, extensão de prazos
+com justificativa, e cálculo automático de progresso.
 
 ---
 
@@ -25,7 +27,8 @@ Cada projeto agora possui automaticamente 10 etapas:
 
 ### 2. ✅ Prazo de 24 Horas
 
-- **Todas as etapas** começam a contar 24h simultaneamente quando o projeto é criado
+- **Todas as etapas** começam a contar 24h simultaneamente quando o projeto é
+  criado
 - Contagem regressiva em **tempo real** (horas e minutos)
 - Indicador visual de status:
   - ✅ **Verde**: Concluída
@@ -61,12 +64,14 @@ progresso = (etapas admin concluídas + tasks kanban concluídas) / (10 + total 
 ```
 
 **Atualização automática:**
+
 - ✅ Ao marcar etapa administrativa como concluída
 - ✅ Ao concluir task do Kanban
 - ✅ Ao arrastar task para "Concluído" (drag & drop)
 - ✅ Ao criar/editar projeto
 
 **Exemplo:**
+
 - 10 etapas admin (2 concluídas)
 - 5 tasks kanban (3 concluídas)
 - Progresso = (2 + 3) / (10 + 5) = 33%
@@ -78,11 +83,13 @@ progresso = (etapas admin concluídas + tasks kanban concluídas) / (10 + total 
 ### Aba "📊 Etapas Admin" no Modal de Projeto
 
 **Layout:**
+
 - Grid 2 colunas (responsivo)
 - Cards coloridos por status
 - Contador de etapas concluídas no header
 
 **Informações por Etapa:**
+
 - Número e nome (ex: "1. Organizar Projeto")
 - Emoji de status (✅ / ⏳ / ⚠️)
 - Tempo restante ou atraso
@@ -93,6 +100,7 @@ progresso = (etapas admin concluídas + tasks kanban concluídas) / (10 + total 
 - Data de conclusão (se concluída)
 
 **Cores:**
+
 ```css
 ✅ Concluída: bg-green-100 border-green-300 text-green-800
 ⏳ Em andamento: bg-yellow-100 border-yellow-300 text-yellow-800
@@ -109,17 +117,17 @@ Calcula o progresso baseado em etapas admin e tasks kanban:
 
 ```typescript
 const calculateProgress = (project: Project): number => {
-    const adminCompleted = project.adminStages.filter(
-        s => s.status === AdminStageStatus.Completed
-    ).length;
-    
-    const tasksCompleted = project.stages.filter(
-        s => s.status === ProjectStageStatus.Concluido
-    ).length;
-    
-    const total = project.adminStages.length + project.stages.length;
-    
-    return Math.round(((adminCompleted + tasksCompleted) / total) * 100);
+  const adminCompleted = project.adminStages.filter(
+    (s) => s.status === AdminStageStatus.Completed
+  ).length;
+
+  const tasksCompleted = project.stages.filter(
+    (s) => s.status === ProjectStageStatus.Concluido
+  ).length;
+
+  const total = project.adminStages.length + project.stages.length;
+
+  return Math.round(((adminCompleted + tasksCompleted) / total) * 100);
 };
 ```
 
@@ -157,9 +165,9 @@ Confirma extensão de prazo:
 
 ```typescript
 enum AdminStageStatus {
-    Pending = 'pending',
-    Completed = 'completed',
-    Overdue = 'overdue',
+  Pending = "pending",
+  Completed = "completed",
+  Overdue = "overdue",
 }
 ```
 
@@ -167,15 +175,15 @@ enum AdminStageStatus {
 
 ```typescript
 interface AdminStage {
-    id: string;
-    name: string;
-    order: number; // 1-10
-    status: AdminStageStatus;
-    deadline: string; // ISO date
-    startedAt: string; // ISO date
-    completedAt?: string; // ISO date
-    extendedDeadline?: string; // ISO date
-    extensionReason?: string;
+  id: string;
+  name: string;
+  order: number; // 1-10
+  status: AdminStageStatus;
+  deadline: string; // ISO date
+  startedAt: string; // ISO date
+  completedAt?: string; // ISO date
+  extendedDeadline?: string; // ISO date
+  extensionReason?: string;
 }
 ```
 
@@ -183,9 +191,9 @@ interface AdminStage {
 
 ```typescript
 interface Project {
-    // ... campos existentes
-    adminStages: AdminStage[]; // ← NOVO
-    stages: ProjectStage[]; // Tasks do Kanban
+  // ... campos existentes
+  adminStages: AdminStage[]; // ← NOVO
+  stages: ProjectStage[]; // Tasks do Kanban
 }
 ```
 
@@ -271,6 +279,7 @@ interface Project {
 ### `frontend/src/types/index.ts`
 
 **Adições:**
+
 - `AdminStageStatus` enum
 - `AdminStage` interface
 - `Project.adminStages` campo
@@ -279,6 +288,7 @@ interface Project {
 ### `frontend/src/data/mockData.ts`
 
 **Adições:**
+
 - Função `generateAdminStages()`
 - Todos os projetos têm adminStages
 
@@ -313,6 +323,7 @@ interface Project {
 ### Projeto: "Instalação Elétrica Ed. Phoenix"
 
 **Etapas Administrativas:**
+
 - ✅ 1. Organizar Projeto (Concluída em 16/10/2025 15:30)
 - ✅ 2. Abertura de SR (Concluída em 16/10/2025 16:45)
 - ⏳ 3. Emitir ART (Prazo: 17/10/2025 12:00 - Resta 8h 30min)
@@ -320,11 +331,13 @@ interface Project {
 - ⏳ 5-10. Demais etapas...
 
 **Tasks Kanban:**
+
 - ✅ Passagem de Conduítes (Concluída)
 - 🔄 Cabeamento de Unidades (Em Andamento)
 - 📋 Montagem de Quadros (A Fazer)
 
 **Progresso Calculado:**
+
 - Etapas admin: 2/10 concluídas
 - Tasks kanban: 1/4 concluídas
 - **Progresso Total: (2+1)/(10+4) = 21%** ✅
@@ -386,7 +399,8 @@ GET  /api/projects/:id/progress
 
 ## 🎉 RESULTADO FINAL
 
-O sistema agora possui um **gerenciamento completo de etapas administrativas** com:
+O sistema agora possui um **gerenciamento completo de etapas administrativas**
+com:
 
 - ✅ **10 etapas fixas** para cada projeto
 - ✅ **Prazo de 24h** com contagem regressiva
@@ -401,4 +415,3 @@ O sistema agora possui um **gerenciamento completo de etapas administrativas** c
 **Status:** ✅ **100% FUNCIONAL**  
 **Data:** 17 de Outubro de 2024  
 **Sistema:** S3E System PRO
-

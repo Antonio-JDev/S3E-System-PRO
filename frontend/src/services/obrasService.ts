@@ -7,7 +7,13 @@ export interface Obra {
   status: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO';
   clienteNome: string;
   tipoObra?: 'PROJETO' | 'MANUTENCAO'; // ✅ Tipo da obra
+  createdAt?: string;
+  dataPrevistaInicio?: string;
+  dataInicioReal?: string;
+  dataFimReal?: string;
   dataPrevistaFim?: string;
+  /** Primeira equipe encontrada nas tarefas (para timeline/Gantt) */
+  equipe?: { id: string; nome: string };
   totalTarefas: number;
   tarefasConcluidas: number;
   progresso: number;
@@ -57,6 +63,44 @@ export interface CreateRegistroData {
   descricaoAtividade: string;
   horasTrabalhadas: number;
   observacoes?: string;
+}
+
+/** Material agrupado por movimentações de obra (SAIDA, motivo OBRA) */
+export interface MaterialObra {
+  materialId: string;
+  nome: string;
+  sku: string | null;
+  categoria: string | null;
+  ncm: string | null;
+  unidadeMedida: string;
+  preco: number;
+  valorVenda: number | null;
+  descricao: string | null;
+  imagemUrl: string | null;
+  quantidadeTotal: number;
+  isItemNovo: boolean;
+  fornecedor: { nome: string; cnpj: string | null } | null;
+  movimentacoes: Array<{
+    id: string;
+    quantidade: number;
+    data: string;
+    observacoes: string | null;
+    isItemNovo: boolean;
+  }>;
+}
+
+export interface CompraAvulsa {
+  id: string;
+  numeroNF: string;
+  obraId: string | null;
+  fornecedor: { nome: string; cnpj: string | null };
+  items: Array<{
+    material: { nome: string; sku: string | null; categoria: string | null; unidadeMedida: string };
+    quantidade: number;
+    precoUnit?: number;
+  }>;
+  createdAt: string;
+  [key: string]: unknown;
 }
 
 class ObrasService {
@@ -145,6 +189,22 @@ class ObrasService {
    */
   async deletarObra(obraId: string) {
     return axiosApiService.delete(`/api/obras/${obraId}`);
+  }
+
+  /**
+   * Busca materiais disponíveis na obra (agrupados por movimentações SAIDA/OBRA)
+   */
+  async getMateriaisObra(obraId: string): Promise<{ success: boolean; data?: { obraId: string; obraNome: string; materiais: MaterialObra[]; totalMateriais: number; totalMovimentacoes: number }; error?: string }> {
+    const res = await axiosApiService.get<{ obraId: string; obraNome: string; materiais: MaterialObra[]; totalMateriais: number; totalMovimentacoes: number }>(`/api/obras/${obraId}/materiais`);
+    return res as { success: boolean; data?: { obraId: string; obraNome: string; materiais: MaterialObra[]; totalMateriais: number; totalMovimentacoes: number }; error?: string };
+  }
+
+  /**
+   * Busca compras avulsas vinculadas à obra
+   */
+  async getComprasAvulsasObra(obraId: string): Promise<{ success: boolean; data?: CompraAvulsa[]; error?: string }> {
+    const res = await axiosApiService.get<CompraAvulsa[]>(`/api/obras/${obraId}/compras-avulsas`);
+    return res as { success: boolean; data?: CompraAvulsa[]; error?: string };
   }
 }
 

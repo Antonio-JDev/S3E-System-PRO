@@ -8,8 +8,10 @@ WORKDIR /app
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
 COPY package*.json ./
-# Use npm install if package-lock.json doesn't exist, otherwise use npm ci
-RUN (npm ci || npm install --legacy-peer-deps)
+# Configurar npm para redes lentas (retries, timeout maior)
+RUN npm config set fetch-retries 5 && npm config set fetch-timeout 300000
+# Usar legacy-peer-deps para compatibilidade com React 19
+RUN npm install --legacy-peer-deps
 
 # Development stage
 FROM base AS development

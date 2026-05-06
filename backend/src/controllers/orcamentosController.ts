@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
-
-const prisma = new PrismaClient();
+import puppeteer from 'puppeteer';
+import { roundMoney } from '../utils/currency';
 
 // Configurar multer para upload de JSON
 const storage = multer.diskStorage({
@@ -32,6 +32,156 @@ export const uploadJSON = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB para permitir arquivos grandes com muitos orçamentos
 });
 
+type ItemKitMaterializado = {
+  tipo: 'MATERIAL' | 'KIT' | 'COTACAO' | 'SERVICO';
+  nome: string;
+  quantidade: number;
+  parentKitId?: string;
+  depth?: number;
+  codigo?: string;
+  unidadeMedida?: string | null;
+  ncm?: string | null;
+  materialId?: string;
+  kitId?: string;
+  cotacaoId?: string;
+  servicoId?: string;
+  valorVenda?: number;
+  subtotal?: number;
+};
+
+function parseItensFaltantesToArray(raw: any): any[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'object') return [raw];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+async function materializarComposicaoKitCatalogo(
+  kitId: string,
+  mult = 1,
+  depth = 0,
+  chain: string[] = [],
+  parentKitId?: string
+): Promise<ItemKitMaterializado[]> {
+  // limite hard (o requisito é 4 camadas)
+  if (depth >= 4) {
+    return [{
+      tipo: 'KIT',
+      kitId,
+      nome: 'Limite de expansão do kit atingido',
+      quantidade: mult,
+      parentKitId,
+      depth
+    }];
+  }
+  if (chain.includes(kitId)) {
+    return [{
+      tipo: 'KIT',
+      kitId,
+      nome: 'Ciclo detectado na composição do kit',
+      quantidade: mult,
+      parentKitId,
+      depth
+    }];
+  }
+
+  const kit = await prisma.kit.findUnique({
+    where: { id: kitId },
+    include: {
+      items: {
+        include: {
+          material: {
+            select: {
+              id: true,
+              nome: true,
+              sku: true,
+              unidadeMedida: true,
+              valorVenda: true,
+              preco: true,
+              ncm: true
+            }
+          },
+          kitFilho: {
+            select: {
+              id: true,
+              nome: true,
+              itensFaltantes: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!kit) return [];
+
+  const out: ItemKitMaterializado[] = [];
+
+  // Itens extras (banco-frio / serviços) cadastrados no kit
+  const extras = parseItensFaltantesToArray((kit as any).itensFaltantes);
+  for (const ex of extras) {
+    const tipo = String(ex?.tipo || '').toUpperCase();
+    if (tipo === 'COTACAO' || tipo === 'SERVICO') {
+      out.push({
+        tipo: tipo as any,
+        nome: ex?.nome || (tipo === 'COTACAO' ? 'Cotação' : 'Serviço'),
+        quantidade: Number(ex?.quantidade ?? 0) * mult,
+        parentKitId: kitId,
+        depth,
+        cotacaoId: ex?.cotacaoId || undefined,
+        servicoId: ex?.servicoId || undefined,
+        unidadeMedida: ex?.unidade || null,
+        valorVenda: ex?.precoUnit != null ? Number(ex.precoUnit) : undefined,
+        subtotal: ex?.precoUnit != null ? Number(ex.precoUnit) * Number(ex?.quantidade ?? 0) * mult : undefined
+      });
+    }
+  }
+
+  for (const kitItem of (kit.items || []) as any[]) {
+    const qtd = Number(kitItem.quantidade ?? 0) * mult;
+    if (kitItem.material?.id) {
+      out.push({
+        tipo: 'MATERIAL',
+        nome: kitItem.material.nome,
+        quantidade: qtd,
+        parentKitId: kitId,
+        depth,
+        materialId: kitItem.material.id,
+        codigo: kitItem.material.sku || undefined,
+        unidadeMedida: kitItem.material.unidadeMedida || null,
+        ncm: kitItem.material.ncm || null,
+        valorVenda: kitItem.material.valorVenda != null ? Number(kitItem.material.valorVenda) : undefined,
+        subtotal: kitItem.material.valorVenda != null ? Number(kitItem.material.valorVenda) * qtd : undefined
+      });
+      continue;
+    }
+
+    if (kitItem.kitFilho?.id) {
+      // linha do kit filho + expansão recursiva
+      out.push({
+        tipo: 'KIT',
+        nome: kitItem.kitFilho.nome,
+        quantidade: qtd,
+        kitId: kitItem.kitFilho.id,
+        parentKitId: kitId,
+        depth
+      });
+      const sub = await materializarComposicaoKitCatalogo(kitItem.kitFilho.id, qtd, depth + 1, [...chain, kitId], kitId);
+      out.push(...sub);
+    }
+  }
+
+  return out;
+}
+
 // Listar orçamentos
 export const getOrcamentos = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -47,11 +197,21 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
         cliente: {
           select: { id: true, nome: true, cpfCnpj: true }
         },
+        empresaFiscal: {
+          select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true }
+        },
         items: {
           include: {
             material: { select: { id: true, nome: true, sku: true, valorVenda: true, preco: true, ncm: true } },
             kit: { select: { id: true, nome: true } },
             cotacao: { select: { id: true, nome: true, ncm: true, dataAtualizacao: true, fornecedorNome: true } } // ✅ NOVO: Incluir NCM
+          }
+        },
+        venda: {
+          select: {
+            id: true,
+            numeroSequencial: true,
+            numeroVenda: true
           }
         }
       },
@@ -74,6 +234,7 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
       where: { id },
       include: {
         cliente: true,
+        empresaFiscal: { select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true } },
         items: {
           include: {
             material: true,
@@ -87,7 +248,14 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
             cotacao: true // ✅ NOVO: Incluir dados da cotação
           }
         },
-        projeto: true
+        projeto: true,
+        venda: {
+          select: {
+            id: true,
+            numeroSequencial: true,
+            numeroVenda: true
+          }
+        }
       }
     });
 
@@ -136,7 +304,9 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
       observacoes,
       // Novos campos
       empresaCNPJ,
+      empresaFiscalId,
       enderecoObra,
+      numeroObra,
       cidade,
       bairro,
       cep,
@@ -145,8 +315,37 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
       previsaoTermino,
       descontoValor,
       impostoPercentual,
-      condicaoPagamento
+      condicaoPagamento,
+      contatoLeadId: contatoLeadIdBody,
     } = req.body;
+
+    let contatoLeadIdFk: string | null = null;
+    if (contatoLeadIdBody != null && String(contatoLeadIdBody).trim() !== '') {
+      const idLead = String(contatoLeadIdBody).trim();
+      const leadOk = await prisma.contatoLead.findUnique({ where: { id: idLead }, select: { id: true } });
+      if (leadOk) contatoLeadIdFk = idLead;
+    }
+
+    // Config global (fallback) e alíquotas da empresa executora (quando informada)
+    const config = await prisma.configuracaoSistema.findUnique({
+      where: { id: 'sistema-config' },
+      select: { aliquotaImpostoPadrao: true, markupFabricante: true, markupRevendedor: true, multiplicadorVenda: true, percentualImpostoPadrao: true }
+    }).catch(() => null);
+    const aliquotaPadrao = config?.aliquotaImpostoPadrao ?? config?.percentualImpostoPadrao ?? 8;
+    let aliquotaMaterial = aliquotaPadrao;
+    let aliquotaServico = aliquotaPadrao;
+    if (empresaFiscalId || empresaCNPJ) {
+      const empresa = await prisma.empresaFiscal.findFirst({
+        where: empresaFiscalId ? { id: empresaFiscalId } : { cnpj: String(empresaCNPJ).replace(/\D/g, '') },
+        select: { aliquotaMaterial: true, aliquotaServico: true }
+      });
+      if (empresa) {
+        aliquotaMaterial = empresa.aliquotaMaterial ?? aliquotaPadrao;
+        aliquotaServico = empresa.aliquotaServico ?? aliquotaPadrao;
+      }
+    }
+    const multiplicadorVenda = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+    const markupRevendedor = config?.markupRevendedor ?? 1.10;
 
     // Calcular custo total e preço de venda
     let custoTotal = 0;
@@ -155,57 +354,67 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
     for (const item of items) {
       let custoUnit = item.custoUnit || 0;
       let precoUnit = 0;
-      
+      let custoAgregadoUnit: number | null = null;
+
       // ✅ PRIORIDADE 1: Se o usuário editou o preço manualmente, usar o valor editado
       if (item.precoUnitario !== undefined && item.precoUnitario !== null) {
         // Usuário editou o valor - usar diretamente (já pode incluir BDI ou não, conforme editado)
         precoUnit = item.precoUnitario;
+        if (item.custoAgregadoUnit != null) custoAgregadoUnit = item.custoAgregadoUnit;
         console.log(`✅ Usando preço editado pelo usuário: R$ ${precoUnit.toFixed(2)} para item ${item.descricao || item.nome}`);
       } else {
         // ✅ PRIORIDADE 2: Se não foi editado, calcular baseado no estoque/cotações
         let precoVendaUnit = item.custoUnit || 0; // Preço de venda unitário (valorVenda || preco)
         
-        // Se for cotação (banco frio), buscar valor da cotação
+        // Se for cotação (banco frio), buscar valor da cotação e aplicar regra por classificação do fornecedor
         if (item.tipo === 'COTACAO' && item.cotacaoId) {
           const cotacao = await prisma.cotacao.findUnique({
             where: { id: item.cotacaoId },
-            select: { valorUnitario: true, valorVenda: true }
+            include: { fornecedor: { select: { classificacao: true } } }
           });
           
           if (cotacao) {
-            // Usar valorVenda se disponível, senão usar valorUnitario
-            precoVendaUnit = cotacao.valorVenda || cotacao.valorUnitario || 0;
-            custoUnit = cotacao.valorUnitario || 0; // Custo é o valor unitário da cotação
+            custoUnit = roundMoney(cotacao.valorUnitario || 0);
+            const classificacao = (cotacao.fornecedor as any)?.classificacao;
+            if (classificacao === 'Representante_Vendedor') {
+              precoVendaUnit = roundMoney(cotacao.valorVenda ?? cotacao.valorUnitario ?? 0);
+            } else {
+              precoVendaUnit = roundMoney((cotacao.valorUnitario ?? 0) * multiplicadorVenda);
+            }
+            const aliquotaItem = aliquotaMaterial; // Cotação usa alíquota material
+            const valorImposto = roundMoney(precoVendaUnit * (aliquotaItem / 100));
+            custoAgregadoUnit = roundMoney(custoUnit + valorImposto);
           }
         }
-        // Se for material, buscar valorVenda se disponível
+        // Se for material, buscar valorVenda e percentualImposto
         else if (item.tipo === 'MATERIAL' && item.materialId) {
           const material = await prisma.material.findUnique({
             where: { id: item.materialId },
-            select: { preco: true, valorVenda: true, valorVendaM: true, valorVendaCM: true, unidadeMedida: true }
+            select: { preco: true, valorVenda: true, valorVendaM: true, valorVendaCM: true, unidadeMedida: true, percentualImposto: true, custoAgregado: true } as any
           });
           
           if (material) {
-            // Determinar preço de venda e custo baseado na unidade de venda
+            const pctImp = (material as any).percentualImposto ?? aliquotaMaterial;
             const unidadeVenda = item.unidadeVenda || material.unidadeMedida;
-            const unidadeUpper = (material.unidadeMedida || '').toUpperCase().trim();
+            const unidadeUpper = String(material.unidadeMedida || '').toUpperCase().trim();
             const podeVenderMCM = (unidadeUpper === 'M' || unidadeUpper === 'KG/M' || unidadeUpper === 'M/KG');
             
             if (podeVenderMCM && unidadeVenda === 'm') {
-              // Usar valorVendaM se disponível
-              precoVendaUnit = material.valorVendaM || material.valorVenda || material.preco || 0;
-              custoUnit = material.preco || 0; // Custo em metro é o preço de compra
+              precoVendaUnit = (material as any).valorVendaM || material.valorVenda || material.preco || 0;
+              custoUnit = material.preco || 0;
+              if ((material as any).custoAgregado != null) custoAgregadoUnit = roundMoney((material as any).custoAgregado);
+              else custoAgregadoUnit = roundMoney((Number(material.preco) || 0) + precoVendaUnit * (pctImp / 100));
             } else if (podeVenderMCM && unidadeVenda === 'cm') {
-              // Usar valorVendaCM se disponível
-              precoVendaUnit = material.valorVendaCM || 
-                              (material.valorVendaM ? material.valorVendaM / 100 : 
-                              (material.valorVenda ? material.valorVenda / 100 : (material.preco || 0) / 100));
-              // Calcular custoCM dividindo preço por 100 (custoCM não está no select, calcular diretamente)
-              custoUnit = material.preco ? material.preco / 100 : 0;
+              precoVendaUnit = (material as any).valorVendaCM || 
+                              ((material as any).valorVendaM ? (material as any).valorVendaM / 100 : 
+                              ((material.valorVenda && typeof material.valorVenda === 'number') ? material.valorVenda / 100 : ((material.preco && typeof material.preco === 'number') ? material.preco / 100 : 0)));
+              custoUnit = (material.preco && typeof material.preco === 'number') ? material.preco / 100 : 0;
+              custoAgregadoUnit = roundMoney(custoUnit + precoVendaUnit * (pctImp / 100));
             } else {
-              // Para outras unidades, usar valorVenda padrão
               precoVendaUnit = material.valorVenda || material.preco || 0;
-              custoUnit = material.preco || 0; // Custo padrão
+              custoUnit = material.preco || 0;
+              if ((material as any).custoAgregado != null) custoAgregadoUnit = roundMoney((material as any).custoAgregado);
+              else custoAgregadoUnit = roundMoney((Number(material.preco) || 0) + (precoVendaUnit * (pctImp / 100)));
             }
           }
         }
@@ -276,16 +485,19 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
                 
                 // Somar preços dos itens do banco frio E serviços
                 const precoVendaExtras = itensFaltantesArray.reduce((sum: number, item: any) => {
-                  // Incluir tanto cotações (tipo === 'COTACAO') quanto serviços (tipo === 'SERVICO')
                   const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
                   const quantidade = item.quantidade || 0;
                   return sum + (precoUnit * quantidade);
                 }, 0);
-                precoVendaTotalKit += precoVendaExtras;
+                precoVendaTotalKit = roundMoney(precoVendaTotalKit + precoVendaExtras);
+              } else {
+                precoVendaTotalKit = roundMoney(precoVendaTotalKit);
               }
               
-              custoUnit = custoTotalKit;
+              custoUnit = roundMoney(custoTotalKit);
               precoVendaUnit = precoVendaTotalKit;
+              const valorImpostoKit = roundMoney(precoVendaUnit * (aliquotaMaterial / 100));
+              custoAgregadoUnit = roundMoney(custoUnit + valorImpostoKit);
             }
           } catch (error: any) {
             console.error(`❌ Erro ao processar kit ${item.kitId}:`, error);
@@ -301,52 +513,52 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
           }
         }
         
-        // Aplicar BDI apenas se o preço não foi editado manualmente
-        precoUnit = precoVendaUnit * (1 + (bdi || 0) / 100);
+        // Aplicar BDI apenas se o preço não foi editado manualmente (sempre 2 decimais)
+        precoUnit = roundMoney(precoVendaUnit * (1 + (bdi || 0) / 100));
       }
 
-      const subtotal = custoUnit * item.quantidade;
-      const subtotalPreco = precoUnit * item.quantidade;
+      const subtotal = roundMoney(custoUnit * item.quantidade);
+      const subtotalPreco = roundMoney(precoUnit * item.quantidade);
       
       custoTotal += subtotal;
 
-      // Obter NCM do material, cotação ou item editado manualmente
-      let ncm = item.ncm || null;
-      
-      if (!ncm) {
-        // Se não foi fornecido manualmente, buscar do material ou cotação
-        if (item.tipo === 'MATERIAL' && item.materialId) {
-          const material = await prisma.material.findUnique({
-            where: { id: item.materialId },
-            select: { ncm: true }
-          });
-          ncm = material?.ncm || null;
-        } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
-          const cotacao = await prisma.cotacao.findUnique({
-            where: { id: item.cotacaoId },
-            select: { ncm: true }
-          });
-          ncm = cotacao?.ncm || null;
-        }
+      // NCM: para itens do banco frio (COTACAO) sempre herdar da cotação; para MATERIAL do material; senão usar o enviado
+      let ncm: string | null = null;
+      if (item.tipo === 'COTACAO' && item.cotacaoId) {
+        const cotacao = await prisma.cotacao.findUnique({
+          where: { id: item.cotacaoId },
+          select: { ncm: true }
+        });
+        ncm = cotacao?.ncm ?? item.ncm ?? null;
+      } else if (item.tipo === 'MATERIAL' && item.materialId) {
+        const material = await prisma.material.findUnique({
+          where: { id: item.materialId },
+          select: { ncm: true }
+        });
+        ncm = material?.ncm ?? item.ncm ?? null;
+      } else {
+        ncm = item.ncm || null;
       }
 
       itemsData.push({
         tipo: item.tipo,
         materialId: item.materialId,
         kitId: item.kitId,
-        cotacaoId: item.cotacaoId, // ✅ Incluir cotacaoId para itens do banco frio
+        cotacaoId: item.cotacaoId,
         servicoNome: item.servicoNome,
         descricao: item.descricao,
         quantidade: item.quantidade,
-        custoUnit,
-        precoUnit,
-        subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
-        ncm: ncm ? String(ncm) : null, // ✅ NCM para faturamento NF-e/NFS-e
-        // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
+        custoUnit: roundMoney(custoUnit),
+        precoUnit: roundMoney(precoUnit),
+        custoAgregadoUnit: custoAgregadoUnit != null ? roundMoney(custoAgregadoUnit) : undefined,
+        subtotal: roundMoney(subtotalPreco),
+        ncm: ncm ? String(ncm) : null,
         unidadeVenda: item.unidadeVenda || null,
         tipoMaterial: item.tipoMaterial || null,
-        // ✅ Campo para armazenar itens de kits customizados
-        itensDoKit: item.itensDoKit || null
+        itensDoKit: item.tipo === 'KIT' && item.kitId
+          ? (await materializarComposicaoKitCatalogo(item.kitId, 1)) as any
+          : (item.itensDoKit || null),
+        vendaDiretaFornecedor: Boolean(item.vendaDiretaFornecedor)
       });
     }
 
@@ -403,7 +615,9 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         observacoes,
         // Novos campos
         empresaCNPJ,
+        empresaFiscalId: empresaFiscalId || undefined,
         enderecoObra,
+        numeroObra: numeroObra || undefined,
         cidade,
         bairro,
         cep,
@@ -413,6 +627,14 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         descontoValor: descontoValor || 0,
         impostoPercentual: impostoPercentual || 0,
         condicaoPagamento,
+        contatoLeadId: contatoLeadIdFk,
+        orcamentistaNome: (() => {
+          const user = (req as any).user;
+          const name = user?.name;
+          if (!name || typeof name !== 'string') return undefined;
+          const first = name.trim().split(/\s+/)[0];
+          return first || undefined;
+        })(),
         items: {
           create: itemsData
         }
@@ -429,6 +651,19 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         fotos: true
       }
     });
+
+    if (contatoLeadIdFk) {
+      await prisma.contatoLead
+        .update({
+          where: { id: contatoLeadIdFk },
+          data: {
+            clienteId: clienteId || undefined,
+            status: 'CONVERTIDO',
+            etapa: 3,
+          },
+        })
+        .catch(() => undefined);
+    }
 
     res.status(201).json(orcamento);
   } catch (error: any) {
@@ -866,7 +1101,9 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       observacoes,
       classificacao, // ✅ NOVO: Classificação do orçamento
       empresaCNPJ,
+      empresaFiscalId,
       enderecoObra,
+      numeroObra,
       cidade,
       bairro,
       cep,
@@ -909,46 +1146,73 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
 
     if (items && items.length > 0) {
       custoTotal = 0;
+      const configUpdate = await prisma.configuracaoSistema.findUnique({
+        where: { id: 'sistema-config' },
+        select: { aliquotaImpostoPadrao: true, markupFabricante: true, markupRevendedor: true, multiplicadorVenda: true, percentualImpostoPadrao: true }
+      }).catch(() => null);
+      const aliquotaPadraoUpdate = configUpdate?.aliquotaImpostoPadrao ?? configUpdate?.percentualImpostoPadrao ?? 8;
+      let aliquotaMaterialUpdate = aliquotaPadraoUpdate;
+      let aliquotaServicoUpdate = aliquotaPadraoUpdate;
+      const empresaFiscalIdUpdate = empresaFiscalId ?? (orcamentoExistente as any).empresaFiscalId;
+      const empresaCNPJUpdate = empresaCNPJ ?? orcamentoExistente.empresaCNPJ;
+      if (empresaFiscalIdUpdate || empresaCNPJUpdate) {
+        const empresaUpdate = await prisma.empresaFiscal.findFirst({
+          where: empresaFiscalIdUpdate ? { id: empresaFiscalIdUpdate } : { cnpj: String(empresaCNPJUpdate || '').replace(/\D/g, '') },
+          select: { aliquotaMaterial: true, aliquotaServico: true }
+        });
+        if (empresaUpdate) {
+          aliquotaMaterialUpdate = empresaUpdate.aliquotaMaterial ?? aliquotaPadraoUpdate;
+          aliquotaServicoUpdate = empresaUpdate.aliquotaServico ?? aliquotaPadraoUpdate;
+        }
+      }
+      const multiplicadorVendaUpdate = configUpdate?.markupFabricante ?? configUpdate?.multiplicadorVenda ?? 1.55;
 
       for (const item of items) {
         let custoUnit = item.custoUnit || 0;
         let precoUnit = 0;
-        
+        let custoAgregadoUnit: number | null = null;
+
         // ✅ PRIORIDADE 1: Se o usuário editou o preço manualmente, usar o valor editado
         if (item.precoUnitario !== undefined && item.precoUnitario !== null) {
-          // Usuário editou o valor - usar diretamente (já pode incluir BDI ou não, conforme editado)
           precoUnit = item.precoUnitario;
+          if (item.custoAgregadoUnit != null) custoAgregadoUnit = item.custoAgregadoUnit;
           console.log(`✅ Usando preço editado pelo usuário: R$ ${precoUnit.toFixed(2)} para item ${item.descricao || item.nome}`);
         } else {
-          // ✅ PRIORIDADE 2: Se não foi editado, calcular baseado no estoque/cotações
           let precoVendaUnit = item.custoUnit || 0;
           
-          // Se for cotação (banco frio), buscar valor da cotação
           if (item.tipo === 'COTACAO' && item.cotacaoId) {
             const cotacao = await prisma.cotacao.findUnique({
               where: { id: item.cotacaoId },
-              select: { valorUnitario: true, valorVenda: true }
+              include: { fornecedor: { select: { classificacao: true } } }
             });
-            
             if (cotacao) {
-              precoVendaUnit = cotacao.valorVenda || cotacao.valorUnitario || 0;
               custoUnit = cotacao.valorUnitario || 0;
+              const classificacao = (cotacao.fornecedor as any)?.classificacao;
+              if (classificacao === 'Representante_Vendedor') {
+                precoVendaUnit = cotacao.valorVenda ?? cotacao.valorUnitario ?? 0;
+              } else {
+                precoVendaUnit = (cotacao.valorUnitario ?? 0) * multiplicadorVendaUpdate;
+              }
+              const valorImpostoUpdate = precoVendaUnit * (aliquotaMaterialUpdate / 100);
+              custoAgregadoUnit = custoUnit + valorImpostoUpdate;
             }
           }
-          // Se for material, buscar valorVenda se disponível
           else if (item.tipo === 'MATERIAL' && item.materialId) {
             const material = await prisma.material.findUnique({
               where: { id: item.materialId },
-              select: { preco: true, valorVenda: true }
+              select: { preco: true, valorVenda: true, percentualImposto: true, custoAgregado: true }
             });
-            
             if (material) {
               precoVendaUnit = material.valorVenda || material.preco || 0;
               custoUnit = material.preco || 0;
+              if (material.custoAgregado != null) custoAgregadoUnit = material.custoAgregado;
+              else {
+                const pctImp = material.percentualImposto ?? aliquotaMaterialUpdate;
+                custoAgregadoUnit = (material.preco ?? 0) + (precoVendaUnit * (pctImp / 100));
+              }
             }
           }
           
-          // Se for kit, calcular custo baseado nos materiais
           if (item.tipo === 'KIT' && item.kitId) {
             const kit = await prisma.kit.findUnique({
               where: { id: item.kitId },
@@ -997,6 +1261,8 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
                 }, 0);
                 precoVendaUnit += precoVendaExtras;
               }
+              const valorImpostoKitUpdate = precoVendaUnit * (aliquotaMaterialUpdate / 100);
+              custoAgregadoUnit = custoUnit + valorImpostoKitUpdate;
             }
           }
           
@@ -1009,42 +1275,43 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
         
         custoTotal += subtotal;
 
-        // Obter NCM do material, cotação ou item editado manualmente
-        let ncm = item.ncm || null;
-        
-        if (!ncm) {
-          // Se não foi fornecido manualmente, buscar do material ou cotação
-          if (item.tipo === 'MATERIAL' && item.materialId) {
-            const material = await prisma.material.findUnique({
-              where: { id: item.materialId },
-              select: { ncm: true }
-            });
-            ncm = material?.ncm || null;
-          } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
-            const cotacao = await prisma.cotacao.findUnique({
-              where: { id: item.cotacaoId },
-              select: { ncm: true }
-            });
-            ncm = cotacao?.ncm || null;
-          }
+        // NCM: para itens do banco frio (COTACAO) sempre herdar da cotação; para MATERIAL do material; senão usar o enviado
+        let ncm: string | null = null;
+        if (item.tipo === 'COTACAO' && item.cotacaoId) {
+          const cotacao = await prisma.cotacao.findUnique({
+            where: { id: item.cotacaoId },
+            select: { ncm: true }
+          });
+          ncm = cotacao?.ncm ?? item.ncm ?? null;
+        } else if (item.tipo === 'MATERIAL' && item.materialId) {
+          const material = await prisma.material.findUnique({
+            where: { id: item.materialId },
+            select: { ncm: true }
+          });
+          ncm = material?.ncm ?? item.ncm ?? null;
+        } else {
+          ncm = item.ncm || null;
         }
 
         itemsData.push({
           tipo: item.tipo,
           materialId: item.materialId,
           kitId: item.kitId,
-          itensDoKit: item.itensDoKit || null, // ✅ Campo para armazenar itens de kits customizados
-          cotacaoId: item.cotacaoId, // ✅ Incluir cotacaoId para itens do banco frio
+          itensDoKit: item.tipo === 'KIT' && item.kitId
+            ? (await materializarComposicaoKitCatalogo(item.kitId, 1)) as any
+            : (item.itensDoKit || null),
+          cotacaoId: item.cotacaoId,
           servicoNome: item.servicoNome,
           descricao: item.descricao,
           quantidade: item.quantidade,
           custoUnit,
           precoUnit,
-          subtotal: subtotalPreco, // Usar subtotal baseado no preço (editado ou calculado)
-          ncm: ncm ? String(ncm) : null, // ✅ NCM para faturamento NF-e/NFS-e
-          // ✅ NOVOS CAMPOS: Conversão de unidades (opcionais, compatível com dados existentes)
+          custoAgregadoUnit: custoAgregadoUnit ?? undefined,
+          subtotal: subtotalPreco,
+          ncm: ncm ? String(ncm) : null,
           unidadeVenda: item.unidadeVenda || null,
-          tipoMaterial: item.tipoMaterial || null
+          tipoMaterial: item.tipoMaterial || null,
+          vendaDiretaFornecedor: Boolean(item.vendaDiretaFornecedor)
         });
       }
 
@@ -1054,7 +1321,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       precoVenda = valorComDesconto * (1 + (impostoPercentual || orcamentoExistente.impostoPercentual || 0) / 100);
     }
 
-    // Preparar dados de atualização
+    // Orçamentista: NUNCA alterar na edição. Só é definido na criação do orçamento e permanece fixo (quem criou é quem consta como orçamentista).
     const updateData: any = {
       titulo: titulo || orcamentoExistente.titulo,
       descricao: descricao !== undefined ? descricao : orcamentoExistente.descricao,
@@ -1065,7 +1332,9 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       custoTotal,
       precoVenda,
       empresaCNPJ: empresaCNPJ !== undefined ? empresaCNPJ : orcamentoExistente.empresaCNPJ,
+      empresaFiscalId: empresaFiscalId !== undefined ? empresaFiscalId : (orcamentoExistente as any).empresaFiscalId,
       enderecoObra: enderecoObra !== undefined ? enderecoObra : orcamentoExistente.enderecoObra,
+      numeroObra: numeroObra !== undefined ? numeroObra : (orcamentoExistente as any).numeroObra,
       cidade: cidade !== undefined ? cidade : orcamentoExistente.cidade,
       bairro: bairro !== undefined ? bairro : orcamentoExistente.bairro,
       cep: cep !== undefined ? cep : orcamentoExistente.cep,
@@ -1129,6 +1398,38 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
       success: false,
       error: 'Erro ao atualizar orçamento'
     });
+  }
+};
+
+/** Marcar ou desmarcar item do orçamento como "Venda direta do fornecedor para o cliente" */
+export const updateItemVendaDireta = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orcamentoId, itemId } = req.params;
+    const { vendaDiretaFornecedor } = req.body;
+
+    const item = await prisma.orcamentoItem.findFirst({
+      where: { id: itemId, orcamentoId }
+    });
+
+    if (!item) {
+      res.status(404).json({ error: 'Item do orçamento não encontrado' });
+      return;
+    }
+
+    const itemAtualizado = await prisma.orcamentoItem.update({
+      where: { id: itemId },
+      data: { vendaDiretaFornecedor: Boolean(vendaDiretaFornecedor) },
+      include: {
+        material: { select: { id: true, nome: true, sku: true, ncm: true } },
+        kit: { select: { id: true, nome: true } },
+        cotacao: { select: { id: true, nome: true, ncm: true } }
+      }
+    });
+
+    res.json(itemAtualizado);
+  } catch (error) {
+    console.error('Erro ao atualizar venda direta do item:', error);
+    res.status(500).json({ error: 'Erro ao atualizar item' });
   }
 };
 
@@ -1727,6 +2028,242 @@ export const importarOrcamentos = async (req: Request, res: Response): Promise<v
       success: false,
       error: 'Erro ao importar orçamentos',
       details: error.message
+    });
+  }
+};
+
+function primeiroNomeOrcamentista(nomeCompleto: string | null | undefined): string | null {
+  if (!nomeCompleto || typeof nomeCompleto !== 'string') return null;
+  const t = nomeCompleto.trim().split(/\s+/)[0];
+  return t || null;
+}
+
+/**
+ * Backfill orcamentistaNome em orçamentos vazios e atualiza vendedorNome nas vendas.
+ * Acesso: APENAS role desenvolvedor (para uso em produção sem rodar script no servidor).
+ * POST /api/orcamentos/backfill-orcamentista
+ */
+export const backfillOrcamentista = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    if (!user || user.role?.toLowerCase() !== 'desenvolvedor') {
+      res.status(403).json({ success: false, error: 'Acesso negado. Apenas desenvolvedor pode executar esta ação.' });
+      return;
+    }
+
+    const semNome = await prisma.orcamento.findMany({
+      where: { orcamentistaNome: null },
+      select: { id: true, numeroSequencial: true }
+    });
+
+    let preenchidosPorAudit = 0;
+    let preenchidosPorUser = 0;
+    let preenchidosFallback = 0;
+
+    for (const orc of semNome) {
+      let nome: string | null = null;
+
+      try {
+        const log = await prisma.auditLog.findFirst({
+          where: { entity: 'orcamento', entityId: orc.id, action: 'CREATE' },
+          orderBy: { createdAt: 'asc' },
+          select: { userId: true, userName: true }
+        });
+
+        if (log?.userName) {
+          nome = primeiroNomeOrcamentista(log.userName);
+          if (nome) preenchidosPorAudit++;
+        }
+        if (!nome && log?.userId) {
+          const u = await prisma.user.findUnique({ where: { id: log.userId }, select: { name: true } });
+          nome = primeiroNomeOrcamentista(u?.name ?? null);
+          if (nome) preenchidosPorUser++;
+        }
+      } catch {
+        // ignora falha em audit_log (tabela pode não existir)
+      }
+
+      // Não gravar "Não identificado" no banco: deixa null para exibir como fallback na UI/PDF
+      if (!nome) {
+        preenchidosFallback++;
+        nome = null;
+      }
+
+      await prisma.orcamento.update({
+        where: { id: orc.id },
+        data: { orcamentistaNome: nome }
+      });
+    }
+
+    let vendasAtualizadas = 0;
+    try {
+      vendasAtualizadas = await prisma.$executeRaw`
+        UPDATE vendas v
+        SET "vendedorNome" = o."orcamentistaNome"
+        FROM orcamentos o
+        WHERE v."orcamentoId" = o.id
+          AND v."vendedorNome" IS NULL
+          AND o."orcamentistaNome" IS NOT NULL
+      `;
+    } catch {
+      // ignora se coluna ou tabela não existir
+    }
+
+    res.json({
+      success: true,
+      data: {
+        orcamentosPreenchidos: semNome.length,
+        preenchidosPorAudit,
+        preenchidosPorUser,
+        preenchidosFallback,
+        vendasAtualizadas
+      }
+    });
+  } catch (error: any) {
+    console.error('Erro no backfill orçamentista:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Erro ao executar backfill de orçamentistas'
+    });
+  }
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatarTipoPdf(tipo?: string): string {
+  const t = (tipo || 'MATERIAL').toUpperCase();
+  if (t === 'SERVICO') return 'Serviço';
+  if (t === 'COTACAO') return 'Banco Frio';
+  if (t === 'KIT') return 'Kit';
+  return 'Estoque';
+}
+
+// Gera PDF da composição de um kit (lista simples: item, tipo, quantidade)
+export const gerarPdfItensKit = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { nomeKit, itens, numeroOrcamento, usuarioGerador } = req.body as {
+      nomeKit?: string;
+      numeroOrcamento?: number | string;
+      usuarioGerador?: string;
+      itens?: Array<{
+        nome?: string;
+        tipo?: string;
+        quantidade?: number;
+        unidadeMedida?: string;
+      }>;
+    };
+
+    if (!Array.isArray(itens) || itens.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Informe ao menos um item para gerar o PDF do kit.'
+      });
+      return;
+    }
+
+    const nomeKitSafe = escapeHtml((nomeKit || 'Kit Unificado').trim() || 'Kit Unificado');
+    const numeroOrcamentoSafe = numeroOrcamento !== undefined && numeroOrcamento !== null
+      ? escapeHtml(String(numeroOrcamento))
+      : null;
+    const usuarioGeradorSafe = usuarioGerador
+      ? escapeHtml(String(usuarioGerador).trim())
+      : null;
+    const dataGeracao = new Date().toLocaleString('pt-BR');
+    const linhas = itens.map((item, idx) => {
+      const nome = escapeHtml((item.nome || 'Item sem nome').trim() || 'Item sem nome');
+      const tipo = escapeHtml(formatarTipoPdf(item.tipo));
+      const qtd = Number(item.quantidade || 0);
+      const quantidade = Number.isFinite(qtd) && qtd > 0 ? qtd : 1;
+      const unidade = escapeHtml((item.unidadeMedida || 'un').trim() || 'un');
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${nome}</td>
+          <td>${tipo}</td>
+          <td style="text-align:right;">${quantidade} ${unidade}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Itens do Kit - ${nomeKitSafe}</title>
+        <style>
+          body { font-family: Arial, Helvetica, sans-serif; color: #1f2937; margin: 24px; }
+          h1 { margin: 0; font-size: 22px; }
+          .subtitle { margin-top: 6px; margin-bottom: 18px; color: #4b5563; font-size: 13px; }
+          .meta { margin-bottom: 14px; padding: 10px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; color: #374151; }
+          .meta-item { margin: 3px 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+          th, td { border: 1px solid #d1d5db; padding: 10px 8px; font-size: 12px; }
+          th { background: #f3f4f6; text-align: left; }
+          .footer { margin-top: 16px; font-size: 12px; color: #6b7280; }
+        </style>
+      </head>
+      <body>
+        <h1>Itens do Kit</h1>
+        <div class="subtitle"><strong>Kit:</strong> ${nomeKitSafe}</div>
+        <div class="meta">
+          ${numeroOrcamentoSafe ? `<div class="meta-item"><strong>Orçamento:</strong> #${numeroOrcamentoSafe}</div>` : ''}
+          ${usuarioGeradorSafe ? `<div class="meta-item"><strong>Gerado por:</strong> ${usuarioGeradorSafe}</div>` : ''}
+          <div class="meta-item"><strong>Data/Hora:</strong> ${dataGeracao}</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 50px;">#</th>
+              <th>Item</th>
+              <th style="width: 140px;">Tipo</th>
+              <th style="width: 180px; text-align:right;">Quantidade</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas}
+          </tbody>
+        </table>
+        <div class="footer">Total de itens: ${itens.length}</div>
+      </body>
+      </html>
+    `;
+
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      const pdfBytes = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '12mm', right: '10mm', bottom: '12mm', left: '10mm' }
+      });
+
+      const nomeArquivo = `Itens_Kit_${(nomeKit || 'unificado').replace(/[^\w\-]+/g, '_')}.pdf`;
+      const pdfBuffer = Buffer.from(pdfBytes as Uint8Array);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${nomeArquivo}"`);
+      res.setHeader('Content-Length', String(pdfBuffer.length));
+      res.send(pdfBuffer);
+    } finally {
+      await browser.close();
+    }
+  } catch (error: any) {
+    console.error('Erro ao gerar PDF dos itens do kit:', error);
+    res.status(500).json({
+      success: false,
+      error: error?.message || 'Erro ao gerar PDF dos itens do kit'
     });
   }
 };

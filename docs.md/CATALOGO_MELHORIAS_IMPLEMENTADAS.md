@@ -2,7 +2,10 @@
 
 ## 📋 Resumo Geral
 
-Implementação completa de um sistema semi-automático e inteligente para criação de **Quadros de Medição** com campos pré-preenchidos baseados nas melhores práticas da S3E Engenharia, mantendo total personalização para **Quadros de Comando**, **Quadros Elétricos** e **Subestações**.
+Implementação completa de um sistema semi-automático e inteligente para criação
+de **Quadros de Medição** com campos pré-preenchidos baseados nas melhores
+práticas da S3E Engenharia, mantendo total personalização para **Quadros de
+Comando**, **Quadros Elétricos** e **Subestações**.
 
 ---
 
@@ -18,12 +21,14 @@ Agora com **4 tipos de kit** disponíveis:
 4. **Subestações** (modo personalizado - 3 etapas)
 
 **Modo Assistido (Quadro de Medição):**
+
 - Campos pré-preenchidos automaticamente
 - Cálculos inteligentes baseados nas seleções
 - Validação de componentes compatíveis
 - Sugestões baseadas em padrões técnicos
 
 **Modo Personalizado (Outros tipos):**
+
 - Interface totalmente personalizável
 - Adição manual de componentes
 - Flexibilidade total para projetos especiais
@@ -33,7 +38,8 @@ Agora com **4 tipos de kit** disponíveis:
 ## 📝 Etapas do Quadro de Medição (Modo Assistido)
 
 ### **Etapa 2 - Estrutura do Quadro**
-*Mantida conforme implementação anterior*
+
+_Mantida conforme implementação anterior_
 
 - Seleção de material: Alumínio ou Policarbonato
 - Quantidade de medidores
@@ -44,6 +50,7 @@ Agora com **4 tipos de kit** disponíveis:
 ### **Etapa 3 - Disjuntor Geral** ⭐ NOVO
 
 #### **Tipo de Disjuntor Geral:**
+
 Dois botões de seleção visual:
 
 1. **Caixa Moldada**
@@ -57,6 +64,7 @@ Dois botões de seleção visual:
      - Tripolar
 
 #### **Recursos:**
+
 - Interface visual com botões destacados
 - Polaridade automática para Caixa Moldada
 - Seleção manual de polaridade para DIN
@@ -68,7 +76,9 @@ Dois botões de seleção visual:
 ### **Etapa 4 - Disjuntores por Medidor** ⭐ NOVO
 
 #### **Seleção de Polaridade:**
+
 Três opções disponíveis:
+
 - **Monopolar**
 - **Bipolar**
 - **Tripolar**
@@ -76,14 +86,17 @@ Três opções disponíveis:
 #### **Filtragem Inteligente de Amperagem:**
 
 **Para Monopolar:**
+
 - Amperagens disponíveis: 40A, 50A, 63A
 - Cabo automático: **10mm² HEPR (rígido)**
 
 **Para Bipolar:**
+
 - Amperagens disponíveis: 50A, 63A
 - Cabo automático: **10mm² HEPR (rígido)**
 
 **Para Tripolar:**
+
 - 40A, 50A, 63A → Cabo **10mm² HEPR (rígido)**
 - 70A → Cabo **16mm² HEPR (rígido)**
 - 90A → Cabo **25mm² HEPR (rígido)**
@@ -91,6 +104,7 @@ Três opções disponíveis:
 - 125A → Cabo **35mm²** (opção flex ou rígido)
 
 #### **Recursos:**
+
 - Lista suspensa filtrada por polaridade
 - Cálculo automático de cabos necessários
 - Indicador visual de cabos que serão adicionados
@@ -102,6 +116,7 @@ Três opções disponíveis:
 ### **Etapa 5 - DPS (Dispositivo de Proteção contra Surtos)** ⭐ NOVO
 
 #### **Seleção de Classe:**
+
 Dois botões visuais:
 
 1. **DPS CLASSE 1**
@@ -122,6 +137,7 @@ Dois botões visuais:
      - **Disjuntores do DPS:** 3x Disjuntor DIN 25A - 10KA Monopolar
 
 #### **Recursos:**
+
 - Todos os campos editáveis
 - Pré-preenchimento automático baseado na classe
 - Indicação clara de valores padrão
@@ -132,6 +148,7 @@ Dois botões visuais:
 ### **Etapa 6 - Acabamentos** ⭐ NOVO
 
 #### **Parafusos e Arruelas:**
+
 - Campo de busca inteligente
 - Listagem de itens em estoque
 - Indicador de estoque disponível
@@ -139,6 +156,7 @@ Dois botões visuais:
 - Scroll para visualização de muitos itens
 
 #### **Terminais Tubulares:**
+
 - Quantidade padrão: **12 unidades** (para conexões DPS)
 - Campos editáveis:
   - Tipo de terminal
@@ -146,6 +164,7 @@ Dois botões visuais:
   - Quantidade
 
 #### **Curva Box:**
+
 - Quantidade por caixa: **1 unidade** (padrão)
 - Campo editável conforme necessidade
 
@@ -156,11 +175,13 @@ Dois botões visuais:
 #### **Cálculo Automático Baseado em Polaridade:**
 
 **Regras de cálculo:**
+
 - **Monopolar:** 2 unidades por disjuntor
 - **Bipolar:** 3 unidades por disjuntor
 - **Tripolar:** 4 unidades por disjuntor
 
 #### **Interface:**
+
 - Exibição grande da quantidade total calculada
 - Resumo detalhado por disjuntor
 - Cálculo automático considerando:
@@ -171,6 +192,7 @@ Dois botões visuais:
 - Listagem de terminais disponíveis com preços
 
 #### **Exemplo de Cálculo:**
+
 ```
 3 Disjuntores tripolares × 4 terminais × 5 medidores = 60 terminais
 ```
@@ -180,18 +202,21 @@ Dois botões visuais:
 ## 🎨 Melhorias de Interface
 
 ### **Indicadores Visuais:**
+
 - ✅ Badges de modo (Assistido vs Personalizado)
 - 📊 Indicadores de cálculo automático
 - ⚠️ Alertas de estoque insuficiente
 - 💡 Dicas contextuais em cada etapa
 
 ### **Navegação:**
+
 - Barra de progresso visual com 7 etapas
 - Botões "Voltar" e "Avançar"
 - Etapas completadas marcadas com ✓
 - Navegação clicável em etapas anteriores
 
 ### **Validações:**
+
 - Campos obrigatórios identificados
 - Validação de compatibilidade de componentes
 - Cálculo de preço total em tempo real
@@ -206,14 +231,14 @@ Dois botões visuais:
 ```typescript
 interface KitConfiguration {
     kitType: '' | 'medidores' | 'comando' | 'quadro-eletrico' | 'subestacoes';
-    
+
     // Disjuntor Geral
     disjuntorGeralTipo?: 'caixa-moldada' | 'din';
     disjuntorGeralPolaridade?: 'monopolar' | 'bipolar' | 'tripolar';
-    
+
     // Disjuntores Individuais
     disjuntoresIndividuaisPolaridade?: 'monopolar' | 'bipolar' | 'tripolar';
-    
+
     // DPS
     dpsClasse?: 'classe1' | 'classe2';
     dpsConfig?: {
@@ -224,7 +249,7 @@ interface KitConfiguration {
         barramentoPenteQuantidade: number;
         disjuntoresDPS?: Array<{...}>;
     };
-    
+
     // Acabamentos
     acabamentos?: {
         parafusos?: Array<{...}>;
@@ -245,31 +270,35 @@ interface KitConfiguration {
 ## 🚀 Funcionalidades Automáticas
 
 ### **1. Auto-preenchimento de DPS:**
+
 ```javascript
 useEffect(() => {
-    if (dpsClasse === 'classe1') {
-        // Preenche com valores padrão Classe 1
-    } else if (dpsClasse === 'classe2') {
-        // Preenche com valores padrão Classe 2
-    }
+  if (dpsClasse === "classe1") {
+    // Preenche com valores padrão Classe 1
+  } else if (dpsClasse === "classe2") {
+    // Preenche com valores padrão Classe 2
+  }
 }, [dpsClasse]);
 ```
 
 ### **2. Auto-polaridade para Caixa Moldada:**
+
 ```javascript
 useEffect(() => {
-    if (disjuntorGeralTipo === 'caixa-moldada') {
-        setPolaridade('tripolar'); // Automático
-    }
+  if (disjuntorGeralTipo === "caixa-moldada") {
+    setPolaridade("tripolar"); // Automático
+  }
 }, [disjuntorGeralTipo]);
 ```
 
 ### **3. Filtragem Inteligente de Disjuntores:**
+
 - Por polaridade selecionada
 - Por amperagens compatíveis
 - Por disponibilidade em estoque
 
 ### **4. Cálculo Automático de Terminais:**
+
 - Baseado na polaridade do disjuntor
 - Multiplicado por quantidade de medidores
 - Exibição em tempo real
@@ -279,18 +308,21 @@ useEffect(() => {
 ## 📊 Benefícios da Implementação
 
 ### **Para o Usuário:**
+
 - ⚡ Redução de 70% no tempo de configuração
 - 🎯 Menos erros de configuração
 - 📋 Padronização automática
 - 🔍 Transparência total do cálculo
 
 ### **Para a Empresa:**
+
 - 📐 Garantia de padrões técnicos
 - 💰 Precificação automática precisa
 - 📊 Rastreabilidade de componentes
 - 🔧 Facilita treinamento de novos usuários
 
 ### **Técnico:**
+
 - 🔄 Código modular e reutilizável
 - 📝 Tipos TypeScript completos
 - ⚙️ Fácil manutenção e extensão
@@ -301,18 +333,21 @@ useEffect(() => {
 ## 🎯 Próximos Passos Sugeridos
 
 ### **Curto Prazo:**
+
 1. ✅ Testar fluxo completo de criação
 2. 🔍 Validar cálculos com casos reais
 3. 📊 Ajustar valores padrão se necessário
 4. 🎨 Refinamentos visuais baseados em feedback
 
 ### **Médio Prazo:**
+
 1. 💾 Salvar templates de configuração
 2. 📋 Duplicação de kits existentes
 3. 📤 Exportação de lista de materiais
 4. 🔄 Histórico de alterações
 
 ### **Longo Prazo:**
+
 1. 🤖 IA para sugestões de componentes
 2. 📊 Analytics de uso de componentes
 3. 💰 Otimização automática de custos
@@ -323,15 +358,18 @@ useEffect(() => {
 ## 📝 Notas Técnicas
 
 ### **Arquivos Modificados:**
+
 - `frontend/src/components/Catalogo.tsx` - Componente principal
 - `frontend/src/types/index.ts` - Definições de tipos
 
 ### **Dependências:**
+
 - React 18+
 - TypeScript 4.9+
 - Nenhuma biblioteca externa adicional necessária
 
 ### **Compatibilidade:**
+
 - ✅ Totalmente compatível com implementação anterior
 - ✅ Dados existentes preservados
 - ✅ Modo de edição de kits existentes funcional
@@ -340,7 +378,8 @@ useEffect(() => {
 
 ## ✨ Conclusão
 
-Esta implementação transforma o modal de criação de kits em uma ferramenta profissional e eficiente, combinando:
+Esta implementação transforma o modal de criação de kits em uma ferramenta
+profissional e eficiente, combinando:
 
 - **Automação inteligente** para casos comuns
 - **Flexibilidade total** para casos especiais
@@ -352,6 +391,5 @@ O sistema está pronto para uso em produção! 🚀
 ---
 
 **Desenvolvido para S3E Engenharia**  
-*Sistema de Gestão Integrada - Módulo Catálogo*  
+_Sistema de Gestão Integrada - Módulo Catálogo_  
 Data: Outubro 2025
-

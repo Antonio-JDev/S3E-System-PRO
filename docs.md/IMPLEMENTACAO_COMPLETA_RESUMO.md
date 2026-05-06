@@ -2,7 +2,10 @@
 
 ## 📋 Resumo Executivo
 
-Foi implementado um sistema completo de autenticação JWT, temas personalizáveis (claro/escuro), configurações de usuário avançadas, e melhorias significativas no sistema de gerenciamento de projetos, incluindo etapas administrativas com prazos de 24 horas.
+Foi implementado um sistema completo de autenticação JWT, temas personalizáveis
+(claro/escuro), configurações de usuário avançadas, e melhorias significativas
+no sistema de gerenciamento de projetos, incluindo etapas administrativas com
+prazos de 24 horas.
 
 ---
 
@@ -11,8 +14,10 @@ Foi implementado um sistema completo de autenticação JWT, temas personalizáve
 ### 1. ✅ Sistema de Autenticação com JWT
 
 #### Frontend:
+
 - **AuthContext** (`frontend/src/contexts/AuthContext.tsx`)
-  - Gerenciamento de estado de autenticação (user, token, isAuthenticated, isLoading)
+  - Gerenciamento de estado de autenticação (user, token, isAuthenticated,
+    isLoading)
   - Funções: `login()`, `logout()`, `checkAuth()`, `updateUser()`
   - Armazenamento de token em `localStorage`
   - Interceptor automático para adicionar token em requisições
@@ -34,6 +39,7 @@ Foi implementado um sistema completo de autenticação JWT, temas personalizáve
   - `useTheme()` - Hook para acessar contexto de tema
 
 #### Rotas Configuradas:
+
 ```typescript
 /login          → Página pública de login
 /*              → Todas as demais rotas (protegidas)
@@ -100,6 +106,7 @@ Foi implementado um sistema completo de autenticação JWT, temas personalizáve
    - Gerenciamento de usuários do sistema
 
 #### Melhorias Visuais:
+
 - Header com gradiente #0a1a2f (padrão S3E)
 - Emojis visíveis e bem espaçados (`text-2xl`, `p-3`)
 - Animações de entrada (`fadeIn`, `scaleIn`)
@@ -113,6 +120,7 @@ Foi implementado um sistema completo de autenticação JWT, temas personalizáve
 **Arquivo:** `frontend/src/components/Sidebar.tsx`
 
 #### Novidades:
+
 - **Logo Customizada**
   - Exibição da logo do localStorage
   - Fallback para logo padrão S3E
@@ -142,32 +150,32 @@ Foi implementado um sistema completo de autenticação JWT, temas personalizáve
 ```typescript
 // Etapas Administrativas
 export enum AdminStageStatus {
-    Pending = 'pending',
-    Completed = 'completed',
-    Overdue = 'overdue',
+  Pending = "pending",
+  Completed = "completed",
+  Overdue = "overdue",
 }
 
 export interface AdminStage {
-    id: string;
-    name: string;
-    order: number; // 1-10
-    status: AdminStageStatus;
-    deadline: string;
-    startedAt: string;
-    completedAt?: string;
-    extendedDeadline?: string;
-    extensionReason?: string;
+  id: string;
+  name: string;
+  order: number; // 1-10
+  status: AdminStageStatus;
+  deadline: string;
+  startedAt: string;
+  completedAt?: string;
+  extendedDeadline?: string;
+  extensionReason?: string;
 }
 
 // Tema
-export type Theme = 'light' | 'dark';
+export type Theme = "light" | "dark";
 
 // Autenticação
 export interface AuthState {
-    user: User | null;
-    token: string | null;
-    isAuthenticated: boolean;
-    isLoading: boolean;
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
 }
 ```
 
@@ -176,21 +184,21 @@ export interface AuthState {
 ```typescript
 // User
 export interface User {
-    // ... campos existentes
-    phone?: string;
-    avatar?: string;
+  // ... campos existentes
+  phone?: string;
+  avatar?: string;
 }
 
 // Project
 export interface Project {
-    // ... campos existentes
-    adminStages: AdminStage[]; // NOVO
+  // ... campos existentes
+  adminStages: AdminStage[]; // NOVO
 }
 
 // ProjectStage
 export interface ProjectStage {
-    // ... campos existentes
-    linkedAdminStageId?: string; // NOVO - vínculo com etapa administrativa
+  // ... campos existentes
+  linkedAdminStageId?: string; // NOVO - vínculo com etapa administrativa
 }
 ```
 
@@ -204,25 +212,26 @@ export interface ProjectStage {
 
 ```typescript
 const generateAdminStages = (projectStartDate: string): AdminStage[] => {
-    const stages = [
-        'Organizar Projeto',
-        'Abertura de SR',
-        'Emitir ART',
-        'Concluir Projeto',
-        'Protocolar Projeto',
-        'Aprovação do Projeto',
-        'Revisão Final',
-        'Cobrança',
-        'Acervo Técnico',
-        'Vistoria',
-    ];
-    
-    // Gera etapas com prazo de 24h a partir da data de início
-    // ...
+  const stages = [
+    "Organizar Projeto",
+    "Abertura de SR",
+    "Emitir ART",
+    "Concluir Projeto",
+    "Protocolar Projeto",
+    "Aprovação do Projeto",
+    "Revisão Final",
+    "Cobrança",
+    "Acervo Técnico",
+    "Vistoria",
+  ];
+
+  // Gera etapas com prazo de 24h a partir da data de início
+  // ...
 };
 ```
 
 #### Todos os Projetos Atualizados:
+
 - PROJ-001, PROJ-002, PROJ-003, PROJ-004, PROJ-005
 - Cada um possui 10 etapas administrativas fixas
 - Prazo de 24h configurado para cada etapa
@@ -234,12 +243,14 @@ const generateAdminStages = (projectStartDate: string): AdminStage[] => {
 **Arquivo:** `frontend/src/components/Projetos.tsx`
 
 #### Header Atualizado:
+
 - Gradiente #0a1a2f → #0d2847 (padrão S3E)
 - Emoji 📋 visível
 - Texto branco
 - Animações `fadeIn` e `scaleIn`
 
 #### Tamanho Aumentado:
+
 - De `max-w-6xl` para `max-w-7xl`
 - De `max-h-[90vh]` para `max-h-[95vh]`
 - Melhor usabilidade e visibilidade
@@ -247,6 +258,7 @@ const generateAdminStages = (projectStartDate: string): AdminStage[] => {
 #### Nova Aba: "📊 Etapas Admin"
 
 **UI Implementada:**
+
 - Grid 2 colunas responsivo
 - Cards coloridos por status:
   - ✅ Verde: Concluída
@@ -254,6 +266,7 @@ const generateAdminStages = (projectStartDate: string): AdminStage[] => {
   - ⚠️ Vermelho: Atrasada
 
 **Funcionalidades:**
+
 - Exibição de todas as 10 etapas fixas
 - Cálculo de tempo restante (horas e minutos)
 - Indicador "ATRASADA!" se prazo venceu
@@ -262,6 +275,7 @@ const generateAdminStages = (projectStartDate: string): AdminStage[] => {
 - Exibição de prazos estendidos com justificativa
 
 **Informações Exibidas por Etapa:**
+
 - Número e nome da etapa
 - Status visual (emoji + cor)
 - Tempo restante / Atraso
@@ -270,10 +284,12 @@ const generateAdminStages = (projectStartDate: string): AdminStage[] => {
 - Prazo estendido e justificativa (se aplicável)
 
 #### Aba de Kanban Renomeada:
+
 - De "Etapas (Kanban)" para "Kanban Engenharia"
 - Diferencia claramente do Kanban de Obras
 
 #### Cor das Abas Ativas:
+
 - Alterada de `border-brand-blue` para `border-brand-s3e`
 - Padronização com a nova identidade visual
 
@@ -322,19 +338,22 @@ const App: React.FC = () => {
 #### Adições:
 
 1. **Cor brand-s3e** no Tailwind config
+
    ```javascript
    'brand-s3e': '#0a1a2f'
    ```
 
 2. **darkMode habilitado**
+
    ```javascript
-   darkMode: 'class'
+   darkMode: "class";
    ```
 
 3. **Estilos CSS para Tema Escuro**
+
    ```css
    body.dark {
-       background: linear-gradient(to bottom right, #0a1a2f, #000000);
+     background: linear-gradient(to bottom right, #0a1a2f, #000000);
    }
    /* + outras classes */
    ```
@@ -362,6 +381,7 @@ const App: React.FC = () => {
    - ⏳ `POST /api/settings/logo` - Upload real de logo
 
 ### Comentários no Código:
+
 - Todos os handlers têm comentários `// TODO: Implementar...`
 - Estrutura pronta para integração
 - Validações frontend implementadas
@@ -386,16 +406,19 @@ const App: React.FC = () => {
 ## 🎨 Design System Aplicado
 
 ### Cores:
+
 - **Primary (S3E):** `#0a1a2f`
 - **Primary Dark:** `#0d2847`
 - **Gradiente Tema Escuro:** `#0a1a2f` → `#000000`
 
 ### Animações:
+
 - `fadeIn` - 0.2s
 - `slideUp` - 0.3s
 - `scaleIn` - 0.2s
 
 ### Espaçamentos de Emojis:
+
 - Container: `p-3` (mínimo)
 - Tamanho: `text-2xl` (mínimo)
 - Alinhamento: `inline-flex items-center justify-center`
@@ -431,6 +454,7 @@ const App: React.FC = () => {
 ## 🧪 Como Testar
 
 ### 1. Autenticação
+
 ```bash
 # Backend
 cd backend
@@ -442,19 +466,22 @@ npm run dev
 ```
 
 **Fluxo:**
-1. Acesse http://localhost:5173
+
+1. Acesse <http://localhost:5173>
 2. Será redirecionado para `/login`
 3. Faça login (qualquer email/senha por ora - mocado)
 4. Será redirecionado para o dashboard
 5. Clique em "Sair" na sidebar para logout
 
 ### 2. Tema Escuro
+
 1. Clique no ícone de configurações (⚙️) na sidebar
 2. Vá para aba "Aparência"
 3. Toggle "Tema Escuro"
 4. Observe o gradiente #0a1a2f → #000000
 
 ### 3. Logo Customizada
+
 1. Em Configurações > Aparência
 2. Clique em "Escolher Logo"
 3. Selecione uma imagem (PNG/JPG/SVG, máx 2MB)
@@ -462,6 +489,7 @@ npm run dev
 5. Veja a logo aparecer na sidebar
 
 ### 4. Etapas Administrativas
+
 1. Vá para "Projetos"
 2. Clique em "Ver Detalhes" em qualquer projeto
 3. Clique na aba "📊 Etapas Admin"
@@ -476,6 +504,7 @@ npm run dev
 ## 🎯 Próximos Passos Recomendados
 
 ### Imediato:
+
 1. ✅ **COMPLETO** - Frontend da autenticação
 2. ⏳ Criar endpoints backend de autenticação (`/password`, `/profile`)
 3. ⏳ Implementar handlers para etapas administrativas
@@ -483,6 +512,7 @@ npm run dev
 5. ⏳ Atualizar cálculo de progresso (etapas + tasks)
 
 ### Futuro:
+
 - Upload real de logo para servidor
 - Notificações de etapas atrasadas
 - Histórico de extensões de prazo
@@ -520,4 +550,3 @@ npm run dev
 **Última atualização:** 2025-10-16  
 **Desenvolvido para:** S3E Engenharia  
 **Sistema:** S3E System PRO
-

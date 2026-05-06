@@ -2,9 +2,11 @@
 
 ## 🎯 Para Que Serve?
 
-O módulo de **Gestão de Obras** permite gerenciar a alocação das **3 equipes de campo** (Equipe A, B e C) nos diferentes projetos da empresa.
+O módulo de **Gestão de Obras** permite gerenciar a alocação das **3 equipes de
+campo** (Equipe A, B e C) nos diferentes projetos da empresa.
 
 Você pode:
+
 - ✅ Ver quais equipes estão disponíveis ou ocupadas
 - ✅ Criar novas alocações de equipes a projetos
 - ✅ Visualizar o calendário mensal de alocações
@@ -68,9 +70,9 @@ Você pode:
 
 ### Status das Equipes:
 
-| Indicador | Significado |
-|-----------|-------------|
-| 🟢 **DISPONÍVEL** | Equipe está livre para ser alocada |
+| Indicador                 | Significado                           |
+| ------------------------- | ------------------------------------- |
+| 🟢 **DISPONÍVEL**         | Equipe está livre para ser alocada    |
 | 🔴 **OCUPADA** (pulsando) | Equipe está trabalhando em um projeto |
 
 ### Tipos de Equipe:
@@ -85,11 +87,11 @@ Você pode:
 
 ### Navegação:
 
-| Botão | O que faz |
-|-------|-----------|
-| **◀** | Volta 1 mês |
+| Botão    | O que faz            |
+| -------- | -------------------- |
+| **◀**    | Volta 1 mês          |
 | **Hoje** | Retorna ao mês atual |
-| **▶** | Avança 1 mês |
+| **▶**    | Avança 1 mês         |
 
 ### Lendo o Calendário:
 
@@ -116,11 +118,13 @@ Dom  Seg  Ter  Qua  Qui  Sex  Sáb
 ### Passo a Passo:
 
 #### 1. Abrir o Modal
+
 Clique no botão **[+ Nova Alocação]** no canto superior direito.
 
 #### 2. Preencher o Formulário
 
-##### Campo 1: Equipe*
+##### Campo 1: Equipe\*
+
 ```
 Selecione uma equipe disponível:
 ┌──────────────────────────────────────┐
@@ -131,7 +135,8 @@ Selecione uma equipe disponível:
 
 💡 **Dica:** Apenas equipes **disponíveis** aparecem na lista.
 
-##### Campo 2: Projeto/Obra*
+##### Campo 2: Projeto/Obra\*
+
 ```
 ID do Projeto:
 ┌──────────────────────────────────────┐
@@ -141,14 +146,16 @@ ID do Projeto:
 
 💡 **Dica:** Digite o código do projeto (ex: `projeto-subestacao-abc`)
 
-##### Campo 3: Data de Início*
+##### Campo 3: Data de Início\*
+
 ```
 ┌──────────────────────────────────────┐
 │ 01/04/2025                           │
 └──────────────────────────────────────┘
 ```
 
-##### Campo 4: Duração (dias úteis)*
+##### Campo 4: Duração (dias úteis)\*
+
 ```
 ┌──────────────────────────────────────┐
 │ 20                                   │
@@ -156,12 +163,14 @@ ID do Projeto:
 ```
 
 💡 **Referência:**
+
 - 5 dias = 1 semana
 - 10 dias = 2 semanas
 - 20 dias = 1 mês
 - 40 dias = 2 meses
 
 ##### Campo 5: Observações (opcional)
+
 ```
 ┌──────────────────────────────────────┐
 │ Instalação de subestação 500kVA.    │
@@ -176,7 +185,8 @@ Clique em **[Criar Alocação]**.
 #### 4. Resultado
 
 ✅ **Sucesso:** "Alocação criada com sucesso!"  
-❌ **Erro:** Aparecerá uma mensagem explicando o problema (ex: "Conflito! Equipe já está alocada neste período")
+❌ **Erro:** Aparecerá uma mensagem explicando o problema (ex: "Conflito! Equipe
+já está alocada neste período")
 
 ---
 
@@ -209,10 +219,12 @@ Cada alocação aparece em um card:
 #### 🟡 Se a alocação está **Planejada**:
 
 ##### [▶ Iniciar]
+
 - **Quando usar:** Quando a equipe chegar no local e começar o trabalho
 - **O que faz:** Muda o status para **"Em Andamento"** (azul)
 
 ##### [✕ Cancelar]
+
 - **Quando usar:** Se o projeto for adiado ou cancelado
 - **O que faz:** Solicita um motivo e cancela a alocação
 
@@ -221,11 +233,13 @@ Cada alocação aparece em um card:
 #### 🔵 Se a alocação está **Em Andamento**:
 
 ##### [✓ Concluir]
+
 - **Quando usar:** Quando o trabalho da equipe for finalizado
 - **O que faz:** Marca como **"Concluída"** (verde)
 - **Opcional:** Pode informar a data real de conclusão
 
 ##### [✕ Cancelar]
+
 - **Quando usar:** Se precisar interromper o trabalho
 - **O que faz:** Cancela a alocação (mesmo estando em andamento)
 
@@ -290,6 +304,7 @@ Cada alocação aparece em um card:
 **Situação:** Cliente aprovou projeto de instalação elétrica.
 
 **Passos:**
+
 1. Abra "Gestão de Obras"
 2. Veja na sidebar quais equipes estão disponíveis
 3. Clique em [+ Nova Alocação]
@@ -308,6 +323,7 @@ Cada alocação aparece em um card:
 **Situação:** Equipe A chegou na obra para começar.
 
 **Passos:**
+
 1. Encontre a alocação da Equipe A (status: Planejada)
 2. Clique em [▶ Iniciar]
 3. ✅ Status muda para "Em Andamento" (azul)
@@ -319,6 +335,7 @@ Cada alocação aparece em um card:
 **Situação:** Equipe B concluiu a instalação.
 
 **Passos:**
+
 1. Encontre a alocação da Equipe B (status: Em Andamento)
 2. Clique em [✓ Concluir]
 3. (Opcional) Informe a data real de conclusão
@@ -332,6 +349,7 @@ Cada alocação aparece em um card:
 **Situação:** Cliente pediu para adiar o início da obra.
 
 **Passos:**
+
 1. Encontre a alocação (status: Planejada)
 2. Clique em [✕ Cancelar]
 3. Digite o motivo: "Cliente adiou por 60 dias"
@@ -346,6 +364,7 @@ Cada alocação aparece em um card:
 **Situação:** Preciso saber quais equipes estarão livres em maio.
 
 **Passos:**
+
 1. Use os botões ▶ para navegar até maio
 2. Observe o calendário:
    - Dias sem alocações = equipes disponíveis
@@ -359,11 +378,12 @@ Cada alocação aparece em um card:
 ### "Não consigo criar alocação"
 
 **Possíveis causas:**
+
 1. ❌ Equipe já está ocupada nesse período
    - **Solução:** Escolha outra equipe ou outro período
 
 2. ❌ Campos obrigatórios não preenchidos
-   - **Solução:** Preencha todos os campos marcados com *
+   - **Solução:** Preencha todos os campos marcados com \*
 
 3. ❌ ID do projeto inválido
    - **Solução:** Verifique o código do projeto
@@ -375,6 +395,7 @@ Cada alocação aparece em um card:
 **Causa:** Nenhuma equipe está disponível no período.
 
 **Solução:**
+
 1. Veja no calendário quando as equipes ficarão livres
 2. Ajuste a data de início da alocação
 
@@ -383,6 +404,7 @@ Cada alocação aparece em um card:
 ### "Alocação não aparece no calendário"
 
 **Possíveis causas:**
+
 1. Você está vendo outro mês
    - **Solução:** Navegue até o mês correto
 
@@ -396,6 +418,7 @@ Cada alocação aparece em um card:
 **Causa:** Pode ser problema de permissão.
 
 **Solução:**
+
 - Verifique se você tem perfil de **admin**
 - Apenas admins podem iniciar/concluir/cancelar alocações
 
@@ -413,17 +436,17 @@ Se precisar de ajuda:
 
 ## 📚 Glossário
 
-| Termo | Significado |
-|-------|-------------|
-| **Alocação** | Vínculo de uma equipe a um projeto por um período |
-| **Dias úteis** | Dias de trabalho (segunda a sexta), excluindo finais de semana |
-| **Planejada** | Alocação criada mas ainda não iniciada |
-| **Em Andamento** | Equipe está trabalhando no projeto |
-| **Concluída** | Trabalho finalizado com sucesso |
-| **Cancelada** | Alocação foi cancelada antes ou durante execução |
-| **Conflito** | Tentativa de alocar uma equipe já ocupada no período |
-| **Disponível** | Equipe está livre para ser alocada |
-| **Ocupada** | Equipe está trabalhando em algum projeto |
+| Termo            | Significado                                                    |
+| ---------------- | -------------------------------------------------------------- |
+| **Alocação**     | Vínculo de uma equipe a um projeto por um período              |
+| **Dias úteis**   | Dias de trabalho (segunda a sexta), excluindo finais de semana |
+| **Planejada**    | Alocação criada mas ainda não iniciada                         |
+| **Em Andamento** | Equipe está trabalhando no projeto                             |
+| **Concluída**    | Trabalho finalizado com sucesso                                |
+| **Cancelada**    | Alocação foi cancelada antes ou durante execução               |
+| **Conflito**     | Tentativa de alocar uma equipe já ocupada no período           |
+| **Disponível**   | Equipe está livre para ser alocada                             |
+| **Ocupada**      | Equipe está trabalhando em algum projeto                       |
 
 ---
 
@@ -455,4 +478,3 @@ Durante o trabalho:
 **Última atualização:** 22 de outubro de 2025  
 **Para:** Usuários do Sistema S3E  
 **Suporte:** Administrador do Sistema
-

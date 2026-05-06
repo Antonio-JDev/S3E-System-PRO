@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const prisma = new PrismaClient();
+import { gerarSKUCotacao } from '../utils/skuGenerator';
+import gerarSKUsParaCotacoes from '../scripts/gerarSKUsCotacoes';
 
 /**
  * Listar todas as cotações
@@ -29,6 +29,7 @@ export const listarCotacoes = async (req: Request, res: Response): Promise<void>
             id: true,
             nome: true,
             cnpj: true,
+            classificacao: true,
           }
         }
       },
@@ -87,12 +88,45 @@ export const buscarCotacao = async (req: Request, res: Response): Promise<void> 
 };
 
 /**
+ * Calcula valor de venda para orçamento conforme classificação do fornecedor:
+ * - Representante_Vendedor: valor de venda = valor unitário (preço já é de venda).
+ * - Fabricante ou sem classificação: valor de venda = valor unitário × markupFabricante (ex.: 1,55).
+ */
+async function calcularValorVendaPorClassificacao(
+  valorUnitario: number,
+  fornecedorId: string | null | undefined,
+  valorVendaEnviado: number | undefined
+): Promise<number> {
+  if (fornecedorId) {
+    const fornecedor = await prisma.fornecedor.findUnique({
+      where: { id: fornecedorId },
+      select: { classificacao: true }
+    });
+    const config = await prisma.configuracaoSistema.findFirst({
+      select: { markupFabricante: true, multiplicadorVenda: true }
+    });
+    const markupFabricante = config?.markupFabricante ?? config?.multiplicadorVenda ?? 1.55;
+
+    if (fornecedor?.classificacao === 'Representante_Vendedor') {
+      return valorUnitario; // Vendedor: valor que entra no orçamento = valor do fornecedor
+    }
+    // Fabricante ou sem classificação: preço × coeficiente
+    if (fornecedor?.classificacao === 'Fabricante' || !fornecedor?.classificacao) {
+      return Math.round(valorUnitario * markupFabricante * 100) / 100;
+    }
+  }
+  // Sem fornecedor ou valor enviado explicitamente
+  if (valorVendaEnviado !== undefined) return valorVendaEnviado;
+  return Math.round(valorUnitario * 1.4 * 100) / 100; // padrão 40% de margem
+}
+
+/**
  * Criar nova cotação
  * POST /api/cotacoes
  */
 export const criarCotacao = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes } = req.body;
+    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes, quantidadePorEmbalagem } = req.body;
 
     // Validações
     if (!nome || valorUnitario === undefined) {
@@ -103,23 +137,30 @@ export const criarCotacao = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // Calcular valorVenda padrão (40% de margem) se não fornecido
-    const valorVendaCalculado = valorVenda !== undefined 
-      ? parseFloat(valorVenda) 
-      : parseFloat(valorUnitario) * 1.4;
+    const valorUnitarioNum = parseFloat(valorUnitario);
+    const valorVendaCalculado = await calcularValorVendaPorClassificacao(
+      valorUnitarioNum,
+      fornecedorId || null,
+      valorVenda !== undefined ? parseFloat(valorVenda) : undefined
+    );
+
+    // 🔧 Gerar SKU único para cotação (obrigatório para NF-e)
+    const skuCotacao = await gerarSKUCotacao(prisma);
 
     const cotacao = await prisma.cotacao.create({
       data: {
         nome,
+        sku: skuCotacao, // ✅ SKU obrigatório para campo cProd da NF-e
         ncm,
-        valorUnitario: parseFloat(valorUnitario),
+        valorUnitario: valorUnitarioNum,
         valorVenda: valorVendaCalculado,
         unidadeMedida: unidadeMedida || 'un',
         fornecedorId,
         fornecedorNome,
         observacoes,
+        quantidadePorEmbalagem: quantidadePorEmbalagem != null ? parseFloat(quantidadePorEmbalagem) : null,
         dataAtualizacao: new Date()
-      },
+      } as any,
       include: {
         fornecedor: true
       }
@@ -145,9 +186,8 @@ export const criarCotacao = async (req: Request, res: Response): Promise<void> =
 export const atualizarCotacao = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes, ativo, atualizarDataCotacao } = req.body;
+    const { nome, ncm, valorUnitario, valorVenda, unidadeMedida, fornecedorId, fornecedorNome, observacoes, ativo, atualizarDataCotacao, quantidadePorEmbalagem } = req.body;
 
-    // Se atualizarDataCotacao for false, não atualizar dataAtualizacao (usado quando apenas valorVenda muda)
     const updateData: any = {
       ...(nome && { nome }),
       ...(ncm !== undefined && { ncm }),
@@ -155,29 +195,41 @@ export const atualizarCotacao = async (req: Request, res: Response): Promise<voi
       ...(fornecedorId !== undefined && { fornecedorId }),
       ...(fornecedorNome !== undefined && { fornecedorNome }),
       ...(observacoes !== undefined && { observacoes }),
-      ...(ativo !== undefined && { ativo })
+      ...(ativo !== undefined && { ativo }),
+      ...(quantidadePorEmbalagem !== undefined && { quantidadePorEmbalagem: quantidadePorEmbalagem == null || quantidadePorEmbalagem === '' ? null : parseFloat(quantidadePorEmbalagem) })
     };
 
-    // Se valorUnitario mudou, atualizar dataAtualizacao e recalcular valorVenda se necessário
-    if (valorUnitario !== undefined) {
-      updateData.valorUnitario = parseFloat(valorUnitario);
-      // Se valorVenda não foi fornecido, recalcular com 40% de margem
-      if (valorVenda === undefined) {
-        updateData.valorVenda = parseFloat(valorUnitario) * 1.4;
+    const valorUnitarioNum = valorUnitario !== undefined ? parseFloat(valorUnitario) : undefined;
+    const fornecedorIdAtual = fornecedorId !== undefined ? (fornecedorId || null) : undefined;
+
+    // Recalcular valorVenda por classificação quando há fornecedor e valor unitário
+    if (valorUnitarioNum !== undefined || fornecedorIdAtual !== undefined) {
+      const cotacaoAtual = await prisma.cotacao.findUnique({
+        where: { id },
+        select: { valorUnitario: true, fornecedorId: true }
+      });
+      if (cotacaoAtual) {
+        const vu = valorUnitarioNum ?? cotacaoAtual.valorUnitario;
+        const fid = fornecedorIdAtual !== undefined ? fornecedorIdAtual : cotacaoAtual.fornecedorId;
+        const valorVendaRecalc = await calcularValorVendaPorClassificacao(
+          vu,
+          fid,
+          valorVenda !== undefined ? parseFloat(valorVenda) : undefined
+        );
+        updateData.valorVenda = valorVendaRecalc;
       }
+    }
+
+    if (valorUnitarioNum !== undefined) {
+      updateData.valorUnitario = valorUnitarioNum;
       updateData.dataAtualizacao = new Date();
     }
 
-    // Se apenas valorVenda mudou, não atualizar dataAtualizacao
-    if (valorVenda !== undefined && valorUnitario === undefined) {
-      updateData.valorVenda = parseFloat(valorVenda);
-      // Não atualizar dataAtualizacao quando apenas valorVenda muda
-    } else if (valorVenda !== undefined) {
+    if (valorVenda !== undefined && valorUnitarioNum === undefined && fornecedorIdAtual === undefined) {
       updateData.valorVenda = parseFloat(valorVenda);
     }
 
-    // Atualizar dataAtualizacao apenas se atualizarDataCotacao não for false
-    if (atualizarDataCotacao !== false && (valorUnitario !== undefined || nome || ncm)) {
+    if (atualizarDataCotacao !== false && (valorUnitarioNum !== undefined || nome || ncm)) {
       updateData.dataAtualizacao = new Date();
     }
 
@@ -311,6 +363,22 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
       }
     });
 
+    // Buscar todos os fornecedores para verificar classificação
+    const fornecedores = await prisma.fornecedor.findMany({
+      where: { ativo: true },
+      select: {
+        id: true,
+        nome: true,
+        classificacao: true
+      }
+    });
+
+    // Criar mapa de fornecedores por nome (case insensitive)
+    const mapaFornecedores = new Map<string, { id: string; nome: string; classificacao: string | null }>();
+    fornecedores.forEach(f => {
+      mapaFornecedores.set(f.nome.toLowerCase().trim(), f);
+    });
+
     // Criar mapa para busca rápida (nome + fornecedorNome como chave)
     const mapaExistentes = new Map<string, typeof cotacoesExistentes[0]>();
     cotacoesExistentes.forEach(c => {
@@ -321,11 +389,25 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
     // Processar cotações para preview com informações de comparação
     const cotacoesPreview = jsonData.cotacoes.map((cotacao: any) => {
       const valorUnitario = parseFloat(cotacao.valorUnitario) || 0;
-      const valorVenda = cotacao.valorVenda !== undefined 
-        ? parseFloat(cotacao.valorVenda) 
-        : valorUnitario * 1.4; // 40% de margem padrão
+      
+      // Verificar se o fornecedor é representante para aplicar markup de 10%
+      const fornecedorNome = cotacao.fornecedorNome || '';
+      const fornecedor = mapaFornecedores.get(fornecedorNome.toLowerCase().trim());
+      const isRepresentante = fornecedor?.classificacao === 'Representante_Vendedor';
+      
+      // Calcular valor de venda:
+      // - Representante: valor unitário × 1.1 (10% markup para cobrir impostos)
+      // - Outros: valor unitário × 1.4 (40% margem padrão)
+      let valorVenda: number;
+      if (cotacao.valorVenda !== undefined && cotacao.valorVenda !== null) {
+        valorVenda = parseFloat(cotacao.valorVenda);
+      } else if (isRepresentante) {
+        valorVenda = Math.round(valorUnitario * 1.1 * 100) / 100;
+      } else {
+        valorVenda = Math.round(valorUnitario * 1.4 * 100) / 100;
+      }
 
-      const chave = `${cotacao.nome}|${cotacao.fornecedorNome || ''}`;
+      const chave = `${cotacao.nome}|${fornecedorNome}`;
       const existente = mapaExistentes.get(chave);
 
       // Determinar status da cotação
@@ -350,7 +432,10 @@ export const previewImportacao = async (req: Request, res: Response): Promise<vo
         ncm: cotacao.ncm || '',
         valorUnitario,
         valorVenda,
-        fornecedorNome: cotacao.fornecedorNome || '',
+        fornecedorNome,
+        fornecedorId: fornecedor?.id || null,
+        fornecedorClassificacao: fornecedor?.classificacao || null,
+        isRepresentante,
         observacoes: cotacao.observacoes || '',
         status, // 'novo' | 'atualizado' | 'mantido'
         valorAnterior,
@@ -469,7 +554,7 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
                 ncm: cotacao.ncm,
                 observacoes: cotacao.observacoes,
                 dataAtualizacao: new Date()
-              }
+              } as any
             });
             resultados.atualizados++;
             resultados.detalhes.push({
@@ -490,9 +575,13 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
           }
         } else {
           // Criar
+          // 🔧 Gerar SKU único para cotação (obrigatório para NF-e)
+          const skuCotacaoImport = await gerarSKUCotacao(prisma);
+          
           await prisma.cotacao.create({
             data: {
               nome: cotacao.nome,
+              sku: skuCotacaoImport, // ✅ SKU obrigatório para campo cProd da NF-e
               ncm: cotacao.ncm,
               valorUnitario,
               valorVenda,
@@ -501,7 +590,7 @@ export const importarCotacoes = async (req: Request, res: Response): Promise<voi
               fornecedorNome: cotacao.fornecedorNome,
               observacoes: cotacao.observacoes,
               dataAtualizacao: new Date()
-            }
+            } as any
           });
           resultados.criados++;
           resultados.detalhes.push({
@@ -697,6 +786,56 @@ export const deletarCotacoesEmLote = async (req: Request, res: Response): Promis
       success: false,
       error: 'Erro ao deletar cotações',
       message: error.message
+    });
+  }
+};
+
+/**
+ * Gerar SKUs para todas as cotações existentes
+ * Rota: POST /api/cotacoes/gerar-skus
+ * Acesso: admin, desenvolvedor
+ */
+export const gerarSKUsCotacoes = async (req: Request, res: Response) => {
+  console.log('🔧 [API] Iniciando geração de SKUs para cotações via interface...');
+  
+  try {
+    // Executar o script de geração de SKUs
+    await gerarSKUsParaCotacoes();
+    
+    // Buscar estatísticas atualizadas
+    const [totalCotacoes, cotacoesComSKU] = await Promise.all([
+      prisma.cotacao.count(),
+      prisma.cotacao.count({
+        where: {
+          sku: {
+            not: null
+          }
+        }
+      })
+    ]);
+    
+    const cobertura = totalCotacoes > 0 ? ((cotacoesComSKU / totalCotacoes) * 100) : 0;
+    
+    console.log('✅ [API] Geração de SKUs concluída com sucesso');
+    
+    res.status(200).json({
+      success: true,
+      message: 'SKUs gerados com sucesso!',
+      data: {
+        totalCotacoes,
+        cotacoesComSKU,
+        cobertura: Math.round(cobertura * 10) / 10, // 1 casa decimal
+        processadas: cotacoesComSKU
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('❌ [API] Erro ao gerar SKUs:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao gerar SKUs para cotações',
+      message: error.message || 'Erro interno do servidor'
     });
   }
 };

@@ -2,7 +2,8 @@
 
 ## 🎯 Visão Geral
 
-Implementamos uma solução completa de **precificação estratégica** e **apresentação profissional** de orçamentos para a S3E Engenharia Elétrica.
+Implementamos uma solução completa de **precificação estratégica** e
+**apresentação profissional** de orçamentos para a S3E Engenharia Elétrica.
 
 ---
 
@@ -10,28 +11,34 @@ Implementamos uma solução completa de **precificação estratégica** e **apre
 
 ### 📊 Problema Resolvido: Flutuação de Preços
 
-**Desafio**: Como definir preços competitivos considerando a variação constante dos custos dos materiais?
+**Desafio**: Como definir preços competitivos considerando a variação constante
+dos custos dos materiais?
 
-**Solução**: Sistema de **custos de referência** em tempo real no momento da criação do orçamento.
+**Solução**: Sistema de **custos de referência** em tempo real no momento da
+criação do orçamento.
 
 ### 🔢 Metodologia Implementada
 
 #### **1. Custo Médio Ponderado (CMP)**
+
 - Representa o custo **real e estável** do item no estoque
 - Calculado com base no histórico de compras
 - **Base para definição de margem mínima**
 
 #### **2. Preço da Última Compra**
+
 - Indicador da **tendência atual** do mercado
 - Mostra se o preço está subindo ou caindo
 - **Referência para precificação competitiva**
 
 #### **3. Preço Orçado (Editável)**
+
 - Preço que será **cobrado do cliente**
 - Pré-preenchido com: Última Compra + 30% de margem
 - **Totalmente editável** pelo engenheiro
 
 #### **4. Indicador de Margem Automático**
+
 - Calcula margem sobre o CMP em tempo real
 - **Alertas visuais**:
   - 🔴 **< 10%**: Margem baixa - Atenção!
@@ -43,6 +50,7 @@ Implementamos uma solução completa de **precificação estratégica** e **apre
 ## 📋 Interface de Criação do Orçamento
 
 ### **Antes:**
+
 ```
 Material: [Dropdown com todos os materiais]
 Quantidade: [2]
@@ -50,6 +58,7 @@ Preço fixo: R$ 15,50
 ```
 
 ### **Depois:**
+
 ```
 ┌─────────────────────────────────────────────┐
 │ Disjuntor Monopolar 20A                     │
@@ -72,12 +81,14 @@ Preço fixo: R$ 15,50
 ### **Funcionalidades:**
 
 #### ✅ **Autocomplete Avançado**
+
 - Digite para buscar em tempo real
 - Navegação por teclado (↑ ↓ Enter Esc)
 - Destaque visual do item selecionado
 - Mostra preço de cada material
 
 #### ✅ **Busca Otimizada**
+
 ```typescript
 Input: "disj"
 Resultados:
@@ -87,6 +98,7 @@ Resultados:
 ```
 
 #### ✅ **Feedback Visual**
+
 - Borda roxa quando há sugestões
 - Mensagem quando não encontra resultados
 - Scroll automático na lista
@@ -98,6 +110,7 @@ Resultados:
 ### **Nova Seção: Itens do Catálogo**
 
 **Disponível para TODOS os tipos de projeto:**
+
 - ✅ Montagem de Quadro
 - ✅ Completo com Obra
 - ✅ Instalação
@@ -107,6 +120,7 @@ Resultados:
 ### **Funcionalidades:**
 
 #### 🎁 **Adição de Kits**
+
 ```
 Exemplo: Kit Instalação Padrão
 ├─ Tomada Dupla 2P+T 10A (1x)
@@ -115,6 +129,7 @@ Exemplo: Kit Instalação Padrão
 ```
 
 #### 🔍 **Busca Diferenciada**
+
 - **Badges visuais**:
   - 📦 Kit (azul)
   - 🔧 Produto (cinza)
@@ -122,6 +137,7 @@ Exemplo: Kit Instalação Padrão
 - Autocomplete integrado
 
 #### 💰 **Subtotais Separados**
+
 ```
 Subtotal Materiais:  R$ 1.250,00
 Subtotal Catálogo:   R$ 485,00
@@ -228,34 +244,40 @@ Total Geral:         R$ 2.415,00
 ## 🎨 Elementos Visuais do PDF
 
 ### 1. **Marca D'água**
+
 - Logo "S3E ENGENHARIA ELÉTRICA" em grande
 - Opacidade 10% na impressão
 - Centralizada no documento
 - Não interfere na leitura
 
 ### 2. **Cabeçalho Profissional**
+
 - Logo S3E em destaque
 - Informações de contato completas
 - Número do orçamento em box azul
 - Status do orçamento (badge colorido)
 
 ### 3. **Título do Projeto**
+
 - Box com gradiente azul/roxo
 - Nome do projeto em destaque
 - Cliente claramente identificado
 
 ### 4. **Informações em Cards**
+
 - Cliente, Data e Tipo em cards separados
 - Fácil visualização
 - Design limpo
 
 ### 5. **Escopo do Projeto**
+
 - Border azul lateral
 - Texto justificado
 - Parágrafos bem espaçados
 - Suporte para listas e títulos
 
 ### 6. **Tabelas Profissionais**
+
 - **Materiais**: Header roxo/azul
 - **Serviços**: Header verde
 - Linhas zebradas (alternadas)
@@ -263,18 +285,21 @@ Total Geral:         R$ 2.415,00
 - Bordas e espaçamento adequados
 
 ### 7. **Imagens**
+
 - Grid organizado
 - Bordas arredondadas
 - Nome da imagem abaixo
 - Links clicáveis
 
 ### 8. **Resumo Financeiro**
+
 - Background azul gradiente
 - Total em card branco destacado
 - Condições de pagamento claras
 - Validade do orçamento em amarelo
 
 ### 9. **Rodapé Completo**
+
 - Contatos em 3 colunas
 - CNPJ e informações legais
 - Design profissional
@@ -286,6 +311,7 @@ Total Geral:         R$ 2.415,00
 ### 1. **Busca Inteligente de Materiais** 🔍
 
 **Como funciona:**
+
 ```
 1. Usuário digita no campo de busca
 2. Sistema filtra materiais em tempo real
@@ -295,6 +321,7 @@ Total Geral:         R$ 2.415,00
 ```
 
 **Exemplo de uso:**
+
 ```
 Digite: "cabo"
 Resultados:
@@ -324,6 +351,7 @@ Resultados:
 ### 3. **Tomada de Decisão Informada** 💡
 
 **Cenário 1: Preço subiu**
+
 ```
 CMP: R$ 13,18
 Última Compra: R$ 16,50 (⬆️ subiu!)
@@ -332,6 +360,7 @@ Resultado: Mantém margem saudável
 ```
 
 **Cenário 2: Preço caiu**
+
 ```
 CMP: R$ 13,18
 Última Compra: R$ 12,00 (⬇️ caiu!)
@@ -340,6 +369,7 @@ Resultado: Margem de 21% ainda saudável
 ```
 
 **Cenário 3: Ser mais competitivo**
+
 ```
 CMP: R$ 13,18
 Última Compra: R$ 14,26
@@ -351,6 +381,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ### 4. **Itens do Catálogo (Kits)** 📦
 
 **Como funciona:**
+
 ```
 1. Usuário busca por "kit instalação"
 2. Sistema mostra kits pré-montados
@@ -360,6 +391,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ```
 
 **Benefícios:**
+
 - ⚡ Velocidade na criação de orçamentos
 - 🎯 Consistência nos preços
 - 📦 Pacotes padronizados
@@ -368,6 +400,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ### 5. **Autocomplete em Todos os Campos** 🚀
 
 **Campos com busca inteligente:**
+
 - 🔍 **Clientes**: Digite o nome
 - 📦 **Materiais do Estoque**: Digite para buscar
 - 🎁 **Itens do Catálogo**: Digite para buscar kits/produtos
@@ -380,17 +413,20 @@ Nova margem: 21,4% ✓ Ainda boa!
 ### **Características:**
 
 #### 1. **Marca D'água Corporativa**
+
 - Logo "S3E" em grande no fundo
 - Opacidade ajustada para não atrapalhar leitura
 - Visível mas discreta
 
 #### 2. **Cabeçalho Empresarial**
+
 - Logo S3E em box azul
 - Nome completo da empresa
 - Contatos (email, telefone, site)
 - Número do orçamento destacado
 
 #### 3. **Informação Clara e Estruturada**
+
 - Cards para dados principais
 - Cores por categoria:
   - 🔵 Azul: Informações gerais
@@ -399,6 +435,7 @@ Nova margem: 21,4% ✓ Ainda boa!
   - 🟠 Laranja: Imagens
 
 #### 4. **Tabelas Profissionais**
+
 - Headers coloridos com gradiente
 - Linhas zebradas (alternadas)
 - Totais em destaque
@@ -406,6 +443,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 - Responsive e print-friendly
 
 #### 5. **Descrição Técnica Formatada**
+
 - Texto justificado
 - Parágrafos com espaçamento adequado
 - Suporta:
@@ -415,18 +453,21 @@ Nova margem: 21,4% ✓ Ainda boa!
   - Quebras de linha
 
 #### 6. **Imagens Integradas**
+
 - Grid organizado
 - Legendas com nome do arquivo
 - Bordas arredondadas
 - Links clicáveis (versão digital)
 
 #### 7. **Resumo Financeiro Destacado**
+
 - Box azul na sidebar
 - Total em card branco
 - Condições de pagamento
 - Validade do orçamento
 
 #### 8. **Rodapé Corporativo**
+
 - 3 colunas com contatos
 - Informações legais (CNPJ)
 - Slogan da empresa
@@ -439,6 +480,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ### **Criar Orçamento com Precificação Estratégica:**
 
 1. **Adicionar Material:**
+
    ```
    Digite: "disjuntor 20"
    → Seleciona da lista
@@ -448,6 +490,7 @@ Nova margem: 21,4% ✓ Ainda boa!
    ```
 
 2. **Adicionar Kit do Catálogo:**
+
    ```
    Digite: "kit instalação"
    → Seleciona o kit
@@ -456,6 +499,7 @@ Nova margem: 21,4% ✓ Ainda boa!
    ```
 
 3. **Revisar Margens:**
+
    ```
    Cada material mostra:
    - Margem atual sobre CMP
@@ -464,6 +508,7 @@ Nova margem: 21,4% ✓ Ainda boa!
    ```
 
 4. **Gerar PDF Profissional:**
+
    ```
    1. Preencher todos os dados
    2. Criar orçamento
@@ -477,6 +522,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 📊 Benefícios Empresariais
 
 ### **Para o Engenheiro Orçamentista:**
+
 - ✅ Visibilidade total dos custos
 - ✅ Decisão baseada em dados reais
 - ✅ Agilidade na busca de materiais
@@ -484,6 +530,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 - ✅ Kits pré-configurados
 
 ### **Para a Empresa:**
+
 - ✅ Padronização de margens
 - ✅ Preços competitivos e lucrativos
 - ✅ Apresentação profissional ao cliente
@@ -491,6 +538,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 - ✅ Histórico de custos preservado
 
 ### **Para o Cliente:**
+
 - ✅ Orçamento detalhado e transparente
 - ✅ Apresentação visual profissional
 - ✅ Informações claras
@@ -554,25 +602,30 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 🎨 Paleta de Cores
 
 ### **Materiais** (Roxo)
+
 - Border: `border-purple-500/20`
 - Header: `from-purple-100 to-blue-100`
 - Totais: `text-purple-700`
 
 ### **Catálogo** (Azul)
+
 - Border: `border-blue-500/20`
 - Header: `from-blue-100 to-sky-100`
 - Totais: `text-blue-700`
 
 ### **Serviços** (Verde)
+
 - Border: `border-green-500/20`
 - Header: `from-green-100 to-emerald-100`
 - Totais: `text-green-700`
 
 ### **Imagens** (Laranja)
+
 - Border: `border-orange-500/20`
 - Header: `border-orange-500`
 
 ### **Resumo Financeiro** (Azul Forte)
+
 - Background: `from-brand-blue to-blue-600`
 - Card Total: `bg-white text-brand-blue`
 
@@ -581,15 +634,18 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 📱 Responsividade
 
 ### **Desktop (> 1024px)**
+
 - Layout em 3 colunas
 - Sidebar fixa à direita
 - Tabelas completas
 
 ### **Tablet (768-1024px)**
+
 - Layout em 2 colunas
 - Campos balanceados
 
 ### **Mobile (< 768px)**
+
 - Layout em 1 coluna
 - Cards empilhados
 - Tabelas scroll horizontal
@@ -599,12 +655,14 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 🖨️ Configurações de Impressão
 
 ### **Formato:**
+
 - **Tamanho**: A4
 - **Margem**: 15mm em todos os lados
 - **Orientação**: Retrato
 - **Cores**: Preservadas (`print-color-adjust: exact`)
 
 ### **Otimizações:**
+
 - Remove botões e elementos interativos
 - Ajusta gradientes para impressão
 - Mantém bordas visíveis
@@ -612,6 +670,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 - Marca d'água otimizada
 
 ### **Como Imprimir:**
+
 ```
 1. Abrir orçamento em visualização
 2. Clicar em "Imprimir / Baixar PDF"
@@ -628,6 +687,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 🔐 Segurança e Validações
 
 ### **Validações Implementadas:**
+
 - ✅ Cliente obrigatório
 - ✅ Nome do projeto obrigatório
 - ✅ Pelo menos 1 item (material/catálogo/serviço/mão de obra)
@@ -637,6 +697,7 @@ Nova margem: 21,4% ✓ Ainda boa!
 - ✅ Não permite duplicatas
 
 ### **Feedback Visual:**
+
 - 🔴 Campos obrigatórios com asterisco
 - 🟢 Cliente selecionado em verde
 - 🔵 Border azul nos campos focados
@@ -648,11 +709,13 @@ Nova margem: 21,4% ✓ Ainda boa!
 ## 📈 Cálculo de Margem
 
 ### **Fórmula:**
+
 ```
 Margem % = ((Preço Orçado - CMP) / CMP) × 100
 ```
 
 ### **Exemplo:**
+
 ```
 CMP: R$ 13,18
 Preço Orçado: R$ 18,54
@@ -661,17 +724,19 @@ Margem = 40,7% ✓ Saudável
 ```
 
 ### **Classificação:**
-| Margem | Status | Cor | Ação |
-|--------|--------|-----|------|
-| < 10% | ⚠️ Baixa | Vermelho | Revisar preço |
-| 10-20% | ⚡ Moderada | Amarelo | Aceitável |
-| > 20% | ✓ Saudável | Verde | Excelente |
+
+| Margem | Status      | Cor      | Ação          |
+| ------ | ----------- | -------- | ------------- |
+| < 10%  | ⚠️ Baixa    | Vermelho | Revisar preço |
+| 10-20% | ⚡ Moderada | Amarelo  | Aceitável     |
+| > 20%  | ✓ Saudável  | Verde    | Excelente     |
 
 ---
 
 ## 🎯 Casos de Uso
 
 ### **Caso 1: Orçamento de Instalação Residencial**
+
 ```
 Tipo: Completo com Obra
 Materiais: Busca por "disjuntor", "cabo", "tomada"
@@ -681,6 +746,7 @@ Resultado: Orçamento completo em < 5 minutos
 ```
 
 ### **Caso 2: Manutenção Predial**
+
 ```
 Tipo: Manutenção
 Materiais: Busca componentes específicos
@@ -690,6 +756,7 @@ Resultado: Contrato de manutenção estruturado
 ```
 
 ### **Caso 3: Projeto Industrial**
+
 ```
 Tipo: Montagem de Quadro
 Materiais: Disjuntores, cabos, DPS
@@ -703,7 +770,9 @@ Resultado: Proposta técnica completa
 ## 📝 Notas de Implementação
 
 ### **Simulação de Dados:**
+
 Atualmente, CMP e Última Compra são **simulados** com:
+
 ```typescript
 CMP = Preço Atual × 0.85 (85%)
 Última Compra = Preço Atual × 0.92 (92%)
@@ -711,14 +780,15 @@ Preço Sugerido = Última Compra × 1.30 (+30% margem)
 ```
 
 ### **Integração Futura com Backend:**
+
 ```typescript
 // Quando integrar com API:
 const getCostReferences = async (materialId: string) => {
   const response = await fetch(`/api/materials/${materialId}/costs`);
   return {
-    cmp: response.cmp,           // Do banco de dados
+    cmp: response.cmp, // Do banco de dados
     lastPurchase: response.last, // Da última compra registrada
-    suggestedPrice: response.suggested
+    suggestedPrice: response.suggested,
   };
 };
 ```
@@ -728,6 +798,7 @@ const getCostReferences = async (materialId: string) => {
 ## ✅ Checklist de Recursos
 
 ### **Precificação Estratégica:**
+
 - [x] CMP (Custo Médio Ponderado)
 - [x] Preço da Última Compra
 - [x] Campo de preço editável
@@ -736,6 +807,7 @@ const getCostReferences = async (materialId: string) => {
 - [x] Atualização em tempo real
 
 ### **Busca e Seleção:**
+
 - [x] Autocomplete de materiais
 - [x] Autocomplete de itens do catálogo
 - [x] Navegação por teclado
@@ -743,6 +815,7 @@ const getCostReferences = async (materialId: string) => {
 - [x] Mensagens de "não encontrado"
 
 ### **Catálogo:**
+
 - [x] Busca de kits
 - [x] Busca de produtos
 - [x] Badge de identificação
@@ -750,6 +823,7 @@ const getCostReferences = async (materialId: string) => {
 - [x] Subtotal separado
 
 ### **PDF/Impressão:**
+
 - [x] Marca d'água S3E
 - [x] Cabeçalho profissional
 - [x] Tabelas formatadas
@@ -763,18 +837,21 @@ const getCostReferences = async (materialId: string) => {
 ## 🚀 Próximos Passos Sugeridos
 
 ### **Curto Prazo:**
+
 1. Integrar com API backend para custos reais
 2. Adicionar histórico de compras por material
 3. Gráfico de variação de preços
 4. Exportar PDF direto (sem impressora)
 
 ### **Médio Prazo:**
+
 1. Sistema de aprovação de orçamentos
 2. Templates de orçamento por tipo de projeto
 3. Análise de margem por orçamento
 4. Dashboard de performance de vendas
 
 ### **Longo Prazo:**
+
 1. IA para sugerir preços baseado em histórico
 2. Integração com sistema de compras
 3. Alertas de variação de preços
@@ -785,16 +862,19 @@ const getCostReferences = async (materialId: string) => {
 ## 📊 Impacto Esperado
 
 ### **Redução de Tempo:**
+
 - ⏱️ Criação de orçamento: **-60%** (de 30min para 12min)
 - 🔍 Busca de materiais: **-80%** (de 5min para 1min)
 - 💰 Cálculo de margem: **Instantâneo** (antes manual)
 
 ### **Melhoria de Qualidade:**
+
 - 📈 Margem mais consistente: **+25%**
 - 🎯 Precisão nos preços: **+40%**
 - 📄 Profissionalismo: **+100%**
 
 ### **Satisfação do Cliente:**
+
 - ⭐ Apresentação visual: **Excelente**
 - 📧 Documentação: **Completa**
 - ⏰ Tempo de resposta: **Reduzido**
@@ -805,4 +885,3 @@ const getCostReferences = async (materialId: string) => {
 **Data**: Outubro 2025  
 **Versão**: 3.0 - Precificação Estratégica  
 **Status**: ✅ Implementado e Testado
-

@@ -11,6 +11,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
 ### 1. **Frontend (React + TypeScript)**
 
 #### Types e Interfaces
+
 - ✅ `frontend/src/types/pdfCustomization.ts`
   - Interfaces completas para customização
   - Tipos para marca d'água, design, conteúdo
@@ -18,6 +19,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
   - Designs de cantos pré-definidos
 
 #### Hook Personalizado
+
 - ✅ `frontend/src/hooks/usePDFCustomization.ts`
   - Gerenciamento completo de estado
   - Persistência em localStorage
@@ -25,6 +27,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
   - Controle de mudanças não salvas
 
 #### Serviço Frontend
+
 - ✅ `frontend/src/services/pdfCustomizationService.ts`
   - Geração de PDF customizado
   - CRUD de templates
@@ -32,6 +35,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
   - Upload de designs de cantos
 
 #### Componente Principal
+
 - ✅ `frontend/src/components/PDFCustomization/PDFCustomizationModal.tsx`
   - Modal completo e integrado
   - 4 abas: Marca d'Água, Design & Cores, Conteúdo, Pré-visualização
@@ -41,10 +45,12 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
 ### 2. **Backend (Node.js + Express + TypeScript)**
 
 #### Types Backend
+
 - ✅ `backend/src/types/pdfCustomization.ts`
   - Types compartilhados com frontend
 
 #### Serviço de PDF Dinâmico
+
 - ✅ `backend/src/services/DynamicPDFService.ts`
   - Geração de HTML dinâmico com Handlebars
   - Aplicação de marca d'água (imagem e texto)
@@ -53,12 +59,14 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
   - Geração de PDF com Puppeteer
 
 #### Controller
+
 - ✅ `backend/src/controllers/pdfCustomizationController.ts`
   - Geração de PDF customizado
   - CRUD de templates
   - Upload de imagens (Multer + Sharp)
 
 #### Rotas
+
 - ✅ `backend/src/routes/pdfCustomization.routes.ts`
   - POST `/api/pdf-customization/generate-custom`
   - POST `/api/pdf-customization/templates`
@@ -69,6 +77,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
   - POST `/api/pdf-customization/upload-corner-design`
 
 #### Integração
+
 - ✅ `backend/src/app.ts` - Rotas registradas
 
 ---
@@ -76,6 +85,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
 ## 🎯 Funcionalidades Completas
 
 ### 💧 Marca d'Água
+
 - **Tipos**: Nenhuma, Logo/Imagem, Texto, Design
 - **Upload de imagem**: Suporte a JPG, PNG, SVG, WebP (máx. 5MB)
 - **Texto personalizado**: Digite qualquer texto
@@ -86,6 +96,7 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
 - **Cor do texto**: Seletor de cor para marca d'água de texto
 
 ### 🎨 Design & Cores
+
 - **Templates pré-definidos**:
   - S3E Engenharia (padrão)
   - Profissional (azul escuro)
@@ -104,7 +115,9 @@ Sistema completo de geração de PDFs personalizáveis implementado com sucesso!
 - **Opacidade dos cantos**: Ajustável
 
 ### 📄 Conteúdo do PDF
+
 Checkboxes para controlar o que aparece:
+
 - ✅ Cabeçalho da Empresa
 - ✅ Descrições Técnicas
 - ✅ Imagens dos Itens
@@ -116,6 +129,7 @@ Checkboxes para controlar o que aparece:
 - ✅ Rodapé da Empresa
 
 ### 👁️ Pré-visualização em Tempo Real
+
 - Preview visual do PDF
 - Atualização instantânea das mudanças
 - Simulação de marca d'água
@@ -123,6 +137,7 @@ Checkboxes para controlar o que aparece:
 - Formato A4/Letter
 
 ### 💾 Sistema de Templates
+
 - **Salvar templates**: Nome + descrição
 - **Carregar templates**: Lista de templates salvos
 - **Template padrão**: S3E Engenharia
@@ -266,20 +281,24 @@ backend/
 ### Dependências Instaladas
 
 **Backend:**
+
 - ✅ `puppeteer` - Geração de PDF
 - ✅ `handlebars` - Templates HTML
 - ✅ `multer` - Upload de arquivos
 - ✅ `sharp` - Processamento de imagens
 
 **Frontend:**
+
 - ✅ Usa dependências já existentes (React, TypeScript, Axios)
 
 ### Configurações de Upload
+
 - **Tamanho máximo**: 5MB por arquivo
 - **Formatos aceitos**: JPG, JPEG, PNG, SVG, WebP
 - **Diretório**: `backend/uploads/pdf-customization/`
 
 ### Configurações de PDF
+
 - **Formatos**: A4, Letter
 - **Margens**: Personalizáveis (padrão: 20mm)
 - **Orientação**: Portrait (padrão), Landscape
@@ -290,21 +309,25 @@ backend/
 ## 🎨 Templates de Cores Pré-definidos
 
 ### S3E Engenharia (Padrão)
+
 - **Primária**: #6366F1 (Indigo)
 - **Secundária**: #8B5CF6 (Purple)
 - **Destaque**: #10B981 (Green)
 
 ### Profissional
+
 - **Primária**: #1E40AF (Blue Dark)
 - **Secundária**: #1F2937 (Gray Dark)
 - **Destaque**: #3B82F6 (Blue)
 
 ### Técnico
+
 - **Primária**: #0F766E (Teal)
 - **Secundária**: #14532D (Green Dark)
 - **Destaque**: #F59E0B (Amber)
 
 ### Elegante
+
 - **Primária**: #7C3AED (Purple)
 - **Secundária**: #BE123C (Rose)
 - **Destaque**: #DC2626 (Red)
@@ -325,51 +348,51 @@ backend/
 
 ```typescript
 const orcamentoData: OrcamentoPDFData = {
-    numero: "ORC-2024-001",
-    data: "06/11/2024",
-    validade: "06/12/2024",
-    cliente: {
-        nome: "João Silva Ltda",
-        cpfCnpj: "12.345.678/0001-99",
-        endereco: "Rua das Flores, 123",
-        telefone: "(48) 9999-8888",
-        email: "contato@joaosilva.com"
+  numero: "ORC-2024-001",
+  data: "06/11/2024",
+  validade: "06/12/2024",
+  cliente: {
+    nome: "João Silva Ltda",
+    cpfCnpj: "12.345.678/0001-99",
+    endereco: "Rua das Flores, 123",
+    telefone: "(48) 9999-8888",
+    email: "contato@joaosilva.com",
+  },
+  projeto: {
+    titulo: "Instalação Elétrica - Edifício Comercial",
+    descricao: "Projeto completo de instalação elétrica",
+    enderecoObra: "Av. Principal, 456",
+    cidade: "Florianópolis",
+    bairro: "Centro",
+    cep: "88000-000",
+  },
+  items: [
+    {
+      codigo: "MAT-001",
+      nome: "Disjuntor 32A",
+      descricao: "Disjuntor termomagnético tripolar 32A",
+      unidade: "UN",
+      quantidade: 10,
+      valorUnitario: 45.5,
+      valorTotal: 455.0,
     },
-    projeto: {
-        titulo: "Instalação Elétrica - Edifício Comercial",
-        descricao: "Projeto completo de instalação elétrica",
-        enderecoObra: "Av. Principal, 456",
-        cidade: "Florianópolis",
-        bairro: "Centro",
-        cep: "88000-000"
-    },
-    items: [
-        {
-            codigo: "MAT-001",
-            nome: "Disjuntor 32A",
-            descricao: "Disjuntor termomagnético tripolar 32A",
-            unidade: "UN",
-            quantidade: 10,
-            valorUnitario: 45.50,
-            valorTotal: 455.00
-        },
-        // ... mais itens
-    ],
-    financeiro: {
-        subtotal: 15000.00,
-        bdi: 20,
-        valorComBDI: 18000.00,
-        desconto: 500.00,
-        impostos: 1500.00,
-        valorTotal: 19000.00,
-        condicaoPagamento: "30 dias"
-    },
-    observacoes: "Projeto conforme norma NBR 5410",
-    empresa: {
-        nome: "S3E Engenharia",
-        cnpj: "00.000.000/0000-00",
-        logo: "/uploads/logo.png"
-    }
+    // ... mais itens
+  ],
+  financeiro: {
+    subtotal: 15000.0,
+    bdi: 20,
+    valorComBDI: 18000.0,
+    desconto: 500.0,
+    impostos: 1500.0,
+    valorTotal: 19000.0,
+    condicaoPagamento: "30 dias",
+  },
+  observacoes: "Projeto conforme norma NBR 5410",
+  empresa: {
+    nome: "S3E Engenharia",
+    cnpj: "00.000.000/0000-00",
+    logo: "/uploads/logo.png",
+  },
 };
 ```
 
@@ -378,21 +401,25 @@ const orcamentoData: OrcamentoPDFData = {
 ## 🐛 Troubleshooting
 
 ### PDF não está sendo gerado
+
 1. Verificar se o Puppeteer está instalado corretamente
 2. Verificar permissões da pasta `uploads/`
 3. Verificar logs do backend
 
 ### Marca d'água não aparece
+
 1. Verificar se a imagem foi feita upload corretamente
 2. Verificar opacidade (não pode estar em 0)
 3. Verificar se o tipo está configurado corretamente
 
 ### Cores não aplicadas
+
 1. Verificar se as cores estão no formato hexadecimal (#RRGGBB)
 2. Limpar cache do navegador
 3. Verificar console para erros
 
 ### Upload falha
+
 1. Verificar tamanho do arquivo (máx. 5MB)
 2. Verificar formato do arquivo (JPG, PNG, SVG, WebP)
 3. Verificar se a pasta `uploads/pdf-customization/` existe
@@ -415,10 +442,13 @@ const orcamentoData: OrcamentoPDFData = {
 
 ## 📝 Notas Importantes
 
-1. **Performance**: Geração de PDF pode levar alguns segundos (5-15s) dependendo da complexidade
+1. **Performance**: Geração de PDF pode levar alguns segundos (5-15s) dependendo
+   da complexidade
 2. **Puppeteer**: Requer recursos do sistema (Chrome headless)
-3. **Armazenamento**: Templates são salvos em arquivos JSON (migrar para DB em produção)
-4. **Uploads**: Imagens ficam em `uploads/pdf-customization/` (limpar periodicamente)
+3. **Armazenamento**: Templates são salvos em arquivos JSON (migrar para DB em
+   produção)
+4. **Uploads**: Imagens ficam em `uploads/pdf-customization/` (limpar
+   periodicamente)
 
 ---
 
@@ -443,4 +473,3 @@ const orcamentoData: OrcamentoPDFData = {
 **Data**: 06/11/2024  
 **Desenvolvedor**: Cursor AI Assistant  
 **Status**: ✅ Concluído
-

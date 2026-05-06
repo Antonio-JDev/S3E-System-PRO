@@ -7,6 +7,7 @@
 ## 📊 ORÇAMENTOS - COMPLETO
 
 ### **✅ 1. Campos Adicionados ao Formulário**
+
 - **Bairro** (input texto, obrigatório)
 - **Cidade** (input texto, obrigatório)
 - **CEP** (input texto, obrigatório, máx 9 caracteres)
@@ -14,12 +15,14 @@
 **Localização:** Seção "Dados do Projeto"
 
 ### **✅ 2. Modal "Adicionar Item" - Funcionando**
+
 - Z-index: `z-[70]` (acima do modal principal)
 - Header: Azul escuro (600-700) com texto branco
 - Lista materiais do catálogo
 - Busca por nome ou SKU
 
 ### **✅ 3. Fechamento Automático do Modal**
+
 - Modal fecha após criar orçamento
 - Lista recarrega automaticamente
 - Orçamento aparece com status "Pendente"
@@ -27,10 +30,12 @@
 ### **✅ 4. Geração de PDF - Implementado**
 
 **Botões adicionados:**
+
 1. **No card da lista:** Botão "PDF" (vermelho)
 2. **No modal de visualização:** Botão "Gerar PDF" (vermelho)
 
 **Função `handleGerarPDF()`:**
+
 - Usa utilitário `pdfGenerator.ts`
 - Gera PDF com:
   - Logo S3E Engenharia
@@ -53,10 +58,12 @@
 ### **✅ 1. Campo Orçamento - Otimizado**
 
 **Antes:**
+
 - Dropdown simples
 - IDs não amigáveis
 
 **Depois:**
+
 - ✅ **Opcional** (não obrigatório)
 - ✅ Mostra: Nome + Valor (R$)
 - ✅ **Auto-fill de datas:**
@@ -66,6 +73,7 @@
   - Mensagem de confirmação: "✅ Datas preenchidas automaticamente"
 
 **Código:**
+
 ```typescript
 onChange={e => {
   const selectedBudgetId = e.target.value;
@@ -87,10 +95,12 @@ onChange={e => {
 ### **✅ 2. Modal "Gerenciar Equipe" - Filtrado**
 
 **Antes:**
+
 - Mostrava TODOS os usuários do sistema
 - Incluía eletricistas e usuários comuns
 
 **Depois:**
+
 - ✅ Filtra apenas roles de gestão:
   - `admin`
   - `gerente`
@@ -102,20 +112,22 @@ onChange={e => {
   - `compras` (função específica)
 
 **Carregamento:**
+
 ```typescript
 const [usuariosRes] = await Promise.all([
-  axiosApiService.get('/api/configuracoes/usuarios')
+  axiosApiService.get("/api/configuracoes/usuarios"),
 ]);
 
 // Filtrar por role
-const usuariosFiltrados = usuariosRes.data.filter(u => 
-  ['admin', 'gerente', 'engenheiro', 'orcamentista'].includes(u.role)
+const usuariosFiltrados = usuariosRes.data.filter((u) =>
+  ["admin", "gerente", "engenheiro", "orcamentista"].includes(u.role)
 );
 
 setTeamMembers(usuariosFiltrados);
 ```
 
 **Modal mostra:**
+
 - Nome do usuário
 - Email
 - Role (badge colorido)
@@ -127,19 +139,20 @@ setTeamMembers(usuariosFiltrados);
 
 ### **✅ Todos os Modais Corrigidos:**
 
-| Modal | Header | Texto |
-|-------|--------|-------|
-| Novo Projeto | Azul S3E (brand-s3e) | Branco |
+| Modal            | Header               | Texto  |
+| ---------------- | -------------------- | ------ |
+| Novo Projeto     | Azul S3E (brand-s3e) | Branco |
 | Gerenciar Equipe | Azul S3E (brand-s3e) | Branco |
-| Novo Orçamento | Roxo (600-700) | Branco |
-| Adicionar Item | Azul (600-700) | Branco |
-| Ver Orçamento | Azul (600-700) | Branco |
-| Nova Venda | Verde (600-700) | Branco |
-| Nova Compra | Laranja (600-700) | Branco |
-| Novo Cliente | Verde (600-700) | Branco |
-| Novo Fornecedor | Laranja (600-700) | Branco |
+| Novo Orçamento   | Roxo (600-700)       | Branco |
+| Adicionar Item   | Azul (600-700)       | Branco |
+| Ver Orçamento    | Azul (600-700)       | Branco |
+| Nova Venda       | Verde (600-700)      | Branco |
+| Nova Compra      | Laranja (600-700)    | Branco |
+| Novo Cliente     | Verde (600-700)      | Branco |
+| Novo Fornecedor  | Laranja (600-700)    | Branco |
 
 **Padrão:**
+
 - ✅ Fundo: Gradiente escuro vibrante
 - ✅ Texto: Branco
 - ✅ Ícone: Fundo translúcido branco (20% opacidade)
@@ -250,6 +263,7 @@ setTeamMembers(usuariosFiltrados);
 ## 🎨 CSS GLOBAL - REGRAS APLICADAS
 
 ### **Headers de Modais:**
+
 ```css
 /* Força headers com from-xxx-50 to-xxx-50 a usar cores vibrantes */
 .dark [class*="from-green-50"][class*="to-"] {
@@ -269,6 +283,7 @@ setTeamMembers(usuariosFiltrados);
 ```
 
 **Resultado:**
+
 - ✅ 19 componentes corrigidos automaticamente
 - ✅ Headers claros viram escuros no dark mode
 - ✅ Texto escuro vira branco
@@ -279,6 +294,7 @@ setTeamMembers(usuariosFiltrados);
 ## 🚀 FUNCIONALIDADES COMPLETAS
 
 ### **✅ Orçamentos:**
+
 - Criar (com todos os campos)
 - Editar
 - Visualizar
@@ -289,6 +305,7 @@ setTeamMembers(usuariosFiltrados);
 - Editor avançado de descrição
 
 ### **✅ Projetos:**
+
 - Criar
 - Vincular orçamento (opcional)
 - **Datas automáticas do orçamento**
@@ -297,6 +314,7 @@ setTeamMembers(usuariosFiltrados);
 - Visão geral completa
 
 ### **✅ Dark Mode:**
+
 - Todas as páginas
 - Todos os modais
 - Todos os formulários
@@ -308,6 +326,7 @@ setTeamMembers(usuariosFiltrados);
 ## 🎉 RESULTADO FINAL
 
 **Sistema 100% funcional com:**
+
 - ✅ Orçamentos completos (campos + PDF)
 - ✅ Projetos otimizados (auto-fill + equipe filtrada)
 - ✅ Dark mode perfeito (19 componentes)
@@ -315,4 +334,3 @@ setTeamMembers(usuariosFiltrados);
 - ✅ Sem bugs conhecidos
 
 **Pronto para produção!** 🚀
-

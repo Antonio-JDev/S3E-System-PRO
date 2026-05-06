@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useContext } from 'react';
-import { configuracoesService, type ConfiguracaoSistema, type Usuario } from '../services/configuracoesService';
+import { configuracoesService, type ConfiguracaoSistema, type Usuario, type PreferenciasUsuario, type OrcamentoInsercaoModo } from '../services/configuracoesService';
+import { empresasService, type Empresa } from '../services/empresasService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { AuthContext } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import { API_CONFIG, getUploadUrl, getBackendUrl } from '../config/api';
+import { DEFAULT_SIDEBAR_APP_NAME } from '../config/branding';
 import {
   Dialog,
   DialogContent,
@@ -96,7 +98,7 @@ interface ConfiguracoesProps {
     toggleSidebar: () => void;
 }
 
-type TabType = 'perfil' | 'usuarios' | 'empresa' | 'fiscal';
+type TabType = 'perfil' | 'usuarios' | 'empresa' | 'balanco-aliquotas';
 
 const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     const themeContext = useContext(ThemeContext);
@@ -117,9 +119,14 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     // Estados de Configuração da Empresa
     const [config, setConfig] = useState<ConfiguracaoSistema | null>(null);
     const [formConfig, setFormConfig] = useState({
-        nomeEmpresa: 'S3E Engenharia',
+        nomeEmpresa: DEFAULT_SIDEBAR_APP_NAME,
         emailContato: '',
-        telefoneContato: ''
+        telefoneContato: '',
+        multiplicadorVenda: 1.55 as number,
+        percentualImpostoPadrao: 8 as number,
+        aliquotaImpostoPadrao: 8 as number,
+        markupFabricante: 1.55 as number,
+        markupRevendedor: 1.10 as number
     });
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [logoPreview, setLogoPreview] = useState<string>('');
@@ -131,18 +138,18 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     const [logoLoginFile, setLogoLoginFile] = useState<File | null>(null);
     const [logoLoginPreview, setLogoLoginPreview] = useState<string>('');
     const [logoLoginSelecionada, setLogoLoginSelecionada] = useState<string>('');
-    
-    // Estados de Configuração Fiscal
-    const [certificadoPFX, setCertificadoPFX] = useState<string>('');
-    const [certificadoPFXFile, setCertificadoPFXFile] = useState<File | null>(null);
-    const [senhaCertificado, setSenhaCertificado] = useState('');
-    const [ambienteFiscal, setAmbienteFiscal] = useState<'1' | '2'>('2'); // 1=Produção, 2=Homologação
 
     // Estados de Usuários
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [searchUsuarios, setSearchUsuarios] = useState('');
     const [roleFilter, setRoleFilter] = useState<string>('Todos');
     const [loadingUsuarios, setLoadingUsuarios] = useState(false);
+
+    // Balanço de Alíquotas (por CNPJ)
+    const [empresasAliquotas, setEmpresasAliquotas] = useState<Empresa[]>([]);
+    const [loadingAliquotas, setLoadingAliquotas] = useState(false);
+    const [savingAliquotaId, setSavingAliquotaId] = useState<string | null>(null);
+    const [editAliquotas, setEditAliquotas] = useState<Record<string, { aliquotaMaterial: number; aliquotaServico: number }>>({});
     
     // Estados do Modal de Criar Usuário
     const [isModalUsuarioOpen, setIsModalUsuarioOpen] = useState(false);
@@ -151,12 +158,14 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     const [editarUsuarioForm, setEditarUsuarioForm] = useState({
         email: '',
         name: '',
+        setor: '',
         senhaNova: ''
     });
     const [novoUsuario, setNovoUsuario] = useState({
         email: '',
         password: '',
         name: '',
+        setor: '',
         role: 'user'
     });
     const [creatingUser, setCreatingUser] = useState(false);
@@ -165,6 +174,10 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     const [isModalExcluirOpen, setIsModalExcluirOpen] = useState(false);
     const [usuarioParaExcluir, setUsuarioParaExcluir] = useState<Usuario | null>(null);
     const [excluindoUsuario, setExcluindoUsuario] = useState(false);
+
+    // Preferências do usuário (Inserção em Orçamentos)
+    const [orcamentoInsercaoModo, setOrcamentoInsercaoModo] = useState<OrcamentoInsercaoModo>('check');
+    const [salvandoPreferencias, setSalvandoPreferencias] = useState(false);
 
     useEffect(() => {
         // Apenas carregar configurações se não for eletricista
@@ -178,8 +191,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             loadUsuarios();
         }
         
-        // Carregar logos quando a aba empresa for ativada e usuário for admin
-        if (abaAtiva === 'empresa' && user?.role?.toLowerCase() === 'admin') {
+        // Carregar logos quando a aba empresa for ativada e usuário for admin, isAdmin ou desenvolvedor
+        const podeGerenciarLogo = user?.role?.toLowerCase() === 'admin' || user?.isAdmin === true || user?.role?.toLowerCase() === 'desenvolvedor';
+        if (abaAtiva === 'empresa' && podeGerenciarLogo) {
             loadLogos();
             // Carregar logo atual se existir
             if (config?.logoUrl) {
@@ -192,7 +206,23 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                 setLogoLoginPreview(config.logoLoginUrl);
             }
         }
-    }, [abaAtiva, isEletricista, config?.logoUrl, user?.role]);
+    }, [abaAtiva, isEletricista, config?.logoUrl, user?.role, user?.isAdmin]);
+
+    useEffect(() => {
+        if (abaAtiva === 'balanco-aliquotas') {
+            loadEmpresasAliquotas();
+        }
+    }, [abaAtiva]);
+
+    useEffect(() => {
+        if (abaAtiva === 'perfil') {
+            configuracoesService.getPreferenciasUsuario().then((res) => {
+                if (res.success && res.data?.orcamentoInsercaoModo) {
+                    setOrcamentoInsercaoModo(res.data.orcamentoInsercaoModo);
+                }
+            }).catch(() => {});
+        }
+    }, [abaAtiva]);
 
     const loadConfiguracoes = async () => {
         try {
@@ -202,9 +232,16 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             if (response.success && response.data) {
                 setConfig(response.data);
                 setFormConfig({
-                    nomeEmpresa: response.data.nomeEmpresa,
+                    nomeEmpresa: response.data.nomeEmpresa?.trim()
+                        ? response.data.nomeEmpresa.trim()
+                        : DEFAULT_SIDEBAR_APP_NAME,
                     emailContato: response.data.emailContato || '',
-                    telefoneContato: response.data.telefoneContato || ''
+                    telefoneContato: response.data.telefoneContato || '',
+                    multiplicadorVenda: response.data.multiplicadorVenda ?? 1.55,
+                    percentualImpostoPadrao: response.data.percentualImpostoPadrao ?? 8,
+                    aliquotaImpostoPadrao: response.data.aliquotaImpostoPadrao ?? response.data.percentualImpostoPadrao ?? 8,
+                    markupFabricante: response.data.markupFabricante ?? response.data.multiplicadorVenda ?? 1.55,
+                    markupRevendedor: response.data.markupRevendedor ?? 1.10
                 });
                 // NÃO aplicar tema ao carregar - deixar o tema atual do usuário
                 // O tema é controlado apenas pelo botão na sidebar
@@ -257,6 +294,52 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const loadEmpresasAliquotas = async () => {
+        try {
+            setLoadingAliquotas(true);
+            const res = await empresasService.listar({ ativo: true });
+            if (res.success && res.data) {
+                const list = Array.isArray(res.data) ? res.data : [];
+                setEmpresasAliquotas(list);
+                const initial: Record<string, { aliquotaMaterial: number; aliquotaServico: number }> = {};
+                list.forEach((e: Empresa) => {
+                    initial[e.id] = {
+                        aliquotaMaterial: e.aliquotaMaterial ?? 8,
+                        aliquotaServico: e.aliquotaServico ?? 8
+                    };
+                });
+                setEditAliquotas(initial);
+            } else {
+                setEmpresasAliquotas([]);
+            }
+        } catch (err) {
+            console.error('Erro ao carregar empresas:', err);
+            toast.error('Erro ao carregar empresas');
+            setEmpresasAliquotas([]);
+        } finally {
+            setLoadingAliquotas(false);
+        }
+    };
+
+    const handleSalvarAliquotasEmpresa = async (empresaId: string) => {
+        const values = editAliquotas[empresaId];
+        if (!values) return;
+        try {
+            setSavingAliquotaId(empresaId);
+            await empresasService.atualizar(empresaId, {
+                aliquotaMaterial: values.aliquotaMaterial,
+                aliquotaServico: values.aliquotaServico
+            });
+            toast.success('Alíquotas atualizadas');
+            setEmpresasAliquotas(prev => prev.map(e => e.id === empresaId ? { ...e, aliquotaMaterial: values.aliquotaMaterial, aliquotaServico: values.aliquotaServico } : e));
+        } catch (err) {
+            console.error('Erro ao salvar alíquotas:', err);
+            toast.error('Erro ao salvar alíquotas');
+        } finally {
+            setSavingAliquotaId(null);
+        }
+    };
+
     const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -287,13 +370,12 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         try {
             setSaving(true);
             
-            // Se houver logo selecionada, atualizar primeiro
-            if (logoSelecionada && user?.role?.toLowerCase() === 'admin') {
+            // Se houver logo selecionada, atualizar primeiro (admin, isAdmin ou desenvolvedor)
+            const podeGerenciarLogo = user?.role?.toLowerCase() === 'admin' || user?.isAdmin === true || user?.role?.toLowerCase() === 'desenvolvedor';
+            if (logoSelecionada && podeGerenciarLogo) {
                 await configuracoesService.atualizarLogo(logoSelecionada);
             }
-            
-            // Se houver logo da página de login selecionada, atualizar
-            if (logoLoginSelecionada && user?.role?.toLowerCase() === 'admin') {
+            if (logoLoginSelecionada && podeGerenciarLogo) {
                 await configuracoesService.atualizarLogoLogin(logoLoginSelecionada);
             }
             
@@ -301,6 +383,16 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             
             if (response.success) {
                 toast.success('✅ Configurações salvas com sucesso!');
+                const resolvedName =
+                    formConfig.nomeEmpresa?.trim() || DEFAULT_SIDEBAR_APP_NAME;
+                try {
+                    localStorage.setItem('companyDisplayName', resolvedName);
+                    window.dispatchEvent(
+                        new CustomEvent('companyNameUpdated', { detail: { nomeEmpresa: resolvedName } })
+                    );
+                } catch {
+                    /* ignore */
+                }
                 await loadConfiguracoes();
             } else {
                 toast.error(`❌ ${response.error || 'Erro ao salvar configurações'}`);
@@ -401,6 +493,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             email: '',
             password: '',
             name: '',
+            setor: '',
             role: 'user'
         });
         setIsModalUsuarioOpen(true);
@@ -412,6 +505,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             email: '',
             password: '',
             name: '',
+            setor: '',
             role: 'user'
         });
     };
@@ -461,6 +555,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         setEditarUsuarioForm({
             email: usuario.email,
             name: usuario.name,
+            setor: (usuario.setor || '').trim(),
             senhaNova: ''
         });
         setIsModalEditarUsuarioOpen(true);
@@ -472,6 +567,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         setEditarUsuarioForm({
             email: '',
             name: '',
+            setor: '',
             senhaNova: ''
         });
     };
@@ -488,6 +584,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             }
             if (editarUsuarioForm.name !== usuarioParaEditar.name) {
                 dadosAtualizacao.name = editarUsuarioForm.name;
+            }
+            const setorAtual = (usuarioParaEditar.setor || '').trim();
+            const setorEditado = editarUsuarioForm.setor.trim();
+            if (setorEditado !== setorAtual) {
+                dadosAtualizacao.setor = setorEditado || null;
             }
             if (editarUsuarioForm.senhaNova && editarUsuarioForm.senhaNova.length >= 6) {
                 dadosAtualizacao.senhaNova = editarUsuarioForm.senhaNova;
@@ -555,7 +656,8 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         return usuarios.filter(u => {
             const matchesSearch = !searchUsuarios || 
                 u.name.toLowerCase().includes(searchUsuarios.toLowerCase()) ||
-                u.email.toLowerCase().includes(searchUsuarios.toLowerCase());
+                u.email.toLowerCase().includes(searchUsuarios.toLowerCase()) ||
+                (u.setor || '').toLowerCase().includes(searchUsuarios.toLowerCase());
             
             const matchesRole = roleFilter === 'Todos' || u.role === roleFilter;
             
@@ -567,9 +669,13 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         switch (role) {
             case 'admin': return 'bg-purple-100 text-purple-800 ring-1 ring-purple-200';
             case 'gerente': return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200';
+            case 'desenvolvedor': return 'bg-red-100 text-red-800 ring-1 ring-red-200';
+            case 'financeiro_faturamento': return 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200';
+            case 'desenhista_industrial': return 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200';
+            case 'engenheiro_eletricista': return 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200';
+            case 'engenheiro': return 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200';
             case 'orcamentista': return 'bg-green-100 text-green-800 ring-1 ring-green-200';
             case 'compras': return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
-            case 'engenheiro': return 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200';
             case 'eletricista': return 'bg-orange-100 text-orange-800 ring-1 ring-orange-200';
             default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
         }
@@ -579,13 +685,27 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
         const labels: Record<string, string> = {
             'admin': 'Administrador',
             'gerente': 'Gerente',
+            'desenvolvedor': 'Desenvolvedor',
+            'financeiro_faturamento': 'Financeiro/Faturamento',
+            'desenhista_industrial': 'Desenhista Industrial (Engenharia)',
+            'engenheiro_eletricista': 'Engenheiro Eletricista (Engenharia)',
+            'engenheiro': 'Engenheiro Elétrico',
             'orcamentista': 'Orçamentista',
             'compras': 'Compras',
-            'engenheiro': 'Engenheiro Elétrico',
             'eletricista': 'Eletricista',
             'user': 'Usuário'
         };
         return labels[role] || role;
+    };
+
+    const handleToggleIsAdmin = async (userId: string, currentIsAdmin: boolean) => {
+        try {
+            await configuracoesService.atualizarUsuario(userId, { isAdmin: !currentIsAdmin });
+            toast.success(currentIsAdmin ? 'Permissão de administrador removida' : 'Permissão de administrador concedida (acesso ao módulo Financeiro e todos os módulos)');
+            await loadUsuarios();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.error || 'Erro ao atualizar permissão');
+        }
     };
 
     // Função para atualizar perfil (nome e senha) - ADMIN e ELETRICISTA
@@ -887,17 +1007,17 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                         Informações da Empresa
                     </button>
                     <button
-                        onClick={() => setAbaAtiva('fiscal')}
+                        onClick={() => setAbaAtiva('balanco-aliquotas')}
                         className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
-                            abaAtiva === 'fiscal'
+                            abaAtiva === 'balanco-aliquotas'
                                 ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-bg'
                         }`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
                         </svg>
-                        Config. Fiscal NF-e
+                        Balanço de Alíquotas
                     </button>
                 </div>
 
@@ -1064,6 +1184,70 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Seção: Inserção em Orçamentos */}
+                            <div className="border-t border-gray-200 dark:border-dark-border pt-8 mt-8">
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">Inserção em Orçamentos</h3>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                    Defina como deseja visualizar itens já adicionados ao orçamento na busca do catálogo (materiais, serviços, kits, quadros, cotações).
+                                </p>
+                                <div className="space-y-3">
+                                    <label className="flex items-start gap-3 p-4 rounded-xl border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+                                        <input
+                                            type="radio"
+                                            name="orcamentoInsercaoModo"
+                                            checked={orcamentoInsercaoModo === 'check'}
+                                            onChange={async () => {
+                                                setOrcamentoInsercaoModo('check');
+                                                setSalvandoPreferencias(true);
+                                                try {
+                                                    const res = await configuracoesService.salvarPreferenciasUsuario({ orcamentoInsercaoModo: 'check' });
+                                                    if (res.success) toast.success('Preferência salva: check verde na busca');
+                                                } catch {
+                                                    toast.error('Erro ao salvar preferência');
+                                                } finally {
+                                                    setSalvandoPreferencias(false);
+                                                }
+                                            }}
+                                            disabled={salvandoPreferencias}
+                                            className="mt-0.5 w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                                        />
+                                        <div>
+                                            <span className="font-medium text-gray-900 dark:text-dark-text">A. Confirmar inserção por check verde</span>
+                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-0.5">
+                                                Na busca do catálogo, itens já adicionados ao orçamento aparecem com um ícone de check verde.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    <label className="flex items-start gap-3 p-4 rounded-xl border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+                                        <input
+                                            type="radio"
+                                            name="orcamentoInsercaoModo"
+                                            checked={orcamentoInsercaoModo === 'ocultar'}
+                                            onChange={async () => {
+                                                setOrcamentoInsercaoModo('ocultar');
+                                                setSalvandoPreferencias(true);
+                                                try {
+                                                    const res = await configuracoesService.salvarPreferenciasUsuario({ orcamentoInsercaoModo: 'ocultar' });
+                                                    if (res.success) toast.success('Preferência salva: itens inseridos ocultos na busca');
+                                                } catch {
+                                                    toast.error('Erro ao salvar preferência');
+                                                } finally {
+                                                    setSalvandoPreferencias(false);
+                                                }
+                                            }}
+                                            disabled={salvandoPreferencias}
+                                            className="mt-0.5 w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"
+                                        />
+                                        <div>
+                                            <span className="font-medium text-gray-900 dark:text-dark-text">B. Item inserido não deve mais aparecer na lista de busca</span>
+                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-0.5">
+                                                Na busca do catálogo, itens já inseridos no orçamento não são exibidos; apenas itens ainda não adicionados aparecem.
+                                            </p>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -1090,7 +1274,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                                     <input
                                         type="text"
-                                        placeholder="Buscar por nome ou email..."
+                                        placeholder="Buscar por nome, email ou setor..."
                                         value={searchUsuarios}
                                         onChange={(e) => setSearchUsuarios(e.target.value)}
                                         className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
@@ -1104,10 +1288,14 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     <option value="Todos">Todas as Funções</option>
                                     <option value="admin">Administrador</option>
                                     <option value="gerente">Gerente</option>
+                                    <option value="desenvolvedor">Desenvolvedor</option>
+                                    <option value="financeiro_faturamento">Financeiro/Faturamento</option>
+                                    <option value="desenhista_industrial">Desenhista Industrial</option>
+                                    <option value="engenheiro_eletricista">Engenheiro Eletricista</option>
                                     <option value="engenheiro">Engenheiro Elétrico</option>
+                                    <option value="eletricista">Eletricista</option>
                                     <option value="orcamentista">Orçamentista</option>
                                     <option value="compras">Compras</option>
-                                    <option value="eletricista">Eletricista</option>
                                     <option value="user">Usuário</option>
                                 </select>
                             </div>
@@ -1138,7 +1326,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                 <tr>
                                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Usuário</th>
                                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Email</th>
+                                                    <th className="px-6 py-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Setor</th>
                                                     <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Função</th>
+                                                    <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Admin</th>
                                                     <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
                                                     <th className="px-6 py-4 text-center text-xs font-bold text-gray-600 uppercase tracking-wider">Ações</th>
                                                 </tr>
@@ -1152,6 +1342,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         <td className="px-6 py-4 whitespace-nowrap">
                                                             <div className="text-sm text-gray-600">{usuario.email}</div>
                                                         </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap">
+                                                            <div className="text-sm text-gray-700">{usuario.setor?.trim() || '—'}</div>
+                                                        </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             <select
                                                                 value={usuario.role}
@@ -1160,12 +1353,41 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                             >
                                                                 <option value="admin">Administrador</option>
                                                                 <option value="gerente">Gerente</option>
+                                                                <option value="desenvolvedor">Desenvolvedor</option>
+                                                                <option value="financeiro_faturamento">Financeiro/Faturamento</option>
+                                                                <option value="desenhista_industrial">Desenhista Industrial (Engenharia)</option>
+                                                                <option value="engenheiro_eletricista">Engenheiro Eletricista (Engenharia)</option>
                                                                 <option value="engenheiro">Engenheiro Elétrico</option>
+                                                                <option value="eletricista">Eletricista</option>
                                                                 <option value="orcamentista">Orçamentista</option>
                                                                 <option value="compras">Compras</option>
-                                                                <option value="eletricista">Eletricista</option>
                                                                 <option value="user">Usuário</option>
                                                             </select>
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                            {(() => {
+                                                                const targetIsDesenvolvedor = usuario.role?.toLowerCase() === 'desenvolvedor';
+                                                                const currentIsDesenvolvedor = user?.role?.toLowerCase() === 'desenvolvedor';
+                                                                const onlyDevCanToggleDev = targetIsDesenvolvedor && !currentIsDesenvolvedor;
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => !onlyDevCanToggleDev && handleToggleIsAdmin(usuario.id, !!usuario.isAdmin)}
+                                                                        disabled={onlyDevCanToggleDev}
+                                                                        title={onlyDevCanToggleDev
+                                                                            ? 'Apenas Desenvolvedor pode alterar permissão de admin de outro Desenvolvedor'
+                                                                            : (usuario.isAdmin ? 'Remover permissão de administrador' : 'Conceder permissão de administrador (acesso universal exceto Logs)')}
+                                                                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                                                                            onlyDevCanToggleDev
+                                                                                ? 'bg-red-100 text-red-800 ring-1 ring-red-300 cursor-not-allowed opacity-90'
+                                                                                : usuario.isAdmin
+                                                                                    ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200 hover:bg-purple-200'
+                                                                                    : 'bg-gray-100 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-200'
+                                                                        }`}
+                                                                    >
+                                                                        {usuario.isAdmin ? '👑 Sim' : 'Não'}
+                                                                    </button>
+                                                                );
+                                                            })()}
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             <button
@@ -1181,10 +1403,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             <div className="flex items-center justify-center gap-2">
-                                                                {/* Botão Editar - Apenas para gerente, admin e desenvolvedor */}
+                                                                {/* Botão Editar - Gerente, admin, desenvolvedor ou usuário com isAdmin */}
                                                                 {(user?.role?.toLowerCase() === 'gerente' || 
                                                                   user?.role?.toLowerCase() === 'admin' || 
-                                                                  user?.role?.toLowerCase() === 'desenvolvedor') && (
+                                                                  user?.role?.toLowerCase() === 'desenvolvedor' ||
+                                                                  user?.isAdmin === true) && (
                                                                     <button
                                                                         onClick={() => handleOpenModalEditar(usuario)}
                                                                         className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 ring-1 ring-blue-200 hover:bg-blue-200 transition-colors"
@@ -1223,147 +1446,86 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                         </div>
                     )}
 
-                    {/* ABA 3: CONFIGURAÇÃO FISCAL NF-E */}
-                    {abaAtiva === 'fiscal' && (
+                    {/* ABA: BALANÇO DE ALÍQUOTAS (por CNPJ) */}
+                    {abaAtiva === 'balanco-aliquotas' && (
                         <div className="space-y-8 animate-fade-in">
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-2">Configuração Fiscal para NF-e</h2>
-                                <p className="text-gray-600 dark:text-dark-text-secondary">Configure certificado digital e ambiente de emissão</p>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-2">Balanço de Alíquotas</h2>
+                                <p className="text-gray-600 dark:text-dark-text-secondary">
+                                    Defina a alíquota DAS (Simples Nacional) por empresa (CNPJ). Esses valores são usados nos orçamentos para calcular custo agregado e lucro líquido ao selecionar o CNPJ executora.
+                                </p>
                             </div>
-
-                            {/* Ambiente Fiscal */}
-                            <div className="bg-gray-50 dark:bg-dark-bg p-6 rounded-xl border border-gray-200 dark:border-dark-border">
-                                <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-4">
-                                    Ambiente de Emissão
-                                </label>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => setAmbienteFiscal('2')}
-                                        className={`relative flex flex-col items-center p-6 rounded-xl border-2 transition-all ${
-                                            ambienteFiscal === '2'
-                                                ? 'border-yellow-600 bg-yellow-50 dark:bg-yellow-900/30 ring-2 ring-yellow-200 dark:ring-yellow-800'
-                                                : 'border-gray-300 dark:border-dark-border hover:border-gray-400 dark:hover:border-gray-500 bg-white dark:bg-dark-card'
-                                        }`}
-                                    >
-                                        {ambienteFiscal === '2' && (
-                                            <div className="absolute top-2 right-2">
-                                                <CheckIcon className="w-5 h-5 text-yellow-600" />
-                                            </div>
-                                        )}
-                                        <div className="w-16 h-16 mb-3 bg-yellow-100 dark:bg-yellow-900/40 rounded-full flex items-center justify-center shadow-md">
-                                            <svg className="w-8 h-8 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                            </svg>
-                                        </div>
-                                        <span className="font-bold text-gray-900 dark:text-dark-text">Homologação</span>
-                                        <span className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Ambiente de testes</span>
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => setAmbienteFiscal('1')}
-                                        className={`relative flex flex-col items-center p-6 rounded-xl border-2 transition-all ${
-                                            ambienteFiscal === '1'
-                                                ? 'border-green-600 bg-green-50 dark:bg-green-900/30 ring-2 ring-green-200 dark:ring-green-800'
-                                                : 'border-gray-300 dark:border-dark-border hover:border-gray-400 dark:hover:border-gray-500 bg-white dark:bg-dark-card'
-                                        }`}
-                                    >
-                                        {ambienteFiscal === '1' && (
-                                            <div className="absolute top-2 right-2">
-                                                <CheckIcon className="w-5 h-5 text-green-600" />
-                                            </div>
-                                        )}
-                                        <div className="w-16 h-16 mb-3 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center shadow-md">
-                                            <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                        </div>
-                                        <span className="font-bold text-gray-900 dark:text-dark-text">Produção</span>
-                                        <span className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Ambiente oficial</span>
-                                    </button>
+                            {loadingAliquotas ? (
+                                <div className="flex justify-center py-12">
+                                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
                                 </div>
-                                <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                                    <p className="text-sm text-yellow-800 dark:text-yellow-400">
-                                        <strong>⚠️ Atenção:</strong> Use "Homologação" para testes. Apenas mude para "Produção" quando estiver pronto para emitir NF-es oficiais.
-                                    </p>
+                            ) : empresasAliquotas.length === 0 ? (
+                                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-6 text-center">
+                                    <p className="text-amber-800 dark:text-amber-300">Nenhuma empresa (CNPJ) cadastrada. Cadastre empresas em Orçamentos ou no módulo fiscal para definir alíquotas.</p>
                                 </div>
-                            </div>
-
-                            {/* Certificado Digital PFX */}
-                            <div className="bg-gray-50 dark:bg-dark-bg p-6 rounded-xl border border-gray-200 dark:border-dark-border">
-                                <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-3">
-                                    Certificado Digital A1 (.pfx ou .p12)
-                                </label>
+                            ) : (
                                 <div className="space-y-4">
-                                    {/* Upload de Certificado */}
-                                    <div>
-                                        <input
-                                            type="file"
-                                            id="pfx-upload"
-                                            accept=".pfx,.p12"
-                                            onChange={(e) => {
-                                                const file = e.target.files?.[0];
-                                                if (file) {
-                                                    setCertificadoPFXFile(file);
-                                                }
-                                            }}
-                                            className="hidden"
-                                        />
-                                        <label
-                                            htmlFor="pfx-upload"
-                                            className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl hover:border-indigo-500 cursor-pointer transition-colors bg-white dark:bg-dark-card"
+                                    {empresasAliquotas.map((emp) => (
+                                        <div
+                                            key={emp.id}
+                                            className="bg-white dark:bg-dark-card rounded-xl border border-gray-200 dark:border-dark-border p-6 shadow-sm"
                                         >
-                                            <div className="text-center">
-                                                <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                                </svg>
-                                                <p className="text-sm font-medium text-gray-700 dark:text-dark-text">
-                                                    {certificadoPFXFile ? certificadoPFXFile.name : 'Clique para selecionar certificado PFX'}
-                                                </p>
-                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
-                                                    Formato: .pfx ou .p12 (máx. 5MB)
-                                                </p>
+                                            <div className="flex flex-wrap items-end gap-4">
+                                                <div className="flex-1 min-w-[200px]">
+                                                    <label className="block text-xs font-semibold text-gray-500 dark:text-dark-text-secondary mb-1">Empresa (CNPJ)</label>
+                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">
+                                                        {emp.nomeFantasia || emp.razaoSocial} — {emp.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}
+                                                    </p>
+                                                </div>
+                                                <div className="w-28">
+                                                    <label className="block text-xs font-semibold text-gray-700 dark:text-dark-text mb-1">Materiais (%)</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.1"
+                                                        value={editAliquotas[emp.id]?.aliquotaMaterial ?? emp.aliquotaMaterial ?? 8}
+                                                        onChange={(e) => setEditAliquotas(prev => ({
+                                                            ...prev,
+                                                            [emp.id]: {
+                                                                ...(prev[emp.id] || { aliquotaMaterial: emp.aliquotaMaterial ?? 8, aliquotaServico: emp.aliquotaServico ?? 8 }),
+                                                                aliquotaMaterial: parseFloat(e.target.value) || 0
+                                                            }
+                                                        }))}
+                                                        className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                                    />
+                                                </div>
+                                                <div className="w-28">
+                                                    <label className="block text-xs font-semibold text-gray-700 dark:text-dark-text mb-1">Serviços (%)</label>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.1"
+                                                        value={editAliquotas[emp.id]?.aliquotaServico ?? emp.aliquotaServico ?? 8}
+                                                        onChange={(e) => setEditAliquotas(prev => ({
+                                                            ...prev,
+                                                            [emp.id]: {
+                                                                ...(prev[emp.id] || { aliquotaMaterial: emp.aliquotaMaterial ?? 8, aliquotaServico: emp.aliquotaServico ?? 8 }),
+                                                                aliquotaServico: parseFloat(e.target.value) || 0
+                                                            }
+                                                        }))}
+                                                        className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSalvarAliquotasEmpresa(emp.id)}
+                                                    disabled={savingAliquotaId === emp.id}
+                                                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50 text-sm"
+                                                >
+                                                    {savingAliquotaId === emp.id ? 'Salvando...' : 'Salvar'}
+                                                </button>
                                             </div>
-                                        </label>
-                                    </div>
-
-                                    {/* Senha do Certificado */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">
-                                            Senha do Certificado
-                                        </label>
-                                        <input
-                                            type="password"
-                                            value={senhaCertificado}
-                                            onChange={(e) => setSenhaCertificado(e.target.value)}
-                                            placeholder="Digite a senha do certificado"
-                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-dark-bg text-gray-900 dark:text-dark-text"
-                                        />
-                                    </div>
-
-                                    {/* Informação de Segurança */}
-                                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                                        <h4 className="font-bold text-blue-800 dark:text-blue-400 mb-2 text-sm">🔒 Segurança do Certificado</h4>
-                                        <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
-                                            <li>• O certificado será armazenado de forma segura no servidor</li>
-                                            <li>• A senha será criptografada antes do armazenamento</li>
-                                            <li>• Apenas administradores podem gerenciar certificados</li>
-                                        </ul>
-                                    </div>
+                                        </div>
+                                    ))}
                                 </div>
-                            </div>
-
-                            {/* Botão de Salvar */}
-                            <div className="flex justify-end pt-6 border-t border-gray-200 dark:border-dark-border">
-                                <button
-                                    onClick={handleSalvarConfiguracoes}
-                                    disabled={saving}
-                                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-xl hover:from-indigo-700 hover:to-indigo-600 transition-all shadow-lg font-semibold disabled:opacity-50"
-                                >
-                                    {saving ? 'Salvando...' : 'Salvar Configurações Fiscais'}
-                                </button>
-                            </div>
+                            )}
                         </div>
                     )}
 
@@ -1375,8 +1537,8 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                 <p className="text-gray-600">Dados básicos de contato e identificação</p>
                             </div>
 
-                            {/* Logo da Empresa - Apenas Admin */}
-                            {user?.role?.toLowerCase() === 'admin' && (
+                            {/* Logo da Empresa - Admin ou usuário com permissão de admin (isAdmin) */}
+                            {(user?.role?.toLowerCase() === 'admin' || user?.isAdmin === true || user?.role?.toLowerCase() === 'desenvolvedor') && (
                                 <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
                                     <h3 className="text-lg font-bold text-gray-900 mb-4">Logo da Empresa</h3>
                                     <p className="text-sm text-gray-600 mb-4">
@@ -1606,8 +1768,8 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                 </div>
                             )}
 
-                            {/* Logo da Página de Login - Apenas Admin */}
-                            {user?.role?.toLowerCase() === 'admin' && (
+                            {/* Logo da Página de Login - Admin, isAdmin ou desenvolvedor */}
+                            {(user?.role?.toLowerCase() === 'admin' || user?.isAdmin === true || user?.role?.toLowerCase() === 'desenvolvedor') && (
                                 <div className="bg-white dark:bg-dark-card rounded-2xl shadow-md border border-gray-200 dark:border-dark-border p-6">
                                     <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">Logo da Página de Login</h3>
                                     <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
@@ -1821,15 +1983,18 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                 <div>
                                     <label className="block text-sm font-bold text-gray-700 mb-2">
-                                        Nome da Empresa *
+                                        Nome da empresa (exibido no menu)
                                     </label>
                                     <input
                                         type="text"
                                         value={formConfig.nomeEmpresa}
                                         onChange={(e) => setFormConfig({...formConfig, nomeEmpresa: e.target.value})}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
-                                        placeholder="S3E Engenharia"
+                                        placeholder={DEFAULT_SIDEBAR_APP_NAME}
                                     />
+                                    <p className="text-xs text-gray-500 mt-1.5">
+                                        Este nome aparece no topo da barra lateral. Se ficar vazio ao salvar, será usado “{DEFAULT_SIDEBAR_APP_NAME}”.
+                                    </p>
                                 </div>
 
                                 <div>
@@ -1856,6 +2021,46 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
                                         placeholder="(11) 98765-4321"
                                     />
+                                </div>
+                            </div>
+
+                            {/* Parâmetros de Precificação (Simples Nacional) */}
+                            <div className="mt-8 pt-8 border-t border-gray-200">
+                                <h2 className="text-xl font-bold text-gray-900 dark:text-dark-text mb-4">Parâmetros de Precificação</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                    Preço de venda = Preço de compra × Markup (Fabricante ou Revendedor). A alíquota DAS por empresa é configurada na aba <strong>Balanço de Alíquotas</strong>.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">
+                                            Markup Fabricante
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            step="0.01"
+                                            value={formConfig.markupFabricante ?? 1.55}
+                                            onChange={(e) => setFormConfig({...formConfig, markupFabricante: parseFloat(e.target.value) || 1.55})}
+                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-dark-card text-gray-900 dark:text-dark-text"
+                                            placeholder="1.55"
+                                        />
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Preço de venda = Preço de compra × este valor (fornecedor Fabricante). Ex.: 1.55 = 55%.</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 dark:text-dark-text mb-2">
+                                            Markup Revendedor
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            step="0.01"
+                                            value={formConfig.markupRevendedor ?? 1.10}
+                                            onChange={(e) => setFormConfig({...formConfig, markupRevendedor: parseFloat(e.target.value) || 1.10})}
+                                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-dark-card text-gray-900 dark:text-dark-text"
+                                            placeholder="1.10"
+                                        />
+                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">Preço de venda = Preço de compra × este valor (fornecedor Representante/Vendedor).</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1919,6 +2124,21 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                 />
                             </div>
 
+                            {/* Setor */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Setor
+                                </label>
+                                <input
+                                    type="text"
+                                    value={novoUsuario.setor}
+                                    onChange={(e) => setNovoUsuario({...novoUsuario, setor: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Financeiro, Comercial, Operações..."
+                                    maxLength={80}
+                                />
+                            </div>
+
                             {/* Senha */}
                             <div>
                                 <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -1946,11 +2166,15 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                 >
                                     <option value="user">Usuário</option>
                                     <option value="eletricista">Eletricista</option>
+                                    <option value="desenhista_industrial">Desenhista Industrial (Engenharia)</option>
+                                    <option value="engenheiro_eletricista">Engenheiro Eletricista (Engenharia)</option>
+                                    <option value="engenheiro">Engenheiro Elétrico</option>
                                     <option value="compras">Compras</option>
                                     <option value="orcamentista">Orçamentista</option>
-                                    <option value="engenheiro">Engenheiro Elétrico</option>
+                                    <option value="financeiro_faturamento">Financeiro/Faturamento</option>
                                     <option value="gerente">Gerente</option>
                                     <option value="admin">Administrador</option>
+                                    <option value="desenvolvedor">Desenvolvedor</option>
                                 </select>
                             </div>
                         </div>
@@ -2027,6 +2251,21 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                     onChange={(e) => setEditarUsuarioForm({...editarUsuarioForm, email: e.target.value})}
                                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
                                     placeholder="joao@s3e.com"
+                                />
+                            </div>
+
+                            {/* Setor */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Setor
+                                </label>
+                                <input
+                                    type="text"
+                                    value={editarUsuarioForm.setor}
+                                    onChange={(e) => setEditarUsuarioForm({...editarUsuarioForm, setor: e.target.value})}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Financeiro, Comercial, Operações..."
+                                    maxLength={80}
                                 />
                             </div>
 

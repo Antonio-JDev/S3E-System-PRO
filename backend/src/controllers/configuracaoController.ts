@@ -2,10 +2,9 @@ import { Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from '../services/auditoria.service';
 import configuracaoService from '../services/configuracao.service';
-
-const prisma = new PrismaClient();
 
 // Configuração do multer para upload de imagem
 const storage = multer.diskStorage({
@@ -60,6 +59,15 @@ const upload = multer({
 });
 
 export const uploadLogo = upload.single('logo');
+const MAX_SETOR_LENGTH = 80;
+
+function sanitizeSetorInput(raw: unknown): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const setor = String(raw).trim();
+  if (!setor) return null;
+  return setor;
+}
 
 export class ConfiguracaoController {
   /**
@@ -81,6 +89,53 @@ export class ConfiguracaoController {
   }
 
   /**
+   * GET /api/configuracoes/meta-vendas?mes=YYYY-MM
+   * Meta mensal global (leitura para qualquer usuário autenticado)
+   */
+  static async getMetaVendas(req: Request, res: Response): Promise<void> {
+    try {
+      const mes = typeof req.query.mes === 'string' ? req.query.mes.trim() : undefined;
+      const data = await configuracaoService.getMetaVendas(mes && /^\d{4}-\d{2}$/.test(mes) ? mes : undefined);
+      res.status(200).json({ success: true, data });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao buscar meta de vendas';
+      console.error('Erro getMetaVendas:', error);
+      res.status(500).json({ success: false, message, error: message });
+    }
+  }
+
+  /**
+   * PUT /api/configuracoes/meta-vendas
+   * Body: { mes?: string (YYYY-MM), valor: number, atualizarMetaPadrao?: boolean }
+   * Requer: admin ou desenvolvedor
+   */
+  static async salvarMetaVendas(req: Request, res: Response): Promise<void> {
+    try {
+      const { mes, valor, atualizarMetaPadrao } = req.body as {
+        mes?: string;
+        valor?: number;
+        atualizarMetaPadrao?: boolean;
+      };
+      const valorNum = Number(valor);
+      if (!Number.isFinite(valorNum) || valorNum < 0) {
+        res.status(400).json({ success: false, message: 'Informe um valor numérico válido (≥ 0)' });
+        return;
+      }
+      const data = await configuracaoService.salvarMetaVendas({
+        mes: typeof mes === 'string' ? mes : undefined,
+        valor: valorNum,
+        atualizarPadrao: Boolean(atualizarMetaPadrao)
+      });
+      res.status(200).json({ success: true, data, message: 'Meta de vendas atualizada' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Erro ao salvar meta de vendas';
+      const status = message.includes('inválid') ? 400 : 500;
+      console.error('Erro salvarMetaVendas:', error);
+      res.status(status).json({ success: false, message, error: message });
+    }
+  }
+
+  /**
    * PUT /api/configuracoes
    * Salva/atualiza as configurações do sistema
    * Requer: Admin
@@ -94,7 +149,12 @@ export class ConfiguracaoController {
         logoDanfeUrl,
         nomeEmpresa,
         emailContato,
-        telefoneContato
+        telefoneContato,
+        multiplicadorVenda,
+        percentualImpostoPadrao,
+        aliquotaImpostoPadrao,
+        markupFabricante,
+        markupRevendedor
       } = req.body;
 
       // Validação básica
@@ -113,7 +173,12 @@ export class ConfiguracaoController {
         logoDanfeUrl,
         nomeEmpresa,
         emailContato,
-        telefoneContato
+        telefoneContato,
+        multiplicadorVenda: multiplicadorVenda != null ? Number(multiplicadorVenda) : undefined,
+        percentualImpostoPadrao: percentualImpostoPadrao != null ? Number(percentualImpostoPadrao) : undefined,
+        aliquotaImpostoPadrao: aliquotaImpostoPadrao != null ? Number(aliquotaImpostoPadrao) : undefined,
+        markupFabricante: markupFabricante != null ? Number(markupFabricante) : undefined,
+        markupRevendedor: markupRevendedor != null ? Number(markupRevendedor) : undefined
       });
 
       res.status(200).json({ 
@@ -226,8 +291,8 @@ export class ConfiguracaoController {
         console.log('⚠️ Logo removida da configuração logoLoginUrl');
       }
 
-      if (configuracoes.logoDanfeUrl === logoUrl) {
-        await configuracaoService.salvarConfiguracoes({ logoDanfeUrl: undefined });
+      if ((configuracoes as any).logoDanfeUrl === logoUrl) {
+        await configuracaoService.salvarConfiguracoes({ logoDanfeUrl: undefined } as any);
         console.log('⚠️ Logo removida da configuração logoDanfeUrl');
       }
 
@@ -610,8 +675,8 @@ export class ConfiguracaoController {
 
   /**
    * GET /api/configuracoes/usuarios
-   * Lista todos os usuários (sem senha)
-   * Requer: Admin
+   * Lista todos os usuários (sem senha) - para atribuição em tarefas/kanban (Obras, Ordem de serviço, Tarefas internas).
+   * Acesso: qualquer usuário autenticado.
    */
   static async listarUsuarios(req: Request, res: Response): Promise<void> {
     try {
@@ -712,7 +777,8 @@ export class ConfiguracaoController {
    */
   static async criarUsuario(req: Request, res: Response): Promise<void> {
     try {
-      const { email, password, name, role } = req.body;
+      const { email, password, name, role, setor } = req.body;
+      const setorNormalizado = sanitizeSetorInput(setor);
 
       // Validação dos campos obrigatórios
       if (!email || !password || !name || !role) {
@@ -723,8 +789,8 @@ export class ConfiguracaoController {
         return;
       }
 
-      // Validação do role
-      const rolesPermitidos = ['admin', 'gerente', 'orcamentista', 'compras', 'engenheiro', 'eletricista', 'user'];
+      // Validação do role (novos + antigos para compatibilidade)
+      const rolesPermitidos = ['admin', 'gerente', 'desenvolvedor', 'financeiro_faturamento', 'desenhista_industrial', 'engenheiro_eletricista', 'engenheiro', 'eletricista', 'orcamentista', 'compras', 'user'];
       if (!rolesPermitidos.includes(role)) {
         res.status(400).json({
           success: false,
@@ -742,11 +808,20 @@ export class ConfiguracaoController {
         return;
       }
 
+      if (setorNormalizado && setorNormalizado.length > MAX_SETOR_LENGTH) {
+        res.status(400).json({
+          success: false,
+          message: `Setor deve ter no máximo ${MAX_SETOR_LENGTH} caracteres`
+        });
+        return;
+      }
+
       const usuario = await configuracaoService.criarUsuario({
         email,
         password,
         name,
-        role
+        role,
+        setor: setorNormalizado
       });
 
       res.status(201).json({
@@ -904,9 +979,9 @@ export class ConfiguracaoController {
         }
       });
       
-      // Audit log
-      await prisma.auditLog.create({
-        data: {
+      // Audit log (desativado) — usa stub de auditoria
+      try {
+        await AuditoriaService.registrarEvento({
           userId: userId,
           action: 'UPDATE_PROFILE',
           entity: 'User',
@@ -916,8 +991,10 @@ export class ConfiguracaoController {
             nomeAlterado: !!name,
             senhaAlterada: !!senhaNova
           }
-        }
-      });
+        });
+      } catch (err) {
+        console.error('Erro ao registrar audit (stub):', err);
+      }
       
       console.log(`✅ Perfil atualizado: ${usuarioAtualizado.email}`);
       
@@ -943,7 +1020,7 @@ export class ConfiguracaoController {
   static async atualizarUsuario(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { email, senhaNova, name } = req.body;
+      const { email, senhaNova, name, isAdmin, setor } = req.body;
       const userRole = (req as any).user?.role?.toLowerCase();
       
       // Verificar permissão: apenas gerente, admin ou desenvolvedor
@@ -992,6 +1069,34 @@ export class ConfiguracaoController {
       if (name) {
         dadosAtualizacao.name = name;
       }
+
+      if (setor !== undefined) {
+        const setorNormalizado = sanitizeSetorInput(setor);
+        if (setorNormalizado && setorNormalizado.length > MAX_SETOR_LENGTH) {
+          res.status(400).json({
+            success: false,
+            error: `Setor deve ter no máximo ${MAX_SETOR_LENGTH} caracteres`
+          });
+          return;
+        }
+        if (setorNormalizado !== (usuario.setor ?? null)) {
+          dadosAtualizacao.setor = setorNormalizado;
+        }
+      }
+      
+      // Atualizar isAdmin: apenas se o alvo NÃO for desenvolvedor, OU se quem está editando for desenvolvedor
+      // Somente outro desenvolvedor pode alterar isAdmin de um usuário com role desenvolvedor
+      if (typeof isAdmin === 'boolean') {
+        const alvoEhDesenvolvedor = usuario.role?.toLowerCase() === 'desenvolvedor';
+        if (alvoEhDesenvolvedor && userRole !== 'desenvolvedor') {
+          res.status(403).json({
+            success: false,
+            error: '🚫 Apenas um usuário Desenvolvedor pode alterar a permissão de administrador de outro Desenvolvedor.'
+          });
+          return;
+        }
+        dadosAtualizacao.isAdmin = isAdmin;
+      }
       
       // Atualizar senha (se fornecida) - sem precisar da senha atual para admin/gerente/desenvolvedor
       if (senhaNova) {
@@ -1023,16 +1128,18 @@ export class ConfiguracaoController {
         select: {
           id: true,
           name: true,
+          setor: true,
           email: true,
           role: true,
+          isAdmin: true,
           active: true
         }
       });
       
-      // Audit log
-      const userId = (req as any).user?.userId;
-      await prisma.auditLog.create({
-        data: {
+      // Audit log (desativado) — usa stub de auditoria
+      try {
+        const userId = (req as any).user?.userId;
+        await AuditoriaService.registrarEvento({
           userId: userId,
           action: 'UPDATE_USER',
           entity: 'User',
@@ -1043,8 +1150,10 @@ export class ConfiguracaoController {
             senhaAlterada: !!senhaNova,
             nomeAlterado: !!name
           }
-        }
-      });
+        });
+      } catch (err) {
+        console.error('Erro ao registrar audit (stub):', err);
+      }
       
       console.log(`✅ Usuário atualizado: ${usuarioAtualizado.email}`);
       
@@ -1058,6 +1167,83 @@ export class ConfiguracaoController {
       res.status(500).json({
         success: false,
         error: error.message || 'Erro ao atualizar usuário'
+      });
+    }
+  }
+
+  /**
+   * GET /api/configuracoes/usuarios/me/preferencias
+   * Retorna as preferências do usuário logado (ex: orcamentoInsercaoModo)
+   * @access Authenticated (próprio usuário)
+   */
+  static async getPreferencias(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuário não autenticado' });
+        return;
+      }
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { preferences: true }
+      });
+      const prefs = (user?.preferences as Record<string, unknown>) || {};
+      const orcamentoInsercaoModo = (prefs.orcamentoInsercaoModo === 'ocultar' ? 'ocultar' : 'check') as 'check' | 'ocultar';
+      res.status(200).json({
+        success: true,
+        data: { orcamentoInsercaoModo }
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar preferências:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Erro ao buscar preferências'
+      });
+    }
+  }
+
+  /**
+   * PUT /api/configuracoes/usuarios/me/preferencias
+   * Atualiza as preferências do usuário logado
+   * @access Authenticated (próprio usuário)
+   */
+  static async salvarPreferencias(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Usuário não autenticado' });
+        return;
+      }
+      const { orcamentoInsercaoModo } = req.body;
+      if (orcamentoInsercaoModo !== undefined && orcamentoInsercaoModo !== 'check' && orcamentoInsercaoModo !== 'ocultar') {
+        res.status(400).json({
+          success: false,
+          error: 'orcamentoInsercaoModo deve ser "check" ou "ocultar"'
+        });
+        return;
+      }
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { preferences: true }
+      });
+      const current = (user?.preferences as Record<string, unknown>) || {};
+      const newPrefs = {
+        ...current,
+        ...(orcamentoInsercaoModo !== undefined ? { orcamentoInsercaoModo } : {})
+      };
+      await prisma.user.update({
+        where: { id: userId },
+        data: { preferences: newPrefs }
+      });
+      res.status(200).json({
+        success: true,
+        data: { orcamentoInsercaoModo: newPrefs.orcamentoInsercaoModo === 'ocultar' ? 'ocultar' : 'check' }
+      });
+    } catch (error: any) {
+      console.error('Erro ao salvar preferências:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || 'Erro ao salvar preferências'
       });
     }
   }

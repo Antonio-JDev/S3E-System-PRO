@@ -2,7 +2,8 @@
 
 ## 🐛 **PROBLEMA:**
 
-O botão "Cotações" não aparecia na sidebar porque o link não foi adicionado no array `navLinks`.
+O botão "Cotações" não aparecia na sidebar porque o link não foi adicionado no
+array `navLinks`.
 
 ---
 
@@ -11,6 +12,7 @@ O botão "Cotações" não aparecia na sidebar porque o link não foi adicionado
 **Arquivo:** `frontend/src/constants/index.tsx`
 
 **ANTES:**
+
 ```tsx
 { name: 'Clientes', icon: ClientsIcon },
 { name: 'Orçamentos', icon: BudgetIcon },
@@ -21,6 +23,7 @@ O botão "Cotações" não aparecia na sidebar porque o link não foi adicionado
 ```
 
 **DEPOIS:**
+
 ```tsx
 { name: 'Clientes', icon: ClientsIcon },
 { name: 'Orçamentos', icon: BudgetIcon },
@@ -35,11 +38,13 @@ O botão "Cotações" não aparecia na sidebar porque o link não foi adicionado
 ## 🚀 **TESTE AGORA:**
 
 ### **1. Recarregue o Frontend:**
+
 ```
 Ctrl + Shift + R (hard reload)
 ```
 
 ### **2. Verifique Sidebar:**
+
 ```
 Seção COMERCIAL:
 ✓ Clientes
@@ -49,6 +54,7 @@ Seção COMERCIAL:
 ```
 
 ### **3. Clique em Cotações:**
+
 ```
 Deve abrir a página:
 🏷️ Cotações de Fornecedores
@@ -60,6 +66,7 @@ Banco frio de materiais cotados
 ## ✅ **VERIFICAÇÃO:**
 
 Se aparecer o menu:
+
 ```
 📦 COMERCIAL
    👤 Clientes
@@ -73,4 +80,3 @@ Se aparecer o menu:
 ---
 
 **RECARREGUE E VERIFIQUE! 🚀**
-

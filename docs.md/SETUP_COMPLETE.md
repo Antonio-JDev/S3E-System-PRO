@@ -2,7 +2,8 @@
 
 ## 🎉 Infraestrutura Docker Criada com Sucesso
 
-A engenharia do projeto foi completamente configurada para usar Docker Compose com arquitetura de nível sênior.
+A engenharia do projeto foi completamente configurada para usar Docker Compose
+com arquitetura de nível sênior.
 
 ## 📦 O que foi criado
 

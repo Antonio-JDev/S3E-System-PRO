@@ -9,11 +9,13 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 ## 🎯 Problema Resolvido
 
 ### ANTES (Limitação)
+
 - ❌ Só podia adicionar materiais que **já estavam no estoque**
 - ❌ Orçamentos dependiam de compra prévia
 - ❌ Não refletia o fluxo real de trabalho
 
 ### Fluxo Real da Empresa
+
 ```
 1. Cliente solicita orçamento
 2. Empresa busca preços com fornecedores
@@ -23,6 +25,7 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 ```
 
 ### DEPOIS (Solução)
+
 - ✅ Pode adicionar **itens do estoque** (materiais já comprados)
 - ✅ Pode adicionar **itens manuais** (cotações de fornecedores)
 - ✅ **Ambas as opções** disponíveis no mesmo modal
@@ -54,10 +57,12 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 ## 📦 ABA 1: Do Estoque (Existente - Mantida)
 
 ### O Que Faz
+
 - Lista materiais que **já estão no estoque**
 - Mostra: Nome, SKU, Estoque disponível, Custo
 
 ### Como Usar
+
 1. Clique em "Adicionar Item"
 2. Aba "📦 Do Estoque" já está selecionada
 3. Digite na busca para filtrar
@@ -65,6 +70,7 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 5. ✅ Item adicionado automaticamente!
 
 ### Informações Automaticamente Preenchidas
+
 - ✅ Nome do material
 - ✅ Unidade de medida
 - ✅ Custo unitário (do cadastro)
@@ -76,11 +82,13 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 ## ✏️ ABA 2: Criar Manualmente (NOVA)
 
 ### O Que Faz
+
 - Permite criar item **sem vincular ao estoque**
 - Ideal para cotações de fornecedores
 - Campos totalmente personalizáveis
 
 ### Como Usar
+
 1. Clique em "Adicionar Item"
 2. Clique na aba **"✏️ Criar Manualmente"**
 3. Preencha os campos:
@@ -97,12 +105,14 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 ### Campos Disponíveis
 
 #### Tipo de Item
+
 - **Material** - Materiais elétricos, componentes
 - **Serviço** - Mão de obra, instalações
 - **Kit** - Conjunto de materiais
 - **Custo Extra** - Despesas adicionais
 
 #### Unidades de Medida (11 opções)
+
 - UN (Unidade)
 - M (Metro)
 - M² (Metro Quadrado)
@@ -119,7 +129,8 @@ Agora é possível adicionar itens ao orçamento **mesmo sem ter no estoque**!
 
 ## 💡 Preview de Cálculo em Tempo Real
 
-Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticamente:
+Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra
+automaticamente:
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -132,6 +143,7 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 ```
 
 **Cálculo Automático**:
+
 - **Custo Total** = Custo Unit. × Quantidade
 - **Preço Unit.** = Custo Unit. × (1 + BDI%)
 - **Preço Total** = Preço Unit. × Quantidade
@@ -141,9 +153,12 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 ## 🎯 Casos de Uso
 
 ### Caso 1: Orçamento com Cotação de Fornecedor
-**Cenário**: Cliente pede orçamento, você cotou com fornecedor mas ainda não comprou
+
+**Cenário**: Cliente pede orçamento, você cotou com fornecedor mas ainda não
+comprou
 
 **Como fazer**:
+
 1. Criar novo orçamento
 2. Clicar em "Adicionar Item"
 3. Aba **"✏️ Criar Manualmente"**
@@ -157,23 +172,25 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 6. ✅ Item no orçamento sem afetar estoque!
 
 ### Caso 2: Orçamento Misto (Estoque + Cotação)
+
 **Cenário**: Alguns materiais você tem, outros precisa comprar
 
 **Como fazer**:
+
 1. Adicionar itens do estoque:
    - Aba "📦 Do Estoque"
    - Buscar e adicionar itens disponíveis
-   
 2. Adicionar itens cotados:
    - Aba "✏️ Criar Manualmente"
    - Criar itens baseados em cotações
-   
 3. ✅ Orçamento completo com ambos os tipos!
 
 ### Caso 3: Serviço de Mão de Obra
+
 **Cenário**: Adicionar serviço de instalação
 
 **Como fazer**:
+
 1. Clicar em "Adicionar Item"
 2. Aba "✏️ Criar Manualmente"
 3. Preencher:
@@ -186,9 +203,11 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 4. ✅ Serviço adicionado!
 
 ### Caso 4: Kit Completo
+
 **Cenário**: Orçar um kit de materiais
 
 **Como fazer**:
+
 1. Aba "✏️ Criar Manualmente"
 2. Tipo: **Kit**
 3. Nome: "Kit Iluminação LED Completo"
@@ -201,21 +220,23 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 ## 🔄 Diferenças Entre os Modos
 
 ### 📦 Do Estoque
-| Característica | Valor |
-|----------------|-------|
-| **Fonte** | Materiais cadastrados |
-| **Validação** | Verifica estoque disponível |
-| **Vínculo** | Tem `materialId` |
-| **Custo** | Do cadastro do material |
-| **Quando usar** | Materiais já comprados |
+
+| Característica  | Valor                       |
+| --------------- | --------------------------- |
+| **Fonte**       | Materiais cadastrados       |
+| **Validação**   | Verifica estoque disponível |
+| **Vínculo**     | Tem `materialId`            |
+| **Custo**       | Do cadastro do material     |
+| **Quando usar** | Materiais já comprados      |
 
 ### ✏️ Criar Manualmente
-| Característica | Valor |
-|----------------|-------|
-| **Fonte** | Digitado pelo usuário |
-| **Validação** | Apenas campos obrigatórios |
-| **Vínculo** | Sem `materialId` |
-| **Custo** | Digitado manualmente |
+
+| Característica  | Valor                         |
+| --------------- | ----------------------------- |
+| **Fonte**       | Digitado pelo usuário         |
+| **Validação**   | Apenas campos obrigatórios    |
+| **Vínculo**     | Sem `materialId`              |
+| **Custo**       | Digitado manualmente          |
 | **Quando usar** | Cotações, materiais a comprar |
 
 ---
@@ -223,6 +244,7 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 ## 💡 Fluxo de Trabalho Recomendado
 
 ### Para Orçamentos Novos
+
 ```
 1. Cliente solicita orçamento
    ↓
@@ -252,18 +274,21 @@ Ao preencher **Custo Unitário** e **Quantidade**, o sistema mostra automaticame
 ## ⚙️ Detalhes Técnicos
 
 ### Validações Implementadas
+
 - ✅ Nome obrigatório
 - ✅ Custo unitário > 0
 - ✅ Quantidade > 0
 - ✅ Unidade de medida obrigatória
 
 ### Cálculo Automático
+
 ```typescript
 const precoUnit = custoUnit * (1 + bdi / 100);
 const subtotal = precoUnit * quantidade;
 ```
 
 ### Estrutura do Item Manual
+
 ```typescript
 {
   tipo: 'MATERIAL' | 'SERVICO' | 'KIT' | 'CUSTO_EXTRA',
@@ -283,6 +308,7 @@ const subtotal = precoUnit * quantidade;
 ## 🎨 Interface Visual
 
 ### Aba "Do Estoque"
+
 ```
 ┌──────────────────────────────────────┐
 │  🔍 [Buscar material...]             │
@@ -301,6 +327,7 @@ const subtotal = precoUnit * quantidade;
 ```
 
 ### Aba "Criar Manualmente"
+
 ```
 ┌──────────────────────────────────────┐
 │  💡 Dica: Use para materiais cotados │
@@ -327,14 +354,17 @@ const subtotal = precoUnit * quantidade;
 ### Adicionar Item Manual
 
 #### 1. Abrir o Modal
+
 - Na página "Novo Orçamento"
 - Seção "Itens do Orçamento"
 - Clicar em **"+ Adicionar Item"**
 
 #### 2. Selecionar Modo Manual
+
 - Clicar na aba **"✏️ Criar Manualmente"**
 
 #### 3. Preencher Informações
+
 - **Tipo**: Escolher tipo apropriado
 - **Nome**: Nome do material/serviço
 - **Descrição**: Detalhes técnicos (opcional)
@@ -343,14 +373,17 @@ const subtotal = precoUnit * quantidade;
 - **Custo Unitário**: Valor da cotação
 
 #### 4. Revisar Preview
+
 - Sistema mostra cálculo automático
 - Verifica se valores estão corretos
 
 #### 5. Adicionar
+
 - Clicar em **"Adicionar Item"**
 - Item aparece na lista
 
 #### 6. Ajustar se Necessário
+
 - Pode editar quantidade após adicionar
 - Pode remover item se necessário
 
@@ -361,21 +394,25 @@ const subtotal = precoUnit * quantidade;
 ### Fórmulas Aplicadas
 
 **Preço Unitário de Venda**:
+
 ```
 Preço Unit. = Custo Unit. × (1 + BDI ÷ 100)
 ```
 
 **Exemplo com BDI de 20%**:
+
 - Custo: R$ 45,50
 - BDI: 20%
 - Preço: R$ 45,50 × 1,20 = **R$ 54,60**
 
 **Subtotal do Item**:
+
 ```
 Subtotal = Preço Unit. × Quantidade
 ```
 
 **Exemplo**:
+
 - Preço Unit.: R$ 54,60
 - Quantidade: 10
 - Subtotal: **R$ 546,00**
@@ -385,8 +422,9 @@ Subtotal = Preço Unit. × Quantidade
 ## 🎯 Tipos de Itens Disponíveis
 
 ### 1. MATERIAL
-**Quando usar**: Componentes, materiais elétricos, insumos
-**Exemplos**:
+
+**Quando usar**: Componentes, materiais elétricos, insumos **Exemplos**:
+
 - Disjuntores
 - Cabos elétricos
 - Tomadas e interruptores
@@ -394,8 +432,9 @@ Subtotal = Preço Unit. × Quantidade
 - Quadros elétricos
 
 ### 2. SERVICO
-**Quando usar**: Mão de obra, instalações, serviços técnicos
-**Exemplos**:
+
+**Quando usar**: Mão de obra, instalações, serviços técnicos **Exemplos**:
+
 - Instalação elétrica
 - Manutenção preventiva
 - Projeto elétrico
@@ -403,16 +442,18 @@ Subtotal = Preço Unit. × Quantidade
 - Inspeção
 
 ### 3. KIT
-**Quando usar**: Conjunto de materiais vendidos juntos
-**Exemplos**:
+
+**Quando usar**: Conjunto de materiais vendidos juntos **Exemplos**:
+
 - Kit iluminação LED completo
 - Kit quadro medidor
 - Kit instalação residencial
 - Kit ferramentas
 
 ### 4. CUSTO_EXTRA
-**Quando usar**: Despesas adicionais, custos indiretos
-**Exemplos**:
+
+**Quando usar**: Despesas adicionais, custos indiretos **Exemplos**:
+
 - Transporte
 - Hospedagem
 - Alimentação de equipe
@@ -423,7 +464,8 @@ Subtotal = Preço Unit. × Quantidade
 
 ## 📋 Campos do Formulário Manual
 
-### Obrigatórios (*)
+### Obrigatórios (\*)
+
 - ✅ **Tipo de Item** - Dropdown com 4 opções
 - ✅ **Nome** - Input de texto (máx. recomendado: 100 caracteres)
 - ✅ **Unidade de Medida** - Dropdown com 11 opções
@@ -431,22 +473,23 @@ Subtotal = Preço Unit. × Quantidade
 - ✅ **Custo Unitário** - Input numérico (min: 0, step: 0.01)
 
 ### Opcionais
+
 - ⭐ **Descrição Técnica** - Textarea (2 linhas)
 
 ---
 
 ## 🔄 Comparação: Estoque vs Manual
 
-| Aspecto | Do Estoque | Criar Manualmente |
-|---------|------------|-------------------|
-| **Vínculo** | Sim (materialId) | Não |
-| **Estoque** | Verifica disponibilidade | Não verifica |
-| **Custo** | Do cadastro | Digite você |
-| **Nome** | Do cadastro | Digite você |
-| **Descrição** | Do cadastro | Digite você |
-| **Unidade** | Do cadastro | Escolha você |
-| **Velocidade** | Rápido (1 clique) | Manual (preencher form) |
-| **Quando usar** | Material já comprado | Material a comprar |
+| Aspecto         | Do Estoque               | Criar Manualmente       |
+| --------------- | ------------------------ | ----------------------- |
+| **Vínculo**     | Sim (materialId)         | Não                     |
+| **Estoque**     | Verifica disponibilidade | Não verifica            |
+| **Custo**       | Do cadastro              | Digite você             |
+| **Nome**        | Do cadastro              | Digite você             |
+| **Descrição**   | Do cadastro              | Digite você             |
+| **Unidade**     | Do cadastro              | Escolha você            |
+| **Velocidade**  | Rápido (1 clique)        | Manual (preencher form) |
+| **Quando usar** | Material já comprado     | Material a comprar      |
 
 ---
 
@@ -500,18 +543,21 @@ Subtotal = Preço Unit. × Quantidade
 ## 🎨 Benefícios da Implementação
 
 ### Para a Empresa
+
 - ✅ **Mais agilidade**: Orçamentos sem depender de compra prévia
 - ✅ **Menos risco**: Não compra antes de aprovar
 - ✅ **Flexibilidade**: Pode cotar com vários fornecedores
 - ✅ **Realismo**: Fluxo de trabalho real
 
 ### Para o Orçamentista
+
 - ✅ **Facilidade**: Criar orçamento rapidamente
 - ✅ **Opções**: Estoque OU manual OU ambos
 - ✅ **Preview**: Vê cálculos em tempo real
 - ✅ **Organização**: Sistema ajuda a calcular
 
 ### Para o Cliente
+
 - ✅ **Orçamento rápido**: Não precisa esperar compra
 - ✅ **Detalhes**: Descrições técnicas completas
 - ✅ **Profissional**: PDF bem formatado
@@ -523,6 +569,7 @@ Subtotal = Preço Unit. × Quantidade
 ### Orçamento: Instalação Elétrica Residencial
 
 **Itens do Estoque** (já comprados):
+
 ```
 📦 Do Estoque:
 1. Cabo 2,5mm² - 100M - R$ 350,00
@@ -530,6 +577,7 @@ Subtotal = Preço Unit. × Quantidade
 ```
 
 **Itens Manuais** (a comprar após aprovação):
+
 ```
 ✏️ Criar Manualmente:
 1. Disjuntor Geral 63A - 1UN - R$ 250,00 (Fornecedor A)
@@ -540,6 +588,7 @@ Subtotal = Preço Unit. × Quantidade
 **Total do Orçamento**: R$ 2.400,00 (com BDI)
 
 **Após Aprovação**:
+
 - Comprar itens 1, 2 (materiais)
 - Contratar item 3 (serviço)
 - Executar obra
@@ -549,43 +598,45 @@ Subtotal = Preço Unit. × Quantidade
 ## 🔧 Detalhes Técnicos
 
 ### Estado do Componente
+
 ```typescript
-const [modoAdicao, setModoAdicao] = useState<'estoque' | 'manual'>('estoque');
+const [modoAdicao, setModoAdicao] = useState<"estoque" | "manual">("estoque");
 const [novoItemManual, setNovoItemManual] = useState({
-    nome: '',
-    descricao: '',
-    unidadeMedida: 'UN',
-    quantidade: 1,
-    custoUnit: 0,
-    tipo: 'MATERIAL'
+  nome: "",
+  descricao: "",
+  unidadeMedida: "UN",
+  quantidade: 1,
+  custoUnit: 0,
+  tipo: "MATERIAL",
 });
 ```
 
 ### Função de Adicionar
+
 ```typescript
 const handleAddItemManual = () => {
-    // Validações
-    if (!novoItemManual.nome.trim()) return alert('Digite o nome');
-    if (novoItemManual.custoUnit <= 0) return alert('Digite custo');
-    if (novoItemManual.quantidade <= 0) return alert('Digite quantidade');
-    
-    // Calcular preço com BDI
-    const precoUnit = novoItemManual.custoUnit * (1 + formState.bdi / 100);
-    
-    // Criar item
-    const newItem = {
-        tipo: novoItemManual.tipo,
-        nome: novoItemManual.nome,
-        descricao: novoItemManual.descricao,
-        unidadeMedida: novoItemManual.unidadeMedida,
-        quantidade: novoItemManual.quantidade,
-        custoUnit: novoItemManual.custoUnit,
-        precoUnit: precoUnit,
-        subtotal: precoUnit * novoItemManual.quantidade
-    };
-    
-    // Adicionar à lista
-    setItems(prev => [...prev, newItem]);
+  // Validações
+  if (!novoItemManual.nome.trim()) return alert("Digite o nome");
+  if (novoItemManual.custoUnit <= 0) return alert("Digite custo");
+  if (novoItemManual.quantidade <= 0) return alert("Digite quantidade");
+
+  // Calcular preço com BDI
+  const precoUnit = novoItemManual.custoUnit * (1 + formState.bdi / 100);
+
+  // Criar item
+  const newItem = {
+    tipo: novoItemManual.tipo,
+    nome: novoItemManual.nome,
+    descricao: novoItemManual.descricao,
+    unidadeMedida: novoItemManual.unidadeMedida,
+    quantidade: novoItemManual.quantidade,
+    custoUnit: novoItemManual.custoUnit,
+    precoUnit: precoUnit,
+    subtotal: precoUnit * novoItemManual.quantidade,
+  };
+
+  // Adicionar à lista
+  setItems((prev) => [...prev, newItem]);
 };
 ```
 
@@ -607,6 +658,7 @@ const handleAddItemManual = () => {
 **Funcionalidade 100% Implementada!**
 
 Agora você pode criar orçamentos:
+
 - ✅ **Com materiais do estoque** (já comprados)
 - ✅ **Com materiais cotados** (a comprar)
 - ✅ **Com serviços** (mão de obra)
@@ -622,4 +674,3 @@ Agora você pode criar orçamentos:
 **Data**: 07/11/2024  
 **Status**: ✅ Funcional  
 **Impacto**: 🌟 Alto (melhora significativa no fluxo)
-

@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
 import { clientesService, type Cliente } from '../services/clientesService';
-import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
 
 // Icons
@@ -219,7 +218,14 @@ const ProjetosAPI: React.FC<ProjetosProps> = ({
     };
 
     if (loading) {
-        return <LoadingSpinner size="lg" text="Carregando projetos..." />;
+        return (
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando projetos...</p>
+                </div>
+            </div>
+        );
     }
 
     if (error) {
@@ -227,21 +233,21 @@ const ProjetosAPI: React.FC<ProjetosProps> = ({
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
-            <div className="bg-white shadow">
+            <div className="bg-white dark:bg-dark-card shadow border-b border-gray-200 dark:border-dark-border">
                 <div className="px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center py-6">
                         <div className="flex items-center">
                             <button
                                 onClick={toggleSidebar}
-                                className="p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 lg:hidden"
+                                className="p-2 rounded-md text-gray-400 dark:text-dark-text-secondary hover:text-gray-500 dark:hover:text-dark-text hover:bg-gray-100 dark:hover:bg-dark-hover lg:hidden"
                             >
                                 <Bars3Icon className="h-6 w-6" />
                             </button>
                             <div className="ml-4">
-                                <h1 className="text-2xl font-bold text-gray-900">Projetos</h1>
-                                <p className="text-sm text-gray-500">Gerencie seus projetos</p>
+                                <h1 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Projetos</h1>
+                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary">Gerencie seus projetos</p>
                             </div>
                         </div>
                         <button

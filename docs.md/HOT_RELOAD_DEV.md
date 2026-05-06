@@ -2,16 +2,20 @@
 
 ## O que é HMR?
 
-**Hot Module Replacement (HMR)** é uma tecnologia que permite atualizar módulos em tempo real durante o desenvolvimento, **sem recarregar a página inteira** e **preservando o estado da aplicação**.
+**Hot Module Replacement (HMR)** é uma tecnologia que permite atualizar módulos
+em tempo real durante o desenvolvimento, **sem recarregar a página inteira** e
+**preservando o estado da aplicação**.
 
 ## Tecnologias Utilizadas
 
 ### 1. **Vite HMR** ⚡
+
 - **Rápido**: Atualização instantânea (< 100ms)
 - **Inteligente**: Atualiza apenas o que mudou
 - **Eficiente**: Não recarrega a página inteira
 
 ### 2. **React Fast Refresh** ⚛️
+
 - Preserva o estado dos componentes React
 - Atualiza apenas os componentes alterados
 - Mantém o estado do formulário, scroll, etc.
@@ -85,8 +89,8 @@ frontend:
   ports:
     - "5173:5173"
   volumes:
-    - ./frontend:/app        # Sincroniza código
-    - /app/node_modules      # Preserva node_modules
+    - ./frontend:/app # Sincroniza código
+    - /app/node_modules # Preserva node_modules
   command: npm run dev -- --host
 ```
 
@@ -95,6 +99,7 @@ frontend:
 ### 1. **File Watching (usePolling)**
 
 **Por que `usePolling: true`?**
+
 - Docker no Windows não suporta nativamente eventos de arquivo do filesystem
 - Polling verifica mudanças periodicamente
 - Essencial para HMR funcionar em containers
@@ -148,17 +153,20 @@ http://localhost:5173
 ## Indicadores de HMR Funcionando
 
 ✅ **Console do Browser:**
+
 ```
 [vite] connected.
 [vite] hot updated: /src/components/Catalogo.tsx
 ```
 
 ✅ **Terminal do Vite:**
+
 ```
 5:34:21 PM [vite] hmr update /src/components/Catalogo.tsx
 ```
 
 ✅ **Comportamento:**
+
 - Atualização instantânea (< 1 segundo)
 - Sem reload completo da página
 - Estado preservado
@@ -168,6 +176,7 @@ http://localhost:5173
 ### ❌ HMR não está funcionando?
 
 #### 1. **Verificar se o polling está habilitado**
+
 ```typescript
 // vite.config.ts
 watch: {
@@ -176,16 +185,19 @@ watch: {
 ```
 
 #### 2. **Verificar volumes do Docker**
+
 ```bash
 # Verificar se os volumes estão montados
 docker inspect s3e-frontend | grep -A 10 Mounts
 ```
 
 #### 3. **Verificar WebSocket no browser**
+
 - Abra DevTools → Network → WS
 - Deve ter conexão com `ws://localhost:5173`
 
 #### 4. **Aumentar o intervalo de polling** (se muito lento)
+
 ```typescript
 watch: {
   usePolling: true,
@@ -194,6 +206,7 @@ watch: {
 ```
 
 #### 5. **Limpar cache e reiniciar**
+
 ```bash
 # Parar containers
 docker-compose down
@@ -209,12 +222,12 @@ docker-compose up frontend
 
 ### Vite HMR vs Outras Tecnologias
 
-| Tecnologia | Velocidade | Funciona em Docker | Preserva Estado |
-|------------|------------|-------------------|-----------------|
-| **Vite HMR** | ⚡⚡⚡ Muito Rápida | ✅ Sim (com polling) | ✅ Sim |
-| Webpack HMR | 🐌 Moderada | ✅ Sim | ✅ Sim |
-| Live Reload | ⚡ Rápida | ✅ Sim | ❌ Não (reload full) |
-| Nodemon | 🐌 Lenta | ✅ Sim | ❌ Não |
+| Tecnologia   | Velocidade          | Funciona em Docker   | Preserva Estado      |
+| ------------ | ------------------- | -------------------- | -------------------- |
+| **Vite HMR** | ⚡⚡⚡ Muito Rápida | ✅ Sim (com polling) | ✅ Sim               |
+| Webpack HMR  | 🐌 Moderada         | ✅ Sim               | ✅ Sim               |
+| Live Reload  | ⚡ Rápida           | ✅ Sim               | ❌ Não (reload full) |
+| Nodemon      | 🐌 Lenta            | ✅ Sim               | ❌ Não               |
 
 ### Por que Vite?
 
@@ -262,5 +275,5 @@ watch: {
 
 ---
 
-**Status Atual**: ✅ HMR configurado e otimizado para ambiente Docker no Windows!
-
+**Status Atual**: ✅ HMR configurado e otimizado para ambiente Docker no
+Windows!

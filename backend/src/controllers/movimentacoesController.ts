@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { QuadrosService } from '../services/quadros.service';
-
-const prisma = new PrismaClient();
 
 export class MovimentacoesController {
   static async listarMovimentacoes(req: Request, res: Response): Promise<void> {
@@ -15,8 +13,25 @@ export class MovimentacoesController {
       
       if (dataInicio || dataFim) {
         where.data = {};
-        if (dataInicio) where.data.gte = new Date(dataInicio as string);
-        if (dataFim) where.data.lte = new Date(dataFim as string);
+        // Se for YYYY-MM-DD, parsear para início/fim do dia local
+        if (dataInicio) {
+          const s = String(dataInicio);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+            const [y, m, d] = s.split('-').map(Number);
+            where.data.gte = new Date(y, m - 1, d, 0, 0, 0, 0);
+          } else {
+            where.data.gte = new Date(s);
+          }
+        }
+        if (dataFim) {
+          const s = String(dataFim);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+            const [y, m, d] = s.split('-').map(Number);
+            where.data.lte = new Date(y, m - 1, d, 23, 59, 59, 999);
+          } else {
+            where.data.lte = new Date(s);
+          }
+        }
       }
 
       const movimentacoes = await prisma.movimentacaoEstoque.findMany({

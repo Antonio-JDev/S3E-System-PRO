@@ -43,16 +43,47 @@ export type Permission =
   | 'create_user'
   | 'update_user'
   | 'delete_user'
-  | 'universal_delete';
+  | 'universal_delete'
+  | 'view_kit';
 
-type UserRole = 'desenvolvedor' | 'admin' | 'gerente' | 'comprador' | 'engenheiro' | 'eletricista';
+type UserRole = 'desenvolvedor' | 'admin' | 'gerente' | 'comprador' | 'engenheiro' | 'eletricista' | 'desenhista_industrial' | 'engenheiro_eletricista' | 'financeiro_faturamento';
+
+// Permissões completas (admin atribuído = acesso universal exceto Logs)
+const adminPermissions: Permission[] = [
+  'view_financeiro', 'view_nfe', 'view_gerenciamento', 'view_frota',
+  'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
+  'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra', 'view_kit',
+  'create_material', 'update_material', 'delete_material', 'deactivate_material',
+  'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
+  'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
+  'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
+  'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
+  'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
+  'create_user', 'update_user', 'delete_user',
+  'universal_delete'
+];
+
+// Engenheiro elétrico: todo o sistema EXCETO Financeiro, Emissão NF-e, Frota, RH e Despesas Fixas (abas no Gerenciamento).
+// Tem view_gerenciamento para acessar Dashboard e Planos Estratégicos; abas RH/Frota/Despesas são ocultas no frontend.
+const engenheiroEletricistaPermissions: Permission[] = [
+  'view_gerenciamento', 'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
+  'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra', 'view_kit',
+  'create_material', 'update_material', 'delete_material', 'deactivate_material',
+  'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
+  'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
+  'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
+  'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
+  'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
+  'create_user', 'update_user', 'delete_user',
+  'universal_delete'
+];
 
 // Mapeamento de permissões por role
 const rolePermissions: Record<UserRole, Permission[]> = {
   desenvolvedor: [
     'view_logs', 'view_financeiro', 'view_nfe', 'view_gerenciamento', 'view_frota',
     'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
-    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra',
+    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra', 'view_kit',
     'create_material', 'update_material', 'delete_material', 'deactivate_material',
     'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
     'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
@@ -62,33 +93,27 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'create_user', 'update_user', 'delete_user',
     'universal_delete'
   ],
-  admin: [
-    'view_financeiro', 'view_nfe', 'view_gerenciamento', 'view_frota',
-    'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
-    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas',
-    'create_material', 'update_material', 'delete_material', 'deactivate_material',
-    'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
-    'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
-    'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
-    'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
-    'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
-    'create_user', 'update_user', 'delete_user'
-  ],
+  admin: adminPermissions,
   gerente: [
     'view_financeiro', 'view_nfe', 'view_gerenciamento', 'view_frota',
     'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
-    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas',
+    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra', 'view_kit',
     'create_material', 'update_material', 'delete_material', 'deactivate_material',
     'create_projeto', 'update_projeto', 'delete_projeto', 'deactivate_projeto',
     'create_servico', 'update_servico', 'delete_servico', 'deactivate_servico',
     'create_orcamento', 'update_orcamento', 'delete_orcamento', 'deactivate_orcamento',
     'create_kit', 'update_kit', 'delete_kit', 'deactivate_kit',
     'create_obra', 'update_obra', 'delete_obra', 'deactivate_obra',
-    'create_user', 'update_user', 'delete_user'
+    'create_user', 'update_user', 'delete_user',
+    'universal_delete'
+  ],
+  // Financeiro / Faturamento: conceder permissões amplas (quase admin) para operações financeiras
+  financeiro_faturamento: [
+    ...adminPermissions
   ],
   comprador: [
-    'view_frota', 'view_obras', 'view_movimentacoes', 'view_catalogo',
-    'view_comparacao_precos', 'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas',
+    'view_frota', 'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_kit',
+    'view_comparacao_precos', 'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra',
     'create_material', 'update_material', 'deactivate_material',
     'create_projeto', 'update_projeto', 'deactivate_projeto',
     'create_servico', 'update_servico', 'deactivate_servico',
@@ -97,8 +122,8 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'create_obra', 'update_obra', 'deactivate_obra'
   ],
   engenheiro: [
-    'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos',
-    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas',
+    'view_obras', 'view_movimentacoes', 'view_catalogo', 'view_comparacao_precos', 'view_kit',
+    'view_projetos', 'view_gestao_obras', 'view_servicos', 'view_vendas', 'view_tarefas_obra',
     'create_material', 'update_material', 'deactivate_material',
     'create_projeto', 'update_projeto', 'deactivate_projeto',
     'create_servico', 'update_servico', 'deactivate_servico',
@@ -106,9 +131,12 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'create_kit', 'update_kit', 'deactivate_kit',
     'create_obra', 'update_obra', 'deactivate_obra'
   ],
+  // Desenhista Industrial: mesmo que engenheiro elétrico (sem Financeiro, NF-e, Frota; RH/Frota/Despesas ocultos no frontend)
+  desenhista_industrial: [...engenheiroEletricistaPermissions],
+  engenheiro_eletricista: [...engenheiroEletricistaPermissions],
   eletricista: [
-    'view_tarefas_obra', 'view_movimentacoes',
-    'update_obra' // Apenas atualizar status de tarefas
+    'view_tarefas_obra', 'view_kit', // Apenas página Tarefas da Obra e Ferramentas (kit)
+    'update_obra' // Atualizar status de tarefas
   ]
 };
 
@@ -166,10 +194,38 @@ export const checkPermission = (...requiredPermissions: Permission[]) => {
       return;
     }
     
-    // Desenvolvedor tem acesso universal
+    // Desenvolvedor tem acesso universal (incluindo Logs)
     const normalizedRoleForDev = userRole.trim().toLowerCase();
     if (normalizedRoleForDev === 'desenvolvedor') {
       console.log('🔓 [RBAC] Desenvolvedor detectado - Acesso universal concedido');
+      next();
+      return;
+    }
+    
+    // Usuário atribuído como admin (isAdmin) tem acesso universal EXCETO Logs
+    const isAdminUser = (user as any).isAdmin === true;
+    if (isAdminUser) {
+      const requiresLogs = requiredPermissions.includes('view_logs');
+      if (requiresLogs) {
+        console.error('🚫 [RBAC] Acesso negado: apenas Desenvolvedor pode acessar Logs');
+        res.status(403).json({ success: false, error: '🚫 Acesso negado. Apenas Desenvolvedor pode acessar a página de Logs.' });
+        return;
+      }
+      console.log('🔓 [RBAC] Usuário admin (isAdmin) detectado - Acesso universal concedido (exceto Logs)');
+      next();
+      return;
+    }
+    
+    // Conceder acesso global a roles financeiros (financeiro_faturamento) similar ao admin
+    const normalizedRoleForGlobal = (userRole || '').trim().toLowerCase();
+    if (normalizedRoleForGlobal === 'financeiro_faturamento') {
+      const requiresLogs = requiredPermissions.includes('view_logs');
+      if (requiresLogs) {
+        console.error('🚫 [RBAC] Acesso negado: apenas Desenvolvedor pode acessar Logs');
+        res.status(403).json({ success: false, error: '🚫 Acesso negado. Apenas Desenvolvedor pode acessar a página de Logs.' });
+        return;
+      }
+      console.log('🔓 [RBAC] Role financeiro_faturamento detectado - Acesso global concedido (exceto Logs)');
       next();
       return;
     }
@@ -200,7 +256,9 @@ export const checkPermission = (...requiredPermissions: Permission[]) => {
  */
 export const checkDeletePermission = (entityType: 'material' | 'projeto' | 'servico' | 'orcamento' | 'kit' | 'obra' | 'user') => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = (req as any).user?.role?.toLowerCase();
+    const user = (req as any).user;
+    const userRole = user?.role?.toLowerCase();
+    const isAdminUser = user?.isAdmin === true;
     const isPermanent = req.query.permanent === 'true';
     
     // Desenvolvedor tem permissão universal
@@ -210,9 +268,16 @@ export const checkDeletePermission = (entityType: 'material' | 'projeto' | 'serv
       return;
     }
     
-    // Se é delete permanente, apenas admin e gerente
+    // Usuário atribuído como admin tem permissão de delete permanente (acesso universal)
+    if (isAdminUser) {
+      console.log('🔓 Admin (isAdmin) - Permissão de delete permanente');
+      next();
+      return;
+    }
+    
+    // Se é delete permanente: admin, gerente, desenhista_industrial, engenheiro_eletricista, financeiro_faturamento
     if (isPermanent) {
-      if (['admin', 'gerente'].includes(userRole)) {
+      if (['admin', 'gerente', 'desenhista_industrial', 'engenheiro_eletricista', 'financeiro_faturamento'].includes(userRole || '')) {
         console.log(`✅ ${userRole} pode deletar ${entityType} permanentemente`);
         next();
         return;
@@ -227,7 +292,7 @@ export const checkDeletePermission = (entityType: 'material' | 'projeto' | 'serv
     }
     
     // Se é apenas desativação, comprador e engenheiro podem
-    if (['comprador', 'engenheiro'].includes(userRole)) {
+    if (['comprador', 'engenheiro', 'desenhista_industrial', 'engenheiro_eletricista'].includes(userRole || '')) {
       const permission = `deactivate_${entityType}` as Permission;
       if (hasPermission(userRole, permission)) {
         console.log(`✅ ${userRole} pode desativar ${entityType}`);
@@ -236,8 +301,8 @@ export const checkDeletePermission = (entityType: 'material' | 'projeto' | 'serv
       }
     }
     
-    // Admin e Gerente podem fazer ambos
-    if (['admin', 'gerente'].includes(userRole)) {
+    // Admin e Gerente podem fazer ambos (e desenhista/engenheiro para desativar)
+    if (['admin', 'gerente', 'desenhista_industrial', 'engenheiro_eletricista'].includes(userRole || '')) {
       console.log(`✅ ${userRole} pode deletar/desativar ${entityType}`);
       next();
       return;

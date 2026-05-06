@@ -2,11 +2,13 @@
 
 Sistema profissional de gestão para empresas de engenharia elétrica.
 
-> 📖 **Veja o que a aplicação faz** acessando [SOBRE_A_APLICACAO.md](./SOBRE_A_APLICACAO.md)
+> 📖 **Veja o que a aplicação faz** acessando
+> [SOBRE_A_APLICACAO.md](./SOBRE_A_APLICACAO.md)
 
 ## 🏗️ Arquitetura do Projeto
 
-O S3E System PRO é uma aplicação **full-stack** moderna com arquitetura de microsserviços containerizados:
+O S3E System PRO é uma aplicação **full-stack** moderna com arquitetura de
+microsserviços containerizados:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -77,7 +79,9 @@ cp .env.example .env
 # Para desenvolvimento local, os valores padrão já funcionam
 ```
 
-> ⚠️ **Segurança**: O arquivo `.env.production` contém credenciais de produção e **NUNCA** deve ser commitado no repositório. Ele está protegido pelo `.gitignore`.
+> ⚠️ **Segurança**: O arquivo `.env.production` contém credenciais de produção e
+> **NUNCA** deve ser commitado no repositório. Ele está protegido pelo
+> `.gitignore`.
 
 ### 🐳 Com Docker (Recomendado)
 
@@ -98,7 +102,7 @@ make dev-build
 
 - 🌐 **Frontend**: <http://localhost:5173>
 - 🔌 **Backend API**: <http://localhost:3001>
-- 🗄️ **PgAdmin**: <http://localhost:5050> (admin@s3e.com / admin)
+- 🗄️ **PgAdmin**: <http://localhost:5050> (<admin@s3e.com> / admin)
 - 🐘 **PostgreSQL**: localhost:5432
 
 #### Produção
@@ -111,7 +115,8 @@ docker-compose -f docker-compose.prod.yml up -d
 make prod
 ```
 
-> 📝 **Nota**: Para produção, certifique-se de ter o arquivo `.env.production` configurado com credenciais reais.
+> 📝 **Nota**: Para produção, certifique-se de ter o arquivo `.env.production`
+> configurado com credenciais reais.
 
 ### 📋 Comandos Úteis (Make)
 
@@ -128,6 +133,7 @@ make backup        # Fazer backup do banco de dados
 ### 💻 Desenvolvimento Local (Sem Docker)
 
 Para desenvolvimento sem Docker, você precisará ter instalado:
+
 - Node.js 20+
 - PostgreSQL 16+
 
@@ -163,7 +169,8 @@ npm run seed
 npm run dev
 ```
 
-> 💡 **Recomendação**: Use Docker para desenvolvimento, pois já inclui todos os serviços (PostgreSQL, PgAdmin) configurados e prontos para uso.
+> 💡 **Recomendação**: Use Docker para desenvolvimento, pois já inclui todos os
+> serviços (PostgreSQL, PgAdmin) configurados e prontos para uso.
 
 ## 🛠️ Stack Tecnológico
 
@@ -199,15 +206,18 @@ npm run dev
 
 ## 📝 Módulos Principais
 
-O sistema possui **20+ módulos** integrados para gestão completa de empresas de engenharia elétrica:
+O sistema possui **20+ módulos** integrados para gestão completa de empresas de
+engenharia elétrica:
 
 ### Core
+
 - **Dashboard** - Visão geral com métricas em tempo real
 - **Orçamentos** - Criação e gestão com geração de PDFs profissionais
 - **Projetos** - Gestão completa do ciclo de vida
 - **Obras** - Controle operacional com tarefas e equipes
 
 ### Estoque & Materiais
+
 - **Catálogo** - Gestão de materiais elétricos
 - **Kits e Quadros** - Composição de kits modulares
 - **Movimentações** - Controle de estoque
@@ -215,6 +225,7 @@ O sistema possui **20+ módulos** integrados para gestão completa de empresas d
 - **Cotações** - Banco de cotações (banco frio)
 
 ### Gestão
+
 - **Clientes** - CRM básico
 - **Fornecedores** - Cadastro e histórico
 - **Serviços** - Catálogo de serviços
@@ -223,28 +234,33 @@ O sistema possui **20+ módulos** integrados para gestão completa de empresas d
 - **Veículos** - Controle de frota
 
 ### Financeiro
+
 - **Vendas** - Controle de vendas e parcelas
 - **Contas a Receber/Pagar** - Gestão financeira
 - **Despesas Fixas** - Controle de despesas recorrentes
 - **Vales** - Vale transporte e alimentação
 
 ### Outros
+
 - **Notas Fiscais (NFe)** - Emissão e controle
 - **Relatórios** - Análises e exportações
 - **Auditoria** - Logs e rastreabilidade
 - **Configurações** - Personalização do sistema
 
-> 📖 Para detalhes completos de cada módulo, veja [SOBRE_A_APLICACAO.md](./SOBRE_A_APLICACAO.md)
+> 📖 Para detalhes completos de cada módulo, veja
+> [SOBRE_A_APLICACAO.md](./SOBRE_A_APLICACAO.md)
 
 ## 🔐 Segurança e Variáveis de Ambiente
 
 ### ⚠️ Importante sobre `.env.production`
 
-O arquivo `.env.production` contém **credenciais críticas de produção** e está protegido pelo `.gitignore`. 
+O arquivo `.env.production` contém **credenciais críticas de produção** e está
+protegido pelo `.gitignore`.
 
 **NUNCA faça commit deste arquivo!**
 
 Para trabalhar localmente:
+
 1. Use `.env.example` como template
 2. Copie para `.env` para desenvolvimento
 3. Mantenha `.env.production` apenas localmente com suas credenciais reais

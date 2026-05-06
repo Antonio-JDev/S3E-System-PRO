@@ -2,20 +2,24 @@
 
 ## Visão Geral
 
-Este documento apresenta todos os ícones atualizados no sistema S3E, otimizados para representar adequadamente um sistema de gestão empresarial de **engenharia elétrica**.
+Este documento apresenta todos os ícones atualizados no sistema S3E, otimizados
+para representar adequadamente um sistema de gestão empresarial de **engenharia
+elétrica**.
 
 ---
 
 ## 🔵 Ícone da Marca - S3E
 
 ### `S3ELogoIcon`
+
 **Descrição**: Logo oficial da S3E - Hexágono com raio elétrico  
 **Uso**: Sidebar, branding  
-**Simbolismo**: Representa energia elétrica (raio) contida em uma estrutura sólida (hexágono)
+**Simbolismo**: Representa energia elétrica (raio) contida em uma estrutura
+sólida (hexágono)
 
 ```tsx
-import { S3ELogoIcon } from '../constants';
-<S3ELogoIcon className="w-8 h-8" />
+import { S3ELogoIcon } from "../constants";
+<S3ELogoIcon className="w-8 h-8" />;
 ```
 
 **Visual**: Hexágono azul com raio amarelo/branco no centro
@@ -25,61 +29,73 @@ import { S3ELogoIcon } from '../constants';
 ## 📋 Ícones de Navegação Principal
 
 ### 1. **Dashboard** - `DashboardIcon`
+
 - **Antes**: ChartBarIcon (gráfico de barras simples)
 - **Depois**: Painel com gráficos e pontos de dados
 - **Razão**: Representa melhor um dashboard executivo com múltiplas métricas
 
 ### 2. **Orçamentos** - `BudgetIcon`
+
 - **Antes**: ShoppingCartIcon (carrinho de compras) ❌
 - **Depois**: Documento com símbolo de dinheiro
 - **Razão**: Orçamento é um documento financeiro, não uma compra
 
 ### 3. **Catálogo** - `CatalogIcon`
+
 - **Antes**: BookOpenIcon (livro aberto)
 - **Depois**: Grid 2x2 de produtos
 - **Razão**: Melhor representa um catálogo de produtos elétricos
 
 ### 4. **Serviços** - `ElectricalServiceIcon`
+
 - **Antes**: WrenchScrewdriverIcon (ferramentas genéricas)
 - **Depois**: Raio elétrico com padrão de energia
 - **Razão**: Específico para serviços de engenharia elétrica
 
 ### 5. **Movimentações** - `MovementIcon`
+
 - **Antes**: ArrowPathIcon (setas circulares)
 - **Depois**: Setas bidirecionais (entrada/saída)
 - **Razão**: Representa melhor movimentação de estoque
 
 ### 6. **Histórico** - `HistoryIcon`
+
 - **Antes**: ClockIcon
 - **Depois**: Relógio com seta de retorno
 - **Razão**: Mantido, representa bem histórico temporal
 
 ### 7. **Compras** - `ShoppingBagIcon`
+
 - **Antes**: TagIcon (etiqueta de preço) ❌
 - **Depois**: Sacola de compras
 - **Razão**: Tag representa preço/desconto, não compra
 
 ### 8. **Materiais** - `CubeIcon`
+
 - **Antes**: CubeIcon
 - **Depois**: Mantido (Caixa 3D)
 - **Razão**: Perfeito para representar materiais/estoque
 
 ### 9. **Projetos** - `BlueprintIcon`
+
 - **Antes**: FolderIcon (pasta genérica)
 - **Depois**: Planta/Blueprint técnico
 - **Razão**: Projetos de engenharia são representados por plantas técnicas
 
 ### 10. **Obras** - `ConstructionIcon`
+
 - **Antes**: BuildingOfficeIcon (prédio de escritório) ❌
 - **Depois**: Canteiro de obras/capacete
 - **Razão**: Representa melhor obras em execução
 
 ### 11. **Clientes** - `ClientsIcon`
+
 - **Antes**: UsersIcon
 - **Depois**: Mantido (Grupo de pessoas)
 - **Razão**: Representa bem clientes/usuários
 
 ### 12. **Fornecedores** - `SupplierIcon`
+
 - **Antes**: TruckIcon
 - **Depois**: Mantido (Caminhão de entrega)
 - **Razão**: Representa bem fornecedores e logística
@@ -89,30 +105,37 @@ import { S3ELogoIcon } from '../constants';
 ## 🎯 Ícones de Ação e Status
 
 ### `BoltIcon` - Raio/Energia
+
 **Uso**: Ações rápidas, energia elétrica  
 **Contexto**: Título "Ações Rápidas", indicador de projeto ativo
 
 ### `ExclamationTriangleIcon` - Alerta
+
 **Uso**: Alertas críticos, avisos  
 **Cor**: Laranja/Vermelho
 
 ### `CurrencyDollarIcon` - Valores Financeiros
+
 **Uso**: Valor do estoque, preços, orçamentos  
 **Cor**: Roxo (nos cards)
 
 ### `TrendingUpIcon` - Crescimento/Tendência
+
 **Uso**: Indicadores de crescimento, métricas positivas  
 **Cor**: Verde
 
 ### `PlusCircleIcon` - Adicionar/Criar
+
 **Uso**: Criar novo projeto, adicionar item  
 **Cor**: Verde
 
 ### `DocumentIcon` - Documento/Arquivo
+
 **Uso**: Documentos, arquivos, relatórios  
 **Cor**: Variável
 
 ### `FolderIcon` - Pasta Genérica
+
 **Uso**: Organização de arquivos  
 **Cor**: Variável
 
@@ -149,21 +172,25 @@ import { S3ELogoIcon } from '../constants';
 ## ⚡ Ícones de Ações Rápidas
 
 ### 1. Gerenciar Materiais
+
 - **Ícone**: `CubeIcon`
 - **Cor**: Branco (fundo azul)
 - **Estilo**: Botão primário
 
 ### 2. Novo Projeto
+
 - **Ícone**: `PlusCircleIcon`
 - **Cor**: Verde
 - **Estilo**: Botão secundário
 
 ### 3. Criar Orçamento
+
 - **Ícone**: `BudgetIcon`
 - **Cor**: Roxo
 - **Estilo**: Botão secundário
 
 ### 4. Gerenciar Fornecedores
+
 - **Ícone**: `SupplierIcon`
 - **Cor**: Laranja
 - **Estilo**: Botão secundário
@@ -173,6 +200,7 @@ import { S3ELogoIcon } from '../constants';
 ## 🎨 Paleta de Cores dos Ícones
 
 ### Cores Primárias (Fundos)
+
 - **Azul**: `#2563eb` - Gestão, Catálogo, Materiais
 - **Verde**: `#16a34a` - Projetos, Sucesso, Adicionar
 - **Roxo**: `#9333ea` - Financeiro, Orçamentos
@@ -180,6 +208,7 @@ import { S3ELogoIcon } from '../constants';
 - **Vermelho**: `#dc2626` - Crítico, Erro
 
 ### Gradientes
+
 ```css
 /* Logo e destaques */
 bg-gradient-to-br from-brand-blue to-blue-600
@@ -196,26 +225,31 @@ bg-gradient-to-br from-brand-purple to-purple-600
 ## 📐 Tamanhos Padrão
 
 ### Navegação Sidebar
+
 ```tsx
 <Icon className="w-5 h-5 mr-3" />
 ```
 
 ### Cards de Dashboard (grandes)
+
 ```tsx
 <Icon className="w-7 h-7" />
 ```
 
 ### Títulos de Seção
+
 ```tsx
 <Icon className="w-6 h-6 mr-3" />
 ```
 
 ### Logo
+
 ```tsx
 <S3ELogoIcon className="w-8 h-8" />
 ```
 
 ### Ações Rápidas
+
 ```tsx
 <Icon className="w-5 h-5" />
 ```
@@ -227,14 +261,14 @@ bg-gradient-to-br from-brand-purple to-purple-600
 ### 1. Importar do Constants
 
 ```tsx
-import { 
-    S3ELogoIcon,
-    DashboardIcon, 
-    BudgetIcon, 
-    BlueprintIcon,
-    ElectricalServiceIcon,
-    // ... outros
-} from '../constants';
+import {
+  S3ELogoIcon,
+  DashboardIcon,
+  BudgetIcon,
+  BlueprintIcon,
+  ElectricalServiceIcon,
+  // ... outros
+} from "../constants";
 ```
 
 ### 2. Usar em Componentes
@@ -258,9 +292,9 @@ import {
 
 ```tsx
 export const navLinks = [
-    { name: 'Dashboard', icon: DashboardIcon },
-    { name: 'Orçamentos', icon: BudgetIcon },
-    // ...
+  { name: "Dashboard", icon: DashboardIcon },
+  { name: "Orçamentos", icon: BudgetIcon },
+  // ...
 ];
 ```
 
@@ -270,38 +304,42 @@ export const navLinks = [
 
 ### Antes vs Depois
 
-| Seção | Antes | Depois | Melhoria |
-|-------|-------|--------|----------|
-| **Logo** | Cubo genérico | Hexágono com raio | Identidade de engenharia elétrica |
-| **Orçamentos** | Carrinho 🛒 | Documento $ | Contextualmente correto |
-| **Catálogo** | Livro | Grid de produtos | Mais visual e moderno |
-| **Serviços** | Ferramentas | Raio elétrico | Específico para engenharia elétrica |
-| **Compras** | Tag/Etiqueta | Sacola de compras | Representa ação de comprar |
-| **Projetos** | Pasta | Blueprint/Planta | Profissional para engenharia |
-| **Obras** | Prédio escritório | Canteiro de obras | Representa obras em execução |
-| **Quick Actions** | Apenas texto | Ícones + gradientes | Mais visual e atrativo |
-| **Dashboard Cards** | Ícones simples | Ícones com contexto | Melhor comunicação visual |
+| Seção               | Antes             | Depois              | Melhoria                            |
+| ------------------- | ----------------- | ------------------- | ----------------------------------- |
+| **Logo**            | Cubo genérico     | Hexágono com raio   | Identidade de engenharia elétrica   |
+| **Orçamentos**      | Carrinho 🛒       | Documento $         | Contextualmente correto             |
+| **Catálogo**        | Livro             | Grid de produtos    | Mais visual e moderno               |
+| **Serviços**        | Ferramentas       | Raio elétrico       | Específico para engenharia elétrica |
+| **Compras**         | Tag/Etiqueta      | Sacola de compras   | Representa ação de comprar          |
+| **Projetos**        | Pasta             | Blueprint/Planta    | Profissional para engenharia        |
+| **Obras**           | Prédio escritório | Canteiro de obras   | Representa obras em execução        |
+| **Quick Actions**   | Apenas texto      | Ícones + gradientes | Mais visual e atrativo              |
+| **Dashboard Cards** | Ícones simples    | Ícones com contexto | Melhor comunicação visual           |
 
 ---
 
 ## 🎯 Princípios de Design
 
 ### 1. **Consistência**
+
 - Todos os ícones seguem o mesmo estilo (outline, stroke-width: 2)
 - Tamanhos padronizados (w-5, w-6, w-7, w-8)
 - Cores da paleta da marca
 
 ### 2. **Significado Claro**
+
 - Cada ícone representa claramente sua função
 - Evita ícones genéricos quando possível
 - Contextualizado para engenharia elétrica
 
 ### 3. **Hierarquia Visual**
+
 - Ícones maiores para elementos importantes
 - Gradientes para destaques
 - Cores consistentes por categoria
 
 ### 4. **Acessibilidade**
+
 - Ícones sempre acompanhados de texto
 - Contraste adequado
 - Tamanhos mínimos respeitados (w-4 = 16px)
@@ -332,6 +370,7 @@ Os ícones são totalmente responsivos usando classes Tailwind:
 4. **Lazy Loading**: Componentes carregam ícones apenas quando necessário
 
 ### Bundle Size
+
 - Cada ícone: ~200-500 bytes
 - Total de ícones: ~8-10 KB
 - **Muito mais leve** que bibliotecas como Font Awesome ou Material Icons
@@ -402,7 +441,9 @@ Os ícones são totalmente responsivos usando classes Tailwind:
 **S3E Engenharia Elétrica**  
 Website: [www.s3eengenharia.com.br](https://www.s3eengenharia.com.br)
 
-**Objetivo do Sistema**: Gestão completa de processos empresariais de engenharia elétrica, incluindo:
+**Objetivo do Sistema**: Gestão completa de processos empresariais de engenharia
+elétrica, incluindo:
+
 - Projetos elétricos
 - Obras e instalações
 - Materiais e equipamentos elétricos
@@ -410,5 +451,5 @@ Website: [www.s3eengenharia.com.br](https://www.s3eengenharia.com.br)
 - Fornecedores especializados
 - Gestão de equipes técnicas
 
-Todos os ícones foram escolhidos para refletir esta identidade profissional e técnica.
-
+Todos os ícones foram escolhidos para refletir esta identidade profissional e
+técnica.

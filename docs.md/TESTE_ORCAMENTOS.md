@@ -3,6 +3,7 @@
 ## ⚡ Teste Rápido (5 minutos)
 
 ### 1. **Iniciar o Sistema**
+
 ```bash
 # Se ainda não estiver rodando:
 cd frontend
@@ -13,10 +14,12 @@ http://localhost:5173
 ```
 
 ### 2. **Navegar para Orçamentos**
+
 - Clique em "Orçamentos" na sidebar
 - Veja a lista de orçamentos existentes
 
 ### 3. **Criar Novo Orçamento**
+
 - Clique no botão **"Criar Novo Orçamento"** (azul, topo direito)
 
 ---
@@ -24,11 +27,12 @@ http://localhost:5173
 ## 🎯 Teste 1: Modal Melhorado
 
 ### **O que observar:**
+
 ✅ Modal preenche 95% da altura da tela  
 ✅ Header azul com gradiente  
 ✅ Scroll suave no conteúdo  
 ✅ 3 fieldsets coloridos (azul, roxo, laranja)  
-✅ Footer fixo com botões coloridos  
+✅ Footer fixo com botões coloridos
 
 **Status**: ⏱️ Deve carregar instantaneamente e sem problemas
 
@@ -61,6 +65,7 @@ http://localhost:5173
    - OU simplesmente **clique** no material
 
 5. **Veja os custos de referência:**
+
    ```
    ✅ Deve aparecer um card com:
    - Nome do material
@@ -135,6 +140,7 @@ http://localhost:5173
    - Taxas: R$ 25,00
 
 5. **Veja o cálculo:**
+
    ```
    Materiais:     R$ 600,00
    Catálogo:      R$ 185,50
@@ -149,6 +155,7 @@ http://localhost:5173
    ```
 
 **Observe:**
+
 - ✅ Card azul "TOTAL GERAL" atualiza automaticamente
 - ✅ Todos os subtotais corretos
 
@@ -197,6 +204,7 @@ http://localhost:5173
    - **Modal de visualização abre**
 
 4. **Observe o PDF:**
+
    ```
    ✅ Marca d'água "S3E" ao fundo
    ✅ Cabeçalho com logo e contatos
@@ -335,6 +343,7 @@ http://localhost:5173
 1. **Mantenha a página aberta** em `localhost:5173`
 
 2. **Edite o arquivo:**
+
    ```
    frontend/src/components/Orcamentos.tsx
    ```
@@ -352,6 +361,7 @@ http://localhost:5173
    - ✅ Estado preservado (se modal estiver aberto)
 
 **Console deve mostrar:**
+
 ```
 [vite] hot updated: /src/components/Orcamentos.tsx
 ```
@@ -361,6 +371,7 @@ http://localhost:5173
 ## 📋 Checklist Completo de Testes
 
 ### **Interface Geral:**
+
 - [ ] Modal abre sem problemas
 - [ ] Modal tem scroll funcional
 - [ ] Header azul com gradiente
@@ -368,6 +379,7 @@ http://localhost:5173
 - [ ] Footer com botões visíveis
 
 ### **Busca de Materiais:**
+
 - [ ] Campo de busca funciona
 - [ ] Lista aparece ao digitar
 - [ ] Navegação por teclado (↑ ↓ Enter)
@@ -377,12 +389,14 @@ http://localhost:5173
 - [ ] Indicador de margem funciona
 
 ### **Itens do Catálogo:**
+
 - [ ] Campo de busca funciona
 - [ ] Badge diferencia Kit e Produto
 - [ ] Adiciona corretamente
 - [ ] Subtotal separado calcula
 
 ### **Cálculos:**
+
 - [ ] Subtotal Materiais correto
 - [ ] Subtotal Catálogo correto
 - [ ] Subtotal Serviços correto
@@ -390,6 +404,7 @@ http://localhost:5173
 - [ ] Atualiza em tempo real
 
 ### **PDF/Impressão:**
+
 - [ ] Marca d'água visível
 - [ ] Cabeçalho profissional
 - [ ] Logo S3E aparece
@@ -399,6 +414,7 @@ http://localhost:5173
 - [ ] Rodapé completo
 
 ### **Responsividade:**
+
 - [ ] Desktop OK
 - [ ] Tablet OK
 - [ ] Mobile OK
@@ -408,25 +424,33 @@ http://localhost:5173
 ## 🐛 Problemas Comuns e Soluções
 
 ### **Problema 1: Autocomplete não aparece**
+
 **Solução:**
+
 - Certifique-se de digitar algo no campo
 - Clique no campo primeiro
 - Verifique se há materiais disponíveis
 
 ### **Problema 2: Margem não calcula**
+
 **Solução:**
+
 - Verifique se o material foi adicionado corretamente
 - CMP deve estar aparecendo
 - Preço orçado deve ser > 0
 
 ### **Problema 3: PDF sem cores**
+
 **Solução:**
+
 - Na impressão, ative "Plano de fundo: ✓"
 - Use Chrome ou Edge (melhor suporte)
 - Verifique configurações da impressora
 
 ### **Problema 4: Modal não scrolla**
+
 **Solução:**
+
 - Recarregue a página (Ctrl+R)
 - Verifique se está na versão atualizada
 - Limpe cache (Ctrl+Shift+R)
@@ -436,6 +460,7 @@ http://localhost:5173
 ## 📊 Casos de Teste Específicos
 
 ### **Caso A: Orçamento Simples**
+
 ```
 Cliente: Mariana Costa
 Projeto: Projeto Luminotécnico
@@ -444,9 +469,11 @@ Itens do Catálogo: Kit Instalação x1
 Serviços: Consultoria de Projeto x2
 Mão de Obra: R$ 500,00
 ```
+
 **Resultado esperado:** Total ~R$ 1.092,75
 
 ### **Caso B: Orçamento Completo**
+
 ```
 Cliente: Construtora Alfa
 Projeto: Instalação Completa Ed. Comercial
@@ -457,9 +484,11 @@ Serviços: 3 serviços
 Mão de Obra: R$ 5.000,00
 Desconto: R$ 500,00
 ```
+
 **Resultado esperado:** Total > R$ 5.000,00
 
 ### **Caso C: Apenas Kits**
+
 ```
 Cliente: Indústria Gama
 Projeto: Manutenção Preventiva
@@ -467,6 +496,7 @@ Tipo: Manutenção
 Catálogo: 3 kits de manutenção
 Serviços: Manutenção Preventiva x1
 ```
+
 **Resultado esperado:** Orçamento sem materiais do estoque
 
 ---
@@ -474,24 +504,28 @@ Serviços: Manutenção Preventiva x1
 ## ✅ Critérios de Sucesso
 
 ### **✓ Funcionalidade:**
+
 - Todos os autocompletes funcionam
 - Cálculos estão corretos
 - Modal scrolla sem problemas
 - PDF gera com qualidade
 
 ### **✓ Usabilidade:**
+
 - Busca é rápida e intuitiva
 - Indicador de margem é claro
 - Campos editáveis são óbvios
 - Botões respondem bem
 
 ### **✓ Visual:**
+
 - Cores consistentes
 - Gradientes aplicados
 - Ícones apropriados
 - Layout profissional
 
 ### **✓ Performance:**
+
 - HMR atualiza < 1 segundo
 - Busca responde instantaneamente
 - Cálculos são imediatos
@@ -503,14 +537,14 @@ Serviços: Manutenção Preventiva x1
 
 Execute os testes e valide:
 
-| Teste | Tempo Esperado | Status |
-|-------|---------------|--------|
-| Abrir modal | < 0.5s | [ ] |
-| Buscar material | < 0.2s | [ ] |
-| Adicionar item | < 0.1s | [ ] |
-| Calcular total | < 0.1s | [ ] |
-| Gerar PDF | < 2s | [ ] |
-| HMR update | < 1s | [ ] |
+| Teste           | Tempo Esperado | Status |
+| --------------- | -------------- | ------ |
+| Abrir modal     | < 0.5s         | [ ]    |
+| Buscar material | < 0.2s         | [ ]    |
+| Adicionar item  | < 0.1s         | [ ]    |
+| Calcular total  | < 0.1s         | [ ]    |
+| Gerar PDF       | < 2s           | [ ]    |
+| HMR update      | < 1s           | [ ]    |
 
 ---
 
@@ -523,13 +557,14 @@ Após todos os testes, você deve ter:
 ✅ Preços editáveis com feedback de margem  
 ✅ Kits do catálogo integrados  
 ✅ PDF profissional pronto para cliente  
-✅ Experiência de usuário fluida  
+✅ Experiência de usuário fluida
 
 ---
 
 ## 📞 Suporte
 
 Se encontrar algum problema:
+
 1. Verifique o console do navegador (F12)
 2. Verifique o terminal do Vite
 3. Limpe o cache (Ctrl+Shift+R)
@@ -538,4 +573,3 @@ Se encontrar algum problema:
 ---
 
 **Sistema testado e aprovado para uso em produção! 🚀**
-

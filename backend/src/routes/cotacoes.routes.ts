@@ -12,7 +12,8 @@ import {
   previewImportacao,
   gerarTemplate,
   exportarCotacoes,
-  deletarCotacoesEmLote
+  deletarCotacoesEmLote,
+  gerarSKUsCotacoes
 } from '../controllers/cotacoesController';
 import { authenticate, authorize } from '../middlewares/auth';
 
@@ -67,6 +68,9 @@ router.delete('/bulk', authenticate, authorize('admin', 'gerente', 'engenheiro',
 router.get('/:id', buscarCotacao);
 router.put('/:id', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), atualizarCotacao);
 router.delete('/:id', authenticate, authorize('admin', 'gerente', 'engenheiro', 'orcamentista', 'desenvolvedor'), deletarCotacao);
+
+// Rota especial para gerar SKUs para cotações existentes
+router.post('/gerar-skus', authenticate, authorize('admin', 'desenvolvedor'), gerarSKUsCotacoes);
 
 export default router;
 

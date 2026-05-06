@@ -8,10 +8,17 @@ export interface Cliente {
   email: string;
   telefone: string;
   endereco: string;
+  numero?: string;
+  bairro: string;
+  inscricaoEstadual?: string;
+  /** 1=Contribuinte (exige IE), 2=Isento (IE "ISENTO"), 9=Não contribuinte */
+  indIEDest?: number | null;
   cidade: string;
   estado: string;
   cep: string;
   tipo: 'PF' | 'PJ';
+  /** JSON completo da API CNPJ.ws (raw) para modal de detalhes */
+  dadosCnpjWs?: unknown;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -23,14 +30,23 @@ export interface CreateClienteData {
   email: string;
   telefone: string;
   endereco: string;
+  numero?: string;
+  bairro?: string;
+  inscricaoEstadual?: string;
+  /** 1=Contribuinte, 2=Isento, 9=Não contribuinte */
+  indIEDest?: number | null;
   cidade: string;
   estado: string;
   cep: string;
   tipo: 'PF' | 'PJ';
+  /** JSON completo da API CNPJ.ws (raw) para persistir no cadastro */
+  dadosCnpjWs?: unknown;
 }
 
 export interface UpdateClienteData extends Partial<CreateClienteData> {
   ativo?: boolean;
+  /** JSON completo da API CNPJ.ws (raw) para persistir e exibir no modal sem nova consulta */
+  dadosCnpjWs?: unknown;
 }
 
 export interface ClienteFilters {
@@ -300,6 +316,45 @@ class ClientesService {
         success: false,
         error: 'Erro de conexão ao reativar cliente'
       };
+    }
+  }
+
+  /**
+   * Consulta CNPJ na CNPJ.ws (dados + IE por UF + indIEDest)
+   */
+  async consultarCnpj(cnpj: string) {
+    try {
+      const raw = cnpj.replace(/\D/g, '');
+      if (raw.length !== 14) {
+        return { success: false, error: 'CNPJ deve ter 14 dígitos', data: null };
+      }
+      const response = await axiosApiService.get<{
+        razaoSocial: string;
+        nomeFantasia?: string;
+        cnpj: string;
+        email?: string;
+        telefone?: string;
+        logradouro?: string;
+        numero?: string;
+        bairro?: string;
+        cidade?: string;
+        estado?: string;
+        cep?: string;
+        inscricaoEstadual: string;
+        indIEDest: 1 | 2 | 9;
+        raw?: any;
+      }>(`${ENDPOINTS.CLIENTES}/cnpj/${raw}`);
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return {
+        success: false,
+        error: (response as any).error || 'CNPJ não encontrado',
+        data: null
+      };
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || error?.message || 'Erro ao consultar CNPJ';
+      return { success: false, error: msg, data: null };
     }
   }
 

@@ -1,16 +1,19 @@
 # 🔒 Guia de Teste - Rotas Protegidas com JWT
 
-Este guia mostra como testar a autenticação JWT e as rotas protegidas da API S3E System.
+Este guia mostra como testar a autenticação JWT e as rotas protegidas da API S3E
+System.
 
 ---
 
 ## 📋 Pré-requisitos
 
 1. **Backend rodando:**
+
    ```bash
    cd backend
    npm run dev
    ```
+
    Deve estar em: `http://localhost:3001`
 
 2. **Banco de dados:**
@@ -30,6 +33,7 @@ curl -X POST http://localhost:3000/api/auth/login \
 ```
 
 **Resposta esperada (200):**
+
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -56,6 +60,7 @@ curl -X GET http://localhost:3000/api/protected/data \
 ```
 
 **Resposta esperada (200):**
+
 ```json
 {
   "success": true,
@@ -79,6 +84,7 @@ curl -X GET http://localhost:3000/api/protected/admin-only \
 ```
 
 **Resposta esperada (200):**
+
 ```json
 {
   "success": true,
@@ -101,6 +107,7 @@ curl -X GET http://localhost:3000/api/protected/data
 ```
 
 **Resposta esperada (401):**
+
 ```json
 {
   "error": "Token não fornecido"
@@ -117,6 +124,7 @@ curl -X GET http://localhost:3000/api/protected/data \
 ```
 
 **Resposta esperada (401):**
+
 ```json
 {
   "error": "Token inválido"
@@ -128,11 +136,13 @@ curl -X GET http://localhost:3000/api/protected/data \
 ## 🧪 Testes com Postman/Insomnia
 
 ### **1. Login**
+
 - **Método:** POST
 - **URL:** `http://localhost:3000/api/auth/login`
 - **Headers:**
   - `Content-Type: application/json`
 - **Body (JSON):**
+
   ```json
   {
     "email": "admin@s3e.com.br",
@@ -141,12 +151,14 @@ curl -X GET http://localhost:3000/api/protected/data \
   ```
 
 ### **2. Rota Protegida**
+
 - **Método:** GET
 - **URL:** `http://localhost:3000/api/protected/data`
 - **Headers:**
   - `Authorization: Bearer [TOKEN_DO_LOGIN]`
 
 ### **3. Rota Admin**
+
 - **Método:** GET
 - **URL:** `http://localhost:3000/api/protected/admin-only`
 - **Headers:**
@@ -220,18 +232,22 @@ Marque conforme for testando:
 ## 🚨 Troubleshooting
 
 ### **Erro: "Token não fornecido"**
+
 - **Causa:** Header `Authorization` ausente
 - **Solução:** Adicione `Authorization: Bearer <token>`
 
 ### **Erro: "Token inválido"**
+
 - **Causa:** Token malformado ou assinatura incorreta
 - **Solução:** Faça login novamente para obter novo token
 
 ### **Erro: "Token expirado"**
+
 - **Causa:** Token passou de 7 dias
 - **Solução:** Faça login novamente
 
 ### **Erro: "Acesso negado"**
+
 - **Causa:** Usuário não tem role necessária (ex: não é admin)
 - **Solução:** Use um usuário com permissão adequada
 
@@ -284,12 +300,14 @@ echo -e "\n✅ Testes concluídos!"
 ```
 
 **Para executar:**
+
 ```bash
 chmod +x test-auth.sh
 ./test-auth.sh
 ```
 
 **Nota:** Requer `jq` instalado para formatar JSON. Instale com:
+
 ```bash
 # Windows (Git Bash/Chocolatey)
 choco install jq
@@ -301,7 +319,8 @@ choco install jq
 
 ## 🎉 Conclusão
 
-O sistema de autenticação JWT está completamente implementado e integrado! Todas as rotas protegidas estão funcionando com:
+O sistema de autenticação JWT está completamente implementado e integrado! Todas
+as rotas protegidas estão funcionando com:
 
 - ✅ Validação de token JWT
 - ✅ Injeção de dados do usuário em `req.user`
@@ -310,4 +329,3 @@ O sistema de autenticação JWT está completamente implementado e integrado! To
 - ✅ Integração completa com o Express
 
 **Pronto para uso em produção!** 🚀
-

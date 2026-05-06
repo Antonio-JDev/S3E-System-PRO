@@ -4,6 +4,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { vendasService, type Venda } from '../services/vendasService';
 import { orcamentosService } from '../services/orcamentosService';
 import { AuthContext } from '../contexts/AuthContext';
+import { getUploadUrl } from '../config/api';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -76,7 +77,7 @@ interface ContaReceber {
     valor: number;
     valorRecebido?: number;
     dataPagamento?: string;
-    status: 'Pendente' | 'Recebido' | 'Atrasado';
+    status: 'Pendente' | 'Recebido' | 'Recebido Parcial' | 'Atrasado';
     observacoes?: string;
     statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null;
     projetoId?: string;
@@ -98,6 +99,7 @@ interface VendaDetalhada {
     valorTotal: number;
     formaPagamento: string;
     parcelas: number;
+    vendedorNome?: string | null;
     cliente: {
         id: string;
         nome: string;
@@ -125,6 +127,7 @@ interface VendaDetalhada {
     orcamento?: {
         id: string;
         items: ItemVenda[];
+        orcamentistaNome?: string | null;
     };
 }
 
@@ -136,13 +139,28 @@ interface ContasAReceberProps {
 // ==================== COMPONENT ====================
 const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAtiva }) => {
     const { user } = useContext(AuthContext)!;
+
+    const toISODate = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const getMesAtualRange = () => {
+        const hoje = new Date();
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+        return { dataInicio: toISODate(inicio), dataFim: toISODate(fim) };
+    };
     
     // Estados
     const [contasReceber, setContasReceber] = useState<ContaReceber[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState<string>('Todos');
-    const [filterPeriodo, setFilterPeriodo] = useState<string>('Todos');
+    const [filterStatus, setFilterStatus] = useState<string>('Em aberto'); // Padrão: apenas Pendente e Atrasado
+    const [filterPeriodo, setFilterPeriodo] = useState<string>('MesAtual');
+    const [{ dataInicio, dataFim }, setFiltroDatas] = useState(() => getMesAtualRange());
     
     // Modal de Baixa
     const [isBaixaModalOpen, setIsBaixaModalOpen] = useState(false);
@@ -150,6 +168,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().split('T')[0]);
     const [valorRecebido, setValorRecebido] = useState('0');
     const [observacoesBaixa, setObservacoesBaixa] = useState('');
+    const [meioPagamentoBaixa, setMeioPagamentoBaixa] = useState<string>('PIX');
     
     // Modal de Visualização de Venda (usando o mesmo formato do componente Vendas)
     const [isVisualizarModalOpen, setIsVisualizarModalOpen] = useState(false);
@@ -163,6 +182,22 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     // AlertDialog de Confirmação
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
 
+    // Modal Histórico de recebimentos da duplicata
+    const [isHistoricoModalOpen, setIsHistoricoModalOpen] = useState(false);
+    const [historicoConta, setHistoricoConta] = useState<ContaReceber | null>(null);
+    const [historicoData, setHistoricoData] = useState<{ conta: any; recebimentos: any[] } | null>(null);
+    const [loadingHistorico, setLoadingHistorico] = useState(false);
+
+    // Modal Nova Conta a Receber (receita manual: Entradas / Outras Receitas)
+    const [isNovaContaModalOpen, setIsNovaContaModalOpen] = useState(false);
+    const [novaContaClassificacao, setNovaContaClassificacao] = useState<'ENTRADA' | 'OUTRAS_RECEITAS'>('ENTRADA');
+    const [novaContaPagador, setNovaContaPagador] = useState('');
+    const [novaContaDescricao, setNovaContaDescricao] = useState('');
+    const [novaContaValor, setNovaContaValor] = useState('');
+    const [novaContaVencimento, setNovaContaVencimento] = useState(new Date().toISOString().split('T')[0]);
+    const [novaContaObservacoes, setNovaContaObservacoes] = useState('');
+    const [salvandoNovaConta, setSalvandoNovaConta] = useState(false);
+
     // Carregar dados
     useEffect(() => {
         // Carregar vendas primeiro para calcular número sequencial
@@ -170,6 +205,30 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
             loadContasReceber();
         });
     }, []);
+
+    // Sincronizar “atalhos” de período com os campos de data (calendário)
+    useEffect(() => {
+        const hoje = new Date();
+        if (filterPeriodo === 'MesAtual') {
+            setFiltroDatas(getMesAtualRange());
+            return;
+        }
+        if (filterPeriodo === 'Todos') {
+            setFiltroDatas({ dataInicio: '', dataFim: '' });
+            return;
+        }
+        if (filterPeriodo === 'Próximo30Dias') {
+            const inicio = toISODate(hoje);
+            const fim = toISODate(new Date(hoje.getTime() + 30 * 24 * 60 * 60 * 1000));
+            setFiltroDatas({ dataInicio: inicio, dataFim: fim });
+            return;
+        }
+        if (filterPeriodo === 'Vencidas') {
+            const ontem = new Date(hoje.getTime() - 24 * 60 * 60 * 1000);
+            setFiltroDatas({ dataInicio: '', dataFim: toISODate(ontem) });
+            return;
+        }
+    }, [filterPeriodo]);
 
     const loadContasReceber = async () => {
         setLoading(true);
@@ -196,40 +255,45 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                 const contasProcessadas = response.data.map((conta: any) => {
                     // Detectar atraso
                     const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
-                    
-                    // Extrair informações da venda e orçamento
+
+                    // Extrair informações da venda e orçamento (contas de venda) ou pagador (contas manuais)
                     const venda = conta.venda || {};
                     const orcamento = venda.orcamento || {};
-                    const cliente = conta.cliente || venda.cliente || orcamento.cliente || {};
-                    
-                    // Calcular número sequencial da venda
+                    const cliente = conta.clientePagador || conta.cliente || venda.cliente || orcamento.cliente || {};
+                    const clienteNome = cliente?.nome ?? conta.pagadorNome ?? 'Cliente não informado';
+
+                    // Número do pedido de venda: usar numeroSequencial da venda (igual à coluna N° na lista de vendas)
                     const vendaId = conta.vendaId || venda.id;
-                    const indiceVenda = vendasOrdenadas.findIndex(v => v.id === vendaId);
-                    const numeroSequencialVenda = indiceVenda >= 0 ? indiceVenda + 1 : null;
-                    
-                    // Identificar se é entrada (numeroParcela = 0) ou parcela normal
-                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
-                    const numeroParcela = conta.numeroParcela || 1;
-                    
+                    const numeroSequencialVenda = venda?.numeroSequencial != null
+                        ? venda.numeroSequencial
+                        : (vendaId ? (() => {
+                            const indiceVenda = vendasOrdenadas.findIndex((v: any) => v.id === vendaId);
+                            return indiceVenda >= 0 ? indiceVenda + 1 : null;
+                        })() : null);
+
+                    // Identificar se é entrada (numeroParcela = 0) ou parcela normal; contas manuais tipo ENTRADA
+                    const isEntrada = conta.tipo === 'ENTRADA' || conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
+                    const numeroParcela = conta.numeroParcela ?? 1;
+
                     return {
                         id: conta.id,
                         vendaId: vendaId || 'N/A',
                         numeroParcela: numeroParcela,
-                        isEntrada: isEntrada, // Flag para identificar entrada
+                        isEntrada: isEntrada,
                         numeroDuplicata: isEntrada ? 'ENTRADA' : `DUP-${numeroParcela.toString().padStart(3, '0')}`,
-                        numeroVenda: venda.numeroVenda || 'N/A', // Número da venda (VND-xxx) - mantido para referência
-                        numeroSequencialVenda: numeroSequencialVenda, // Número sequencial (1, 2, 3...)
-                        numeroOS: orcamento.numeroSequencial || null, // Número sequencial da OS
-                        clienteNome: cliente.nome || 'Cliente não informado',
+                        numeroVenda: venda.numeroVenda || (conta.tipo !== 'VENDA' ? conta.tipo : 'N/A'),
+                        numeroSequencialVenda: numeroSequencialVenda,
+                        numeroOS: orcamento.numeroSequencial || null,
+                        clienteNome,
                         projetoTitulo: conta.descricao || orcamento.titulo || 'Projeto',
                         dataVencimento: conta.dataVencimento,
                         valor: conta.valorParcela || conta.valor || 0,
-                        valorRecebido: conta.valorRecebido,
+                        valorRecebido: conta.valorRecebido ?? (conta.status === 'Pago' ? conta.valorParcela : undefined),
                         dataPagamento: conta.dataPagamento,
-                        status: isAtrasada ? 'Atrasado' : (conta.status === 'Pago' ? 'Recebido' : conta.status),
+                        status: isAtrasada ? 'Atrasado' : (conta.status === 'Pago' ? 'Recebido' : (conta.status === 'Recebido Parcial' ? 'Recebido Parcial' : conta.status)),
                         observacoes: conta.observacoes,
-                        venda: conta.venda, // Salvar objeto venda para usar depois
-                        totalParcelas: conta.totalParcelas || venda.parcelas || 1 // Total de parcelas para exibição
+                        venda: conta.venda,
+                        totalParcelas: conta.totalParcelas || venda.parcelas || 1
                     };
                 });
                 
@@ -266,24 +330,31 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const contasFiltradas = useMemo(() => {
         let filtered = [...contasReceber];
 
-        // Filtro por status
-        if (filterStatus !== 'Todos') {
+        // Filtro por status: "Em aberto" = Pendente, Atrasado e Recebido Parcial (ainda tem saldo a receber)
+        if (filterStatus === 'Em aberto') {
+            filtered = filtered.filter(conta => conta.status === 'Pendente' || conta.status === 'Atrasado' || conta.status === 'Recebido Parcial');
+        } else if (filterStatus !== 'Todos') {
             filtered = filtered.filter(conta => conta.status === filterStatus);
         }
 
-        // Filtro por período
-        if (filterPeriodo !== 'Todos') {
-            const hoje = new Date();
-            filtered = filtered.filter(conta => {
-                const vencimento = new Date(conta.dataVencimento);
-                if (filterPeriodo === 'Vencidas') {
-                    return vencimento < hoje && conta.status !== 'Recebido';
-                } else if (filterPeriodo === 'Próximo30Dias') {
-                    const proximos30 = new Date(hoje.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    return vencimento >= hoje && vencimento <= proximos30;
-                }
-                return true;
-            });
+        // Filtro por período (calendário)
+        {
+            const inicio = dataInicio ? new Date(`${dataInicio}T00:00:00`) : null;
+            const fim = dataFim ? new Date(`${dataFim}T23:59:59`) : null;
+            if (inicio || fim) {
+                filtered = filtered.filter((conta) => {
+                    const vencimento = new Date(conta.dataVencimento);
+                    if (inicio && vencimento < inicio) return false;
+                    if (fim && vencimento > fim) return false;
+                    return true;
+                });
+            }
+
+            // Regra complementar do “atalho” Vencidas
+            if (filterPeriodo === 'Vencidas') {
+                const hoje = new Date();
+                filtered = filtered.filter((conta) => new Date(conta.dataVencimento) < hoje && conta.status !== 'Recebido');
+            }
         }
 
         // Filtro por busca
@@ -296,17 +367,17 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         }
 
         return filtered;
-    }, [contasReceber, filterStatus, filterPeriodo, searchTerm]);
+    }, [contasReceber, filterStatus, filterPeriodo, dataInicio, dataFim, searchTerm]);
 
     // Estatísticas
     const estatisticas = useMemo(() => {
         const totalReceber = contasFiltradas
-            .filter(c => c.status === 'Pendente' || c.status === 'Atrasado')
-            .reduce((sum, c) => sum + c.valor, 0);
+            .filter(c => c.status === 'Pendente' || c.status === 'Atrasado' || c.status === 'Recebido Parcial')
+            .reduce((sum, c) => sum + (c.valor - (c.valorRecebido || 0)), 0);
         
         const totalRecebido = contasReceber
             .filter(c => c.status === 'Recebido')
-            .reduce((sum, c) => sum + (c.valorRecebido || 0), 0);
+            .reduce((sum, c) => sum + (c.valorRecebido ?? c.valor), 0);
         
         const totalAtrasado = contasFiltradas
             .filter(c => c.status === 'Atrasado')
@@ -327,9 +398,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     // Handlers
     const handleOpenBaixaModal = (conta: ContaReceber) => {
         setContaSelecionada(conta);
-        setValorRecebido(conta.valor.toString());
+        const saldoRestante = conta.valor - (conta.valorRecebido || 0);
+        setValorRecebido(saldoRestante > 0 ? saldoRestante.toFixed(2) : conta.valor.toString());
         setDataPagamento(new Date().toISOString().split('T')[0]);
         setObservacoesBaixa('');
+        setMeioPagamentoBaixa('PIX');
         setIsBaixaModalOpen(true);
     };
 
@@ -344,6 +417,54 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setIsConfirmDialogOpen(true);
     };
 
+    const handleCloseNovaContaModal = () => {
+        setIsNovaContaModalOpen(false);
+        setNovaContaClassificacao('ENTRADA');
+        setNovaContaPagador('');
+        setNovaContaDescricao('');
+        setNovaContaValor('');
+        setNovaContaVencimento(new Date().toISOString().split('T')[0]);
+        setNovaContaObservacoes('');
+    };
+
+    const handleCriarNovaContaReceber = async () => {
+        const descricao = novaContaDescricao.trim();
+        const valor = parseFloat(String(novaContaValor).replace(',', '.'));
+        if (!descricao || !novaContaVencimento) {
+            toast.error('Preencha Descrição e Data de vencimento.');
+            return;
+        }
+        if (isNaN(valor) || valor <= 0) {
+            toast.error('Informe um valor válido.');
+            return;
+        }
+        setSalvandoNovaConta(true);
+        try {
+            const response = await financeiroService.criarContaReceber({
+                tipo: novaContaClassificacao,
+                pagadorNome: novaContaPagador.trim() || undefined,
+                descricao,
+                valorParcela: valor,
+                dataVencimento: novaContaVencimento,
+                observacoes: novaContaObservacoes.trim() || undefined
+            });
+            if (response.success) {
+                toast.success('Conta a receber criada com sucesso!', {
+                    description: 'Você já pode registrar o recebimento na lista.'
+                });
+                handleCloseNovaContaModal();
+                await loadContasReceber();
+            } else {
+                toast.error(response.error || 'Erro ao criar conta a receber.');
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao criar conta a receber.');
+        } finally {
+            setSalvandoNovaConta(false);
+        }
+    };
+
     const handleBaixaRecebimento = async () => {
         if (!contaSelecionada) return;
 
@@ -352,7 +473,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
             const response = await financeiroService.darBaixaRecebimento(contaSelecionada.id, {
                 dataPagamento,
                 valorRecebido: parseFloat(valorRecebido),
-                observacoes: observacoesBaixa
+                observacoes: observacoesBaixa,
+                meioPagamento: meioPagamentoBaixa
             });
 
             if (response.success) {
@@ -438,10 +560,37 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setDetalhesVenda(null);
     };
 
+    const handleAbrirHistorico = async (conta: ContaReceber) => {
+        setHistoricoConta(conta);
+        setIsHistoricoModalOpen(true);
+        setLoadingHistorico(true);
+        setHistoricoData(null);
+        try {
+            const res = await financeiroService.historicoRecebimentos(conta.id);
+            if (res.success && res.data) {
+                setHistoricoData(res.data);
+            } else {
+                toast.error(res.error || 'Erro ao carregar histórico');
+            }
+        } catch (e) {
+            toast.error('Erro ao carregar histórico');
+        } finally {
+            setLoadingHistorico(false);
+        }
+    };
+
+    const handleCloseHistoricoModal = () => {
+        setIsHistoricoModalOpen(false);
+        setHistoricoConta(null);
+        setHistoricoData(null);
+    };
+
     // Fechar modais com ESC
     useEscapeKey(isBaixaModalOpen, handleCloseBaixaModal);
     useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
+    useEscapeKey(isHistoricoModalOpen, handleCloseHistoricoModal);
     useEscapeKey(isConfirmDialogOpen, () => setIsConfirmDialogOpen(false));
+    useEscapeKey(isNovaContaModalOpen, handleCloseNovaContaModal);
 
     const getStatusObraDisplay = (statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null) => {
         if (!statusObra) {
@@ -467,18 +616,27 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
         try {
             const statusObra = detalhesVenda.obra ? getStatusObraDisplay(detalhesVenda.obra.status) : null;
-            
-            // Criar conteúdo HTML para impressão
+            // Número igual ao da lista de vendas (coluna Nº): numeroSequencial, fallback numeroVenda/id
+            const numeroPedido = detalhesVenda.numeroSequencial ?? detalhesVenda.numeroVenda ?? detalhesVenda.id;
+            const nomePedido = detalhesVenda.orcamento?.titulo || 'Pedido de Venda';
+            // Logo: path relativo ao backend (em produção /app/uploads no servidor → servido como /uploads)
+            const logoUrl = getUploadUrl('/uploads/logos/logo-1762808549243-748106383.png');
+
             const conteudoHTML = `
                 <!DOCTYPE html>
                 <html lang="pt-BR">
                 <head>
                     <meta charset="UTF-8">
-                    <title>Venda - ${detalhesVenda.numeroVenda || detalhesVenda.id}</title>
+                    <title>Venda - N° ${numeroPedido}</title>
                     <style>
                         body { font-family: Arial, sans-serif; margin: 20px; color: #333; }
+                        .brand { text-align: center; margin-bottom: 24px; }
+                        .brand img { max-height: 64px; max-width: 200px; object-fit: contain; }
+                        .brand h2 { margin: 8px 0 2px 0; font-size: 18px; color: #1e293b; }
+                        .brand .tagline { margin: 0; font-size: 12px; color: #64748b; }
                         .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #16a34a; padding-bottom: 20px; }
-                        .header h1 { margin: 0; color: #15803d; font-size: 28px; }
+                        .header .numero-pedido { font-size: 24px; font-weight: bold; color: #15803d; margin: 0 0 4px 0; }
+                        .header .nome-pedido { font-size: 14px; color: #475569; margin: 0 0 12px 0; }
                         .header p { margin: 5px 0; color: #64748b; }
                         .section { margin: 20px 0; padding: 15px; border: 2px solid #e5e7eb; border-radius: 8px; }
                         .section h2 { margin: 0 0 15px 0; color: #15803d; font-size: 18px; border-bottom: 2px solid #dcfce7; padding-bottom: 8px; }
@@ -494,16 +652,19 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                         .resumo-total { border-top: 2px solid #16a34a; padding-top: 10px; margin-top: 10px; font-size: 18px; font-weight: bold; color: #15803d; }
                         .badge { display: inline-block; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: bold; }
                         .badge-obra { background: #fed7aa; color: #9a3412; }
-                        @media print { 
-                            body { margin: 0; } 
-                            .no-print { display: none; }
-                        }
+                        @media print { body { margin: 0; } .no-print { display: none; } }
                     </style>
                 </head>
                 <body>
+                    <div class="brand">
+                        ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'" />` : ''}
+                        <h2>S3E ENGENHARIA LTDA.</h2>
+                        <p class="tagline">Soluções em Eficiência de Energia Elétrica</p>
+                    </div>
                     <div class="header">
                         <h1>💰 VENDA - RECIBO</h1>
-                        <p><strong>Venda Nº:</strong> ${detalhesVenda.numeroVenda || detalhesVenda.id}</p>
+                        <p class="numero-pedido">Nº ${numeroPedido}</p>
+                        <p class="nome-pedido">${nomePedido}</p>
                         <p><strong>Data da Venda:</strong> ${new Date(detalhesVenda.dataVenda).toLocaleDateString('pt-BR')}</p>
                     </div>
 
@@ -669,13 +830,15 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const getStatusClass = (status: string) => {
         switch (status) {
             case 'Recebido':
-                return 'bg-green-100 text-green-800 ring-1 ring-green-200';
+                return 'bg-green-100 text-green-800 ring-1 ring-green-200 dark:bg-green-900/30 dark:text-green-300';
+            case 'Recebido Parcial':
+                return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200 dark:bg-blue-900/30 dark:text-blue-300';
             case 'Pendente':
-                return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
+                return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300';
             case 'Atrasado':
-                return 'bg-red-100 text-red-800 ring-1 ring-red-200';
+                return 'bg-red-100 text-red-800 ring-1 ring-red-200 dark:bg-red-900/30 dark:text-red-300';
             default:
-                return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
+                return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200 dark:bg-gray-700 dark:text-gray-300';
         }
     };
 
@@ -686,28 +849,28 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando contas a receber...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 dark:border-green-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando contas a receber...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div className="flex items-center gap-4">
                     {toggleSidebar && (
-                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                             <Bars3Icon className="w-6 h-6" />
                         </button>
                     )}
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Contas a Receber</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gestão de recebimentos e parcelas</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Contas a Receber</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gestão de recebimentos e parcelas</p>
                     </div>
                 </div>
                 <div className="flex gap-3">
@@ -722,6 +885,13 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             Voltar ao Dashboard
                         </button>
                     )}
+                    <button
+                        onClick={() => setIsNovaContaModalOpen(true)}
+                        className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-xl transition-colors flex items-center gap-2"
+                    >
+                        <CurrencyDollarIcon className="w-4 h-4" />
+                        Nova Conta a Receber
+                    </button>
                     <button
                         onClick={loadContasReceber}
                         className="btn-success flex items-center gap-2"
@@ -816,8 +986,10 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             onChange={(e) => setFilterStatus(e.target.value)}
                             className="select-field"
                         >
+                            <option value="Em aberto">Em aberto (Pendente + Atrasado + Parcial)</option>
                             <option value="Todos">Todos os Status</option>
                             <option value="Pendente">Pendente</option>
+                            <option value="Recebido Parcial">Recebido Parcial</option>
                             <option value="Recebido">Recebido</option>
                             <option value="Atrasado">Atrasado</option>
                         </select>
@@ -828,12 +1000,43 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             onChange={(e) => setFilterPeriodo(e.target.value)}
                             className="select-field"
                         >
+                            <option value="MesAtual">Mês Atual</option>
                             <option value="Todos">Todos os Períodos</option>
                             <option value="Vencidas">Vencidas</option>
                             <option value="Próximo30Dias">Próximos 30 Dias</option>
+                            <option value="Personalizado">Personalizado</option>
                         </select>
                     </div>
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">De</label>
+                        <input
+                            type="date"
+                            value={dataInicio}
+                            onChange={(e) => {
+                                setFiltroDatas((prev) => ({ ...prev, dataInicio: e.target.value }));
+                                setFilterPeriodo('Personalizado');
+                            }}
+                            className="select-field"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">Até</label>
+                        <input
+                            type="date"
+                            value={dataFim}
+                            onChange={(e) => {
+                                setFiltroDatas((prev) => ({ ...prev, dataFim: e.target.value }));
+                                setFilterPeriodo('Personalizado');
+                            }}
+                            className="select-field"
+                        />
+                    </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                    Alterar o período atualiza automaticamente as estatísticas e a lista.
+                </p>
             </div>
 
             {/* Tabela de Contas */}
@@ -946,6 +1149,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         <td className="px-6 py-4 text-center">
                                             <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-lg ${getStatusClass(conta.status)}`}>
                                                 {conta.status === 'Recebido' && '✅ '}
+                                                {conta.status === 'Recebido Parcial' && '💳 '}
                                                 {conta.status === 'Pendente' && '⏳ '}
                                                 {conta.status === 'Atrasado' && '⚠️ '}
                                                 {conta.status}
@@ -966,15 +1170,25 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 {conta.status !== 'Recebido' && (
                                                     <button
                                                         onClick={() => handleOpenBaixaModal(conta)}
-                                                        className="flex items-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                                        className="flex items-center gap-1 px-3 py-2 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors text-sm font-semibold"
                                                     >
                                                         <CheckCircleIcon className="w-4 h-4" />
                                                         Dar Baixa
                                                     </button>
                                                 )}
                                                 <button
+                                                    onClick={() => handleAbrirHistorico(conta)}
+                                                    className="flex items-center gap-1 px-3 py-2 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors text-sm font-semibold"
+                                                    title="Histórico de recebimentos"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                    Histórico
+                                                </button>
+                                                <button
                                                     onClick={() => handleVisualizarVenda(conta.vendaId)}
-                                                    className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                    className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors text-sm font-semibold"
                                                     title="Visualizar Venda"
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
@@ -1059,17 +1273,15 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 Vendedor
                                             </h4>
                                             <p className="text-lg text-gray-900 dark:text-white font-semibold">
-                                                {detalhesVenda.orcamento?.usuarioNome || detalhesVenda.orcamento?.criadoPorNome || user?.name || 'N/A'}
+                                                {detalhesVenda.vendedorNome || detalhesVenda.orcamento?.orcamentistaNome || 'N/A'}
                                             </p>
                                         </div>
                                         <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4">
                                             <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-1">
-                                                Número Sequencial da Venda
+                                                Número do Pedido de Venda
                                             </h4>
                                             <p className="text-lg text-gray-900 dark:text-white font-semibold">
-                                                N{([...vendas]
-                                                    .sort((a, b) => new Date(b.dataVenda || b.createdAt).getTime() - new Date(a.dataVenda || a.createdAt).getTime())
-                                                ).findIndex(v => v.id === detalhesVenda.id) + 1}
+                                                N° {detalhesVenda.numeroSequencial ?? detalhesVenda.numeroVenda ?? '—'}
                                             </p>
                                         </div>
                                     </div>
@@ -1117,16 +1329,22 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                     <tbody>
                                                         {detalhesVenda.orcamento.items.map((item: any, index: number) => {
                                                             const quantidade = item.quantidade || 0;
-                                                            // Usar valorVenda do material se disponível, senão usar precoUnit do orçamento
                                                             const valorVenda = item.material?.valorVenda;
                                                             const precoUnit = valorVenda || item.precoUnit || item.precoUnitario || (item.subtotal / (item.quantidade || 1)) || 0;
                                                             const valorTotal = item.subtotal || (quantidade * precoUnit);
-                                                            // Obter NCM: prioridade para cotação, depois material
                                                             const ncm = item.cotacao?.ncm || item.material?.ncm || '-';
+                                                            const vendaDireta = item.vendaDiretaFornecedor;
                                                             return (
                                                                 <tr key={item.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                                                     <td className="px-4 py-3 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
-                                                                        {item.material?.nome || item.servico?.nome || item.kit?.nome || item.descricao || 'Item sem nome'}
+                                                                        <div>
+                                                                            {item.material?.nome || item.servico?.nome || item.kit?.nome || item.descricao || 'Item sem nome'}
+                                                                            {vendaDireta && (
+                                                                                <span className="ml-2 inline-flex items-center px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded text-xs font-medium" title="Não entra em contas a receber, estoque nem NF-e">
+                                                                                    Venda direta fornecedor
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </td>
                                                                     <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600">
                                                                         {ncm}
@@ -1207,7 +1425,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 </p>
                                             </div>
                                             <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-purple-200 dark:border-purple-700">
-                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor Financiado</p>
+                                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase mb-1">Valor de Venda</p>
                                                 <p className="text-base font-bold text-purple-600 dark:text-purple-400">
                                                     R$ {((detalhesVenda.valorTotal || 0) - (detalhesVenda.valorEntrada || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </p>
@@ -1233,16 +1451,15 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 {(() => {
                                                     const contas = detalhesVenda.contasReceber || [];
                                                     const totalContas = contas.length;
-                                                    // Considerar tanto 'Pago' quanto 'Recebido' como status pago
-                                                    const qtdPagas = contas.filter((c: any) => c.status === 'Pago' || c.status === 'Recebido').length;
+                                                    const qtdTotalmentePagas = contas.filter((c: any) => c.status === 'Pago' || c.status === 'Recebido').length;
+                                                    const temPagoOuParcial = contas.some((c: any) => c.status === 'Pago' || c.status === 'Recebido' || c.status === 'Recebido Parcial');
                                                     let statusExibicao = 'Pendente';
                                                     let statusClass = 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-                                                    
                                                     if (totalContas > 0) {
-                                                        if (qtdPagas === totalContas) {
+                                                        if (qtdTotalmentePagas === totalContas) {
                                                             statusExibicao = 'Concluída';
                                                             statusClass = 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-                                                        } else if (qtdPagas > 0) {
+                                                        } else if (temPagoOuParcial) {
                                                             statusExibicao = 'Pago Parcial';
                                                             statusClass = 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
                                                         }
@@ -1471,14 +1688,36 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         value={valorRecebido}
                                         onChange={(e) => setValorRecebido(e.target.value)}
                                         min="0"
-                                        max={contaSelecionada.valor}
+                                        max={Math.max(0, contaSelecionada.valor - (contaSelecionada.valorRecebido || 0))}
                                         step="0.01"
                                         required
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                     />
                                     <p className="text-xs text-gray-500 mt-1">
-                                        Valor original: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        {contaSelecionada.valorRecebido ? (
+                                            <>Valor da parcela: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • Já recebido: R$ {(contaSelecionada.valorRecebido || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • Saldo restante: R$ {(contaSelecionada.valor - (contaSelecionada.valorRecebido || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</>
+                                        ) : (
+                                            <>Valor da parcela: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</>
+                                        )}
                                     </p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Meio de Pagamento
+                                    </label>
+                                    <select
+                                        value={meioPagamentoBaixa}
+                                        onChange={(e) => setMeioPagamentoBaixa(e.target.value)}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                    >
+                                        <option value="PIX">PIX</option>
+                                        <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                        <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                        <option value="BOLETO">Boleto</option>
+                                        <option value="TRANSFERENCIA">Transferência</option>
+                                        <option value="DINHEIRO">Dinheiro</option>
+                                    </select>
                                 </div>
 
                                 <div>
@@ -1520,6 +1759,191 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             >
                                 <CheckCircleIcon className="w-5 h-5" />
                                 Confirmar Recebimento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Histórico de recebimentos da duplicata */}
+            {isHistoricoModalOpen && historicoConta && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100" style={{ backgroundColor: '#0a1a2f' }}>
+                            <div>
+                                <h2 className="text-2xl font-bold text-white">Histórico de Recebimentos</h2>
+                                <p className="text-sm text-gray-200 mt-1">
+                                    {historicoConta.numeroDuplicata} • {historicoConta.clienteNome}
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleCloseHistoricoModal}
+                                className="p-2 text-gray-300 hover:text-white hover:bg-white/20 rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            {loadingHistorico ? (
+                                <div className="text-center py-12">
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                                    <p className="text-gray-600 dark:text-gray-400">Carregando histórico...</p>
+                                </div>
+                            ) : historicoData ? (
+                                <>
+                                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                                        <div className="grid grid-cols-2 gap-3 text-sm">
+                                            <div>
+                                                <span className="text-blue-700 dark:text-blue-300 font-medium">Valor da parcela:</span>
+                                                <p className="text-blue-900 dark:text-white font-bold">R$ {Number(historicoData.conta?.valorParcela || historicoConta.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                            </div>
+                                            <div>
+                                                <span className="text-blue-700 dark:text-blue-300 font-medium">Já recebido:</span>
+                                                <p className="text-green-700 dark:text-green-400 font-bold">R$ {Number(historicoData.conta?.valorRecebido ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                            </div>
+                                            <div>
+                                                <span className="text-blue-700 dark:text-blue-300 font-medium">Saldo restante:</span>
+                                                <p className="text-amber-700 dark:text-amber-400 font-bold">R$ {Number(historicoData.conta?.saldoRestante ?? (historicoConta.valor - (historicoConta.valorRecebido || 0))).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Registro de pagamentos</h3>
+                                        {historicoData.recebimentos && historicoData.recebimentos.length > 0 ? (
+                                            <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+                                                <table className="w-full text-sm">
+                                                    <thead className="bg-gray-50 dark:bg-gray-800">
+                                                        <tr>
+                                                            <th className="px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-300">Data</th>
+                                                            <th className="px-4 py-2 text-right font-semibold text-gray-700 dark:text-gray-300">Valor</th>
+                                                            <th className="px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-300">Meio</th>
+                                                            <th className="px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-300">Observação</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                                                        {historicoData.recebimentos.map((rec: any) => (
+                                                            <tr key={rec.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                                <td className="px-4 py-3 text-gray-900 dark:text-white">
+                                                                    {new Date(rec.dataPagamento).toLocaleDateString('pt-BR')}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-right font-semibold text-green-700 dark:text-green-400">
+                                                                    R$ {Number(rec.valorPago).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{rec.meioPagamento || '-'}</td>
+                                                                <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-[200px] truncate" title={rec.observacoes}>{rec.observacoes || '-'}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : (
+                                            <p className="text-gray-500 dark:text-gray-400 py-4">Nenhum recebimento registrado ainda.</p>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="text-gray-500 dark:text-gray-400 py-4">Não foi possível carregar o histórico.</p>
+                            )}
+                        </div>
+                        <div className="p-6 border-t border-gray-100 flex justify-end">
+                            <button onClick={handleCloseHistoricoModal} className="btn-secondary">Fechar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Nova Conta a Receber (receita manual: Entradas / Outras Receitas) */}
+            {isNovaContaModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-green-50 to-emerald-50">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Nova Conta a Receber</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Receita que não vem de venda (Entradas / Outras Receitas)</p>
+                            </div>
+                            <button
+                                onClick={handleCloseNovaContaModal}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 dark:hover:bg-dark-card rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Classificação *</label>
+                                <select
+                                    value={novaContaClassificacao}
+                                    onChange={(e) => setNovaContaClassificacao(e.target.value as 'ENTRADA' | 'OUTRAS_RECEITAS')}
+                                    className="select-field focus:ring-green-500 focus:border-green-500"
+                                >
+                                    <option value="ENTRADA">Entradas</option>
+                                    <option value="OUTRAS_RECEITAS">Outras Receitas</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Pagador (opcional)</label>
+                                <input
+                                    type="text"
+                                    value={novaContaPagador}
+                                    onChange={(e) => setNovaContaPagador(e.target.value)}
+                                    placeholder="Nome de quem vai pagar"
+                                    className="select-field focus:ring-green-500 focus:border-green-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Descrição *</label>
+                                <input
+                                    type="text"
+                                    value={novaContaDescricao}
+                                    onChange={(e) => setNovaContaDescricao(e.target.value)}
+                                    placeholder="Ex: Reembolso, Rendimento, Serviço avulso..."
+                                    className="select-field focus:ring-green-500 focus:border-green-500"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Valor (R$) *</label>
+                                    <input
+                                        type="number"
+                                        value={novaContaValor}
+                                        onChange={(e) => setNovaContaValor(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-green-500 focus:border-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Vencimento *</label>
+                                    <input
+                                        type="date"
+                                        value={novaContaVencimento}
+                                        onChange={(e) => setNovaContaVencimento(e.target.value)}
+                                        className="select-field focus:ring-green-500 focus:border-green-500"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Observação</label>
+                                <textarea
+                                    value={novaContaObservacoes}
+                                    onChange={(e) => setNovaContaObservacoes(e.target.value)}
+                                    rows={2}
+                                    className="select-field focus:ring-green-500 focus:border-green-500"
+                                    placeholder="Opcional"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100 dark:border-dark-border">
+                            <button onClick={handleCloseNovaContaModal} className="btn-secondary">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleCriarNovaContaReceber}
+                                disabled={salvandoNovaConta}
+                                className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50"
+                            >
+                                {salvandoNovaConta ? 'Salvando...' : 'Criar Conta'}
                             </button>
                         </div>
                     </div>

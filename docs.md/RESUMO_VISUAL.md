@@ -142,6 +142,7 @@
 ```
 
 **EXEMPLO DE EDIÇÃO:**
+
 ```
 ANTES:  "precoNovo": 2.50
 DEPOIS: "precoNovo": 2.80
@@ -225,11 +226,13 @@ DEPOIS: "precoNovo": 2.80
 ## 🎨 CORES E SIGNIFICADOS
 
 ### Flags:
+
 - 🟢 **Verde** = Tudo OK, pode usar sem medo
 - 🟡 **Amarelo** = Atenção, verificar em breve
 - 🔴 **Vermelho** = URGENTE, não usar sem atualizar
 
 ### Histórico:
+
 - 🟢 **Verde** = Redução de preço (bom!)
 - 🔴 **Vermelho** = Aumento de preço (atenção!)
 - 🔵 **Azul** = Preço mantido igual
@@ -255,6 +258,7 @@ DEPOIS: "precoNovo": 2.80
 ```
 
 **Após 20 dias:**
+
 ```
 ┌─────────────────────────────────────┐
 │  📊 Status dos Preços               │
@@ -268,6 +272,7 @@ DEPOIS: "precoNovo": 2.80
 ```
 
 **Após 35 dias (sem atualização):**
+
 ```
 ┌─────────────────────────────────────┐
 │  📊 Status dos Preços               │
@@ -285,6 +290,7 @@ DEPOIS: "precoNovo": 2.80
 ## 🎯 COMANDOS RÁPIDOS
 
 ### Primeira vez (Setup):
+
 ```bash
 cd backend
 npx prisma migrate dev
@@ -293,6 +299,7 @@ npm run dev
 ```
 
 ### Uso diário:
+
 ```bash
 # Apenas rodar os servidores
 cd backend && npm run dev
@@ -300,6 +307,7 @@ cd frontend && npm run dev
 ```
 
 ### Ver dados:
+
 ```bash
 cd backend
 npx prisma studio  # Abre interface visual do banco
@@ -310,11 +318,13 @@ npx prisma studio  # Abre interface visual do banco
 ## 🎓 TUTORIAL RÁPIDO (2 Minutos)
 
 ### 1. Baixar Template (10 segundos)
+
 ```
 Atualização de Preços → 📄 JSON → Arquivo baixa
 ```
 
 ### 2. Editar (30 segundos)
+
 ```
 Abrir JSON no Notepad
 Procurar material
@@ -323,16 +333,19 @@ Salvar
 ```
 
 ### 3. Importar (30 segundos)
+
 ```
 Importar JSON → Selecionar → Processar → Revisar → Confirmar
 ```
 
 ### 4. Ver Resultado (30 segundos)
+
 ```
 Criar orçamento → Buscar material → Flag VERDE 🟢 → Usar!
 ```
 
 ### 5. Ver Histórico (20 segundos)
+
 ```
 Material → Histórico → Ver todas alterações
 ```
@@ -344,6 +357,7 @@ Material → Histórico → Ver todas alterações
 ## 🔥 FEATURES ESPECIAIS
 
 ### 1. Preview Inteligente
+
 ```
 Antes de aplicar, vê:
 ✅ 45 materiais serão atualizados
@@ -355,14 +369,16 @@ Deseja continuar? [Sim] [Não]
 ```
 
 ### 2. Validação Automática
+
 ```
 ❌ JSON inválido → "Formato incorreto"
-❌ SKU não existe → "Material não encontrado"  
+❌ SKU não existe → "Material não encontrado"
 ❌ Preço negativo → "Preço inválido"
 ✅ Tudo OK → Preview mostra alterações
 ```
 
 ### 3. Alertas Contextuais
+
 ```
 Adicionar material vermelho 🔴:
 ├→ "⚠️ PREÇO DESATUALIZADO!"
@@ -383,6 +399,7 @@ Adicionar material verde 🟢:
 ## 🎁 ARQUIVOS PRONTOS PARA USAR
 
 ### 1. Exemplo de JSON (Teste Imediato)
+
 ```
 backend/docs/exemplo_template_precos.json
    ↓
@@ -390,6 +407,7 @@ Copiar → Editar → Importar → Testar!
 ```
 
 ### 2. Código de Exemplo (Integração)
+
 ```
 EXEMPLO_INTEGRACAO_ORCAMENTO.tsx
    ↓
@@ -397,6 +415,7 @@ Copiar → Adaptar → Colar no seu componente → Funciona!
 ```
 
 ### 3. Componente Pronto (Usar Direto)
+
 ```
 frontend/src/components/MaterialCardComValidade.tsx
    ↓
@@ -430,6 +449,7 @@ Importar → Usar em qualquer lista → Pronto!
 ## ✅ CHECKLIST DE VERIFICAÇÃO
 
 ### Backend:
+
 - [x] Migration aplicada
 - [x] 66 materiais com data inicializada
 - [x] Endpoints testados e funcionando
@@ -438,6 +458,7 @@ Importar → Usar em qualquer lista → Pronto!
 - [x] Histórico salvando
 
 ### Frontend:
+
 - [x] HoverCard instalado
 - [x] Flags aparecendo
 - [x] Cores corretas (verde/amarelo/vermelho)
@@ -446,6 +467,7 @@ Importar → Usar em qualquer lista → Pronto!
 - [x] Importação funcionando
 
 ### Funcional:
+
 - [x] Ciclo completo testado
 - [x] Preços atualizando no banco
 - [x] Histórico registrando
@@ -502,7 +524,7 @@ Você agora possui uma **ferramenta completamente robusta** para:
 
 **Teste AGORA:**
 
-1. Acesse: http://localhost:5173
+1. Acesse: <http://localhost:5173>
 2. Login
 3. Menu → "Atualização de Preços"
 4. Clique "📄 JSON"
@@ -517,7 +539,6 @@ Você agora possui uma **ferramenta completamente robusta** para:
 **Sistema desenvolvido com ❤️ e dedicação**  
 **S3E Engenharia Elétrica - Gestão Inteligente de Preços**
 
-*Versão: 1.0.0*  
-*Data: 12/11/2024*  
-*Status: ✅ PRONTO PARA USO*
-
+_Versão: 1.0.0_  
+_Data: 12/11/2024_  
+_Status: ✅ PRONTO PARA USO_

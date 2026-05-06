@@ -1,10 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from '../services/auditoria.service';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-
-const prisma = new PrismaClient();
 
 // Configuração do Multer para upload de fotos de kits
 const storage = multer.diskStorage({
@@ -424,7 +423,13 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string, op
  */
 export const listarKits = async (req: Request, res: Response): Promise<void> => {
   try {
+    const user = (req as any).user;
+    const userRole = user?.role?.toLowerCase();
+    // Eletricista só vê seus próprios kits (vinculados ao seu userId)
+    const where = userRole === 'eletricista' ? { eletricistaId: user?.userId } : {};
+
     const kits = await prisma.kitFerramenta.findMany({
+      where,
       include: {
         itens: {
           include: {
@@ -456,6 +461,7 @@ export const listarKits = async (req: Request, res: Response): Promise<void> => 
 export const buscarKit = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const user = (req as any).user;
 
     const kit = await prisma.kitFerramenta.findUnique({
       where: { id },
@@ -472,6 +478,15 @@ export const buscarKit = async (req: Request, res: Response): Promise<void> => {
       res.status(404).json({
         success: false,
         error: 'Kit não encontrado'
+      });
+      return;
+    }
+
+    // Eletricista só pode ver seu próprio kit
+    if (user?.role?.toLowerCase() === 'eletricista' && kit.eletricistaId !== user.userId) {
+      res.status(403).json({
+        success: false,
+        error: 'Acesso negado. Você só pode visualizar seu próprio kit de ferramentas.'
       });
       return;
     }
@@ -609,7 +624,7 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
         }
         
         const quantidadeNecessaria = item.quantidade || 1;
-        const estoqueDisponivel = ferramenta.quantidade || 0;
+        const estoqueDisponivel = (ferramenta as any).quantidade || 0;
         
         // Verificar se há estoque suficiente
         if (estoqueDisponivel < quantidadeNecessaria) {
@@ -667,16 +682,16 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
             quantidade: {
               decrement: quantidadeNecessaria
             }
-          }
+          } as any
         });
       }
 
       return kitCriado;
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'CREATE',
         entity: 'KitFerramenta',
@@ -687,8 +702,10 @@ export const criarKit = async (req: Request, res: Response): Promise<void> => {
           totalFerramentas: itens.length,
           precoTotal: precoTotalKit
         }
-      }
-    });
+      });
+    } catch (auditError: any) {
+      console.error('⚠️ Erro ao registrar audit log (stub):', auditError.message);
+    }
 
     console.log(`✅ Kit criado: ${kit.nome} para ${eletricistaNome} (${itens.length} ferramentas) - Valor Total: R$ ${precoTotalKit.toFixed(2)}`);
 
@@ -780,7 +797,7 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
               quantidade: {
                 increment: itemRemover.quantidade
               }
-            }
+            } as any
           });
         }
 
@@ -822,10 +839,10 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
           const quantidadeNecessaria = item.quantidade || 1;
           
           // Verificar se há estoque suficiente
-          if (ferramenta.quantidade < quantidadeNecessaria) {
+          if ((ferramenta as any).quantidade < quantidadeNecessaria) {
             throw new Error(
               `Estoque insuficiente para ${ferramenta.nome}. ` +
-              `Disponível: ${ferramenta.quantidade}, Necessário: ${quantidadeNecessaria}`
+              `Disponível: ${(ferramenta as any).quantidade}, Necessário: ${quantidadeNecessaria}`
             );
           }
         }
@@ -849,7 +866,7 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
               quantidade: {
                 decrement: item.quantidade || 1
               }
-            }
+            } as any
           });
         }
 
@@ -879,14 +896,14 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
                 const ferramenta = await tx.ferramenta.findUnique({
                   where: { id: item.ferramentaId }
                 });
-                if (ferramenta && ferramenta.quantidade < diferenca) {
-                  throw new Error(`Estoque insuficiente para aumentar quantidade. Disponível: ${ferramenta.quantidade}, Necessário: ${diferenca}`);
+                if (ferramenta && (ferramenta as any).quantidade < diferenca) {
+                  throw new Error(`Estoque insuficiente para aumentar quantidade. Disponível: ${(ferramenta as any).quantidade}, Necessário: ${diferenca}`);
                 }
                 await tx.ferramenta.update({
                   where: { id: item.ferramentaId },
                   data: {
                     quantidade: { decrement: diferenca }
-                  }
+                  } as any
                 });
               } else {
                 // Diminuiu quantidade - devolver ao estoque
@@ -894,7 +911,7 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
                   where: { id: item.ferramentaId },
                   data: {
                     quantidade: { increment: Math.abs(diferenca) }
-                  }
+                  } as any
                 });
               }
             }
@@ -915,9 +932,9 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
       });
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'UPDATE',
         entity: 'KitFerramenta',
@@ -930,8 +947,10 @@ export const atualizarKit = async (req: Request, res: Response): Promise<void> =
           observacoes: observacoes !== undefined,
           novosItens: itens ? itens.length : 0
         }
-      }
-    });
+      });
+    } catch (auditError: any) {
+      console.error('⚠️ Erro ao registrar audit log (stub):', auditError.message);
+    }
 
     console.log(`✅ Kit atualizado: ${kitAtualizado?.nome}`);
 
@@ -994,7 +1013,7 @@ export const deletarKit = async (req: Request, res: Response): Promise<void> => 
               quantidade: {
                 increment: item.quantidade
               }
-            }
+            } as any
           });
         }
         console.log(`✅ ${kit.itens.length} ferramentas devolvidas ao estoque do kit "${kit.nome}"`);
@@ -1007,17 +1026,19 @@ export const deletarKit = async (req: Request, res: Response): Promise<void> => 
       });
     });
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'DELETE',
         entity: 'KitFerramenta',
         entityId: id,
         description: `Kit "${kitNome}" excluído permanentemente (${quantidadeItens} itens)`,
         metadata: { eletricistaId: eletricistaId }
-      }
-    });
+      });
+    } catch (auditError: any) {
+      console.error('⚠️ Erro ao registrar audit log (stub):', auditError.message);
+    }
 
     console.log(`✅ Kit excluído permanentemente: ${kitNome}`);
 

@@ -73,9 +73,9 @@ const exitReasons = [
 
 const getTypeClass = (type: MovementType) => {
     switch (type) {
-        case MovementType.Entrada: return 'bg-green-100 text-green-800 ring-1 ring-green-200';
-        case MovementType.Saida: return 'bg-orange-100 text-orange-800 ring-1 ring-orange-200';
-        default: return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
+        case MovementType.Entrada: return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800';
+        case MovementType.Saida: return 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 ring-1 ring-orange-200 dark:ring-orange-800';
+        default: return 'bg-gray-100 dark:bg-dark-card text-gray-800 dark:text-dark-text ring-1 ring-gray-200 dark:ring-dark-border';
     }
 };
 
@@ -94,7 +94,8 @@ interface MovimentacoesProps {
 const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
     const authContext = useContext(AuthContext);
     const userRole = authContext?.user?.role?.toLowerCase() || '';
-    const isAdminOrDeveloper = userRole === 'admin' || userRole === 'desenvolvedor';
+    const user = authContext?.user;
+    const isAdminOrDeveloper = userRole === 'admin' || userRole === 'desenvolvedor' || user?.isAdmin === true;
     
     const [movements, setMovements] = useState<StockMovement[]>([]);
     const [materials, setMaterials] = useState<MaterialItem[]>([]);
@@ -387,26 +388,26 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-white dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando movimentações...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 dark:border-indigo-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando movimentações...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-white dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-gray-100 dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Movimentações</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Controle de entradas e saídas de estoque</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Movimentações</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Controle de entradas e saídas de estoque</p>
                     </div>
                 </div>
                 <div className="flex gap-3">
@@ -429,74 +430,74 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
 
             {/* Error Message */}
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 animate-fade-in">
-                    <p className="text-red-800 font-medium">⚠️ {error}</p>
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-4 mb-6 animate-fade-in">
+                    <p className="text-red-800 dark:text-red-300 font-medium">⚠️ {error}</p>
                 </div>
             )}
 
             {/* Cards de Estatísticas */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="card-primary">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
-                            <ClockIcon className="w-6 h-6 text-indigo-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 flex items-center justify-center">
+                            <ClockIcon className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Total de Movimentos</p>
-                            <p className="text-2xl font-bold text-indigo-600">{stats.totalMovimentos}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Total de Movimentos</p>
+                            <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{stats.totalMovimentos}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="card-primary">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 flex items-center justify-center">
-                            <ArrowDownTrayIcon className="w-6 h-6 text-green-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/50 dark:to-green-800/50 flex items-center justify-center">
+                            <ArrowDownTrayIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Entradas</p>
-                            <p className="text-2xl font-bold text-green-600">{stats.entradas}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Entradas</p>
+                            <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.entradas}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="card-primary">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center">
-                            <ArrowUpTrayIcon className="w-6 h-6 text-orange-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900/50 dark:to-orange-800/50 flex items-center justify-center">
+                            <ArrowUpTrayIcon className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Saídas</p>
-                            <p className="text-2xl font-bold text-orange-600">{stats.saidas}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Saídas</p>
+                            <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{stats.saidas}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="card-primary">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/50 dark:to-blue-800/50 flex items-center justify-center">
                             <span className="text-2xl">📅</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Hoje</p>
-                            <p className="text-2xl font-bold text-blue-600">{stats.movimentosHoje}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Hoje</p>
+                            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.movimentosHoje}</p>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Filtros */}
-            <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
+            <div className="card-primary mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
-                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-dark-text-secondary" />
                             <input
                                 type="text"
                                 placeholder="Buscar por material, motivo ou responsável..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                className="input-field pl-10"
                             />
                         </div>
                     </div>
@@ -505,7 +506,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                         <select
                             value={filter}
                             onChange={(e) => setFilter(e.target.value as MovementType | 'Todos')}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                            className="select-field"
                         >
                             <option value="Todos">Todos os Tipos</option>
                             <option value={MovementType.Entrada}>Entradas</option>
@@ -518,23 +519,23 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                             type="date"
                             value={dateFilter}
                             onChange={(e) => setDateFilter(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                            className="input-field"
                         />
                     </div>
                 </div>
 
                 <div className="mt-4 flex items-center justify-between">
-                    <p className="text-sm text-gray-600">
-                        Exibindo <span className="font-bold text-gray-900">{filteredMovements.length}</span> de <span className="font-bold text-gray-900">{movements.length}</span> movimentações
+                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                        Exibindo <span className="font-bold text-gray-900 dark:text-dark-text">{filteredMovements.length}</span> de <span className="font-bold text-gray-900 dark:text-dark-text">{movements.length}</span> movimentações
                     </p>
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Entradas: {stats.entradas}</span>
+                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Entradas: {stats.entradas}</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Saídas: {stats.saidas}</span>
+                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Saídas: {stats.saidas}</span>
                         </div>
                     </div>
                 </div>
@@ -542,12 +543,12 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
 
             {/* Lista de Movimentações */}
             {filteredMovements.length === 0 ? (
-                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
-                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="card-primary p-16 text-center">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-dark-card rounded-full flex items-center justify-center mx-auto mb-4">
                         <span className="text-4xl">📦</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhuma movimentação encontrada</h3>
-                    <p className="text-gray-500 mb-6">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">Nenhuma movimentação encontrada</h3>
+                    <p className="text-gray-500 dark:text-dark-text-secondary mb-6">
                         {searchTerm || filter !== 'Todos' || dateFilter
                             ? 'Tente ajustar os filtros de busca'
                             : 'Comece registrando sua primeira movimentação'}
@@ -577,16 +578,16 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                         if (!movement || !movement.id) return null;
                         
                         return (
-                            <div key={movement.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-indigo-300 transition-all duration-200">
+                            <div key={movement.id} className="card-primary border-2 hover:border-indigo-300 dark:hover:border-indigo-600 transition-all duration-200">
                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-2">
-                                            <h3 className="font-bold text-lg text-gray-900">{movement.materialName || 'Material'}</h3>
+                                            <h3 className="font-bold text-lg text-gray-900 dark:text-dark-text">{movement.materialName || 'Material'}</h3>
                                             <span className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getTypeClass(movement.type)}`}>
                                                 {getTypeIcon(movement.type)} {movement.type === MovementType.Entrada ? 'Entrada' : 'Saída'}
                                             </span>
                                         </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-gray-600">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-gray-600 dark:text-dark-text-secondary">
                                             <div className="flex items-center gap-2">
                                                 <span>📦</span>
                                                 <span><strong>Quantidade:</strong> {movement.quantity || 0}</span>
@@ -601,24 +602,24 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                         </div>
                                     </div>
                                     {movement.notes && (
-                                        <div className="mt-2 text-sm text-gray-600">
+                                        <div className="mt-2 text-sm text-gray-600 dark:text-dark-text-secondary">
                                             <span className="font-medium">Observações:</span> {movement.notes}
                                         </div>
                                     )}
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
                                     <div className="text-right">
-                                        <p className="text-lg font-bold text-indigo-700">
+                                        <p className="text-lg font-bold text-indigo-700 dark:text-indigo-400">
                                             {new Date(movement.date).toLocaleDateString('pt-BR')}
                                         </p>
-                                        <p className="text-sm text-gray-600">
+                                        <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
                                             {new Date(movement.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                                         </p>
                                     </div>
                                     {isAdminOrDeveloper && (
                                         <button
                                             onClick={() => setMovimentacaoToDelete(movement)}
-                                            className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold flex items-center gap-2"
+                                            className="btn-action-delete px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2"
                                             title="Excluir movimentação (hard delete)"
                                         >
                                             <TrashIcon className="w-4 h-4" />
@@ -636,37 +637,37 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
             {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
             {movimentacaoToDelete && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">Excluir Movimentação</h3>
-                        <p className="text-gray-600 mb-2">
+                    <div className="modal-content max-w-md w-full p-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text mb-4">Excluir Movimentação</h3>
+                        <p className="text-gray-600 dark:text-dark-text-secondary mb-2">
                             Tem certeza que deseja excluir permanentemente esta movimentação?
                         </p>
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                            <p className="text-sm text-gray-800">
+                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+                            <p className="text-sm text-gray-800 dark:text-dark-text">
                                 <strong>Material:</strong> {movimentacaoToDelete.materialName}
                             </p>
-                            <p className="text-sm text-gray-800">
+                            <p className="text-sm text-gray-800 dark:text-dark-text">
                                 <strong>Tipo:</strong> {movimentacaoToDelete.type === MovementType.Entrada ? 'Entrada' : 'Saída'}
                             </p>
-                            <p className="text-sm text-gray-800">
+                            <p className="text-sm text-gray-800 dark:text-dark-text">
                                 <strong>Quantidade:</strong> {movimentacaoToDelete.quantity}
                             </p>
-                            <p className="text-sm text-gray-800">
+                            <p className="text-sm text-gray-800 dark:text-dark-text">
                                 <strong>Data:</strong> {new Date(movimentacaoToDelete.date).toLocaleDateString('pt-BR')}
                             </p>
                         </div>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                            <p className="text-sm text-yellow-800 font-semibold">
+                        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
+                            <p className="text-sm text-yellow-800 dark:text-yellow-300 font-semibold">
                                 ⚠️ ATENÇÃO: Esta ação é irreversível!
                             </p>
-                            <p className="text-xs text-yellow-700 mt-1">
+                            <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">
                                 O estoque será revertido automaticamente (hard delete).
                             </p>
                         </div>
                         <div className="flex justify-end gap-3">
                             <button
                                 onClick={() => setMovimentacaoToDelete(null)}
-                                className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 font-semibold"
+                                className="btn-secondary"
                             >
                                 Cancelar
                             </button>
@@ -684,7 +685,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
             {/* MODAL DE DEVOLUÇÃO ESTOQUE (ENTRADA) */}
             {isEntradaModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
                         <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-green-50 to-emerald-50">
                             <div className="flex items-center gap-4">
@@ -724,7 +725,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
                                     />
                                     {isMaterialListOpen && filteredMaterials.length > 0 && (
-                                        <div className="absolute z-10 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                        <div className="absolute z-10 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
                                             {filteredMaterials.map((material) => (
                                                 <button
                                                     key={material.id}
@@ -857,7 +858,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
             {/* MODAL DE BAIXA ESTOQUE (SAÍDA) */}
             {isSaidaModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
+                    <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
                         {/* Header */}
                         <div className="relative p-6 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-red-50">
                             <div className="flex items-center gap-4">
@@ -897,7 +898,7 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
                                     />
                                     {isMaterialListOpen && filteredMaterials.length > 0 && (
-                                        <div className="absolute z-10 w-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-y-auto">
+                                        <div className="absolute z-10 w-full mt-2 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
                                             {filteredMaterials.map((material) => (
                                                 <button
                                                     key={material.id}

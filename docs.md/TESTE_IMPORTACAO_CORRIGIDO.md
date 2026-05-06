@@ -3,6 +3,7 @@
 ## 🔧 **O QUE FOI CORRIGIDO:**
 
 ### **1. Backend (`materiaisController.ts`)**
+
 ```typescript
 // ✨ ANTES: Backend tentava ler jsonData.versao diretamente
 const jsonData = JSON.parse(jsonContent);
@@ -11,13 +12,14 @@ console.log(jsonData.versao); // ❌ undefined (porque estava em data.versao)
 // ✅ AGORA: Backend detecta e remove wrapper automaticamente
 let jsonData = JSON.parse(jsonContent);
 if (jsonData.success && jsonData.data) {
-  console.log('🧹 Detectado wrapper - Extraindo data...');
+  console.log("🧹 Detectado wrapper - Extraindo data...");
   jsonData = jsonData.data; // Remove { success, data }
 }
 console.log(jsonData.versao); // ✅ "1.0"
 ```
 
 ### **2. Frontend (`AtualizacaoPrecos.tsx`)**
+
 ```typescript
 // ✨ ANTES: Tentava extrair de múltiplos níveis (confuso)
 let templateData = response; // Às vezes funciona, às vezes não
@@ -56,6 +58,7 @@ npm run dev
 ```
 
 **Console Frontend DEVE mostrar:**
+
 ```
 📄 Resposta COMPLETA (tipo): object
 📄 Resposta COMPLETA (keys): ['success', 'data']
@@ -78,6 +81,7 @@ npm run dev
 ```
 
 **✅ DEVE SER:**
+
 ```json
 {
   "versao": "1.0",
@@ -86,6 +90,7 @@ npm run dev
 ```
 
 **❌ NÃO PODE SER:**
+
 ```json
 {
   "success": true,    ← ❌ NÃO!
@@ -103,6 +108,7 @@ npm run dev
 ```
 
 **Backend Console DEVE mostrar:**
+
 ```
 📥 Preview - Recebendo arquivo...
 📂 Lendo arquivo: ...
@@ -121,6 +127,7 @@ POST /api/materiais/preview-importacao 200  ← ✅ 200, não 400!
 ```
 
 **Frontend DEVE mostrar:**
+
 ```
 ℹ️ Nenhuma alteração detectada
 
@@ -143,6 +150,7 @@ POST /api/materiais/preview-importacao 200  ← ✅ 200, não 400!
 ```
 
 **DEVE mostrar:**
+
 ```
 ✅ 1 material COM alteração:
    • SKU-123: R$ 100 → R$ 150 (+50%)
@@ -213,4 +221,3 @@ Se mostrar `versao: undefined`, o JSON ainda tem wrapper.
 **TESTE AGORA E VAI FUNCIONAR! 🚀**
 
 **Qualquer problema, verifique os logs do console (F12) e backend!**
-

@@ -77,8 +77,22 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
         cidade: '',
         estado: '',
         cep: '',
-        categoria: ''
+        categoria: '',
+        classificacao: ''
     });
+    const [cnpjLoading, setCnpjLoading] = useState(false);
+    const [cnpjError, setCnpjError] = useState<string | null>(null);
+    const [cnpjFetchedData, setCnpjFetchedData] = useState<any | null>(null);
+    // Helpers para formatação de CNPJ
+    const onlyDigits = (v: string) => (v || '').replace(/\D/g, '');
+    const formatCNPJ = (v: string) => {
+        const d = onlyDigits(v).slice(0, 14);
+        if (d.length <= 2) return d;
+        if (d.length <= 5) return `${d.slice(0,2)}.${d.slice(2)}`;
+        if (d.length <= 8) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`;
+        if (d.length <= 12) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8)}`;
+        return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12,14)}`;
+    };
 
     useEffect(() => {
         loadFornecedores();
@@ -113,6 +127,8 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
     }, [fornecedores, searchTerm, ativoFilter]);
 
     const handleOpenModal = (fornecedor: Fornecedor | null = null) => {
+        // limpar dados de busca anterior para evitar vazamento entre formulários
+        setCnpjFetchedData(null);
         if (fornecedor) {
             setFornecedorToEdit(fornecedor);
             setFormState({
@@ -124,7 +140,8 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                 cidade: fornecedor.cidade || '',
                 estado: fornecedor.estado || '',
                 cep: fornecedor.cep || '',
-                categoria: fornecedor.categoria || ''
+                categoria: fornecedor.categoria || '',
+                classificacao: (fornecedor.classificacao as '' | 'Fabricante' | 'Representante_Vendedor') || ''
             });
         } else {
             setFornecedorToEdit(null);
@@ -137,7 +154,8 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                 cidade: '',
                 estado: '',
                 cep: '',
-                categoria: ''
+                categoria: '',
+                classificacao: ''
             });
         }
         setIsModalOpen(true);
@@ -147,14 +165,24 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
         e.preventDefault();
         
         try {
+            // Incluir campos fiscais adicionais se vieram da consulta ao BrasilAPI
+            const payload: any = { ...formState };
+            if (payload.classificacao === '') payload.classificacao = null;
+            if (cnpjFetchedData) {
+                payload.cnae_fiscal = cnpjFetchedData.cnae_fiscal || cnpjFetchedData.cnae || null;
+                payload.codigo_municipio_ibge = cnpjFetchedData.codigo_municipio_ibge || cnpjFetchedData.codigo_municipio || null;
+                payload.situacao_cadastral = cnpjFetchedData.situacao_cadastral || cnpjFetchedData.situacao_cadastral || null;
+                payload.bairro = cnpjFetchedData.bairro || payload.bairro || '';
+            }
+
             if (fornecedorToEdit) {
-                const response = await fornecedoresService.atualizar(fornecedorToEdit.id, formState);
+                const response = await fornecedoresService.atualizar(fornecedorToEdit.id, payload);
                 if (response.success) {
                     await loadFornecedores();
                     setIsModalOpen(false);
                 }
             } else {
-                const response = await fornecedoresService.criar(formState);
+                const response = await fornecedoresService.criar(payload);
                 if (response.success) {
                     await loadFornecedores();
                     setIsModalOpen(false);
@@ -218,7 +246,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-white dark:bg-dark-bg">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-orange-600 mx-auto mb-4"></div>
                     <p className="text-gray-600">Carregando fornecedores...</p>
@@ -228,11 +256,11 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-white dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-gray-100 dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
@@ -242,7 +270,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                 </div>
                 <button
                     onClick={() => handleOpenModal()}
-                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                 >
                     <PlusIcon className="w-5 h-5" />
                     Novo Fornecedor
@@ -250,7 +278,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
             </header>
 
             {/* Filtros */}
-            <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
+            <div className="card-primary mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
@@ -260,7 +288,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                 placeholder="Buscar por nome, CNPJ ou email..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             />
                         </div>
                     </div>
@@ -269,7 +297,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                         <select
                             value={ativoFilter}
                             onChange={(e) => setAtivoFilter(e.target.value as any)}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                         >
                             <option value="Todos">Todos os Status</option>
                             <option value="Ativo">Ativos</option>
@@ -298,8 +326,8 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
 
             {/* Grid/Lista de Fornecedores */}
             {filteredFornecedores.length === 0 ? (
-                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
-                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="card-primary p-16 text-center">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-dark-card rounded-full flex items-center justify-center mx-auto mb-4">
                         <span className="text-4xl">🏭</span>
                     </div>
                     <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhum fornecedor encontrado</h3>
@@ -311,9 +339,9 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                     {!searchTerm && ativoFilter === 'Todos' && (
                         <button
                             onClick={() => handleOpenModal()}
-                            className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-6 py-3 rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                         >
-                            <PlusIcon className="w-5 h-5 inline mr-2" />
+                            <PlusIcon className="w-5 h-5" />
                             Adicionar Primeiro Fornecedor
                         </button>
                     )}
@@ -321,15 +349,15 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredFornecedores.map((fornecedor) => (
-                        <div key={fornecedor.id} className={`bg-white border-2 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 ${
-                            fornecedor.ativo ? 'border-gray-200 hover:border-orange-300' : 'border-red-200 hover:border-red-300 opacity-75'
+                        <div key={fornecedor.id} className={`card-primary border-2 transition-all duration-200 ${
+                            fornecedor.ativo ? 'border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-600' : 'border-red-200 dark:border-red-800 opacity-75'
                         }`}>
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
                                     <h3 className="font-bold text-lg text-gray-900 mb-1">{fornecedor.nome}</h3>
                                     <div className="flex items-center gap-2">
-                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
+                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800">
                                             🏭 Fornecedor
                                         </span>
                                     </div>
@@ -374,7 +402,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                     <>
                                         <button
                                             onClick={() => handleOpenModal(fornecedor)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors text-sm font-semibold"
                                         >
                                             <PencilIcon className="w-4 h-4" />
                                             Editar
@@ -410,7 +438,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-gray-50 dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">
                                 <tr>
                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Nome</th>
                                     <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">CNPJ</th>
@@ -422,7 +450,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {filteredFornecedores.map((fornecedor) => (
-                                    <tr key={fornecedor.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={fornecedor.id} className="hover:bg-gray-50 dark:hover:bg-dark-card transition-colors">
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="font-bold text-gray-900">{fornecedor.nome}</div>
                                         </td>
@@ -450,7 +478,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                                     <>
                                                         <button
                                                             onClick={() => handleOpenModal(fornecedor)}
-                                                            className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                            className="px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors text-sm font-semibold"
                                                         >
                                                             <PencilIcon className="w-4 h-4" />
                                                         </button>
@@ -489,7 +517,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
                     <div className="bg-white rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
-                        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-orange-600 to-orange-700">
+                        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-blue-700">
                             <div className="flex items-center gap-4">
                                 <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
                                     {fornecedorToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
@@ -522,7 +550,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         value={formState.nome}
                                         onChange={(e) => setFormState({...formState, nome: e.target.value})}
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="Nome da empresa"
                                     />
                                 </div>
@@ -531,14 +559,82 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         CNPJ *
                                     </label>
-                                    <input
-                                        type="text"
-                                        value={formState.cnpj}
-                                        onChange={(e) => setFormState({...formState, cnpj: e.target.value})}
-                                        required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                        placeholder="00.000.000/0000-00"
-                                    />
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={formState.cnpj}
+                                            onChange={(e) => {
+                                                const formatted = formatCNPJ(e.target.value);
+                                                setFormState({...formState, cnpj: formatted});
+                                                setCnpjFetchedData(null);
+                                            }}
+                                            required
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                            placeholder="00.000.000/0000-00"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                const raw = (formState.cnpj || '').replace(/\D/g, '');
+                                                if (raw.length !== 14) {
+                                                    toast.error('Digite um CNPJ válido (14 dígitos).');
+                                                    return;
+                                                }
+                                                setCnpjError(null);
+                                                setCnpjLoading(true);
+                                                try {
+                                                    const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${raw}`);
+                                                    if (!res.ok) {
+                                                        let errMsg = 'CNPJ não encontrado';
+                                                        try {
+                                                            const b = await res.json();
+                                                            if (b && b.message) errMsg = b.message;
+                                                        } catch (_) {}
+                                                        toast.error(errMsg);
+                                                        setCnpjError(errMsg);
+                                                        return;
+                                                    }
+                                                    const data = await res.json();
+                                                    // preencher email com variantes possíveis
+                                                    const email = data.email || data.e_mail || data.email_principal || data.emailPrincipal || '';
+                                                    const telefone = (data.ddd_telefone_1 || data.ddd_telefone_2) || data.telefone || '';
+                                                    const logradouro = data.logradouro || '';
+                                                    const numero = data.numero || '';
+                                                    const complemento = data.complemento || '';
+                                                    const enderecoStr = [logradouro, numero, complemento].filter(Boolean).join(', ');
+                                                    const bairro = data.bairro || '';
+                                                    const cidade = data.municipio || data.nome_municipio || '';
+                                                    const estado = data.uf || '';
+                                                    const cepResp = data.cep ? String(data.cep) : '';
+
+                                                    setFormState(prev => ({
+                                                        ...prev,
+                                                        email: email || prev.email || '',
+                                                        telefone: telefone || prev.telefone || '',
+                                                        endereco: enderecoStr || prev.endereco || '',
+                                                        bairro: bairro || prev.bairro || '',
+                                                        cidade: cidade || prev.cidade || '',
+                                                        estado: estado || prev.estado || '',
+                                                        cep: cepResp || prev.cep || ''
+                                                    }));
+
+                                                    setCnpjFetchedData(data);
+                                                    toast.success('Dados do CNPJ aplicados ao formulário.');
+                                                } catch (err: any) {
+                                                    console.error('Erro ao consultar BrasilAPI CNPJ (fornecedor):', err);
+                                                    setCnpjError(err?.message || 'Erro ao consultar CNPJ');
+                                                    toast.error('Erro ao consultar CNPJ: ' + (err?.message || 'unknown'));
+                                                } finally {
+                                                    setCnpjLoading(false);
+                                                }
+                                            }}
+                                            disabled={cnpjLoading}
+                                            className="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50"
+                                        >
+                                            {cnpjLoading ? 'Buscando...' : 'Buscar CNPJ'}
+                                        </button>
+                                    </div>
+                                    {cnpjError && <p className="text-xs text-red-600 mt-1">{cnpjError}</p>}
                                 </div>
 
                                 <div>
@@ -549,7 +645,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         type="email"
                                         value={formState.email}
                                         onChange={(e) => setFormState({...formState, email: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="contato@fornecedor.com"
                                     />
                                 </div>
@@ -562,7 +658,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         type="text"
                                         value={formState.telefone}
                                         onChange={(e) => setFormState({...formState, telefone: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="(00) 0000-0000"
                                     />
                                 </div>
@@ -575,10 +671,33 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         type="text"
                                         value={formState.endereco}
                                         onChange={(e) => setFormState({...formState, endereco: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="Rua, número, complemento"
                                     />
                                 </div>
+                                {cnpjFetchedData && (
+                                    <div className="md:col-span-2 border-t pt-4 mt-4">
+                                        <h4 className="text-sm font-semibold text-gray-700 mb-3">Dados (BrasilAPI)</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+                                            <div>
+                                                <p className="text-xs text-gray-500 uppercase">Natureza Jurídica</p>
+                                                <p className="font-medium">{cnpjFetchedData.natureza_juridica || cnpjFetchedData.descricao_natureza_juridica || '—'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-gray-500 uppercase">CNAE Fiscal</p>
+                                                <p className="font-medium">{cnpjFetchedData.cnae_fiscal || cnpjFetchedData.cnae || '—'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-gray-500 uppercase">Código Município (IBGE)</p>
+                                                <p className="font-medium">{cnpjFetchedData.codigo_municipio_ibge || cnpjFetchedData.codigo_municipio || '—'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-gray-500 uppercase">Situação Cadastral</p>
+                                                <p className="font-medium">{cnpjFetchedData.descricao_situacao_cadastral || cnpjFetchedData.descricao_situacao || (cnpjFetchedData.situacao_cadastral ? String(cnpjFetchedData.situacao_cadastral) : '—')}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -588,7 +707,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         type="text"
                                         value={formState.cidade}
                                         onChange={(e) => setFormState({...formState, cidade: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="Nome da cidade"
                                     />
                                 </div>
@@ -600,7 +719,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                     <select
                                         value={formState.estado}
                                         onChange={(e) => setFormState({...formState, estado: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                     >
                                         <option value="">Selecione o estado</option>
                                         <option value="AC">Acre</option>
@@ -641,7 +760,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         type="text"
                                         value={formState.cep}
                                         onChange={(e) => setFormState({...formState, cep: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                         placeholder="00000-000"
                                         maxLength={9}
                                     />
@@ -654,7 +773,7 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                     <select
                                         value={formState.categoria}
                                         onChange={(e) => setFormState({...formState, categoria: e.target.value})}
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                                     >
                                         <option value="">Selecione a categoria</option>
                                         <option value="Materiais Elétricos">Materiais Elétricos</option>
@@ -668,19 +787,35 @@ const FornecedoresModerno: React.FC<FornecedoresProps> = ({ toggleSidebar }) => 
                                         <option value="Diversos">Diversos</option>
                                     </select>
                                 </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Classificação
+                                    </label>
+                                    <select
+                                        value={formState.classificacao ?? ''}
+                                        onChange={(e) => setFormState({...formState, classificacao: e.target.value as '' | 'Fabricante' | 'Representante_Vendedor'})}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="">Selecione a classificação</option>
+                                        <option value="Fabricante">Fabricante</option>
+                                        <option value="Representante_Vendedor">Representante/Vendedor</option>
+                                    </select>
+                                    <p className="text-xs text-gray-500 mt-1">Usado na regra de valor de venda em cotações</p>
+                                </div>
                             </div>
 
                             <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
                                 <button
                                     type="button"
                                     onClick={() => setIsModalOpen(false)}
-                                    className="px-6 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-all font-semibold"
+                                    className="btn-secondary"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-8 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                                    className="px-8 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
                                 >
                                     {fornecedorToEdit ? 'Atualizar' : 'Cadastrar'} Fornecedor
                                 </button>

@@ -2,13 +2,15 @@
 
 ## ✅ Remoção Concluída
 
-A rota antiga `/api/pdf` foi removida e consolidada no novo sistema `/api/pdf-customization`.
+A rota antiga `/api/pdf` foi removida e consolidada no novo sistema
+`/api/pdf-customization`.
 
 ---
 
 ## 📋 O Que Foi Feito
 
 ### Backend (`backend/src/app.ts`)
+
 - ✅ **Removido import**: `import pdfRoutes from './routes/pdf.routes.js'`
 - ✅ **Removida rota**: `app.use('/api/pdf', pdfRoutes)`
 - ✅ **Removido do endpoint list**: `pdf: '/api/pdf'`
@@ -19,6 +21,7 @@ A rota antiga `/api/pdf` foi removida e consolidada no novo sistema `/api/pdf-cu
 ## 🔄 Sistema Consolidado
 
 ### Antes (2 rotas separadas)
+
 ```
 /api/pdf                    → PDF simples (antiga)
   ├─ /orcamento/:id/download
@@ -34,6 +37,7 @@ A rota antiga `/api/pdf` foi removida e consolidada no novo sistema `/api/pdf-cu
 ```
 
 ### Depois (1 rota consolidada)
+
 ```
 /api/pdf-customization      → Sistema completo
   ├─ /generate-custom       ✅ Gera PDF customizado
@@ -47,6 +51,7 @@ A rota antiga `/api/pdf` foi removida e consolidada no novo sistema `/api/pdf-cu
 ## ⚠️ Arquivos do Frontend Afetados
 
 ### `frontend/src/services/orcamentosService.ts`
+
 Este arquivo ainda tem referências à rota antiga:
 
 ```typescript
@@ -69,7 +74,9 @@ async visualizarPDF(id: string) {
 ```
 
 ### ✅ Solução
+
 Essas funções podem ser **removidas** porque:
+
 1. ✅ A página de orçamentos já usa o novo sistema (`PDFCustomizationModal`)
 2. ✅ O botão "PDF" já abre o modal de customização
 3. ✅ A geração de PDF agora usa `/api/pdf-customization/generate-custom`
@@ -79,7 +86,9 @@ Essas funções podem ser **removidas** porque:
 ## 🎯 Próximos Passos (Opcional)
 
 ### Opção 1: Remover Funções Obsoletas
+
 Remover do `orcamentosService.ts`:
+
 - `gerarPDF()`
 - `gerarPDFURL()`
 - `verificarOrcamento()`
@@ -87,7 +96,9 @@ Remover do `orcamentosService.ts`:
 - `baixarPDF()`
 
 ### Opção 2: Manter por Compatibilidade
+
 Se alguma outra parte do sistema ainda usa essas funções, você pode:
+
 1. Deixá-las (mas vão dar erro 404)
 2. Ou atualizá-las para usar o novo sistema
 
@@ -105,11 +116,13 @@ Estes arquivos podem ser deletados (opcional):
 ## ✨ Benefícios da Consolidação
 
 ### Antes
+
 - 😕 2 sistemas de PDF separados
 - 😕 Confusão sobre qual usar
 - 😕 Manutenção duplicada
 
 ### Depois
+
 - ✅ 1 sistema unificado
 - ✅ Mais recursos (customização)
 - ✅ Código mais limpo
@@ -142,11 +155,13 @@ PDF é baixado automaticamente
 ## 🔧 Verificação de Erros
 
 ### Backend
+
 - ✅ Sem erros de lint em `app.ts`
 - ✅ Rotas antigas removidas
 - ✅ Nova rota funcionando
 
 ### Frontend
+
 - ⚠️ Funções em `orcamentosService.ts` ainda referenciam rota antiga
 - ⚠️ Se usadas, vão retornar 404
 - ✅ Página de orçamentos usa novo sistema (não afetada)
@@ -162,6 +177,7 @@ PDF é baixado automaticamente
 3. Se usa: Atualizar para usar o novo sistema
 
 **Comando para verificar uso**:
+
 ```bash
 # Procurar por uso das funções obsoletas
 grep -r "gerarPDF\|gerarPDFURL\|verificarOrcamento\|visualizarPDF" frontend/src/components
@@ -178,8 +194,9 @@ grep -r "gerarPDF\|gerarPDFURL\|verificarOrcamento\|visualizarPDF" frontend/src/
 
 ---
 
-**Conclusão**: A rota antiga foi removida com sucesso! O sistema agora usa apenas `/api/pdf-customization` com todas as funcionalidades de personalização. 🎉
+**Conclusão**: A rota antiga foi removida com sucesso! O sistema agora usa
+apenas `/api/pdf-customization` com todas as funcionalidades de personalização.
+🎉
 
 **Data**: 06/11/2024  
 **Status**: ✅ Concluído
-

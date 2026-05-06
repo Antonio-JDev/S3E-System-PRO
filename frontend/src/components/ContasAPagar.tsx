@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { financeiroService } from '../services/financeiroService';
 import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { AuthContext } from '../contexts/AuthContext';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -67,7 +68,9 @@ interface CompraBasica {
 interface ContaPagar {
     id: string;
     compraId?: string;
+    despesaFixaId?: string; // ✅ NOVO: ID da despesa fixa que gerou a parcela
     fornecedorId?: string;
+    funcionario?: { id: string; nome: string } | null;
     fornecedorNome: string;
     numeroParcela: number;
     descricao: string;
@@ -79,6 +82,7 @@ interface ContaPagar {
     status: 'Pendente' | 'Pago' | 'Atrasado';
     observacoes?: string;
     compra?: CompraBasica;
+    tipo?: string; // FORNECEDOR, RH, DESPESA_FIXA
 }
 
 interface ItemCompra {
@@ -126,19 +130,62 @@ interface CompraDetalhada {
     duplicatas?: Duplicata[];
 }
 
+interface FornecedorOption {
+    id: string;
+    nome: string;
+    ativo?: boolean;
+}
+
+interface FuncionarioOption {
+    id: string;
+    nome: string;
+    status?: string;
+}
+
 interface ContasAPagarProps {
     toggleSidebar?: () => void;
     setAbaAtiva?: (aba: string) => void;
+    initialContaId?: string | null;
+    onClearInitialContaId?: () => void;
+}
+
+/** Nome do colaborador em conta RH: relação `funcionario` ou texto "Salário NOME - AAAA-MM" */
+function nomeColaboradorContaRh(conta: { funcionario?: { nome?: string } | null; descricao?: string }): string | null {
+    const n = conta.funcionario?.nome?.trim();
+    if (n) return n;
+    const d = (conta.descricao || '').trim();
+    const m = d.match(/^Salário\s+(.+?)\s*-\s*\d{4}-\d{2}/i);
+    return m ? m[1].trim() : null;
 }
 
 // ==================== COMPONENT ====================
-const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva }) => {
+const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva, initialContaId, onClearInitialContaId }) => {
+    const { user } = useContext(AuthContext)!;
+
+    const toISODate = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const getMesAtualRange = () => {
+        const hoje = new Date();
+        const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+        return { dataInicio: toISODate(inicio), dataFim: toISODate(fim) };
+    };
+    
     // Estados
     const [contasPagar, setContasPagar] = useState<ContaPagar[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState<string>('Todos');
-    const [filterPeriodo, setFilterPeriodo] = useState<string>('Todos');
+    const [searchValorExato, setSearchValorExato] = useState('');
+    const [searchValorMin, setSearchValorMin] = useState('');
+    const [searchValorMax, setSearchValorMax] = useState('');
+    const [filterStatus, setFilterStatus] = useState<string>('Em aberto'); // Padrão: apenas Pendente e Atrasado
+    const [filterPeriodo, setFilterPeriodo] = useState<string>('MesAtual');
+    const [{ dataInicio, dataFim }, setFiltroDatas] = useState(() => getMesAtualRange());
     const [filterTipo, setFilterTipo] = useState<string>('TODOS'); // TODOS, FORNECEDOR, RH, DESPESA_FIXA
     const [gerandoContas, setGerandoContas] = useState(false);
     
@@ -148,16 +195,43 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
     const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().split('T')[0]);
     const [valorPago, setValorPago] = useState('0');
     const [observacoesPagamento, setObservacoesPagamento] = useState('');
+    const [meioPagamento, setMeioPagamento] = useState<string>('PIX');
     
     // Modal de Visualização de Compra
     const [isVisualizarModalOpen, setIsVisualizarModalOpen] = useState(false);
     const [compraDetalhada, setCompraDetalhada] = useState<CompraDetalhada | null>(null);
     const [loadingCompra, setLoadingCompra] = useState(false);
+    // Highlighting / foco em parcela vinda de outra página
+    const [highlightedContaId, setHighlightedContaId] = useState<string | null>(null);
+    const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+
+    // Quando highlightedContaId é setado, aguardar render e scrollar até a linha
+    useEffect(() => {
+        if (!highlightedContaId) return;
+        // Limpar sinal do pai para não repetir ao trocar de aba
+        if (onClearInitialContaId) onClearInitialContaId();
+        // Aguardar o DOM renderizar a linha
+        const timer = setTimeout(() => {
+            const el = rowRefs.current[highlightedContaId];
+            if (el && typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 300);
+        // Remover destaque após 10s
+        const clearTimer = setTimeout(() => {
+            setHighlightedContaId(null);
+        }, 10000);
+        return () => {
+            clearTimeout(timer);
+            clearTimeout(clearTimer);
+        };
+    }, [highlightedContaId]);
     
     // Modal de Atualização de Conta
     const [isAtualizarModalOpen, setIsAtualizarModalOpen] = useState(false);
     const [novaDataVencimento, setNovaDataVencimento] = useState('');
     const [novasObservacoes, setNovasObservacoes] = useState('');
+    const [novoCredorNome, setNovoCredorNome] = useState('');
     
     // AlertDialog de Confirmação
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
@@ -167,12 +241,82 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
     const [isAgendamentoModalOpen, setIsAgendamentoModalOpen] = useState(false);
     const [dataAgendamento, setDataAgendamento] = useState(new Date().toISOString().split('T')[0]);
 
+    // Modal Nova Conta a Pagar (manual, sem compra)
+    const [isNovaContaModalOpen, setIsNovaContaModalOpen] = useState(false);
+    const [novaContaCredor, setNovaContaCredor] = useState('');
+    const [novaContaDescricao, setNovaContaDescricao] = useState('');
+    const [novaContaValor, setNovaContaValor] = useState('');
+    const [novaContaVencimento, setNovaContaVencimento] = useState(new Date().toISOString().split('T')[0]);
+    const [novaContaObservacoes, setNovaContaObservacoes] = useState('');
+    const [novaContaClassificacao, setNovaContaClassificacao] = useState<string>('');
+    const [novaContaTipoDespesa, setNovaContaTipoDespesa] = useState<'FORNECEDOR' | 'RH' | 'DESPESA_FIXA'>('FORNECEDOR');
+    const [novaContaFornecedorModo, setNovaContaFornecedorModo] = useState<'CADASTRADO' | 'NOVO'>('NOVO');
+    const [novaContaFornecedorId, setNovaContaFornecedorId] = useState('');
+    const [novaContaRhSubtipo, setNovaContaRhSubtipo] = useState<'ADIANTAMENTO' | 'VALE'>('ADIANTAMENTO');
+    const [novaContaFuncionarioId, setNovaContaFuncionarioId] = useState('');
+    const [novaContaRhDescontoTipo, setNovaContaRhDescontoTipo] = useState<'UMA_VEZ' | 'PARCELADO'>('UMA_VEZ');
+    const [novaContaRhParcelas, setNovaContaRhParcelas] = useState('2');
+    const [novaContaRhReferencia, setNovaContaRhReferencia] = useState(new Date().toISOString().slice(0, 7));
+    const [fornecedoresOptions, setFornecedoresOptions] = useState<FornecedorOption[]>([]);
+    const [funcionariosOptions, setFuncionariosOptions] = useState<FuncionarioOption[]>([]);
+    const [salvandoNovaConta, setSalvandoNovaConta] = useState(false);
+
+    const CLASSIFICACOES_CONTA_PAGAR = [
+        { value: '', label: 'Selecione a classificação...' },
+        { value: 'Cartão de crédito', label: 'Cartão de crédito' },
+        { value: 'Impostos', label: 'Impostos' },
+        { value: 'TRT-ART', label: 'TRT-ART' },
+        { value: 'Serviço mão de obra eletricista', label: 'Serviço mão de obra eletricista' },
+        { value: 'Brindes', label: 'Brindes' },
+        { value: 'Combustíveis e pedagios', label: 'Combustíveis e pedagios' },
+        { value: 'Frete', label: 'Frete' },
+        { value: 'Material de escritório', label: 'Material de escritório' },
+        { value: 'Outras Despesas', label: 'Outras Despesas' },
+        { value: 'Saídas', label: 'Saídas' },
+        { value: 'Tarifas Bancarias', label: 'Tarifas Bancarias' }
+    ] as const;
+
+    // Modal Pagamento: Juros e Descontos
+    const [jurosPagamento, setJurosPagamento] = useState('0');
+    const [descontosPagamento, setDescontosPagamento] = useState('0');
+
     // Handlers de Modal - Declarados antes do useEscapeKey para evitar erro de inicialização
     const handleClosePagamentoModal = () => {
         setIsPagamentoModalOpen(false);
         setContaSelecionada(null);
         setValorPago('0');
         setObservacoesPagamento('');
+        setJurosPagamento('0');
+        setDescontosPagamento('0');
+    };
+
+    const handleOpenPagamentoModal = (conta: ContaPagar) => {
+        setContaSelecionada(conta);
+        setDataPagamento(new Date().toISOString().split('T')[0]);
+        setValorPago(conta.valor.toString());
+        setObservacoesPagamento('');
+        setMeioPagamento('PIX');
+        setJurosPagamento('0');
+        setDescontosPagamento('0');
+        setIsPagamentoModalOpen(true);
+    };
+
+    const handleCloseNovaContaModal = () => {
+        setIsNovaContaModalOpen(false);
+        setNovaContaCredor('');
+        setNovaContaDescricao('');
+        setNovaContaValor('');
+        setNovaContaVencimento(new Date().toISOString().split('T')[0]);
+        setNovaContaObservacoes('');
+        setNovaContaClassificacao('');
+        setNovaContaTipoDespesa('FORNECEDOR');
+        setNovaContaFornecedorModo('NOVO');
+        setNovaContaFornecedorId('');
+        setNovaContaRhSubtipo('ADIANTAMENTO');
+        setNovaContaFuncionarioId('');
+        setNovaContaRhDescontoTipo('UMA_VEZ');
+        setNovaContaRhParcelas('2');
+        setNovaContaRhReferencia(new Date().toISOString().slice(0, 7));
     };
 
     const handleCloseVisualizarModal = () => {
@@ -185,6 +329,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         setContaSelecionada(null);
         setNovaDataVencimento('');
         setNovasObservacoes('');
+        setNovoCredorNome('');
     };
 
     const handleCloseAgendamentoModal = () => {
@@ -248,10 +393,112 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         }
     };
 
+    // Verificar se pode excluir a parcela
+    const podeExcluirParcela = (conta: ContaPagar): boolean => {
+        // Só admin e desenvolvedor podem excluir
+        const userRole = user?.role?.toLowerCase();
+        if (userRole !== 'admin' && userRole !== 'administrador' && userRole !== 'desenvolvedor') {
+            return false;
+        }
+
+        // Parcela deve estar paga
+        if (conta.status !== 'Pago') {
+            return false;
+        }
+
+        // Se tem compraId, verificar se a compra foi excluída (não existe mais)
+        if (conta.compraId) {
+            // Se compra existe (tem dados), não pode excluir
+            if (conta.compra) {
+                return false;
+            }
+            // Se compraId existe mas compra não tem dados, significa que foi excluída
+            return true;
+        }
+
+        // Se tem despesaFixaId, verificar se a despesa fixa foi excluída
+        if (conta.despesaFixaId) {
+            // Se despesaFixa existe (tem dados), não pode excluir
+            if ((conta as any).despesaFixa) {
+                return false;
+            }
+            // Se despesaFixaId existe mas despesaFixa não tem dados, significa que foi excluída
+            return true;
+        }
+
+        // Se não tem nem compraId nem despesaFixaId, é uma conta manual e pode excluir se estiver paga
+        return true;
+    };
+
+    const handleExcluirParcela = async (conta: ContaPagar) => {
+        if (!confirm(`Tem certeza que deseja excluir a parcela "${conta.descricao}"?\n\nEsta ação não pode ser desfeita.`)) {
+            return;
+        }
+
+        try {
+            await axiosApiService.delete(`/api/contas-pagar/${conta.id}`);
+            toast.success('Parcela excluída com sucesso!');
+            await loadContasPagar();
+        } catch (error: any) {
+            console.error('Erro ao excluir parcela:', error);
+            toast.error('Erro ao excluir parcela', {
+                description: error.response?.data?.message || 'Tente novamente'
+            });
+        }
+    };
+
     // Carregar dados
     useEffect(() => {
         loadContasPagar();
+        carregarOpcoesNovaConta();
     }, []);
+
+    // Sincronizar “atalhos” de período com os campos de data (calendário)
+    useEffect(() => {
+        const hoje = new Date();
+        if (filterPeriodo === 'MesAtual') {
+            setFiltroDatas(getMesAtualRange());
+            return;
+        }
+        if (filterPeriodo === 'Todos') {
+            // manter vazio = sem filtro por data
+            setFiltroDatas({ dataInicio: '', dataFim: '' });
+            return;
+        }
+        if (filterPeriodo === 'Próximo30Dias') {
+            const inicio = toISODate(hoje);
+            const fim = toISODate(new Date(hoje.getTime() + 30 * 24 * 60 * 60 * 1000));
+            setFiltroDatas({ dataInicio: inicio, dataFim: fim });
+            return;
+        }
+        if (filterPeriodo === 'Vencidas') {
+            // até ontem
+            const ontem = new Date(hoje.getTime() - 24 * 60 * 60 * 1000);
+            setFiltroDatas({ dataInicio: '', dataFim: toISODate(ontem) });
+            return;
+        }
+    }, [filterPeriodo]);
+
+    const carregarOpcoesNovaConta = async () => {
+        try {
+            const [fornecedoresResp, funcionariosResp] = await Promise.all([
+                axiosApiService.get<any>('/api/fornecedores?ativo=true'),
+                axiosApiService.get<any>('/api/funcionarios')
+            ]);
+
+            const fornecedores = (fornecedoresResp.success ? (fornecedoresResp.data?.data || fornecedoresResp.data || []) : [])
+                .filter((f: any) => f && f.id && f.nome)
+                .map((f: any) => ({ id: String(f.id), nome: String(f.nome), ativo: f.ativo !== false }));
+            const funcionarios = (funcionariosResp.success ? (funcionariosResp.data?.data || funcionariosResp.data || []) : [])
+                .filter((f: any) => f && f.id && f.nome)
+                .map((f: any) => ({ id: String(f.id), nome: String(f.nome), status: f.status }));
+
+            setFornecedoresOptions(fornecedores);
+            setFuncionariosOptions(funcionarios.filter((f: FuncionarioOption) => !f.status || f.status === 'Ativo'));
+        } catch (err) {
+            console.warn('Não foi possível carregar opções de fornecedores/funcionários para nova conta.', err);
+        }
+    };
 
     const loadContasPagar = async () => {
         setLoading(true);
@@ -264,13 +511,23 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                 console.log('📦 Dados recebidos do backend:', {
                     tipo: Array.isArray(response.data) ? 'array' : typeof response.data,
                     primeiraConta: Array.isArray(response.data) ? response.data[0] : null,
-                    temCompra: Array.isArray(response.data) && response.data[0]?.compra ? 'sim' : 'não'
+                    temCompra: Array.isArray(response.data) && (response.data[0] as any)?.compra ? 'sim' : 'não'
                 });
                 
                 // Processar e enriquecer dados
                 const contasProcessadas = response.data.map((conta: any) => {
                     // Detectar atraso
                     const isAtrasada = new Date(conta.dataVencimento) < new Date() && conta.status === 'Pendente';
+                    const tipoConta = (conta.tipo || 'FORNECEDOR') as string;
+                    const rawCredor = (conta.fornecedorNome || conta.fornecedor?.nome || conta.credorNome || '').trim();
+                    const nomeColabRh = tipoConta === 'RH' ? nomeColaboradorContaRh(conta) : null;
+                    /** RH: "Pagamento Colaborador [nome]" (ex.: Pagamento Colaborador Marcello) */
+                    const fornecedorNome =
+                        tipoConta === 'RH'
+                            ? nomeColabRh
+                                ? `Pagamento Colaborador ${nomeColabRh}`
+                                : 'Pagamento Colaborador'
+                            : rawCredor || 'Fornecedor não informado';
                     
                     // Debug: verificar se compra está vindo do backend
                     if (conta.compraId && !conta.compra) {
@@ -280,8 +537,9 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                     return {
                         id: conta.id,
                         compraId: conta.compraId,
+                        despesaFixaId: conta.despesaFixaId, // ✅ NOVO: ID da despesa fixa
                         fornecedorId: conta.fornecedorId,
-                        fornecedorNome: conta.fornecedorNome || conta.fornecedor?.nome || 'Fornecedor não informado',
+                        fornecedorNome,
                         numeroParcela: conta.numeroParcela || 1,
                         descricao: conta.descricao || `Parcela ${conta.numeroParcela || 1}`,
                         dataVencimento: conta.dataVencimento,
@@ -291,14 +549,28 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         dataPagamento: conta.dataPagamento,
                         status: isAtrasada ? 'Atrasado' : conta.status,
                         observacoes: conta.observacoes,
-                        tipo: conta.tipo || 'FORNECEDOR', // Adicionar tipo
-                        compra: conta.compra // Incluir dados da compra (numeroSequencial, numeroNF, etc)
+                        tipo: tipoConta,
+                        funcionario: conta.funcionario ?? null,
+                        compra: conta.compra, // Incluir dados da compra (numeroSequencial, numeroNF, etc)
+                        despesaFixa: (conta as any).despesaFixa // ✅ NOVO: Dados da despesa fixa (se existir)
                     };
                 });
                 
                 setContasPagar(contasProcessadas);
                 console.log(`✅ ${contasProcessadas.length} contas a pagar carregadas`);
                 console.log('📦 Exemplo de conta com compra:', contasProcessadas.find(c => c.compra));
+
+                // Se foi solicitado foco em uma conta específica (vinda de outra página), destacar
+                try {
+                    if (initialContaId) {
+                        const found = contasProcessadas.find(c => c.id === initialContaId);
+                        if (found) {
+                            setHighlightedContaId(found.id);
+                        }
+                    }
+                } catch (err) {
+                    // ignore
+                }
             } else {
                 console.warn('⚠️ Erro ao carregar contas:', response.error);
                 setContasPagar([]);
@@ -367,23 +639,31 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         }
 
         // Filtro por status
-        if (filterStatus !== 'Todos') {
+        // Filtro por status: "Em aberto" = apenas Pendente e Atrasado (o que ainda precisa ser pago)
+        if (filterStatus === 'Em aberto') {
+            filtered = filtered.filter(conta => conta.status === 'Pendente' || conta.status === 'Atrasado');
+        } else if (filterStatus !== 'Todos') {
             filtered = filtered.filter(conta => conta.status === filterStatus);
         }
 
         // Filtro por período
-        if (filterPeriodo !== 'Todos') {
-            const hoje = new Date();
-            filtered = filtered.filter(conta => {
-                const vencimento = new Date(conta.dataVencimento);
-                if (filterPeriodo === 'Vencidas') {
-                    return vencimento < hoje && conta.status !== 'Pago';
-                } else if (filterPeriodo === 'Próximo30Dias') {
-                    const proximos30 = new Date(hoje.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    return vencimento >= hoje && vencimento <= proximos30;
-                }
-                return true;
-            });
+        {
+            const inicio = dataInicio ? new Date(`${dataInicio}T00:00:00`) : null;
+            const fim = dataFim ? new Date(`${dataFim}T23:59:59`) : null;
+            if (inicio || fim) {
+                filtered = filtered.filter((conta) => {
+                    const vencimento = new Date(conta.dataVencimento);
+                    if (inicio && vencimento < inicio) return false;
+                    if (fim && vencimento > fim) return false;
+                    return true;
+                });
+            }
+
+            // Regras complementares do “atalho” Vencidas (mantém o comportamento atual)
+            if (filterPeriodo === 'Vencidas') {
+                const hoje = new Date();
+                filtered = filtered.filter((conta) => new Date(conta.dataVencimento) < hoje && conta.status !== 'Pago');
+            }
         }
 
         // Filtro por busca
@@ -394,8 +674,23 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
             );
         }
 
+        const valorExato = searchValorExato ? parseFloat(searchValorExato.replace(',', '.')) : undefined;
+        const valorMin = searchValorMin ? parseFloat(searchValorMin.replace(',', '.')) : undefined;
+        const valorMax = searchValorMax ? parseFloat(searchValorMax.replace(',', '.')) : undefined;
+
+        if (valorExato !== undefined && !isNaN(valorExato)) {
+            filtered = filtered.filter(conta => Math.abs(conta.valor - valorExato) < 0.0001);
+        } else {
+            if (valorMin !== undefined && !isNaN(valorMin)) {
+                filtered = filtered.filter(conta => conta.valor >= valorMin);
+            }
+            if (valorMax !== undefined && !isNaN(valorMax)) {
+                filtered = filtered.filter(conta => conta.valor <= valorMax);
+            }
+        }
+
         return filtered;
-    }, [contasPagar, filterStatus, filterPeriodo, searchTerm, filterTipo]);
+    }, [contasPagar, filterStatus, filterPeriodo, dataInicio, dataFim, searchTerm, filterTipo, searchValorExato, searchValorMin, searchValorMax]);
 
     // Estatísticas
     const estatisticas = useMemo(() => {
@@ -423,29 +718,126 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         };
     }, [contasPagar, contasFiltradas]);
 
-    // Handlers
-    const handleOpenPagamentoModal = (conta: ContaPagar) => {
-        setContaSelecionada(conta);
-        setValorPago(conta.valor.toString());
-        setDataPagamento(new Date().toISOString().split('T')[0]);
-        setObservacoesPagamento('');
-        setIsPagamentoModalOpen(true);
-    };
-
+    // Handlers (handleOpenPagamentoModal já definido acima com setMeioPagamento)
     const handleOpenConfirmPagamento = () => {
         setConfirmAction('pagar');
         setIsConfirmDialogOpen(true);
     };
 
+    const handleCriarNovaConta = async () => {
+        const credor = novaContaCredor.trim();
+        const descricao = novaContaDescricao.trim();
+        const valor = parseFloat(novaContaValor.replace(',', '.'));
+        if (!descricao || !novaContaVencimento) {
+            toast.error('Preencha Descrição e Vencimento.');
+            return;
+        }
+        if (isNaN(valor) || valor <= 0) {
+            toast.error('Informe um valor válido.');
+            return;
+        }
+
+        if (novaContaTipoDespesa === 'FORNECEDOR') {
+            if (novaContaFornecedorModo === 'CADASTRADO' && !novaContaFornecedorId) {
+                toast.error('Selecione um fornecedor cadastrado.');
+                return;
+            }
+            if (novaContaFornecedorModo === 'NOVO' && !credor) {
+                toast.error('Informe o nome do novo fornecedor/credor.');
+                return;
+            }
+        }
+
+        if (novaContaTipoDespesa === 'RH') {
+            if (!novaContaFuncionarioId) {
+                toast.error('Selecione o funcionário.');
+                return;
+            }
+            if (!novaContaRhReferencia || !/^\d{4}-\d{2}$/.test(novaContaRhReferencia)) {
+                toast.error('Informe a competência de desconto da folha no formato AAAA-MM.');
+                return;
+            }
+            if (novaContaRhDescontoTipo === 'PARCELADO') {
+                const parcelas = parseInt(novaContaRhParcelas, 10);
+                if (!Number.isFinite(parcelas) || parcelas < 2) {
+                    toast.error('Para parcelado, informe no mínimo 2 parcelas.');
+                    return;
+                }
+            }
+        }
+
+        const [descontoAno, descontoMes] = novaContaRhReferencia.split('-').map(Number);
+        const isFornecedorCadastrado = novaContaTipoDespesa === 'FORNECEDOR' && novaContaFornecedorModo === 'CADASTRADO';
+        const fornecedorSelecionado = isFornecedorCadastrado
+            ? fornecedoresOptions.find((f) => f.id === novaContaFornecedorId)
+            : null;
+        const funcionarioSelecionado = novaContaTipoDespesa === 'RH'
+            ? funcionariosOptions.find((f) => f.id === novaContaFuncionarioId)
+            : null;
+
+        const nomeCredorFinal = novaContaTipoDespesa === 'FORNECEDOR'
+            ? (isFornecedorCadastrado ? (fornecedorSelecionado?.nome || '') : credor)
+            : (novaContaTipoDespesa === 'RH' ? (funcionarioSelecionado?.nome || '') : (credor || 'Despesa fixa'));
+
+        const descricaoFinal = novaContaTipoDespesa === 'RH'
+            ? `${novaContaRhSubtipo === 'VALE' ? 'Vale' : 'Adiantamento'} - ${nomeCredorFinal} - ${descricao}`
+            : `${nomeCredorFinal ? `${nomeCredorFinal} - ` : ''}${descricao}`;
+
+        setSalvandoNovaConta(true);
+        try {
+            const response = await financeiroService.criarContaPagar({
+                fornecedorId: isFornecedorCadastrado ? novaContaFornecedorId : undefined,
+                credorNome: !isFornecedorCadastrado ? nomeCredorFinal : undefined,
+                origemCadastro: novaContaTipoDespesa === 'FORNECEDOR'
+                    ? (isFornecedorCadastrado ? 'FORNECEDOR_CADASTRADO' : 'FORNECEDOR_NOVO')
+                    : (novaContaTipoDespesa === 'RH' ? 'RH' : 'DESPESA_FIXA'),
+                descricao: descricaoFinal,
+                valor,
+                dataVencimento: novaContaVencimento,
+                tipo: novaContaTipoDespesa,
+                subtipo: novaContaTipoDespesa === 'RH' ? novaContaRhSubtipo : undefined,
+                funcionarioId: novaContaTipoDespesa === 'RH' ? novaContaFuncionarioId : undefined,
+                descontoFolhaTipo: novaContaTipoDespesa === 'RH' ? novaContaRhDescontoTipo : undefined,
+                descontoFolhaParcelas: novaContaTipoDespesa === 'RH' && novaContaRhDescontoTipo === 'PARCELADO'
+                    ? parseInt(novaContaRhParcelas, 10)
+                    : undefined,
+                descontoFolhaReferenciaAno: novaContaTipoDespesa === 'RH' ? descontoAno : undefined,
+                descontoFolhaReferenciaMes: novaContaTipoDespesa === 'RH' ? descontoMes : undefined,
+                observacoes: novaContaObservacoes || undefined,
+                classificacao: novaContaClassificacao.trim() || undefined
+            });
+            if (response.success) {
+                toast.success('Conta a pagar criada com sucesso!', {
+                    description: 'Você já pode registrar o pagamento na lista.'
+                });
+                handleCloseNovaContaModal();
+                await loadContasPagar();
+            } else {
+                toast.error(response.error || 'Erro ao criar conta.');
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao criar conta a pagar.');
+        } finally {
+            setSalvandoNovaConta(false);
+        }
+    };
+
     const handlePagarConta = async () => {
         if (!contaSelecionada) return;
+
+        const valorBase = parseFloat(valorPago || '0') || 0;
+        const juros = parseFloat(jurosPagamento || '0') || 0;
+        const descontos = parseFloat(descontosPagamento || '0') || 0;
+        const valorARegistrar = valorBase + juros - descontos;
 
         try {
             console.log('💳 Registrando pagamento...');
             const response = await financeiroService.pagarContaPagar(contaSelecionada.id, {
                 dataPagamento,
-                valorPago: parseFloat(valorPago),
-                observacoes: observacoesPagamento
+                valorPago: valorARegistrar,
+                observacoes: observacoesPagamento,
+                meioPagamento
             });
 
             if (response.success) {
@@ -540,6 +932,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
         setContaSelecionada(conta);
         setNovaDataVencimento(conta.dataVencimento.split('T')[0]);
         setNovasObservacoes(conta.observacoes || '');
+        setNovoCredorNome(conta.fornecedorNome || '');
         setIsAtualizarModalOpen(true);
     };
 
@@ -553,7 +946,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
 
         try {
             console.log('✏️ Atualizando conta a pagar...');
-            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}/vencimento`, {
+            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}`, {
+                credorNome: (novoCredorNome || '').trim() || null,
                 dataVencimento: novaDataVencimento,
                 observacoes: novasObservacoes
             });
@@ -806,31 +1200,31 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando contas a pagar...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-600 dark:border-red-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando contas a pagar...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <div className="flex items-center gap-4">
                     {toggleSidebar && (
-                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                             <Bars3Icon className="w-6 h-6" />
                         </button>
                     )}
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Contas a Pagar</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gestão de pagamentos e fornecedores</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Contas a Pagar</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gestão de pagamentos e fornecedores</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                     {setAbaAtiva && (
                         <button
                             onClick={() => setAbaAtiva('dashboard')}
@@ -842,6 +1236,15 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                             Voltar ao Dashboard
                         </button>
                     )}
+                    <button
+                        onClick={() => setIsNovaContaModalOpen(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-xl transition-colors flex items-center gap-2 shadow-soft"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                        Nova Conta a Pagar
+                    </button>
                     <button
                         onClick={loadContasPagar}
                         className="btn-danger flex items-center gap-2"
@@ -926,7 +1329,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         <p className="text-sm text-blue-800">
                             <strong>FORNECEDORES:</strong> Contas geradas automaticamente ao importar compras XML. <br/>
                             <strong>RECURSOS HUMANOS:</strong> Clique em "+ Gerar" para criar contas de salários dos funcionários cadastrados. <br/>
-                            <strong>DESPESAS FIXAS:</strong> Clique em "+ Gerar" para criar contas das despesas fixas cadastradas.
+                            <strong>DESPESAS VARIADAS:</strong> Clique em "+ Gerar" para criar contas das despesas cadastradas.
                         </p>
                     </div>
                 </div>
@@ -1002,7 +1405,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                 </svg>
                             </div>
                             <div>
-                                <p className="text-sm font-semibold text-gray-600 uppercase">Despesas Fixas</p>
+                                <p className="text-sm font-semibold text-gray-600 uppercase">Despesas Variadas</p>
                                 <p className="text-3xl font-bold text-orange-600">
                                     {contasPagar.filter(c => ((c as any).tipo) === 'DESPESA_FIXA').length}
                                 </p>
@@ -1038,7 +1441,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
 
             {/* Filtros */}
             <div className="card-primary mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                     <div className="md:col-span-1">
                         <div className="relative">
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -1052,11 +1455,45 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                         </div>
                     </div>
                     <div>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={searchValorExato}
+                            onChange={(e) => setSearchValorExato(e.target.value)}
+                            placeholder="Valor exato"
+                            className="select-field focus:ring-red-500 focus:border-red-500"
+                        />
+                    </div>
+                    <div>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={searchValorMin}
+                            onChange={(e) => setSearchValorMin(e.target.value)}
+                            placeholder="Valor mínimo"
+                            className="select-field focus:ring-red-500 focus:border-red-500"
+                        />
+                    </div>
+                    <div>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={searchValorMax}
+                            onChange={(e) => setSearchValorMax(e.target.value)}
+                            placeholder="Valor máximo"
+                            className="select-field focus:ring-red-500 focus:border-red-500"
+                        />
+                    </div>
+                    <div>
                         <select
                             value={filterStatus}
                             onChange={(e) => setFilterStatus(e.target.value)}
                             className="select-field focus:ring-red-500"
                         >
+                            <option value="Em aberto">Em aberto (Pendente + Atrasado)</option>
                             <option value="Todos">Todos os Status</option>
                             <option value="Pendente">Pendente</option>
                             <option value="Pago">Pago</option>
@@ -1069,15 +1506,59 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                             onChange={(e) => setFilterPeriodo(e.target.value)}
                             className="select-field focus:ring-red-500"
                         >
+                            <option value="MesAtual">Mês Atual</option>
                             <option value="Todos">Todos os Períodos</option>
                             <option value="Vencidas">Vencidas</option>
                             <option value="Próximo30Dias">Próximos 30 Dias</option>
+                            <option value="Personalizado">Personalizado</option>
                         </select>
+                    </div>
+                    <div className="md:col-span-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">De</label>
+                                <input
+                                    type="date"
+                                    value={dataInicio}
+                                    onChange={(e) => {
+                                        setFiltroDatas((prev) => ({ ...prev, dataInicio: e.target.value }));
+                                        setFilterPeriodo('Personalizado');
+                                    }}
+                                    className="select-field focus:ring-red-500 focus:border-red-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Até</label>
+                                <input
+                                    type="date"
+                                    value={dataFim}
+                                    onChange={(e) => {
+                                        setFiltroDatas((prev) => ({ ...prev, dataFim: e.target.value }));
+                                        setFilterPeriodo('Personalizado');
+                                    }}
+                                    className="select-field focus:ring-red-500 focus:border-red-500"
+                                />
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Alterar o período atualiza automaticamente as estatísticas e a lista.
+                        </p>
                     </div>
                 </div>
             </div>
 
             {/* Tabela de Contas */}
+            {/* Estilos para destaque piscante da parcela selecionada */}
+            <style>{`
+                @keyframes s3e-blink {
+                    0% { box-shadow: 0 0 0 2px rgba(59,130,246,1); }
+                    50% { box-shadow: 0 0 0 2px rgba(59,130,246,0); }
+                    100% { box-shadow: 0 0 0 2px rgba(59,130,246,1); }
+                }
+                .animated-highlight {
+                    animation: s3e-blink 1s linear infinite;
+                }
+            `}</style>
             <div className="card-primary overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full">
@@ -1121,7 +1602,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                 </tr>
                             ) : (
                                 contasFiltradas.map((conta) => (
-                                    <tr key={conta.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr
+                                        key={conta.id}
+                                        ref={(el) => { rowRefs.current[conta.id] = el; }}
+                                        className={`hover:bg-gray-50 transition-colors ${highlightedContaId === conta.id ? 'animated-highlight' : ''}`}
+                                    >
                                         <td className="px-6 py-4">
                                             <div>
                                                 <p className="font-semibold text-gray-900">Parcela {conta.numeroParcela}</p>
@@ -1228,6 +1713,17 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                                         title="Visualizar Compra"
                                                     >
                                                         <ShoppingCartIcon className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                {podeExcluirParcela(conta) && (
+                                                    <button
+                                                        onClick={() => handleExcluirParcela(conta)}
+                                                        className="flex items-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                                        title="Excluir Parcela (apenas para parcelas pagas cuja origem foi excluída)"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                        </svg>
                                                     </button>
                                                 )}
                                             </div>
@@ -1535,6 +2031,21 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        Nome do Fornecedor/Credor
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={novoCredorNome}
+                                        onChange={(e) => setNovoCredorNome(e.target.value)}
+                                        className="input-field"
+                                        placeholder="Ex: Concessionária, locador, prestador..."
+                                    />
+                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
+                                        Para contas com fornecedor cadastrado, este campo atualiza o nome do credor (contas manuais).
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Nova Data de Vencimento *
                                     </label>
                                     <input
@@ -1577,6 +2088,248 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
                                 Confirmar Atualização
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Nova Conta a Pagar (manual, sem compra) */}
+            {isNovaContaModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900">Nova Conta a Pagar</h2>
+                                <p className="text-sm text-gray-600 mt-1">Conta que não vem de compra (mesma rota de contas fixas)</p>
+                            </div>
+                            <button
+                                onClick={handleCloseNovaContaModal}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Tipo de despesa *</label>
+                                <select
+                                    value={novaContaTipoDespesa}
+                                    onChange={(e) => setNovaContaTipoDespesa(e.target.value as 'FORNECEDOR' | 'RH' | 'DESPESA_FIXA')}
+                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                >
+                                    <option value="FORNECEDOR">Fornecedores</option>
+                                    <option value="RH">Recursos Humanos</option>
+                                    <option value="DESPESA_FIXA">Despesas Variadas</option>
+                                </select>
+                            </div>
+
+                            {novaContaTipoDespesa === 'FORNECEDOR' && (
+                                <div className="space-y-3">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Origem do fornecedor *</label>
+                                    <div className="flex gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setNovaContaFornecedorModo('CADASTRADO')}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border ${
+                                                novaContaFornecedorModo === 'CADASTRADO'
+                                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                                    : 'bg-white text-gray-700 border-gray-300'
+                                            }`}
+                                        >
+                                            Fornecedor cadastrado
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setNovaContaFornecedorModo('NOVO')}
+                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border ${
+                                                novaContaFornecedorModo === 'NOVO'
+                                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                                    : 'bg-white text-gray-700 border-gray-300'
+                                            }`}
+                                        >
+                                            Novo fornecedor
+                                        </button>
+                                    </div>
+
+                                    {novaContaFornecedorModo === 'CADASTRADO' ? (
+                                        <select
+                                            value={novaContaFornecedorId}
+                                            onChange={(e) => setNovaContaFornecedorId(e.target.value)}
+                                            className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                        >
+                                            <option value="">Selecione o fornecedor...</option>
+                                            {fornecedoresOptions.map((fornecedor) => (
+                                                <option key={fornecedor.id} value={fornecedor.id}>
+                                                    {fornecedor.nome}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Beneficiário / Credor *</label>
+                                            <input
+                                                type="text"
+                                                value={novaContaCredor}
+                                                onChange={(e) => setNovaContaCredor(e.target.value)}
+                                                placeholder="Nome do novo fornecedor ou credor"
+                                                className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {novaContaTipoDespesa === 'RH' && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Tipo RH *</label>
+                                            <select
+                                                value={novaContaRhSubtipo}
+                                                onChange={(e) => setNovaContaRhSubtipo(e.target.value as 'ADIANTAMENTO' | 'VALE')}
+                                                className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                            >
+                                                <option value="ADIANTAMENTO">Adiantamento</option>
+                                                <option value="VALE">Vale</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Funcionário *</label>
+                                            <select
+                                                value={novaContaFuncionarioId}
+                                                onChange={(e) => setNovaContaFuncionarioId(e.target.value)}
+                                                className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                            >
+                                                <option value="">Selecione o funcionário...</option>
+                                                {funcionariosOptions.map((funcionario) => (
+                                                    <option key={funcionario.id} value={funcionario.id}>
+                                                        {funcionario.nome}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Desconto futuro *</label>
+                                            <select
+                                                value={novaContaRhDescontoTipo}
+                                                onChange={(e) => setNovaContaRhDescontoTipo(e.target.value as 'UMA_VEZ' | 'PARCELADO')}
+                                                className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                            >
+                                                <option value="UMA_VEZ">1x</option>
+                                                <option value="PARCELADO">Várias vezes</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Competência inicial *</label>
+                                            <input
+                                                type="month"
+                                                value={novaContaRhReferencia}
+                                                onChange={(e) => setNovaContaRhReferencia(e.target.value)}
+                                                className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                            />
+                                        </div>
+                                        {novaContaRhDescontoTipo === 'PARCELADO' && (
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">Parcelas *</label>
+                                                <input
+                                                    type="number"
+                                                    min="2"
+                                                    step="1"
+                                                    value={novaContaRhParcelas}
+                                                    onChange={(e) => setNovaContaRhParcelas(e.target.value)}
+                                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {novaContaTipoDespesa === 'DESPESA_FIXA' && (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Beneficiário / Credor</label>
+                                    <input
+                                        type="text"
+                                        value={novaContaCredor}
+                                        onChange={(e) => setNovaContaCredor(e.target.value)}
+                                        placeholder="Ex: Concessionária, locador, prestador..."
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Descrição *</label>
+                                <input
+                                    type="text"
+                                    value={novaContaDescricao}
+                                    onChange={(e) => setNovaContaDescricao(e.target.value)}
+                                    placeholder="Ex: Serviço de manutenção, Aluguel..."
+                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Classificação</label>
+                                <select
+                                    value={novaContaClassificacao}
+                                    onChange={(e) => setNovaContaClassificacao(e.target.value)}
+                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    title="Usado em movimentações, fluxo de caixa e DRE (ex.: Impostos)"
+                                >
+                                    {CLASSIFICACOES_CONTA_PAGAR.map((op) => (
+                                        <option key={op.value || 'vazio'} value={op.value}>{op.label}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-gray-500 mt-1">Importante para movimentações, fluxo de caixa e DRE (ex.: Impostos)</p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Valor (R$) *</label>
+                                    <input
+                                        type="number"
+                                        value={novaContaValor}
+                                        onChange={(e) => setNovaContaValor(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Vencimento *</label>
+                                    <input
+                                        type="date"
+                                        value={novaContaVencimento}
+                                        onChange={(e) => setNovaContaVencimento(e.target.value)}
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Observações</label>
+                                <textarea
+                                    value={novaContaObservacoes}
+                                    onChange={(e) => setNovaContaObservacoes(e.target.value)}
+                                    rows={2}
+                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    placeholder="Opcional"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100">
+                            <button onClick={handleCloseNovaContaModal} className="btn-secondary">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleCriarNovaConta}
+                                disabled={salvandoNovaConta}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-6 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50"
+                            >
+                                {salvandoNovaConta ? 'Salvando...' : 'Criar Conta'}
                             </button>
                         </div>
                     </div>
@@ -1652,7 +2405,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                         value={valorPago}
                                         onChange={(e) => setValorPago(e.target.value)}
                                         min="0"
-                                        max={contaSelecionada.valor}
+                                        max={(contaSelecionada as any).tipo === 'RH' ? undefined : contaSelecionada.valor}
                                         step="0.01"
                                         required
                                         className="select-field focus:ring-red-500 focus:border-red-500"
@@ -1660,31 +2413,96 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                                     <p className="text-xs text-gray-500 mt-1">
                                         Valor original: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </p>
+                                    {(contaSelecionada as any).tipo === 'RH' && (
+                                        <p className="text-xs text-amber-700 mt-1">
+                                            Para funcionário: pode registrar com desconto (ex.: faltas) e informar a justificativa no campo abaixo.
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Observações
+                                        Meio de Pagamento
+                                    </label>
+                                    <select
+                                        value={meioPagamento}
+                                        onChange={(e) => setMeioPagamento(e.target.value)}
+                                        className="select-field focus:ring-red-500 focus:border-red-500"
+                                    >
+                                        <option value="PIX">PIX</option>
+                                        <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                        <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                        <option value="BOLETO">Boleto</option>
+                                        <option value="TRANSFERENCIA">Transferência</option>
+                                        <option value="DINHEIRO">Dinheiro</option>
+                                    </select>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Juros (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={jurosPagamento}
+                                            onChange={(e) => setJurosPagamento(e.target.value)}
+                                            min="0"
+                                            step="0.01"
+                                            className="select-field focus:ring-red-500 focus:border-red-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Descontos (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            value={descontosPagamento}
+                                            onChange={(e) => setDescontosPagamento(e.target.value)}
+                                            min="0"
+                                            step="0.01"
+                                            className="select-field focus:ring-red-500 focus:border-red-500"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        {(contaSelecionada as any).tipo === 'RH' ? 'Justificativa / Observações' : 'Observações'}
                                     </label>
                                     <textarea
                                         value={observacoesPagamento}
                                         onChange={(e) => setObservacoesPagamento(e.target.value)}
                                         rows={3}
                                         className="select-field focus:ring-red-500 focus:border-red-500"
-                                        placeholder="Informações adicionais sobre o pagamento..."
+                                        placeholder={(contaSelecionada as any).tipo === 'RH' ? 'Ex.: Desconto por falta no dia X; obrigatório se houver desconto' : 'Informações adicionais sobre o pagamento...'}
                                     />
                                 </div>
                             </div>
 
-                            {/* Resumo */}
-                            <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 p-4 rounded-xl">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-sm font-semibold text-red-700">Valor a Registrar:</span>
-                                    <span className="text-2xl font-bold text-red-700">
-                                        R$ {parseFloat(valorPago || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </span>
-                                </div>
-                            </div>
+                            {/* Resumo: Valor a Registrar = Valor Pago + Juros - Descontos */}
+                            {(() => {
+                                const v = parseFloat(valorPago || '0') || 0;
+                                const j = parseFloat(jurosPagamento || '0') || 0;
+                                const d = parseFloat(descontosPagamento || '0') || 0;
+                                const total = v + j - d;
+                                return (
+                                    <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 p-4 rounded-xl">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-semibold text-red-700">Valor a Registrar:</span>
+                                            <span className="text-2xl font-bold text-red-700">
+                                                R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                        </div>
+                                        {(j > 0 || d > 0) && (
+                                            <p className="text-xs text-red-600 mt-1">
+                                                {v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} {j > 0 ? `+ ${j.toFixed(2)} (juros)` : ''} {d > 0 ? `- ${d.toFixed(2)} (descontos)` : ''}
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
 
                         {/* Footer */}
@@ -1715,15 +2533,21 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva 
                             {confirmAction === 'pagar' ? 'Confirmar Pagamento' : 'Confirmar Atualização'}
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            {confirmAction === 'pagar' && contaSelecionada && (
-                                <>
-                                    Confirmar o pagamento de{' '}
-                                    <span className="font-bold text-red-600">
-                                        R$ {parseFloat(valorPago).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </span>
-                                    {' '}para {contaSelecionada.fornecedorNome}?
-                                </>
-                            )}
+                            {confirmAction === 'pagar' && contaSelecionada && (() => {
+                                const v = parseFloat(valorPago || '0') || 0;
+                                const j = parseFloat(jurosPagamento || '0') || 0;
+                                const d = parseFloat(descontosPagamento || '0') || 0;
+                                const total = v + j - d;
+                                return (
+                                    <>
+                                        Confirmar o pagamento de{' '}
+                                        <span className="font-bold text-red-600">
+                                            R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        {' '}para {contaSelecionada.fornecedorNome}?
+                                    </>
+                                );
+                            })()}
                             {confirmAction === 'atualizar' && contaSelecionada && (
                                 <>
                                     Confirmar a atualização da conta de {contaSelecionada.fornecedorNome}?

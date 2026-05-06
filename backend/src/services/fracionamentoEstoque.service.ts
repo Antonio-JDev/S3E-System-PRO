@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export class FracionamentoEstoqueService {
     /**
@@ -19,7 +17,7 @@ export class FracionamentoEstoqueService {
                     some: {
                         quantidadeFracionada: { not: null },
                         fracionamentoAplicado: false
-                    }
+                    } as any
                 }
             },
             include: {
@@ -27,7 +25,7 @@ export class FracionamentoEstoqueService {
                     where: {
                         quantidadeFracionada: { not: null },
                         fracionamentoAplicado: false
-                    },
+                    } as any,
                     include: {
                         material: true
                     }
@@ -62,7 +60,7 @@ export class FracionamentoEstoqueService {
 
             try {
                 await prisma.$transaction(async (tx) => {
-                    for (const item of compra.items) {
+                    for (const item of (compra as any).items) {
                         if (!item.materialId || !item.quantidadeFracionada) {
                             continue;
                         }
@@ -219,7 +217,7 @@ export class FracionamentoEstoqueService {
                                     where: { id: item.id },
                                     data: {
                                         fracionamentoAplicado: true
-                                    }
+                                    } as any
                                 });
 
                                 itensProcessados++;
@@ -231,7 +229,7 @@ export class FracionamentoEstoqueService {
                                     where: { id: item.id },
                                     data: {
                                         fracionamentoAplicado: true
-                                    }
+                                    } as any
                                 });
                                 itensProcessados++;
                                 console.log(`ℹ️ Item ${item.nomeProduto}: já ajustado ou estoque maior que esperado (diferença: ${diferenca.toFixed(2)})`);
@@ -241,7 +239,7 @@ export class FracionamentoEstoqueService {
                                     where: { id: item.id },
                                     data: {
                                         fracionamentoAplicado: true
-                                    }
+                                    } as any
                                 });
                                 itensProcessados++;
                                 console.log(`✅ Item ${item.nomeProduto}: já está correto`);
@@ -293,7 +291,7 @@ export class FracionamentoEstoqueService {
                     some: {
                         quantidadeFracionada: { not: null },
                         fracionamentoAplicado: false
-                    }
+                    } as any
                 }
             },
             include: {
@@ -301,7 +299,7 @@ export class FracionamentoEstoqueService {
                     where: {
                         quantidadeFracionada: { not: null },
                         fracionamentoAplicado: false
-                    },
+                    } as any,
                     include: {
                         material: {
                             select: {
@@ -321,10 +319,10 @@ export class FracionamentoEstoqueService {
         return compras.map(compra => ({
             id: compra.id,
             numeroNF: compra.numeroNF,
-            numeroSequencial: compra.numeroSequencial,
+            numeroSequencial: (compra as any).numeroSequencial,
             fornecedorNome: compra.fornecedorNome,
             dataCompra: compra.dataCompra,
-            itensPendentes: compra.items.map(item => ({
+            itensPendentes: (compra as any).items.map(item => ({
                 id: item.id,
                 nomeProduto: item.nomeProduto,
                 quantidade: item.quantidade,

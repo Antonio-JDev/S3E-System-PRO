@@ -19,6 +19,18 @@ export const funcionariosService = {
         telefone?: string;
         email?: string;
         status?: string;
+        diaPagamento?: number;
+        uniformeCamisa?: string;
+        uniformeCalca?: string;
+        uniformeBermuda?: string;
+        uniformeSapato?: string;
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        salarioBase?: number;
+        valorHora?: number;
+        valorDiaria?: number;
+        cargaHorariaMensal?: number;
+        saldoBancoHoras?: number;
+        codigoRelogio?: number;
     }) {
         return await axiosApiService.post('/api/funcionarios', data);
     },
@@ -32,6 +44,18 @@ export const funcionariosService = {
         telefone?: string;
         email?: string;
         status?: string;
+        diaPagamento?: number;
+        uniformeCamisa?: string;
+        uniformeCalca?: string;
+        uniformeBermuda?: string;
+        uniformeSapato?: string;
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        salarioBase?: number;
+        valorHora?: number;
+        valorDiaria?: number;
+        cargaHorariaMensal?: number;
+        saldoBancoHoras?: number;
+        codigoRelogio?: number;
     }>) {
         return await axiosApiService.put(`/api/funcionarios/${id}`, data);
     },
@@ -40,9 +64,158 @@ export const funcionariosService = {
         return await axiosApiService.delete(`/api/funcionarios/${id}`);
     },
     
-    async obterMetricas() {
-        return await axiosApiService.get('/api/funcionarios/metricas');
+    async obterMetricas(mesRef?: string) {
+        const url = mesRef
+            ? `/api/funcionarios/metricas?mes=${encodeURIComponent(mesRef)}`
+            : '/api/funcionarios/metricas';
+        return await axiosApiService.get(url);
+    },
+
+    async historicoPagamentos(funcionarioId: string) {
+        return await axiosApiService.get(`/api/funcionarios/${funcionarioId}/historico-pagamentos`);
     }
+};
+
+/** Folha, configuração de ponto (hora FDS), lançamentos e importação XLS do relógio */
+export const rhService = {
+    async buscarConfigPonto(funcionarioId: string) {
+        return await axiosApiService.get(`/api/rh/config-ponto/${funcionarioId}`);
+    },
+
+    async salvarConfigPonto(
+        funcionarioId: string,
+        data: {
+            trabalhaFimDeSemana: boolean;
+            valorHoraFimDeSemana: number | null;
+            workShiftId?: string | null;
+            toleranciaMinutos?: number;
+            inicioNoturno?: string | null;
+        },
+    ) {
+        return await axiosApiService.put(`/api/rh/config-ponto/${funcionarioId}`, data);
+    },
+
+    async listarWorkShifts() {
+        return await axiosApiService.get('/api/rh/work-shifts');
+    },
+
+    async listarLancamentos(funcionarioId: string, ano: number, mes: number) {
+        return await axiosApiService.get('/api/rh/lancamentos', {
+            funcionarioId,
+            ano,
+            mes,
+        });
+    },
+
+    async criarLancamento(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        categoria: 'ADIANTAMENTO' | 'FALTA' | 'FALTA_JUSTIFICADA' | 'DESCONTO_OUTRO' | 'ACRESCIMO';
+        valor: number;
+        descricao?: string | null;
+    }) {
+        return await axiosApiService.post('/api/rh/lancamentos', data);
+    },
+
+    async excluirLancamento(id: string) {
+        return await axiosApiService.delete(`/api/rh/lancamentos/${id}`);
+    },
+
+    /** Atualiza valor da conta a pagar RH Pendente com o total da folha (mesmo cálculo do modal). */
+    async sincronizarParcelaFolha(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+    }) {
+        return await axiosApiService.post('/api/rh/sincronizar-parcela', data);
+    },
+
+    async atualizarRegistroPonto(registroId: string, batidas: string[]) {
+        return await axiosApiService.put(`/api/rh/registro-ponto/${registroId}`, { batidas });
+    },
+
+    async salvarIntervaloAlmoco(registroId: string, data: { inicio: string; fim: string }) {
+        return await axiosApiService.put(`/api/rh/registro-ponto/${registroId}/intervalo-almoco`, data);
+    },
+
+    async converterBancoParaFolga(data: {
+        funcionarioId: string;
+        horas: number;
+        origem?: 'automatico' | 'normais' | 'extras100';
+    }) {
+        return await axiosApiService.post('/api/rh/banco-horas/converter-folga', data);
+    },
+
+    async incluirBancoHorasNaFolha(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        modo: 'total' | 'parcial';
+        horasParcial?: number;
+        alocacao?:
+            | { tipo: 'automatico' | 'so_normais' | 'so_extras100' }
+            | { tipo: 'misto'; horasNormais: number; horasExtras100: number };
+    }) {
+        return await axiosApiService.post('/api/rh/banco-horas/incluir-folha', data);
+    },
+
+    /** Importação no servidor: SheetJS (`parsePresencaXlsBuffer`) + gravação em `RegistroPonto`. */
+    async importarPresencaXls(file: File, ano?: number, mes?: number) {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (ano != null && ano > 0) fd.append('ano', String(ano));
+        if (mes != null && mes >= 1 && mes <= 12) fd.append('mes', String(mes));
+        return await axiosApiService.upload('/api/ponto/importar-presenca', fd);
+    },
+
+    async registrarFaltaJustificada(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        descricao: string;
+    }) {
+        return await axiosApiService.post('/api/rh/falta-justificada', data);
+    },
+
+    async proporDividaHoras(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        horasDivida: number;
+        modoQuitacao: 'DESCONTAR_SALARIO' | 'COMPENSAR_BANCO';
+        periodoCompensacao: 'DIAS_SEMANA' | 'FINAL_DE_SEMANA';
+    }) {
+        return await axiosApiService.post('/api/rh/divida-horas/propor', data);
+    },
+
+    async listarDividaHoras(funcionarioId: string, mesRef: string) {
+        return await axiosApiService.get(`/api/rh/divida-horas/${funcionarioId}/${mesRef}`);
+    },
+
+    async aprovarDiaDivida(diaId: string) {
+        return await axiosApiService.post(`/api/rh/divida-horas/dia/${diaId}/aprovar`, {});
+    },
+};
+
+// ========== BENEFÍCIOS ==========
+export const beneficiosService = {
+    async listar() {
+        return await axiosApiService.get('/api/beneficios');
+    },
+
+    async criar(data: { nome: string; valorPadrao: number; ativo?: boolean }) {
+        return await axiosApiService.post('/api/beneficios', data);
+    },
+
+    async atualizar(id: string, data: Partial<{ nome: string; valorPadrao: number; ativo: boolean }>) {
+        return await axiosApiService.put(`/api/beneficios/${id}`, data);
+    },
+
+    async deletar(id: string) {
+        return await axiosApiService.delete(`/api/beneficios/${id}`);
+    },
 };
 
 // ========== VALES ==========
@@ -194,7 +367,8 @@ export const planosService = {
         status?: string;
         categoria?: string;
     }>) {
-        return await axiosApiService.put(`/api/planos/${id}`, data);
+        // Usamos PATCH para atualizações parciais
+        return await axiosApiService.patch(`/api/planos/${id}`, data);
     },
     
     async toggleStatus(id: string) {

@@ -1,3 +1,19 @@
+// Mock do libxmljs2 ANTES de importar o serviço
+jest.mock('libxmljs2', () => {
+    return {
+        parseXmlString: jest.fn((xml: string) => ({
+            validate: jest.fn(() => true),
+            get: jest.fn(() => ''),
+            root: jest.fn(() => ({
+                get: jest.fn(() => ''),
+            })),
+        })),
+        parseXml: jest.fn((xml: string) => ({
+            validate: jest.fn(() => true),
+        })),
+    };
+});
+
 import { NFeXMLValidatorService } from '../services/nfe-xml-validator.service';
 
 // XML mínimo válido (estrutura simplificada) apenas para testar integração básica

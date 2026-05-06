@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs
+dist/
+build/
+*/dist/
+*/build/
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Coverage
+coverage/
+*.lcov
+
+# Prisma generated
+**/prisma/generated/
+
+# Database
+*.db
+*.sqlite
+
+# Temporary files
+*.tmp
+.cache/
+
+# Git
+.git/
+
+# Docker
+docker-compose*.yml
+Dockerfile
+
+# Scripts
+*.sh
+*.bat
+
+# XSD files
+*.xsd

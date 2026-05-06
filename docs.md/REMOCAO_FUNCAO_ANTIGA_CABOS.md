@@ -1,16 +1,19 @@
 # ✅ Remoção da Função Antiga de Adicionar Cabos
 
 ## 🎯 Objetivo
-Remover a funcionalidade antiga de adicionar cabos manualmente, mantendo apenas o novo sistema de autocomplete com busca no estoque.
+
+Remover a funcionalidade antiga de adicionar cabos manualmente, mantendo apenas
+o novo sistema de autocomplete com busca no estoque.
 
 ---
 
 ## ❌ O Que Foi Removido
 
 ### **1. Estado Antigo**
+
 ```typescript
 // REMOVIDO
-const [caboToAdd, setCaboToAdd] = useState({ id: '', quantity: 1 });
+const [caboToAdd, setCaboToAdd] = useState({ id: "", quantity: 1 });
 ```
 
 **Motivo:** Não é mais necessário, pois agora usamos busca por autocomplete.
@@ -18,23 +21,33 @@ const [caboToAdd, setCaboToAdd] = useState({ id: '', quantity: 1 });
 ---
 
 ### **2. Função handleAddCabo**
+
 ```typescript
 // REMOVIDO
 const handleAddCabo = () => {
-    if (!caboToAdd.id || (kitConfig.cabos?.items || []).some(c => c.id === caboToAdd.id)) return;
-    handleKitConfigChange('cabos.items', [...(kitConfig.cabos?.items || []), caboToAdd]);
-    setCaboToAdd({ id: '', quantity: 1 });
+  if (
+    !caboToAdd.id ||
+    (kitConfig.cabos?.items || []).some((c) => c.id === caboToAdd.id)
+  )
+    return;
+  handleKitConfigChange("cabos.items", [
+    ...(kitConfig.cabos?.items || []),
+    caboToAdd,
+  ]);
+  setCaboToAdd({ id: "", quantity: 1 });
 };
 ```
 
-**Motivo:** Substituída pela nova função `handleAddCaboFromSearch` que busca direto do estoque.
+**Motivo:** Substituída pela nova função `handleAddCaboFromSearch` que busca
+direto do estoque.
 
 ---
 
 ### **3. Reset do Estado no Cleanup**
+
 ```typescript
 // REMOVIDO
-setCaboToAdd({ id: '', quantity: 1 });
+setCaboToAdd({ id: "", quantity: 1 });
 ```
 
 **Motivo:** Estado não existe mais.
@@ -48,28 +61,33 @@ setCaboToAdd({ id: '', quantity: 1 });
 ```typescript
 // MANTIDO E ATIVO ✅
 const handleAddCaboFromSearch = (cabo: MaterialItem) => {
-    // Verificar se já existe
-    if ((kitConfig.cabos?.items || []).some((c: any) => c.materialId === cabo.id)) {
-        alert('Este cabo já foi adicionado!');
-        return;
-    }
-    
-    // Adicionar cabo do estoque real
-    const novoCabo = {
-        id: `cabo-${Date.now()}`,
-        materialId: cabo.id,
-        materialName: cabo.name,
-        materialSku: cabo.sku,
-        bitola: '10mm²',
-        cor: 'Preto/Vermelho/Azul',
-        tipo: cabo.subType || 'HEPR Rígido',
-        quantidade: 10,
-        precoUnitario: cabo.price || 0,
-        isCustom: true
-    };
-    
-    handleKitConfigChange('cabos.items', [...(kitConfig.cabos?.items || []), novoCabo]);
-    setCaboSearch('');
+  // Verificar se já existe
+  if (
+    (kitConfig.cabos?.items || []).some((c: any) => c.materialId === cabo.id)
+  ) {
+    alert("Este cabo já foi adicionado!");
+    return;
+  }
+
+  // Adicionar cabo do estoque real
+  const novoCabo = {
+    id: `cabo-${Date.now()}`,
+    materialId: cabo.id,
+    materialName: cabo.name,
+    materialSku: cabo.sku,
+    bitola: "10mm²",
+    cor: "Preto/Vermelho/Azul",
+    tipo: cabo.subType || "HEPR Rígido",
+    quantidade: 10,
+    precoUnitario: cabo.price || 0,
+    isCustom: true,
+  };
+
+  handleKitConfigChange("cabos.items", [
+    ...(kitConfig.cabos?.items || []),
+    novoCabo,
+  ]);
+  setCaboSearch("");
 };
 ```
 
@@ -78,12 +96,14 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 ## 📊 Comparação
 
 ### **Sistema Antigo (Removido)** ❌
+
 - Select manual de cabos
 - Sem integração com estoque
 - Sem informações de preço
 - Sem validação de disponibilidade
 
 ### **Sistema Novo (Ativo)** ✅
+
 - ✅ Input com autocomplete
 - ✅ Busca em tempo real no estoque
 - ✅ Exibe preço unitário
@@ -110,6 +130,7 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 ```
 
 **Não há mais:**
+
 - ❌ Select "Escolha o cabo"
 - ❌ Campo manual de quantidade
 - ❌ Botão "Adicionar Cabo"
@@ -138,6 +159,7 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 ## 🧪 Validação
 
 ### **Funcionalidades Ativas:**
+
 - [x] ✅ Input de busca com autocomplete
 - [x] ✅ Filtro em tempo real
 - [x] ✅ Dropdown com resultados
@@ -146,6 +168,7 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 - [x] ✅ Validação de duplicatas
 
 ### **Funcionalidades Removidas:**
+
 - [x] ❌ Select manual de cabos
 - [x] ❌ handleAddCabo (antiga)
 - [x] ❌ caboToAdd (estado antigo)
@@ -165,13 +188,13 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 
 ## 🎯 Status Final
 
-| Item | Status |
-|------|--------|
-| **Função antiga removida** | ✅ Completo |
-| **Estado antigo removido** | ✅ Completo |
+| Item                         | Status         |
+| ---------------------------- | -------------- |
+| **Função antiga removida**   | ✅ Completo    |
+| **Estado antigo removido**   | ✅ Completo    |
 | **Nova implementação ativa** | ✅ Funcionando |
-| **Sem erros de linting** | ✅ Verificado |
-| **Código limpo** | ✅ Confirmado |
+| **Sem erros de linting**     | ✅ Verificado  |
+| **Código limpo**             | ✅ Confirmado  |
 
 ---
 
@@ -204,6 +227,7 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 ## 💡 Dica de Uso
 
 **Para adicionar cabos agora:**
+
 1. Digite no campo de busca (ex: "10mm", "flexível", "MAT-001")
 2. Clique no cabo desejado no dropdown
 3. Pronto! Cabo adicionado automaticamente
@@ -214,11 +238,12 @@ const handleAddCaboFromSearch = (cabo: MaterialItem) => {
 
 ## ✅ Conclusão
 
-A funcionalidade antiga foi completamente removida. O sistema agora usa **apenas** o autocomplete com integração direta ao estoque, proporcionando uma experiência mais moderna, eficiente e consistente.
+A funcionalidade antiga foi completamente removida. O sistema agora usa
+**apenas** o autocomplete com integração direta ao estoque, proporcionando uma
+experiência mais moderna, eficiente e consistente.
 
 ---
 
 **Atualizado em:** Outubro 2025  
 **Versão:** 1.2.1  
 **Status:** ✅ **LIMPEZA COMPLETA**
-

@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface ConfiguracaoData {
   temaPreferido?: string; // 'light' | 'dark' | 'system'
@@ -10,6 +8,11 @@ export interface ConfiguracaoData {
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
+  multiplicadorVenda?: number; // legado
+  percentualImpostoPadrao?: number; // legado
+  aliquotaImpostoPadrao?: number; // Alíquota % sobre valor de venda (DAS), default 8
+  markupFabricante?: number; // Preço venda = Preço compra × este valor (Fabricante), default 1.55
+  markupRevendedor?: number; // Preço venda = Preço compra × este valor (Revendedor), default 1.10
 }
 
 export interface UsuarioFiltros {
@@ -19,6 +22,73 @@ export interface UsuarioFiltros {
 }
 
 export class ConfiguracaoService {
+  private normalizeMesReferencia(mes?: string): string {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const atual = `${y}-${m}`;
+    if (mes && /^\d{4}-\d{2}$/.test(mes)) return mes;
+    return atual;
+  }
+
+  private decimalConfigParaNumero(v: unknown): number {
+    if (v == null) return 100000;
+    if (typeof v === 'object' && v !== null && 'toNumber' in v && typeof (v as { toNumber: () => number }).toNumber === 'function') {
+      return Number((v as { toNumber: () => number }).toNumber());
+    }
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 100000;
+  }
+
+  /**
+   * Metas de vendas: padrão global + mapa por YYYY-MM (visível a todos; edição restrita na rota PUT).
+   */
+  async getMetaVendas(mesReferencia?: string) {
+    const config = await this.getConfiguracoes();
+    const mes = this.normalizeMesReferencia(mesReferencia);
+    const padrao = this.decimalConfigParaNumero((config as { metaMensalVendas?: unknown }).metaMensalVendas);
+    const raw = config.metasVendasPorMes;
+    const porMes: Record<string, number> =
+      raw && typeof raw === 'object' && !Array.isArray(raw)
+        ? Object.fromEntries(
+            Object.entries(raw as Record<string, unknown>).map(([k, val]) => [k, Number(val)])
+          )
+        : {};
+    const especifica = porMes[mes];
+    const valorEfetivo =
+      typeof especifica === 'number' && !Number.isNaN(especifica) && especifica >= 0 ? especifica : padrao;
+
+    return { padrao, porMes, mesAtual: mes, valorEfetivo };
+  }
+
+  async salvarMetaVendas(input: { mes?: string; valor: number; atualizarPadrao?: boolean }) {
+    const mesBruto = input.mes?.trim();
+    const mes = this.normalizeMesReferencia(mesBruto && /^\d{4}-\d{2}$/.test(mesBruto) ? mesBruto : undefined);
+    const valor = Math.max(0, Number(input.valor));
+    if (!Number.isFinite(valor)) {
+      throw new Error('Valor da meta inválido');
+    }
+    const config = await this.getConfiguracoes();
+    const prev = config.metasVendasPorMes;
+    const map: Record<string, number> =
+      prev && typeof prev === 'object' && !Array.isArray(prev)
+        ? { ...(prev as Record<string, number>) }
+        : {};
+    map[mes] = valor;
+
+    const data: { metasVendasPorMes: Record<string, number>; metaMensalVendas?: number } = { metasVendasPorMes: map };
+    if (input.atualizarPadrao) {
+      data.metaMensalVendas = valor;
+    }
+
+    await prisma.configuracaoSistema.update({
+      where: { id: 'sistema-config' },
+      data: data as any
+    });
+
+    return this.getMetaVendas(mes);
+  }
+
   /**
    * Busca as configurações do sistema (cria se não existir)
    */
@@ -34,7 +104,12 @@ export class ConfiguracaoService {
           data: {
             id: 'sistema-config',
             temaPreferido: 'light',
-            nomeEmpresa: 'S3E Engenharia'
+            nomeEmpresa: 'Eng System Pro',
+            multiplicadorVenda: 1.55,
+            percentualImpostoPadrao: 8,
+            aliquotaImpostoPadrao: 8,
+            markupFabricante: 1.55,
+            markupRevendedor: 1.10
           }
         });
       }
@@ -51,22 +126,33 @@ export class ConfiguracaoService {
    */
   async salvarConfiguracoes(data: ConfiguracaoData) {
     try {
+      const nomeEmpresaNormalized =
+        data.nomeEmpresa != null && String(data.nomeEmpresa).trim() !== ''
+          ? String(data.nomeEmpresa).trim()
+          : 'Eng System Pro';
+
       const config = await prisma.configuracaoSistema.upsert({
         where: { id: 'sistema-config' },
         update: {
           ...data,
+          nomeEmpresa: nomeEmpresaNormalized,
           updatedAt: new Date()
-        },
+        } as any,
         create: {
           id: 'sistema-config',
           temaPreferido: data.temaPreferido || 'light',
           logoUrl: data.logoUrl,
           logoLoginUrl: data.logoLoginUrl,
-          logoDanfeUrl: data.logoDanfeUrl,
-          nomeEmpresa: data.nomeEmpresa || 'S3E Engenharia',
+          logoDanfeUrl: (data as any).logoDanfeUrl,
+          nomeEmpresa: nomeEmpresaNormalized,
           emailContato: data.emailContato,
-          telefoneContato: data.telefoneContato
-        }
+          telefoneContato: data.telefoneContato,
+          multiplicadorVenda: data.multiplicadorVenda ?? data.markupFabricante ?? 1.55,
+          percentualImpostoPadrao: data.percentualImpostoPadrao ?? data.aliquotaImpostoPadrao ?? 8,
+          aliquotaImpostoPadrao: data.aliquotaImpostoPadrao ?? 8,
+          markupFabricante: data.markupFabricante ?? 1.55,
+          markupRevendedor: data.markupRevendedor ?? 1.10
+        } as any
       });
 
       return config;
@@ -94,7 +180,8 @@ export class ConfiguracaoService {
       if (filtros?.search) {
         where.OR = [
           { name: { contains: filtros.search, mode: 'insensitive' } },
-          { email: { contains: filtros.search, mode: 'insensitive' } }
+          { email: { contains: filtros.search, mode: 'insensitive' } },
+          { setor: { contains: filtros.search, mode: 'insensitive' } }
         ];
       }
 
@@ -103,8 +190,10 @@ export class ConfiguracaoService {
         select: {
           id: true,
           name: true,
+          setor: true,
           email: true,
           role: true,
+          isAdmin: true,
           active: true,
           createdAt: true,
           updatedAt: true
@@ -125,8 +214,12 @@ export class ConfiguracaoService {
    */
   async atualizarUsuarioRole(userId: string, newRole: string) {
     try {
-      // Validar roles permitidos
-      const rolesPermitidos = ['admin', 'gerente', 'orcamentista', 'compras', 'engenheiro', 'eletricista', 'user'];
+      // Validar roles permitidos (novos + antigos para compatibilidade)
+      const rolesPermitidos = [
+        'admin', 'gerente', 'desenvolvedor', 'financeiro_faturamento',
+        'desenhista_industrial', 'engenheiro_eletricista', 'engenheiro', 'eletricista',
+        'orcamentista', 'compras', 'user'
+      ];
       
       if (!rolesPermitidos.includes(newRole)) {
         throw new Error(`Role inválido: ${newRole}. Permitidos: ${rolesPermitidos.join(', ')}`);
@@ -141,8 +234,10 @@ export class ConfiguracaoService {
         select: {
           id: true,
           name: true,
+          setor: true,
           email: true,
           role: true,
+          isAdmin: true,
           active: true,
           updatedAt: true
         }
@@ -169,8 +264,10 @@ export class ConfiguracaoService {
         select: {
           id: true,
           name: true,
+          setor: true,
           email: true,
           role: true,
+          isAdmin: true,
           active: true,
           updatedAt: true
         }
@@ -184,9 +281,37 @@ export class ConfiguracaoService {
   }
 
   /**
+   * Atualiza o flag isAdmin de um usuário (acesso a módulo Financeiro e todos os módulos)
+   */
+  async atualizarUsuarioIsAdmin(userId: string, isAdmin: boolean) {
+    const usuario = await prisma.user.update({
+      where: { id: userId },
+      data: { isAdmin, updatedAt: new Date() },
+      select: {
+        id: true,
+        name: true,
+        setor: true,
+        email: true,
+        role: true,
+        isAdmin: true,
+        active: true,
+        updatedAt: true
+      }
+    });
+    return usuario;
+  }
+
+  /**
    * Cria um novo usuário (Admin-only)
    */
-  async criarUsuario(data: { email: string; password: string; name: string; role: string }) {
+  async criarUsuario(data: {
+    email: string;
+    password: string;
+    name: string;
+    role: string;
+    setor?: string | null;
+    isAdmin?: boolean;
+  }) {
     try {
       // Verificar se o email já existe
       const usuarioExistente = await prisma.user.findUnique({
@@ -209,14 +334,18 @@ export class ConfiguracaoService {
           email: data.email,
           password: hashedPassword,
           name: data.name,
+          setor: data.setor?.trim() || null,
           role: data.role,
+          isAdmin: data.isAdmin ?? false,
           active: true
         },
         select: {
           id: true,
           name: true,
+          setor: true,
           email: true,
           role: true,
+          isAdmin: true,
           active: true,
           createdAt: true,
           updatedAt: true

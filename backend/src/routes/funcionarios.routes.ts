@@ -10,6 +10,9 @@ router.use(authenticate);
 // Métricas (deve vir antes de :id para evitar conflitos)
 router.get('/metricas', FuncionariosController.obterMetricas);
 
+// Histórico de pagamentos (deve vir antes de :id genérico)
+router.get('/:id/historico-pagamentos', FuncionariosController.historicoPagamentos);
+
 // CRUD de funcionários
 router.get('/', FuncionariosController.listar);
 router.get('/:id', FuncionariosController.buscar);

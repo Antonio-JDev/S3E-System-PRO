@@ -2,7 +2,8 @@
 
 ## 📋 Visão Geral
 
-O serviço JWT (`jwt.service.ts`) centraliza toda a lógica de geração e validação de tokens JWT (JSON Web Tokens) para autenticação no sistema S3E.
+O serviço JWT (`jwt.service.ts`) centraliza toda a lógica de geração e validação
+de tokens JWT (JSON Web Tokens) para autenticação no sistema S3E.
 
 ## 🎯 Características
 
@@ -20,22 +21,24 @@ O serviço JWT (`jwt.service.ts`) centraliza toda a lógica de geração e valid
 Gera um novo token JWT válido por 7 dias.
 
 **Parâmetros:**
+
 ```typescript
 {
-  id: string;      // ID único do usuário
-  role: string;    // Role/perfil (admin, user, orcamentista, etc)
+  id: string; // ID único do usuário
+  role: string; // Role/perfil (admin, user, orcamentista, etc)
 }
 ```
 
 **Retorno:** `string` - Token JWT assinado
 
 **Exemplo:**
+
 ```typescript
-import { generateToken } from '../services/jwt.service';
+import { generateToken } from "../services/jwt.service";
 
 const token = generateToken({
-  id: 'user-abc-123',
-  role: 'admin'
+  id: "user-abc-123",
+  role: "admin",
 });
 
 console.log(token);
@@ -49,9 +52,11 @@ console.log(token);
 Valida e decodifica um token JWT.
 
 **Parâmetros:**
+
 - `token: string` - Token JWT a ser validado
 
 **Retorno:** `DecodedToken` - Payload decodificado
+
 ```typescript
 {
   userId: string;
@@ -64,15 +69,16 @@ Valida e decodifica um token JWT.
 **Throws:** `Error` - Se o token for inválido ou expirado
 
 **Exemplo:**
+
 ```typescript
-import { verifyToken } from '../services/jwt.service';
+import { verifyToken } from "../services/jwt.service";
 
 try {
   const decoded = verifyToken(token);
-  console.log(decoded.userId);  // "user-abc-123"
-  console.log(decoded.role);    // "admin"
+  console.log(decoded.userId); // "user-abc-123"
+  console.log(decoded.role); // "admin"
 } catch (error) {
-  console.error('Token inválido:', error.message);
+  console.error("Token inválido:", error.message);
   // Possíveis erros:
   // - "Token expirado"
   // - "Token inválido"
@@ -87,22 +93,25 @@ try {
 Extrai o token do header de autorização.
 
 **Parâmetros:**
-- `authHeader: string | undefined` - Header Authorization (formato: "Bearer \<token\>")
+
+- `authHeader: string | undefined` - Header Authorization (formato: "Bearer
+  \<token\>")
 
 **Retorno:** `string | null` - Token extraído ou null se inválido
 
 **Exemplo:**
+
 ```typescript
-import { extractTokenFromHeader, verifyToken } from '../services/jwt.service';
+import { extractTokenFromHeader, verifyToken } from "../services/jwt.service";
 
 const authHeader = req.headers.authorization;
 const token = extractTokenFromHeader(authHeader);
 
 if (token) {
   const decoded = verifyToken(token);
-  console.log('Usuário autenticado:', decoded.userId);
+  console.log("Usuário autenticado:", decoded.userId);
 } else {
-  console.error('Token não fornecido');
+  console.error("Token não fornecido");
 }
 ```
 
@@ -115,16 +124,18 @@ if (token) {
 **NÃO USE PARA VALIDAÇÃO DE AUTENTICAÇÃO!**
 
 **Parâmetros:**
+
 - `token: string` - Token JWT
 
 **Retorno:** `any` - Payload decodificado (sem validação)
 
 **Exemplo:**
+
 ```typescript
-import { decodeTokenWithoutVerification } from '../services/jwt.service';
+import { decodeTokenWithoutVerification } from "../services/jwt.service";
 
 const payload = decodeTokenWithoutVerification(token);
-console.log('Debug - Payload:', payload);
+console.log("Debug - Payload:", payload);
 ```
 
 ---
@@ -134,28 +145,28 @@ console.log('Debug - Payload:', payload);
 ### Exemplo: Register/Login (authController.ts)
 
 ```typescript
-import { generateToken } from '../services/jwt.service';
+import { generateToken } from "../services/jwt.service";
 
 export const login = async (req: Request, res: Response) => {
   // ... validação de credenciais ...
-  
+
   const user = await prisma.user.findUnique({ where: { email } });
-  
+
   // Gerar token
-  const token = generateToken({ 
-    id: user.id, 
-    role: user.role 
+  const token = generateToken({
+    id: user.id,
+    role: user.role,
   });
-  
+
   res.json({
-    message: 'Login realizado com sucesso',
+    message: "Login realizado com sucesso",
     token,
     user: {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role
-    }
+      role: user.role,
+    },
   });
 };
 ```
@@ -167,21 +178,25 @@ export const login = async (req: Request, res: Response) => {
 ### Exemplo: Middleware de Autenticação (auth.ts)
 
 ```typescript
-import { verifyToken, extractTokenFromHeader } from '../services/jwt.service';
+import { verifyToken, extractTokenFromHeader } from "../services/jwt.service";
 
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+export const authenticate = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     // Extrair token
     const token = extractTokenFromHeader(req.headers.authorization);
-    
+
     if (!token) {
-      return res.status(401).json({ error: 'Token não fornecido' });
+      return res.status(401).json({ error: "Token não fornecido" });
     }
-    
+
     // Verificar token
     const decoded = verifyToken(token);
     req.user = decoded;
-    
+
     next();
   } catch (error) {
     res.status(401).json({ error: error.message });
@@ -221,12 +236,14 @@ curl -X GET http://localhost:3001/api/auth/me \
    - Method: POST
    - URL: `http://localhost:3001/api/auth/login`
    - Body (JSON):
+
      ```json
      {
        "email": "admin@s3e.com",
        "password": "123456"
      }
      ```
+
    - Copiar o `token` da resposta
 
 2. **Requisição Autenticada:**
@@ -240,26 +257,26 @@ curl -X GET http://localhost:3001/api/auth/me \
 
 ```typescript
 // Teste unitário exemplo
-import { generateToken, verifyToken } from './jwt.service';
+import { generateToken, verifyToken } from "./jwt.service";
 
-describe('JWT Service', () => {
-  it('deve gerar e validar token corretamente', () => {
-    const payload = { id: 'user-123', role: 'admin' };
-    
+describe("JWT Service", () => {
+  it("deve gerar e validar token corretamente", () => {
+    const payload = { id: "user-123", role: "admin" };
+
     // Gerar token
     const token = generateToken(payload);
     expect(token).toBeDefined();
-    
+
     // Validar token
     const decoded = verifyToken(token);
-    expect(decoded.userId).toBe('user-123');
-    expect(decoded.role).toBe('admin');
+    expect(decoded.userId).toBe("user-123");
+    expect(decoded.role).toBe("admin");
   });
-  
-  it('deve rejeitar token inválido', () => {
+
+  it("deve rejeitar token inválido", () => {
     expect(() => {
-      verifyToken('token_invalido');
-    }).toThrow('Token inválido');
+      verifyToken("token_invalido");
+    }).toThrow("Token inválido");
   });
 });
 ```
@@ -273,11 +290,13 @@ describe('JWT Service', () => {
 O serviço usa a variável `JWT_SECRET` do ambiente:
 
 **Desenvolvimento (.env.development):**
+
 ```env
 JWT_SECRET=seu_secret_dev_aqui_12345
 ```
 
 **Produção (.env.production):**
+
 ```env
 JWT_SECRET=seu_secret_producao_super_seguro_complexo_longo_e_aleatorio
 ```
@@ -287,7 +306,8 @@ JWT_SECRET=seu_secret_producao_super_seguro_complexo_longo_e_aleatorio
 1. **NUNCA** use o secret padrão em produção
 2. **NUNCA** commite o `.env.production` no Git
 3. Use secrets **longos e aleatórios** (mínimo 32 caracteres)
-4. Gere secrets com: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
+4. Gere secrets com:
+   `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
 5. Rotacione secrets periodicamente em produção
 6. Use HTTPS em produção para proteger tokens em trânsito
 
@@ -296,6 +316,7 @@ JWT_SECRET=seu_secret_producao_super_seguro_complexo_longo_e_aleatorio
 ## 📊 Estrutura do Token
 
 ### Header
+
 ```json
 {
   "alg": "HS256",
@@ -304,6 +325,7 @@ JWT_SECRET=seu_secret_producao_super_seguro_complexo_longo_e_aleatorio
 ```
 
 ### Payload
+
 ```json
 {
   "userId": "abc-123-def-456",
@@ -314,6 +336,7 @@ JWT_SECRET=seu_secret_producao_super_seguro_complexo_longo_e_aleatorio
 ```
 
 ### Signature
+
 ```
 HMACSHA256(
   base64UrlEncode(header) + "." +
@@ -327,14 +350,17 @@ HMACSHA256(
 ## 🐛 Troubleshooting
 
 ### Erro: "Token expirado"
+
 **Causa:** O token tem mais de 7 dias  
 **Solução:** Fazer login novamente para obter novo token
 
 ### Erro: "Token inválido"
+
 **Causa:** Token corrompido ou assinado com secret diferente  
 **Solução:** Verificar se está usando o mesmo JWT_SECRET em todo o sistema
 
 ### Erro: "Token não fornecido"
+
 **Causa:** Header Authorization não foi enviado  
 **Solução:** Adicionar header `Authorization: Bearer <token>`
 
@@ -344,17 +370,18 @@ HMACSHA256(
 
 - [JWT.io](https://jwt.io/) - Debugger e documentação
 - [RFC 7519](https://tools.ietf.org/html/rfc7519) - Especificação JWT
-- [jsonwebtoken npm](https://www.npmjs.com/package/jsonwebtoken) - Biblioteca usada
+- [jsonwebtoken npm](https://www.npmjs.com/package/jsonwebtoken) - Biblioteca
+  usada
 
 ---
 
 ## 🔄 Changelog
 
 ### v1.0.0 (16/10/2024)
+
 - ✅ Criação do serviço JWT
 - ✅ Funções: generateToken, verifyToken
 - ✅ Função auxiliar: extractTokenFromHeader
 - ✅ Tipagem completa com TypeScript
 - ✅ Tratamento de erros específicos
 - ✅ Integração com authController e middleware auth
-

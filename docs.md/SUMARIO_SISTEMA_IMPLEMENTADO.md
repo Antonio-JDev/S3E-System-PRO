@@ -9,6 +9,7 @@
 ### 🔧 **Backend (Node.js + TypeScript + Prisma)**
 
 #### 1. Estrutura de Banco de Dados
+
 - ✅ Campo `ultimaAtualizacaoPreco` adicionado à tabela `materiais`
 - ✅ Nova tabela `historico_precos` para rastrear todas alterações
 - ✅ Índices otimizados para consultas rápidas
@@ -18,33 +19,40 @@
 #### 2. Endpoints da API
 
 **a) Gerar Templates**
+
 ```
 GET /api/materiais/template-importacao?formato=json&tipo=todos
 GET /api/materiais/template-importacao?formato=pdf&tipo=criticos
 ```
+
 - JSON estruturado com todos os materiais
 - PDF estilizado com logo da empresa
 - Filtro para materiais críticos (estoque baixo)
 
 **b) Importação e Preview**
+
 ```
 POST /api/materiais/preview-importacao  (FormData: arquivo)
 POST /api/materiais/importar-precos     (FormData: arquivo)
 ```
+
 - Suporta JSON, XLSX e CSV
 - Preview antes de aplicar alterações
 - Validação completa de dados
 - Registro automático em histórico
 
 **c) Histórico**
+
 ```
 GET /api/materiais/:id/historico-precos
 ```
+
 - Retorna todas alterações de preço
 - Ordenado por data (mais recente primeiro)
 - Inclui preço anterior, novo, motivo e usuário
 
 #### 3. Funcionalidades do Backend
+
 - ✅ Transações atômicas (update + histórico juntos)
 - ✅ Validação de arquivos (tamanho, formato, estrutura)
 - ✅ Geração de PDF com logo
@@ -58,12 +66,14 @@ GET /api/materiais/:id/historico-precos
 #### 1. Componentes Criados
 
 **a) PrecoValidadeFlag.tsx** 🚦
+
 - Flag colorida (verde/amarelo/vermelho)
 - HoverCard com informações detalhadas ao passar mouse
 - Cálculo automático de dias desde atualização
 - Recomendações personalizadas
 
 **b) HistoricoPrecosModal.tsx** 📊
+
 - Modal interativo de histórico completo
 - Mostra todas alterações com:
   - Preço anterior e novo
@@ -74,6 +84,7 @@ GET /api/materiais/:id/historico-precos
 - Scroll infinito para muitos registros
 
 **c) MaterialCardComValidade.tsx** 🎴
+
 - Componente de exemplo completo
 - Integração de flag + histórico + ações
 - Pronto para copiar e usar
@@ -81,9 +92,11 @@ GET /api/materiais/:id/historico-precos
 #### 2. Página Atualizada: ComparacaoPrecos.tsx
 
 **Antes:**
+
 - Apenas importação CSV básica
 
 **Agora:**
+
 - ✅ Botão "📄 JSON" - Baixa template JSON
 - ✅ Botão "📑 PDF" - Abre PDF em nova aba
 - ✅ Botão "Importar JSON" - Upload de arquivo
@@ -96,6 +109,7 @@ GET /api/materiais/:id/historico-precos
 #### 3. Serviços Criados
 
 **precosService.ts** - Funções utilitárias:
+
 - `calcularDiasDesdeAtualizacao()`
 - `getStatusPreco()` - verde/amarelo/vermelho
 - `precoEstaValido()` - boolean
@@ -119,6 +133,7 @@ Dia 30+:               URGENTE!         → 🔴 VERMELHO
 ```
 
 ### Regras:
+
 - **0-15 dias**: Preço OK para usar ✅
 - **16-27 dias**: Alerta ao adicionar em orçamento ⚠️
 - **28+ dias**: Confirmar antes de adicionar ❌
@@ -128,6 +143,7 @@ Dia 30+:               URGENTE!         → 🔴 VERMELHO
 ## 📁 Arquivos Criados/Modificados
 
 ### Backend (9 arquivos)
+
 ```
 ✅ backend/prisma/schema.prisma                    (Material + HistoricoPreco)
 ✅ backend/prisma/migrations/...add_historico...   (Migration SQL)
@@ -138,6 +154,7 @@ Dia 30+:               URGENTE!         → 🔴 VERMELHO
 ```
 
 ### Frontend (6 arquivos)
+
 ```
 ✅ frontend/src/components/PrecoValidadeFlag.tsx      (Flag colorida)
 ✅ frontend/src/components/HistoricoPrecosModal.tsx   (Modal histórico)
@@ -149,6 +166,7 @@ Dia 30+:               URGENTE!         → 🔴 VERMELHO
 ```
 
 ### Documentação (4 arquivos)
+
 ```
 ✅ SISTEMA_ATUALIZACAO_PRECOS.md      (Doc técnica completa)
 ✅ GUIA_RAPIDO_INTEGRACAO.md          (Como integrar)
@@ -162,6 +180,7 @@ Dia 30+:               URGENTE!         → 🔴 VERMELHO
 ## 🚀 Como Começar a Usar AGORA
 
 ### Passo 1: Reiniciar Servidor
+
 ```bash
 # Backend
 cd backend
@@ -173,6 +192,7 @@ npm run dev
 ```
 
 ### Passo 2: Acessar Sistema
+
 ```
 http://localhost:5173
 Login → Menu lateral → "Atualização de Preços"
@@ -181,18 +201,21 @@ Login → Menu lateral → "Atualização de Preços"
 ### Passo 3: Testar Funcionalidades
 
 **a) Download de Template:**
+
 ```
 Clique: 📄 JSON
 Resultado: Arquivo template-precos-2024-11-12.json baixado
 ```
 
 **b) Visualizar PDF:**
+
 ```
 Clique: 📑 PDF
 Resultado: PDF abre em nova aba (pode imprimir)
 ```
 
 **c) Editar JSON:**
+
 ```
 1. Abra o arquivo JSON no Notepad
 2. Procure um material pelo SKU
@@ -201,6 +224,7 @@ Resultado: PDF abre em nova aba (pode imprimir)
 ```
 
 **d) Importar:**
+
 ```
 1. Clique: "Importar JSON"
 2. Selecione arquivo editado
@@ -211,6 +235,7 @@ Resultado: PDF abre em nova aba (pode imprimir)
 ```
 
 **e) Ver Histórico:**
+
 ```
 1. Em qualquer lista de materiais
 2. Passe o mouse sobre a bolinha colorida
@@ -224,18 +249,21 @@ Resultado: PDF abre em nova aba (pode imprimir)
 ## 📈 Estatísticas da Implementação
 
 ### Código Escrito:
+
 - **Backend**: ~600 linhas de código
 - **Frontend**: ~500 linhas de código
 - **Documentação**: ~1000 linhas
 - **Total**: ~2100 linhas
 
 ### Componentes:
+
 - **3 novos componentes** React
 - **1 novo serviço** frontend
 - **6 novos endpoints** backend
 - **2 novas tabelas** no banco
 
 ### Funcionalidades:
+
 - **5 formatos** de arquivo suportados (JSON, PDF, XLSX, XLS, CSV)
 - **3 níveis** de alerta (verde, amarelo, vermelho)
 - **30 dias** de validade de preço
@@ -246,6 +274,7 @@ Resultado: PDF abre em nova aba (pode imprimir)
 ## 🎯 Casos de Uso Reais
 
 ### Caso 1: Atualização Mensal de Preços
+
 ```
 Situação: Início do mês, precisa atualizar todos os preços
 
@@ -258,6 +287,7 @@ Solução:
 ```
 
 ### Caso 2: Enviar Cotação ao Fornecedor
+
 ```
 Situação: Precisa de orçamento do fornecedor
 
@@ -271,6 +301,7 @@ Solução:
 ```
 
 ### Caso 3: Criar Orçamento com Preços Válidos
+
 ```
 Situação: Cliente pediu orçamento urgente
 
@@ -288,6 +319,7 @@ Solução:
 ```
 
 ### Caso 4: Analisar Variação de Preços
+
 ```
 Situação: Precisa saber se um material aumentou ou diminuiu
 
@@ -306,12 +338,14 @@ Solução:
 ## 🔥 Destaques Técnicos
 
 ### Performance
+
 - ✅ Queries otimizadas com índices
 - ✅ Limit de 1000 materiais no template (evita sobrecarga)
 - ✅ Paginação no histórico (últimas 50 alterações)
 - ✅ Cache de materiais no frontend
 
 ### Segurança
+
 - ✅ Autenticação JWT em todos endpoints
 - ✅ Validação de tipos de arquivo
 - ✅ Sanitização de dados
@@ -319,6 +353,7 @@ Solução:
 - ✅ Logs de auditoria
 
 ### Usabilidade
+
 - ✅ Interface intuitiva
 - ✅ Instruções passo a passo
 - ✅ Preview antes de aplicar
@@ -364,6 +399,7 @@ Solução:
 ## 📊 Resultados Esperados
 
 ### Impacto no Negócio:
+
 - ⏱️ **Economia de Tempo**: 90% menos tempo atualizando preços
 - 💰 **Orçamentos Precisos**: Preços sempre atualizados
 - 📈 **Competitividade**: Preços de mercado em tempo real (até 30 dias)
@@ -372,13 +408,13 @@ Solução:
 
 ### Antes vs Depois:
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| Atualização de 100 materiais | 2-3 horas | 5-10 minutos |
-| Controle de validade | Manual (papel) | Automático (flags) |
-| Histórico de preços | Não existe | Completo e rastreável |
-| Risco de preço errado | Alto | Muito baixo |
-| Análise de variação | Impossível | Fácil e visual |
+| Aspecto                      | Antes          | Depois                |
+| ---------------------------- | -------------- | --------------------- |
+| Atualização de 100 materiais | 2-3 horas      | 5-10 minutos          |
+| Controle de validade         | Manual (papel) | Automático (flags)    |
+| Histórico de preços          | Não existe     | Completo e rastreável |
+| Risco de preço errado        | Alto           | Muito baixo           |
+| Análise de variação          | Impossível     | Fácil e visual        |
 
 ---
 
@@ -405,6 +441,7 @@ Criamos arquivos prontos para você testar:
 ## 📞 Comandos Úteis
 
 ### Desenvolvimento:
+
 ```bash
 # Aplicar migration
 cd backend
@@ -425,6 +462,7 @@ npm run dev
 ```
 
 ### Produção:
+
 ```bash
 # Aplicar migrations
 npx prisma migrate deploy
@@ -450,6 +488,7 @@ npm start
 ## 🎉 Funcionalidades Destacadas
 
 ### 1. Template JSON Inteligente
+
 ```json
 {
   "versao": "1.0",
@@ -469,6 +508,7 @@ npm start
 ```
 
 ### 2. PDF Profissional
+
 - Logo da empresa no cabeçalho
 - Tabela formatada
 - Materiais críticos destacados
@@ -476,6 +516,7 @@ npm start
 - Rodapé com data e validade
 
 ### 3. Flags Inteligentes
+
 ```
 🟢 Passe o mouse → Ver detalhes
    - Material: Cabo Flexível
@@ -490,6 +531,7 @@ npm start
 ```
 
 ### 4. Histórico Detalhado
+
 ```
 📊 Histórico de Preços - Cabo Flexível 2.5mm
 
@@ -564,6 +606,7 @@ npm start
 ### ✅ Checklist Final:
 
 **Backend:**
+
 - [x] Migration aplicada
 - [x] 66 materiais inicializados
 - [x] Endpoints funcionando
@@ -574,6 +617,7 @@ npm start
 - [x] Logs detalhados
 
 **Frontend:**
+
 - [x] HoverCard instalado
 - [x] Componentes criados
 - [x] Serviços implementados
@@ -583,6 +627,7 @@ npm start
 - [x] Modais responsivos
 
 **Documentação:**
+
 - [x] README geral
 - [x] Doc técnica
 - [x] Guia de integração
@@ -602,7 +647,7 @@ npm start
 ✅ **Importação em massa** rápida e segura  
 ✅ **Templates profissionais** (JSON + PDF)  
 ✅ **Alertas automáticos** para preços vencidos  
-✅ **Interface intuitiva** e fácil de usar  
+✅ **Interface intuitiva** e fácil de usar
 
 ---
 
@@ -621,18 +666,21 @@ Após usar pela primeira vez, você vai perceber:
 ## 🚀 Começe Agora!
 
 1. **Teste básico** (5 minutos):
+
    ```
    Download JSON → Edite 1 material → Importe → Veja histórico
    ```
 
 2. **Teste completo** (15 minutos):
+
    ```
-   Download JSON → Edite 10 materiais → Importe → 
-   Crie orçamento → Veja flags → Veja históricos → 
+   Download JSON → Edite 10 materiais → Importe →
+   Crie orçamento → Veja flags → Veja históricos →
    Download PDF → Envie a fornecedor fictício
    ```
 
 3. **Uso real** (quando quiser):
+
    ```
    Consulte fornecedores reais → Atualize JSON →
    Importe → Use em orçamentos reais → Lucre! 💰
@@ -643,11 +691,13 @@ Após usar pela primeira vez, você vai perceber:
 ## 🎓 Suporte
 
 **Dúvidas?** Consulte os arquivos:
+
 - `README_SISTEMA_PRECOS.md` - Visão geral
 - `GUIA_RAPIDO_INTEGRACAO.md` - Como integrar
 - `SISTEMA_ATUALIZACAO_PRECOS.md` - Doc técnica
 
 **Problemas?** Verifique:
+
 - Backend rodando? `npm run dev`
 - Migration aplicada? `npx prisma migrate dev`
 - Datas inicializadas? `npx tsx src/scripts/inicializarDatasPrecos.ts`
@@ -659,6 +709,7 @@ Após usar pela primeira vez, você vai perceber:
 Sistema desenvolvido com dedicação para **S3E Engenharia Elétrica**.
 
 **Tecnologias utilizadas:**
+
 - Node.js + Express + TypeScript
 - Prisma ORM + PostgreSQL
 - React + TypeScript + Tailwind CSS
@@ -669,7 +720,6 @@ Sistema desenvolvido com dedicação para **S3E Engenharia Elétrica**.
 
 **🎉 PARABÉNS! SISTEMA COMPLETO E FUNCIONAL! 🎉**
 
-*Última atualização: 12/11/2024*  
-*Versão: 1.0.0*  
-*Status: ✅ Produção Ready*
-
+_Última atualização: 12/11/2024_  
+_Versão: 1.0.0_  
+_Status: ✅ Produção Ready_

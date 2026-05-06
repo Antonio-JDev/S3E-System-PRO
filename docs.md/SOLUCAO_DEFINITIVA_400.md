@@ -3,6 +3,7 @@
 ## 📋 **RESUMO EXECUTIVO:**
 
 O **erro 400** ocorria porque:
+
 1. Frontend baixava JSON com wrapper `{ success, data }`
 2. Usuário importava arquivo com wrapper
 3. Backend tentava ler `jsonData.versao` (mas estava em `jsonData.data.versao`)
@@ -24,7 +25,7 @@ let jsonData = JSON.parse(jsonContent);
 
 // Detectar e remover wrapper { success, data }
 if (jsonData.success && jsonData.data) {
-  console.log('🧹 Detectado wrapper - Extraindo...');
+  console.log("🧹 Detectado wrapper - Extraindo...");
   jsonData = jsonData.data;
 }
 
@@ -32,6 +33,7 @@ console.log(jsonData.versao); // "1.0" ✅
 ```
 
 **Por que funciona:**
+
 - Agora aceita AMBOS os formatos (com e sem wrapper)
 - Remove wrapper automaticamente
 - Logs mostram quando wrapper é detectado
@@ -47,10 +49,11 @@ if (response.data.data) templateData = response.data.data;
 
 // DEPOIS ✅
 const templateData = response.data; // Direto!
-console.log('✅ Template extraído:', templateData);
+console.log("✅ Template extraído:", templateData);
 ```
 
 **Por que funciona:**
+
 - `axiosApiService.get()` SEMPRE retorna `{ success, data }`
 - Logo, `response.data` contém os dados reais
 - Simples, direto, sem confusão
@@ -70,40 +73,47 @@ console.log('✅ Template extraído:', templateData);
 ## 🚀 **COMO TESTAR:**
 
 ### **1. Reinicie Backend:**
+
 ```bash
 cd backend
 npm run dev
 ```
 
 ### **2. Limpe Frontend:**
+
 ```
 Ctrl + Shift + R (hard reload)
 F12 → Console → Ctrl+L (limpar)
 ```
 
 ### **3. Baixe JSON:**
+
 ```
 Menu → Atualização de Preços → 📄 JSON
 ```
 
 **Verifique primeiro caractere do arquivo:**
+
 ```json
 {         ← ✅ Correto
   "versao": "1.0",
 ```
 
 **NÃO PODE SER:**
+
 ```json
 {
   "success": true,  ← ❌ Errado!
 ```
 
 ### **4. Importe JSON:**
+
 ```
 Importar JSON → Selecionar → Processar
 ```
 
 **Backend logs DEVE mostrar:**
+
 ```
 📄 JSON parseado (após limpeza): {
   versao: '1.0',  ← ✅ Não mais undefined!
@@ -147,4 +157,3 @@ POST /api/materiais/preview-importacao 200  ← ✅ 200!
 **STATUS:** ✅ RESOLVIDO E PRONTO PARA PRODUÇÃO
 
 **TESTE E VAI FUNCIONAR! 🚀**
-

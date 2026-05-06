@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { randomBytes } from 'crypto';
-
-const prisma = new PrismaClient();
 
 /**
  * Gera uma string aleatória de caracteres alfanuméricos
@@ -123,17 +121,75 @@ export async function gerarSKUUnico(
 }
 
 /**
- * Valida se um SKU já existe no banco
+ * Gera um SKU único para cotações (banco frio)
+ * Verifica unicidade tanto em materiais quanto em cotações
+ * Formato: COT-XX (onde XX são 3 caracteres aleatórios)
+ * 
+ * @param prismaTransaction - Transação do Prisma (opcional)
+ * @param maxTentativas - Número máximo de tentativas (padrão: 20)
+ * @returns SKU único para cotação
+ */
+export async function gerarSKUCotacao(
+    prismaTransaction?: any,
+    maxTentativas: number = 20
+): Promise<string> {
+    const tx = prismaTransaction || prisma;
+    let tentativas = 0;
+    
+    while (tentativas < maxTentativas) {
+        // Gerar 3 caracteres aleatórios para o sufixo
+        const sufixo = gerarCodigoAleatorio(3);
+        const skuCotacao = `COT${sufixo}`; // 6 caracteres total: COT + 3 chars
+        
+        // Verificar unicidade em ambas as tabelas
+        const [existeMaterial, existeCotacao] = await Promise.all([
+            tx.material.findUnique({
+                where: { sku: skuCotacao },
+                select: { id: true }
+            }),
+            tx.cotacao.findUnique({
+                where: { sku: skuCotacao },
+                select: { id: true }
+            })
+        ]);
+        
+        if (!existeMaterial && !existeCotacao) {
+            console.log(`✅ SKU único gerado para cotação: ${skuCotacao}`);
+            return skuCotacao;
+        }
+        
+        tentativas++;
+    }
+    
+    // Fallback com timestamp
+    const timestamp = Date.now().toString().slice(-3);
+    const skuFallback = `COT${timestamp}`;
+    
+    console.warn(`⚠️ Usando SKU com timestamp para cotação: ${skuFallback}`);
+    return skuFallback;
+}
+
+/**
+ * Valida se um SKU já existe no banco (materiais ou cotações)
  * @param sku - SKU a ser validado
  * @param prismaTransaction - Transação do Prisma (opcional)
  * @returns true se o SKU já existe, false caso contrário
  */
 export async function skuExiste(sku: string, prismaTransaction?: any): Promise<boolean> {
     const tx = prismaTransaction || prisma;
-    const material = await tx.material.findUnique({
-        where: { sku },
-        select: { id: true }
-    });
-    return !!material;
+    
+    // Verificar em ambas as tabelas
+    const [material, cotacao] = await Promise.all([
+        tx.material.findUnique({
+            where: { sku },
+            select: { id: true }
+        }),
+        tx.cotacao.findUnique({
+            where: { sku },
+            select: { id: true }
+        })
+    ]);
+    
+    return !!(material || cotacao);
 }
 

@@ -6,27 +6,28 @@ export const API_CONFIG = {
 };
 
 /**
- * Função auxiliar para garantir que a URL sempre use a porta 3001 (backend)
- * Nunca usa a porta 8080 (frontend) para requisições de API/arquivos
+ * Retorna a URL base do backend para requisições e uploads.
+ * - Se VITE_API_URL estiver definido (produção ou dev), usa esse valor.
+ * - Em desenvolvimento local (porta 8080 ou 5173): usa mesma origem com porta 3001 (backend).
+ * - Em produção (sem porta de dev): usa a mesma origem, para funcionar com reverse proxy (ex: nginx fazendo /api → backend).
  */
 export const getBackendUrl = (): string => {
   let baseUrl = API_CONFIG.BASE_URL;
   
-  // Se não tiver BASE_URL, tentar construir a partir da origem atual
   if (!baseUrl && typeof window !== 'undefined') {
     const origin = window.location.origin;
-    // Se estiver na porta 8080, trocar para 3001
-    if (origin.includes(':8080')) {
-      baseUrl = origin.replace(':8080', ':3001');
-    } else if (!origin.includes(':3001')) {
-      // Se não tiver porta definida, adicionar :3001
-      baseUrl = `${origin.split(':')[0]}:3001`;
+    const isDev = origin.includes(':8080') || origin.includes(':5173');
+    if (isDev) {
+      // Desenvolvimento: front na 8080/5173, backend na 3001
+      baseUrl = origin.includes(':8080')
+        ? origin.replace(':8080', ':3001')
+        : origin.replace(':5173', ':3001');
     } else {
+      // Produção: mesma origem (front e API atrás do mesmo host, ex: proxy /api → backend)
       baseUrl = origin;
     }
   }
   
-  // Se BASE_URL ainda tiver porta 8080, corrigir para 3001
   if (baseUrl && baseUrl.includes(':8080')) {
     baseUrl = baseUrl.replace(':8080', ':3001');
   }
@@ -112,5 +113,12 @@ export const ENDPOINTS = {
     FINANCEIRO: '/api/relatorios/financeiro',
     FINANCEIRO_RESUMO: '/api/relatorios/financeiro/resumo',
   },
+  MOVIMENTACOES_CAIXA: '/api/movimentacoes-caixa',
   COMPARACAO_PRECOS: '/api/comparacao-precos',
+  ATENDIMENTO_CRM: '/api/atendimento-crm',
+  BRASIL_API: {
+    NCM_SEARCH: '/api/brasil-api/ncm/search',
+    /** path com código NCM (com ou sem pontos); usar encodeURIComponent no código */
+    ncmByCode: (code: string) => `/api/brasil-api/ncm/${encodeURIComponent(code)}`,
+  },
 };

@@ -37,7 +37,7 @@ const CriarClienteRapidoModal: React.FC<CriarClienteRapidoModalProps> = ({
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
       <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-md w-full animate-slide-in-up">
         {/* Header */}
-        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-green-600 to-green-700">
+        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-blue-700">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -95,8 +95,8 @@ const CriarClienteRapidoModal: React.FC<CriarClienteRapidoModalProps> = ({
             <div className="flex gap-4">
               <label className={`flex-1 flex items-center justify-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${
                 tipo === 'PF' 
-                  ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
-                  : 'border-gray-300 dark:border-gray-600 hover:border-green-300'
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
+                  : 'border-gray-300 dark:border-gray-600 hover:border-blue-300'
               }`}>
                 <input
                   type="radio"
@@ -104,7 +104,7 @@ const CriarClienteRapidoModal: React.FC<CriarClienteRapidoModalProps> = ({
                   value="PF"
                   checked={tipo === 'PF'}
                   onChange={(e) => setTipo(e.target.value as 'PF')}
-                  className="w-4 h-4 text-green-600"
+                  className="w-4 h-4 text-blue-600"
                   disabled={loading}
                 />
                 <div className="text-center">
@@ -119,8 +119,8 @@ const CriarClienteRapidoModal: React.FC<CriarClienteRapidoModalProps> = ({
 
               <label className={`flex-1 flex items-center justify-center gap-3 p-4 border-2 rounded-xl cursor-pointer transition-all ${
                 tipo === 'PJ' 
-                  ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
-                  : 'border-gray-300 dark:border-gray-600 hover:border-green-300'
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-gray-300 dark:border-gray-600 hover:border-blue-300'
               }`}>
                 <input
                   type="radio"
@@ -128,7 +128,7 @@ const CriarClienteRapidoModal: React.FC<CriarClienteRapidoModalProps> = ({
                   value="PJ"
                   checked={tipo === 'PJ'}
                   onChange={(e) => setTipo(e.target.value as 'PJ')}
-                  className="w-4 h-4 text-green-600"
+                  className="w-4 h-4 text-blue-600"
                   disabled={loading}
                 />
                 <div className="text-center">

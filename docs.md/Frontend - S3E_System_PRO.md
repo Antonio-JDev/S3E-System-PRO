@@ -56,11 +56,13 @@ npm run preview
 ## 🎨 Design System
 
 ### Cores (TailwindCSS)
+
 - **brand-blue**: Azul primário (#2563eb)
 - **brand-gray**: Tons de cinza
 - **brand-red**: Vermelho para alertas
 
 ### Componentes Reutilizáveis
+
 - StatCard - Cards de estatísticas
 - Sidebar - Menu lateral
 - SettingsModal - Modal de configurações
@@ -75,7 +77,9 @@ npm run preview
 
 ## 🔄 Fluxo de Dados
 
-O projeto usa React State para gerenciamento de estado local. No futuro, poderá ser integrado com:
+O projeto usa React State para gerenciamento de estado local. No futuro, poderá
+ser integrado com:
+
 - Context API
 - Zustand
 - Redux Toolkit
@@ -83,6 +87,7 @@ O projeto usa React State para gerenciamento de estado local. No futuro, poderá
 ## 🛣️ Rotas
 
 O sistema usa navegação baseada em estado (`activeView`). Principais views:
+
 - Dashboard
 - Orçamentos
 - Catálogo

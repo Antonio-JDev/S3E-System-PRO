@@ -7,12 +7,31 @@ export class ContasPagarController {
      */
     static async criarConta(req: Request, res: Response) {
         try {
-            const contaData: ContaPagarPayload = req.body;
+            const body = req.body;
+            // Aceitar valor ou valorParcela
+            const valorParcela = body.valorParcela ?? body.valor;
+            // Parsear dataVencimento corretamente para evitar problema de timezone (YYYY-MM-DD)
+            let dataVencimentoParsed: Date | undefined = undefined;
+            if (body.dataVencimento) {
+                const raw = String(body.dataVencimento);
+                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                    const [y, m, d] = raw.split('-').map(Number);
+                    dataVencimentoParsed = new Date(y, m - 1, d, 12, 0, 0, 0);
+                } else {
+                    dataVencimentoParsed = new Date(raw);
+                }
+            }
+
+            const contaData: ContaPagarPayload = {
+                ...body,
+                valorParcela: typeof valorParcela === 'number' ? valorParcela : parseFloat(valorParcela),
+                dataVencimento: dataVencimentoParsed
+            };
 
             // Validar dados obrigatórios
-            if (!contaData.descricao || !contaData.valorParcela || !contaData.dataVencimento) {
+            if (!contaData.descricao || contaData.valorParcela == null || !contaData.dataVencimento) {
                 return res.status(400).json({
-                    error: 'Dados obrigatórios ausentes: descricao, valorParcela, dataVencimento'
+                    error: 'Dados obrigatórios ausentes: descricao, valorParcela (ou valor), dataVencimento'
                 });
             }
 
@@ -66,10 +85,16 @@ export class ContasPagarController {
 
     /**
      * Marca uma conta a pagar como paga
+     * Body pode conter:
+     * - dataPagamento (string): Data em que o pagamento foi efetuado
+     * - valorPago (number): Valor pago (opcional)
+     * - observacoes (string): Observações sobre o pagamento
+     * - meioPagamento (string): PIX, Boleto, Cartão, etc.
      */
     static async pagarConta(req: Request, res: Response) {
         try {
             const { id } = req.params;
+            const { dataPagamento, valorPago, observacoes, meioPagamento } = req.body;
 
             if (!id) {
                 return res.status(400).json({
@@ -77,7 +102,22 @@ export class ContasPagarController {
                 });
             }
 
-            const conta = await ContasPagarService.pagarConta(id);
+            console.log('💳 Registrando pagamento:', {
+                id,
+                dataPagamento,
+                valorPago,
+                observacoes,
+                meioPagamento
+            });
+
+            // ✅ CORRIGIDO: Passar dados do formulário para o serviço
+            const conta = await ContasPagarService.pagarConta(
+                id,
+                dataPagamento,
+                valorPago,
+                observacoes,
+                meioPagamento
+            );
 
             res.json({
                 success: true,
@@ -114,7 +154,16 @@ export class ContasPagarController {
                 });
             }
 
-            const conta = await ContasPagarService.agendarPagamento(id, new Date(dataAgendamento));
+            // Parsear dataAgendamento para evitar timezone issues
+            let dataAgendamentoParsed: Date;
+            if (typeof dataAgendamento === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dataAgendamento)) {
+                const [y, m, d] = dataAgendamento.split('-').map(Number);
+                dataAgendamentoParsed = new Date(y, m - 1, d, 12, 0, 0, 0);
+            } else {
+                dataAgendamentoParsed = new Date(dataAgendamento);
+            }
+
+            const conta = await ContasPagarService.agendarPagamento(id, dataAgendamentoParsed);
 
             res.json({
                 success: true,
@@ -166,11 +215,25 @@ export class ContasPagarController {
      */
     static async listarContas(req: Request, res: Response) {
         try {
-            const { status, fornecedorId, page = 1, limit = 10 } = req.query;
+            // ✅ CORREÇÃO CRÍTICA: Aumentar limit padrão de 10 para 1000 para evitar perda de dados em auditoria
+            const {
+                status,
+                fornecedorId,
+                tipo,
+                valorExato,
+                valorMin,
+                valorMax,
+                page = 1,
+                limit = 1000
+            } = req.query;
 
             const resultado = await ContasPagarService.listarContasPagar(
                 status as string,
                 fornecedorId as string,
+                tipo as string,
+                valorExato !== undefined ? parseFloat(valorExato as string) : undefined,
+                valorMin !== undefined ? parseFloat(valorMin as string) : undefined,
+                valorMax !== undefined ? parseFloat(valorMax as string) : undefined,
                 parseInt(page as string),
                 parseInt(limit as string)
             );
@@ -262,7 +325,16 @@ export class ContasPagarController {
                 });
             }
 
-            const conta = await ContasPagarService.atualizarVencimento(id, new Date(novaData));
+            // Parsear novaData para evitar timezone issues
+            let novaDataParsed: Date;
+            if (typeof novaData === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(novaData)) {
+                const [y, m, d] = novaData.split('-').map(Number);
+                novaDataParsed = new Date(y, m - 1, d, 12, 0, 0, 0);
+            } else {
+                novaDataParsed = new Date(novaData);
+            }
+
+            const conta = await ContasPagarService.atualizarVencimento(id, novaDataParsed);
 
             res.json({
                 success: true,
@@ -274,6 +346,53 @@ export class ContasPagarController {
             console.error('Erro ao atualizar vencimento:', error);
             res.status(500).json({
                 error: 'Erro interno do servidor',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
+     * Atualiza dados de uma conta a pagar (admin/desenvolvedor)
+     * Permite editar fornecedor/credor (contas manuais), descrição, vencimento, observações e classificação.
+     */
+    static async atualizarConta(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const { fornecedorId, credorNome, descricao, dataVencimento, observacoes, classificacao } = req.body || {};
+
+            if (!id) {
+                return res.status(400).json({ error: 'ID da conta a pagar é obrigatório' });
+            }
+
+            let dataVencimentoParsed: Date | undefined = undefined;
+            if (dataVencimento !== undefined && dataVencimento !== null && String(dataVencimento).trim() !== '') {
+                const raw = String(dataVencimento);
+                if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                    const [y, m, d] = raw.split('-').map(Number);
+                    dataVencimentoParsed = new Date(y, m - 1, d, 12, 0, 0, 0);
+                } else {
+                    dataVencimentoParsed = new Date(raw);
+                }
+            }
+
+            const conta = await ContasPagarService.atualizarConta(id, {
+                fornecedorId: fornecedorId === '' ? null : fornecedorId,
+                credorNome,
+                descricao,
+                dataVencimento: dataVencimentoParsed,
+                observacoes,
+                classificacao
+            });
+
+            res.json({
+                success: true,
+                message: 'Conta a pagar atualizada com sucesso',
+                data: conta
+            });
+        } catch (error) {
+            console.error('Erro ao atualizar conta a pagar:', error);
+            res.status(400).json({
+                error: 'Erro ao atualizar conta a pagar',
                 message: error instanceof Error ? error.message : 'Erro desconhecido'
             });
         }
@@ -356,12 +475,20 @@ export class ContasPagarController {
                 });
             }
 
-            const contas = await ContasPagarService.gerarContasSalarios(mesReferencia);
+            const { criadas, atualizadas } = await ContasPagarService.gerarContasSalarios(mesReferencia);
+
+            const parts: string[] = [];
+            if (criadas.length) parts.push(`${criadas.length} nova(s)`);
+            if (atualizadas.length) parts.push(`${atualizadas.length} atualizada(s) com valor da folha`);
+            const msg =
+                parts.length > 0
+                    ? `Contas de salário: ${parts.join('; ')}.`
+                    : 'Nenhuma alteração (contas já existentes não pendentes ou sem funcionários ativos).';
 
             res.status(201).json({
                 success: true,
-                message: `${contas.length} conta(s) de salário gerada(s)`,
-                data: contas
+                message: msg,
+                data: { criadas, atualizadas }
             });
         } catch (error) {
             console.error('Erro ao gerar contas de salários:', error);
@@ -395,6 +522,38 @@ export class ContasPagarController {
             console.error('Erro ao gerar contas de despesas fixas:', error);
             res.status(500).json({
                 error: 'Erro interno do servidor',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
+     * Exclui uma parcela de conta a pagar
+     * Só permite excluir se:
+     * - A parcela estiver paga (status = 'Pago')
+     * - E a origem (compra ou despesa fixa) tiver sido excluída
+     */
+    static async excluirParcela(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+
+            if (!id) {
+                return res.status(400).json({
+                    error: 'ID da conta a pagar é obrigatório'
+                });
+            }
+
+            await ContasPagarService.excluirParcela(id);
+
+            res.json({
+                success: true,
+                message: 'Parcela excluída com sucesso'
+            });
+
+        } catch (error) {
+            console.error('Erro ao excluir parcela:', error);
+            res.status(400).json({
+                error: 'Erro ao excluir parcela',
                 message: error instanceof Error ? error.message : 'Erro desconhecido'
             });
         }

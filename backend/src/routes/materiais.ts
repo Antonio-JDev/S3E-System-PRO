@@ -12,15 +12,18 @@ import {
   buscarMateriaisSimilares,
   atualizarSKUsENCMs,
   exportarMateriaisCriticos,
-  importarPrecos,
-  uploadImportFile,
   uploadImagemMaterial,
   uploadImagemMaterialHandler,
   deletarImagemMaterial,
   servirImagemMaterial,
-  gerarTemplateImportacao,
-  previewImportacao,
-  getHistoricoPrecos
+  getHistoricoPrecos,
+  recalcularCustoUnitario,
+  getCandidatosRecalculoCusto,
+  atualizarValoresVenda,
+  exportarTemplateMateriais,
+  importarMateriais,
+  previewPrecoBitolaCabo,
+  aplicarPrecoBitolaCabo
 } from '../controllers/materiaisController';
 import { authenticate } from '../middlewares/auth';
 
@@ -34,14 +37,23 @@ router.post('/corrigir-nomes', corrigirNomesGenericos); // Rota de correção
 router.post('/buscar-similares', buscarMateriaisSimilares); // Nova rota para verificação de duplicatas
 router.post('/atualizar-skus-ncms', atualizarSKUsENCMs); // Atualizar SKUs e NCMs de materiais existentes
 
-// Rotas de exportação/importação (antes das rotas com :id)
+// Rotas de exportação e recálculo (antes das rotas com :id)
 router.get('/exportar-criticos', exportarMateriaisCriticos);
-router.get('/template-importacao', gerarTemplateImportacao); // Gerar template JSON/PDF
-router.post('/preview-importacao', uploadImportFile, previewImportacao); // Preview antes de importar
-router.post('/importar-precos', uploadImportFile, importarPrecos);
+router.get('/candidatos-recalculo-custo', getCandidatosRecalculoCusto);
 
 router.get('/:id/historico-compras', getHistoricoCompras); // Rota específica antes da genérica
 router.get('/:id/historico-precos', getHistoricoPrecos); // Histórico de preços
+router.post('/:id/recalcular-custo', recalcularCustoUnitario); // Recálculo custo unitário (KM→M)
+
+// Rota especial para atualizar valores de venda de todos os materiais
+router.post('/atualizar-valores-venda', authenticate, atualizarValoresVenda);
+
+// Template e importação em lote (antes da rota /:id)
+router.get('/import/template', exportarTemplateMateriais);
+router.post('/import', importarMateriais);
+
+router.post('/cabos/preview-preco-bitola', previewPrecoBitolaCabo);
+router.post('/cabos/aplicar-preco-bitola', aplicarPrecoBitolaCabo);
 
 // Rotas de imagens (antes da rota genérica /:id)
 router.post('/:id/upload-imagem', uploadImagemMaterial, uploadImagemMaterialHandler);

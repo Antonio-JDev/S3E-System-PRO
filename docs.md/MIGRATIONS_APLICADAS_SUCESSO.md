@@ -2,7 +2,8 @@
 
 ## 🎉 Resumo
 
-As migrations do módulo de **Vendas e Relatórios** foram aplicadas com sucesso no banco de dados PostgreSQL!
+As migrations do módulo de **Vendas e Relatórios** foram aplicadas com sucesso
+no banco de dados PostgreSQL!
 
 ---
 
@@ -30,6 +31,7 @@ CREATE TABLE "vendas" (
 ```
 
 **Campos principais:**
+
 - `numeroVenda`: Identificador único (ex: VND-1729436789012)
 - `orcamentoId`: Vínculo único com orçamento aprovado
 - `valorTotal`: Valor total da venda
@@ -37,6 +39,7 @@ CREATE TABLE "vendas" (
 - `valorEntrada`: Valor pago na entrada
 
 **Índices criados:**
+
 - `vendas_numeroVenda_key` (UNIQUE)
 - `vendas_orcamentoId_key` (UNIQUE)
 
@@ -45,13 +48,14 @@ CREATE TABLE "vendas" (
 ### ✅ 2. Tabela `contas_receber` (MODIFICADA)
 
 **Mudanças:**
+
 - ❌ Removido: `clienteId`, `projetoId`, `valorTotal`, `valorRecebido`
 - ✅ Adicionado: `vendaId`, `valorParcela`
 - ✅ Estrutura simplificada e focada
 
 ```sql
 -- Nova estrutura
-ALTER TABLE "contas_receber" 
+ALTER TABLE "contas_receber"
     DROP COLUMN "clienteId",
     DROP COLUMN "projetoId",
     DROP COLUMN "valorTotal",
@@ -60,25 +64,27 @@ ALTER TABLE "contas_receber"
     ADD COLUMN "valorParcela" DOUBLE PRECISION NOT NULL;
 
 -- Nova foreign key
-ALTER TABLE "contas_receber" 
-    ADD CONSTRAINT "contas_receber_vendaId_fkey" 
-    FOREIGN KEY ("vendaId") REFERENCES "vendas"("id") 
+ALTER TABLE "contas_receber"
+    ADD CONSTRAINT "contas_receber_vendaId_fkey"
+    FOREIGN KEY ("vendaId") REFERENCES "vendas"("id")
     ON DELETE CASCADE;
 ```
 
-**Benefício:** Agora as contas a receber estão **vinculadas às vendas**, não diretamente aos clientes.
+**Benefício:** Agora as contas a receber estão **vinculadas às vendas**, não
+diretamente aos clientes.
 
 ---
 
 ### ✅ 3. Tabela `contas_pagar` (MODIFICADA)
 
 **Mudanças:**
+
 - ❌ Removido: `valorTotal`, `valorPago`
 - ✅ Adicionado: `valorParcela`
 - ✅ `fornecedorId` agora é opcional
 
 ```sql
-ALTER TABLE "contas_pagar" 
+ALTER TABLE "contas_pagar"
     DROP COLUMN "valorPago",
     DROP COLUMN "valorTotal",
     ADD COLUMN "valorParcela" DOUBLE PRECISION NOT NULL,
@@ -94,29 +100,35 @@ ALTER TABLE "contas_pagar"
 **Criadas:**
 
 1. **Venda → Orçamento** (1:1)
+
    ```sql
    FOREIGN KEY ("orcamentoId") REFERENCES "orcamentos"("id")
    ```
 
 2. **Venda → Cliente** (N:1)
+
    ```sql
    FOREIGN KEY ("clienteId") REFERENCES "clientes"("id")
    ```
 
 3. **Venda → Projeto** (N:1, opcional)
+
    ```sql
    FOREIGN KEY ("projetoId") REFERENCES "projetos"("id")
    ON DELETE SET NULL
    ```
 
 4. **ContaReceber → Venda** (N:1, com cascade)
+
    ```sql
    FOREIGN KEY ("vendaId") REFERENCES "vendas"("id")
    ON DELETE CASCADE
    ```
+
    **Cascade:** Se deletar venda, contas são deletadas automaticamente!
 
 5. **ContaPagar → Fornecedor** (N:1, opcional)
+
    ```sql
    FOREIGN KEY ("fornecedorId") REFERENCES "fornecedores"("id")
    ON DELETE SET NULL
@@ -127,6 +139,7 @@ ALTER TABLE "contas_pagar"
 ## 📁 Arquivos de Migration
 
 ### Localização
+
 ```
 backend/
   └─ prisma/
@@ -138,6 +151,7 @@ backend/
 ```
 
 ### Migration Aplicada
+
 ```
 Nome: modulo_vendas_e_relatorios_completo
 Data: 2025-10-20 18:51:54
@@ -217,12 +231,14 @@ NODE_ENV=development
 ### Scripts npm Simplificados
 
 **Antes:**
+
 ```json
 "dev": "dotenv -e .env.development -- tsx watch src/app.ts"
 "seed": "dotenv -e .env.development -- npx tsx src/seed.ts"
 ```
 
 **Agora:**
+
 ```json
 "dev": "tsx watch src/app.ts"
 "seed": "npx tsx src/seed.ts"
@@ -266,6 +282,7 @@ http://localhost:5555
 ```
 
 **Você verá:**
+
 - ✅ Tabela `vendas` (vazia)
 - ✅ Tabela `contas_receber` (vazia)
 - ✅ Tabela `contas_pagar` com nova estrutura
@@ -281,6 +298,7 @@ npm run dev
 ```
 
 **Saída esperada:**
+
 ```
 🚀 Server running on http://localhost:3001
 📝 Environment: development
@@ -329,6 +347,7 @@ Tabelas: 19
 ```
 
 **Novos relacionamentos:**
+
 - Venda ↔ Orçamento (1:1)
 - Venda ↔ Cliente (N:1)
 - Venda ↔ Projeto (N:1)
@@ -339,11 +358,13 @@ Tabelas: 19
 ## 🎓 Entendendo o que Aconteceu
 
 ### 1. Renomeamos .env.development → .env
+
 ```bash
 mv .env.development .env
 ```
 
 ### 2. Prisma detectou mudanças no schema
+
 ```
 - Modelo Venda não existe no banco → CRIAR
 - Modelo ContaReceber mudou → ALTERAR
@@ -351,6 +372,7 @@ mv .env.development .env
 ```
 
 ### 3. Gerou SQL automaticamente
+
 ```sql
 CREATE TABLE vendas...
 ALTER TABLE contas_receber...
@@ -358,6 +380,7 @@ ALTER TABLE contas_pagar...
 ```
 
 ### 4. Executou no PostgreSQL
+
 ```
 Tabelas criadas/modificadas ✅
 Índices criados ✅
@@ -365,6 +388,7 @@ Foreign keys criadas ✅
 ```
 
 ### 5. Atualizou Prisma Client
+
 ```
 Código TypeScript gerado ✅
 Autocomplete habilitado ✅
@@ -376,6 +400,7 @@ Types atualizados ✅
 ## ✨ Benefícios Imediatos
 
 ### 1. Código TypeScript Funciona
+
 ```typescript
 // Agora você pode usar:
 await prisma.venda.create({ ... })  // ✅ Funciona!
@@ -383,22 +408,24 @@ await prisma.contaReceber.create({ ... })  // ✅ Funciona!
 ```
 
 ### 2. Relações Automáticas
+
 ```typescript
 // Buscar venda com suas contas
 const venda = await prisma.venda.findUnique({
-    where: { id: 'VND-123' },
-    include: {
-        contasReceber: true,  // ✅ Todas as parcelas
-        cliente: true,         // ✅ Dados do cliente
-        orcamento: true        // ✅ Orçamento vinculado
-    }
+  where: { id: "VND-123" },
+  include: {
+    contasReceber: true, // ✅ Todas as parcelas
+    cliente: true, // ✅ Dados do cliente
+    orcamento: true, // ✅ Orçamento vinculado
+  },
 });
 ```
 
 ### 3. Cascade Delete
+
 ```typescript
 // Se deletar venda, contas são deletadas automaticamente
-await prisma.venda.delete({ where: { id: 'VND-123' } });
+await prisma.venda.delete({ where: { id: "VND-123" } });
 // ✅ Venda deletada
 // ✅ Contas a receber deletadas automaticamente (CASCADE)
 ```
@@ -408,6 +435,7 @@ await prisma.venda.delete({ where: { id: 'VND-123' } });
 ## 🚀 Próximos Passos
 
 ### 1. Testar Criação de Venda (recomendado)
+
 ```bash
 # Rodar backend
 cd backend
@@ -427,16 +455,18 @@ curl -X POST http://localhost:3001/api/vendas/realizar \
 ```
 
 ### 2. Visualizar no Prisma Studio
+
 ```
 http://localhost:5555
 
 Navegue para:
-- Tabela "vendas" 
+- Tabela "vendas"
 - Tabela "contas_receber"
 - Veja os registros criados!
 ```
 
 ### 3. Integrar Frontend
+
 - Conectar componente Vendas.tsx aos endpoints reais
 - Testar fluxo completo no navegador
 
@@ -445,6 +475,7 @@ Navegue para:
 ## 📝 Comandos Simplificados Agora
 
 **Antes (complicado):**
+
 ```bash
 dotenv -e .env.development -- npx prisma migrate dev
 dotenv -e .env.development -- npx prisma studio
@@ -452,6 +483,7 @@ dotenv -e .env.development -- tsx watch src/app.ts
 ```
 
 **Agora (simples):**
+
 ```bash
 npm run prisma:migrate
 npm run prisma:studio
@@ -459,6 +491,7 @@ npm run dev
 ```
 
 Ou ainda mais direto:
+
 ```bash
 npx prisma migrate dev
 npx prisma studio
@@ -470,21 +503,25 @@ tsx watch src/app.ts
 ## 🎯 Status Final
 
 ### ✅ Migrations
+
 - Total de migrations: 2
 - Status: Database schema is up to date! ✅
 - Todas aplicadas com sucesso
 
 ### ✅ Banco de Dados
+
 - PostgreSQL conectado ✅
 - 19 tabelas ativas
 - Todas as relações criadas
 
 ### ✅ Configuração
+
 - Arquivo .env criado ✅
 - Scripts npm simplificados ✅
 - Pronto para desenvolvimento
 
 ### ✅ Sistema
+
 - Backend pronto para rodar ✅
 - API de vendas funcional ✅
 - API de relatórios funcional ✅
@@ -495,6 +532,7 @@ tsx watch src/app.ts
 ## 🎉 Sucesso!
 
 Seu sistema S3E agora tem:
+
 - ✅ Módulo de Vendas completo
 - ✅ Módulo de Contas a Receber
 - ✅ Módulo de Relatórios Financeiros
@@ -507,4 +545,3 @@ Seu sistema S3E agora tem:
 
 **Migration aplicada em: 20/10/2025 18:51:54**  
 **Sistema S3E Engenharia Elétrica** ⚡
-

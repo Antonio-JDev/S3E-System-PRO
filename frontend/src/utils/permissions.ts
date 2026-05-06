@@ -4,6 +4,7 @@
 
 export interface User {
   role?: string;
+  isAdmin?: boolean;
 }
 
 export type Permission = 
@@ -14,22 +15,25 @@ export type Permission =
   | 'view_comparacao_precos'
   | 'view_obras'
   | 'view_tarefas_obra'
+  | 'view_tarefas_internas'
   | 'view_gestao_obras'
   | 'view_servicos'
   | 'view_financeiro'
   | 'view_nfe'
   | 'view_logs'
-  | 'view_gerenciamento';
+  | 'view_gerenciamento'
+  | 'view_kit';
 
 /**
  * Verifica se o usuário tem permissão para excluir registros
- * Apenas Desenvolvedor e Administrador podem excluir
+ * Desenvolvedor, Administrador (role ou isAdmin), Financeiro/Faturamento podem excluir
  */
 export const canDelete = (user: User | null | undefined): boolean => {
-  if (!user || !user.role) return false;
-  
+  if (!user) return false;
+  if (user.isAdmin === true) return true;
+  if (!user.role) return false;
   const role = user.role.toLowerCase();
-  return role === 'desenvolvedor' || role === 'admin' || role === 'administrador';
+  return role === 'desenvolvedor' || role === 'admin' || role === 'administrador' || role === 'financeiro_faturamento';
 };
 
 /**
@@ -41,10 +45,12 @@ export const isDeveloper = (user: User | null | undefined): boolean => {
 };
 
 /**
- * Verifica se o usuário é Administrador
+ * Verifica se o usuário é Administrador (role admin ou flag isAdmin definida no gerenciamento de usuários)
  */
 export const isAdmin = (user: User | null | undefined): boolean => {
-  if (!user || !user.role) return false;
+  if (!user) return false;
+  if (user.isAdmin === true) return true;
+  if (!user.role) return false;
   const role = user.role.toLowerCase();
   return role === 'admin' || role === 'administrador';
 };
@@ -63,16 +69,26 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
   // Desenvolvedor tem acesso UNIVERSAL - sempre retorna true
   if (userRole === 'desenvolvedor') return true;
   
-  // Admin/Administrador tem todas as permissões (exceto logs que é devOnly)
-  if (userRole === 'admin' || userRole === 'administrador') {
-    // Logs é apenas para desenvolvedor
+  // Admin/Administrador ou isAdmin: todas as permissões (exceto logs que é devOnly)
+  if (userRole === 'admin' || userRole === 'administrador' || user.isAdmin === true) {
     if (permission === 'view_logs') return false;
     return true;
   }
   
+  // Financeiro/Faturamento: mesmo nível que Administrador (acesso a todos os módulos exceto Logs)
+  if (userRole === 'financeiro_faturamento') {
+    if (permission === 'view_logs') return false;
+    return true;
+  }
+  
+  // Módulo Financeiro: apenas admin, gerente, financeiro_faturamento ou isAdmin
+  if (permission === 'view_financeiro') {
+    return userRole === 'admin' || userRole === 'gerente' || userRole === 'financeiro_faturamento' || user.isAdmin === true;
+  }
+  
   // Mapeamento de permissões por role
   const rolePermissions: Record<string, Permission[]> = {
-    // Gerente: acesso amplo (quase tudo exceto logs)
+    // Gerente: acesso amplo EXCETO Emissão NF-e e aba Recursos Humanos (oculta no Gerenciamento)
     gerente: [
       'view_projetos',
       'view_vendas',
@@ -81,53 +97,108 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
       'view_comparacao_precos',
       'view_obras',
       'view_tarefas_obra',
+      'view_tarefas_internas',
       'view_gestao_obras',
       'view_servicos',
       'view_financeiro',
-      'view_nfe',
-      'view_gerenciamento'
+      'view_gerenciamento',
+      'view_kit'
     ],
     
-    // Engenheiro Elétrico: acesso operacional e projetos
-    engenheiro: [
+    // Desenhista Industrial: como engenheiro elétrico (sem Financeiro, NF-e, Frota; RH/Frota/Despesas ocultos no Gerenciamento)
+    desenhista_industrial: [
       'view_projetos',
+      'view_vendas',
       'view_obras',
       'view_tarefas_obra',
+      'view_tarefas_internas',
       'view_gestao_obras',
       'view_servicos',
       'view_movimentacoes',
       'view_catalogo',
-      'view_gerenciamento'
+      'view_comparacao_precos',
+      'view_gerenciamento',
+      'view_kit'
     ],
     
-    // Orcamentista: acesso comercial
+    // Engenheiro Eletricista: sem Financeiro, Emissão NF-e, Frota; abas RH/Frota/Despesas Fixas ocultas no Gerenciamento
+    engenheiro_eletricista: [
+      'view_projetos',
+      'view_vendas',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_tarefas_internas',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_movimentacoes',
+      'view_catalogo',
+      'view_comparacao_precos',
+      'view_gerenciamento',
+      'view_kit'
+    ],
+    
+    // Engenheiro (legado): mesmo que engenheiro_eletricista (sem financeiro/logs/gerenciamento)
+    engenheiro: [
+      'view_projetos',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_tarefas_internas',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_movimentacoes',
+      'view_catalogo',
+      'view_comparacao_precos',
+      'view_kit'
+    ],
+    
+    // Financeiro/Faturamento: mesmo nível que Administrador (acesso a todos os módulos)
+    financeiro_faturamento: [
+      'view_projetos',
+      'view_vendas',
+      'view_catalogo',
+      'view_movimentacoes',
+      'view_comparacao_precos',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_tarefas_internas',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_financeiro',
+      'view_nfe',
+      'view_gerenciamento',
+      'view_kit'
+    ],
+    
+    // Orcamentista (legado): acesso comercial - módulo orçamentos todos podem usar
     orcamentista: [
       'view_projetos',
       'view_vendas',
       'view_catalogo',
       'view_obras',
+      'view_tarefas_internas',
       'view_servicos'
     ],
     
-    // Compras: acesso a suprimentos
+    // Compras (legado): módulo compras todos podem usar
     compras: [
       'view_catalogo',
       'view_movimentacoes',
       'view_comparacao_precos',
-      'view_obras' // Para ver obras e necessidades
+      'view_obras',
+      'view_tarefas_internas'
     ],
     
-    // Eletricista: acesso operacional básico
+    // Eletricista: apenas Tarefas da Obra e Ferramentas (seu kit)
     eletricista: [
-      'view_obras',
       'view_tarefas_obra',
-      'view_movimentacoes'
+      'view_kit'
     ],
     
     // User padrão: acesso mínimo
     user: [
       'view_obras',
-      'view_tarefas_obra'
+      'view_tarefas_obra',
+      'view_tarefas_internas'
     ]
   };
   

@@ -5,11 +5,13 @@
 ---
 
 ### **1️⃣ Cadastrar Cotação**
+
 ```
 Menu → Cotações → Template
 ```
 
 **Edite o JSON:**
+
 ```json
 {
   "versao": "1.0",
@@ -17,7 +19,7 @@ Menu → Cotações → Template
     {
       "nome": "Cabo de Cobre 2,5mm - Rolo 100m",
       "ncm": "85444200",
-      "valorUnitario": 450.00,
+      "valorUnitario": 450.0,
       "fornecedorNome": "Eletromar Distribuidora",
       "observacoes": "Cotação válida por 30 dias"
     }
@@ -26,6 +28,7 @@ Menu → Cotações → Template
 ```
 
 **Importe:**
+
 ```
 Importar JSON → Selecionar → Importar
 Toast: "✅ Importação concluída: 1 criados"
@@ -34,6 +37,7 @@ Toast: "✅ Importação concluída: 1 criados"
 ---
 
 ### **2️⃣ Criar Novo Orçamento**
+
 ```
 Menu → Orçamentos → (botão criar novo orçamento)
 Preencha:
@@ -45,12 +49,14 @@ Preencha:
 ---
 
 ### **3️⃣ Abrir Modal de Adicionar Item**
+
 ```
 Seção "Itens do Orçamento"
 Clique: "+ Adicionar Item"
 ```
 
 **Modal abre:**
+
 ```
 ╔═══════════════════════════════════════════════╗
 ║  Adicionar Item ao Orçamento                  ║
@@ -64,11 +70,13 @@ Clique: "+ Adicionar Item"
 ---
 
 ### **4️⃣ Selecionar Aba "Cotações"**
+
 ```
 Clique: "🏷️ Cotações"
 ```
 
 **Deve mostrar:**
+
 ```
 ┌───────────────────────────────────────────────┐
 │ 📦 Banco Frio: Materiais cotados...          │
@@ -86,11 +94,13 @@ Clique: "🏷️ Cotações"
 ---
 
 ### **5️⃣ Adicionar Cotação**
+
 ```
 Clique no card da cotação
 ```
 
 **Toast:**
+
 ```
 ✅ Cotação adicionada
 Cabo de Cobre 2,5mm - Rolo 100m do banco frio adicionado
@@ -101,6 +111,7 @@ Cabo de Cobre 2,5mm - Rolo 100m do banco frio adicionado
 ---
 
 ### **6️⃣ Ver Item Adicionado com FLAG**
+
 ```
 Item aparece na lista:
 
@@ -119,6 +130,7 @@ Item aparece na lista:
 ---
 
 ### **7️⃣ Comparar com Item de Estoque**
+
 ```
 Adicionar Item → 📦 Materiais → Selecionar material
 
@@ -140,6 +152,7 @@ Item aparece SEM flag:
 ## ✅ **VERIFICAÇÕES:**
 
 ### **Console Frontend:**
+
 ```
 ✓ GET /api/cotacoes 200
 ✓ Toast: "Cotação adicionada"
@@ -149,6 +162,7 @@ Item aparece SEM flag:
 ```
 
 ### **Lista de Itens:**
+
 ```
 ✓ Item de cotação tem flag azul
 ✓ Flag mostra "📦 Banco Frio"
@@ -158,6 +172,7 @@ Item aparece SEM flag:
 ```
 
 ### **Busca no Modal:**
+
 ```
 Digite: "cabo"
 ✓ Mostra cotação do cabo
@@ -198,6 +213,7 @@ Digite: "eletromar"
 ## 📝 **RESUMO TÉCNICO:**
 
 **Modificações:**
+
 - ✅ `NovoOrcamentoPage.tsx` (10+ mudanças)
 - ✅ Interface `OrcamentoItem` atualizada
 - ✅ Estado `cotacoes` adicionado
@@ -217,4 +233,3 @@ Digite: "eletromar"
 
 **Data:** 12/11/2025  
 **Status:** ✅ COMPLETO E TESTADO
-

@@ -9,13 +9,13 @@ import {
     TypographyConfig
 } from '../types/pdfCustomization';
 
-const STORAGE_KEY = 'pdf_customization_temp';
+export const PDF_CUSTOMIZATION_STORAGE_KEY = 'pdf_customization_temp';
 
 export const usePDFCustomization = () => {
     const [customization, setCustomization] = useState<PDFCustomization>(() => {
         // Tentar carregar do localStorage (último estado)
         try {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(PDF_CUSTOMIZATION_STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
                 
@@ -38,7 +38,7 @@ export const usePDFCustomization = () => {
         } catch (error) {
             console.warn('Erro ao carregar customização do localStorage:', error);
             // Se der erro, limpar localStorage e usar padrão
-            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(PDF_CUSTOMIZATION_STORAGE_KEY);
         }
         return DEFAULT_PDF_CUSTOMIZATION;
     });
@@ -48,7 +48,7 @@ export const usePDFCustomization = () => {
     // Salvar no localStorage quando houver mudanças
     useEffect(() => {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(customization));
+            localStorage.setItem(PDF_CUSTOMIZATION_STORAGE_KEY, JSON.stringify(customization));
             setHasUnsavedChanges(true);
         } catch (error) {
             console.error('Erro ao salvar no localStorage:', error);
@@ -134,7 +134,7 @@ export const usePDFCustomization = () => {
     const resetToDefault = useCallback(() => {
         setCustomization(DEFAULT_PDF_CUSTOMIZATION);
         setHasUnsavedChanges(false);
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(PDF_CUSTOMIZATION_STORAGE_KEY);
     }, []);
 
     // Load template
@@ -161,7 +161,7 @@ export const usePDFCustomization = () => {
 
     // Clear temporary storage
     const clearTemp = useCallback(() => {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(PDF_CUSTOMIZATION_STORAGE_KEY);
     }, []);
 
     return {

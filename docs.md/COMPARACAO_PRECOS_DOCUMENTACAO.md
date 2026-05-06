@@ -2,7 +2,9 @@
 
 ## 🎯 Visão Geral
 
-A funcionalidade de **Comparação de Preços** permite que a S3E System compare preços de fornecedores com o histórico de compras anterior, facilitando a tomada de decisão em novas aquisições.
+A funcionalidade de **Comparação de Preços** permite que a S3E System compare
+preços de fornecedores com o histórico de compras anterior, facilitando a tomada
+de decisão em novas aquisições.
 
 ---
 
@@ -29,18 +31,21 @@ A funcionalidade de **Comparação de Preços** permite que a S3E System compare
 ## 📋 Funcionalidades Implementadas
 
 ### ✅ **1. Upload de Arquivo CSV**
+
 - Interface intuitiva com drag-and-drop visual
 - Validação de formato de arquivo (.csv)
 - Informações sobre fornecedor
 - Instruções claras sobre formato esperado
 
 ### ✅ **2. Processamento e Comparação**
+
 - Leitura automática do CSV
 - Comparação com última compra
 - Verificação de estoque atual
 - Cálculo de diferenças percentuais e absolutas
 
 ### ✅ **3. Visualização Comparativa**
+
 - Tabela detalhada com todos os itens
 - Indicadores visuais de variação:
   - 🟢 **Verde**: Preço menor que anterior
@@ -49,6 +54,7 @@ A funcionalidade de **Comparação de Preços** permite que a S3E System compare
   - ⚪ **Cinza**: Sem histórico de compra
 
 ### ✅ **4. Estatísticas e Métricas**
+
 - Total de itens na comparação
 - Valor total da compra
 - Economia total (soma dos itens com preço menor)
@@ -56,16 +62,19 @@ A funcionalidade de **Comparação de Preços** permite que a S3E System compare
 - Contadores por categoria
 
 ### ✅ **5. Filtros e Busca**
+
 - Busca por nome ou código do material
 - Filtro por status de comparação
 - Resultados em tempo real
 
 ### ✅ **6. Integração com Orçamentos**
+
 - Botão para criar orçamento com preços novos
 - Navegação automática para módulo de orçamentos
 - Dados pré-preenchidos (via localStorage)
 
 ### ✅ **7. Histórico de Importações**
+
 - Lista de comparações anteriores
 - Acesso rápido a importações passadas
 - Informações resumidas (fornecedor, data, valor)
@@ -87,6 +96,7 @@ frontend/src/
 ```
 
 ### **Integração:**
+
 - `App.tsx`: Rota adicionada no switch case
 - `constants/index.tsx`: Novo item no `navLinks`
 - Sidebar atualizado automaticamente
@@ -96,11 +106,13 @@ frontend/src/
 ## 🎨 Interface do Usuário
 
 ### **Estado Inicial (Sem Importação)**
+
 - Tela de boas-vindas com instruções
 - Botão destacado para primeira importação
 - Lista de importações anteriores (se houver)
 
 ### **Tela de Comparação Ativa**
+
 - **Cards de Estatísticas** (4 cards):
   1. Total de Itens
   2. Valor Total
@@ -112,8 +124,8 @@ frontend/src/
   - Dropdown de status
   - Botão "Voltar"
 
-- **Tabela Comparativa**:
-  | Material | Qtd | Estoque | Preço Atual | Novo Preço | Diferença | Total | Status |
+- **Tabela Comparativa**: | Material | Qtd | Estoque | Preço Atual | Novo Preço
+  | Diferença | Total | Status |
   |----------|-----|---------|-------------|------------|-----------|-------|--------|
 
 - **Ações Finais**:
@@ -135,13 +147,13 @@ MAT-003,Tomada 2P+T 10A,Unidade,20,12.50
 
 ### **Descrição dos Campos:**
 
-| Campo | Tipo | Descrição | Exemplo |
-|-------|------|-----------|---------|
-| `codigo` | String | Código interno do material | MAT-001 |
-| `nome` | String | Nome/descrição do material | Cabo 2.5mm² |
-| `unidade` | String | Unidade de medida | Rolo, Unidade, Barra |
-| `quantidade` | Number | Quantidade solicitada | 5 |
-| `preco_unitario` | Number | Preço por unidade (use ponto) | 295.00 |
+| Campo            | Tipo   | Descrição                     | Exemplo              |
+| ---------------- | ------ | ----------------------------- | -------------------- |
+| `codigo`         | String | Código interno do material    | MAT-001              |
+| `nome`           | String | Nome/descrição do material    | Cabo 2.5mm²          |
+| `unidade`        | String | Unidade de medida             | Rolo, Unidade, Barra |
+| `quantidade`     | Number | Quantidade solicitada         | 5                    |
+| `preco_unitario` | Number | Preço por unidade (use ponto) | 295.00               |
 
 ---
 
@@ -150,39 +162,39 @@ MAT-003,Tomada 2P+T 10A,Unidade,20,12.50
 ```typescript
 // Status de comparação
 export enum PriceComparisonStatus {
-    Higher = 'Higher',      // Novo preço maior
-    Lower = 'Lower',        // Novo preço menor
-    Equal = 'Equal',        // Preços iguais
-    NoHistory = 'NoHistory' // Sem histórico de compra
+  Higher = "Higher", // Novo preço maior
+  Lower = "Lower", // Novo preço menor
+  Equal = "Equal", // Preços iguais
+  NoHistory = "NoHistory", // Sem histórico de compra
 }
 
 // Item individual da comparação
 export interface PriceComparisonItem {
-    id: string;
-    materialCode: string;
-    materialName: string;
-    unit: string;
-    quantity: number;
-    currentPrice: number | null;      // Preço atual (última compra)
-    newPrice: number | null;          // Preço do novo orçamento
-    difference: number | null;        // Diferença em %
-    differenceValue: number | null;   // Diferença em R$
-    status: PriceComparisonStatus;
-    supplierName?: string;
-    lastPurchaseDate?: string;
-    stockQuantity?: number;
+  id: string;
+  materialCode: string;
+  materialName: string;
+  unit: string;
+  quantity: number;
+  currentPrice: number | null; // Preço atual (última compra)
+  newPrice: number | null; // Preço do novo orçamento
+  difference: number | null; // Diferença em %
+  differenceValue: number | null; // Diferença em R$
+  status: PriceComparisonStatus;
+  supplierName?: string;
+  lastPurchaseDate?: string;
+  stockQuantity?: number;
 }
 
 // Importação completa
 export interface PriceComparisonImport {
-    id: string;
-    fileName: string;
-    uploadDate: string;
-    supplierName: string;
-    itemsCount: number;
-    totalValue: number;
-    items: PriceComparisonItem[];
-    status: 'pending' | 'approved' | 'rejected';
+  id: string;
+  fileName: string;
+  uploadDate: string;
+  supplierName: string;
+  itemsCount: number;
+  totalValue: number;
+  items: PriceComparisonItem[];
+  status: "pending" | "approved" | "rejected";
 }
 ```
 
@@ -193,6 +205,7 @@ export interface PriceComparisonImport {
 ### **Endpoints a Implementar:**
 
 #### **1. Upload e Processamento do CSV**
+
 ```typescript
 POST /api/price-comparison/import
 Content-Type: multipart/form-data
@@ -213,6 +226,7 @@ Response:
 ```
 
 **Lógica Backend:**
+
 1. Receber arquivo CSV
 2. Parsear CSV usando biblioteca (ex: `papaparse`, `csv-parser`)
 3. Para cada item do CSV:
@@ -228,6 +242,7 @@ Response:
 ---
 
 #### **2. Listar Importações**
+
 ```typescript
 GET /api/price-comparison
 
@@ -240,6 +255,7 @@ Response:
 ---
 
 #### **3. Buscar Importação Específica**
+
 ```typescript
 GET /api/price-comparison/:id
 
@@ -252,6 +268,7 @@ Response:
 ---
 
 #### **4. Criar Orçamento a Partir da Comparação**
+
 ```typescript
 POST /api/price-comparison/:id/create-budget
 
@@ -269,6 +286,7 @@ Response:
 ```
 
 **Lógica Backend:**
+
 1. Buscar importação por ID
 2. Criar novo `Budget`
 3. Para cada item da comparação:
@@ -320,6 +338,7 @@ model PriceComparisonItem {
 ## 🎨 Cores e Estilo
 
 ### **Paleta de Cores:**
+
 - **Verde** (`bg-green-50`, `text-green-700`): Economia/Preço menor
 - **Vermelho** (`bg-red-50`, `text-red-700`): Aumento/Preço maior
 - **Azul** (`bg-blue-50`, `text-blue-700`): Preço igual
@@ -327,6 +346,7 @@ model PriceComparisonItem {
 - **Brand S3E** (`bg-brand-s3e`): Botões principais
 
 ### **Ícones:**
+
 - 📊 Comparação de Preços (header)
 - 📤 Upload de arquivo
 - 💰 Economia total
@@ -339,32 +359,40 @@ model PriceComparisonItem {
 ## 📊 Cálculos Implementados
 
 ### **1. Diferença Percentual**
+
 ```typescript
-difference = ((newPrice - currentPrice) / currentPrice) * 100
+difference = ((newPrice - currentPrice) / currentPrice) * 100;
 ```
 
 ### **2. Diferença em Valor Absoluto**
+
 ```typescript
-differenceValue = newPrice - currentPrice
+differenceValue = newPrice - currentPrice;
 ```
 
 ### **3. Economia Total**
+
 ```typescript
 totalSavings = items
-  .filter(item => item.status === 'Lower')
-  .reduce((sum, item) => sum + (abs(item.differenceValue) * item.quantity), 0)
+  .filter((item) => item.status === "Lower")
+  .reduce((sum, item) => sum + abs(item.differenceValue) * item.quantity, 0);
 ```
 
 ### **4. Aumento Total**
+
 ```typescript
 totalIncrease = items
-  .filter(item => item.status === 'Higher')
-  .reduce((sum, item) => sum + (item.differenceValue * item.quantity), 0)
+  .filter((item) => item.status === "Higher")
+  .reduce((sum, item) => sum + item.differenceValue * item.quantity, 0);
 ```
 
 ### **5. Valor Total**
+
 ```typescript
-totalValue = items.reduce((sum, item) => sum + (item.newPrice * item.quantity), 0)
+totalValue = items.reduce(
+  (sum, item) => sum + item.newPrice * item.quantity,
+  0
+);
 ```
 
 ---
@@ -372,17 +400,22 @@ totalValue = items.reduce((sum, item) => sum + (item.newPrice * item.quantity), 
 ## 🔄 Estados da Aplicação
 
 ### **Estado do Componente:**
+
 ```typescript
 const [imports, setImports] = useState<PriceComparisonImport[]>([]);
-const [selectedImport, setSelectedImport] = useState<PriceComparisonImport | null>(null);
-const [searchTerm, setSearchTerm] = useState('');
-const [filterStatus, setFilterStatus] = useState<PriceComparisonStatus | 'all'>('all');
+const [selectedImport, setSelectedImport] =
+  useState<PriceComparisonImport | null>(null);
+const [searchTerm, setSearchTerm] = useState("");
+const [filterStatus, setFilterStatus] = useState<PriceComparisonStatus | "all">(
+  "all"
+);
 const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-const [supplierName, setSupplierName] = useState('');
+const [supplierName, setSupplierName] = useState("");
 const [selectedFile, setSelectedFile] = useState<File | null>(null);
 ```
 
 ### **Fluxo de Estados:**
+
 1. **Inicial**: `selectedImport = null` → Tela de boas-vindas
 2. **Upload**: `isUploadModalOpen = true` → Modal de upload
 3. **Processamento**: CSV é parseado → Novo import criado
@@ -394,6 +427,7 @@ const [selectedFile, setSelectedFile] = useState<File | null>(null);
 ## 🧪 Casos de Teste
 
 ### **Cenário 1: Upload de CSV Válido**
+
 1. Clicar em "Importar CSV"
 2. Preencher nome do fornecedor
 3. Selecionar arquivo .csv válido
@@ -401,20 +435,24 @@ const [selectedFile, setSelectedFile] = useState<File | null>(null);
 5. **Resultado**: Tabela com comparação aparece
 
 ### **Cenário 2: Filtro por Status**
+
 1. Ter uma comparação ativa
 2. Selecionar filtro "Preço Menor"
 3. **Resultado**: Apenas itens com preço menor aparecem
 
 ### **Cenário 3: Busca por Material**
+
 1. Digitar "Cabo" na busca
 2. **Resultado**: Apenas materiais com "Cabo" no nome aparecem
 
 ### **Cenário 4: Criar Orçamento**
+
 1. Ter uma comparação ativa
 2. Clicar em "Criar Orçamento com Estes Preços"
 3. **Resultado**: Redirecionado para Orçamentos com dados pré-preenchidos
 
 ### **Cenário 5: Histórico de Importações**
+
 1. Fazer múltiplas importações
 2. Voltar à tela inicial
 3. **Resultado**: Lista de importações anteriores aparece
@@ -426,12 +464,14 @@ const [selectedFile, setSelectedFile] = useState<File | null>(null);
 ## 🚀 Melhorias Futuras
 
 ### **Fase 2 - Backend Integration:**
+
 - [ ] API de upload e processamento de CSV
 - [ ] Persistência no banco de dados
 - [ ] Histórico real de importações
 - [ ] Busca real de última compra
 
 ### **Fase 3 - Funcionalidades Avançadas:**
+
 - [ ] Exportação da comparação para PDF
 - [ ] Gráficos de variação de preços
 - [ ] Alertas de aumento significativo
@@ -439,6 +479,7 @@ const [selectedFile, setSelectedFile] = useState<File | null>(null);
 - [ ] Sugestão automática de fornecedor mais barato
 
 ### **Fase 4 - Inteligência:**
+
 - [ ] Machine Learning para previsão de preços
 - [ ] Análise de tendência de preços
 - [ ] Recomendações automáticas
@@ -449,6 +490,7 @@ const [selectedFile, setSelectedFile] = useState<File | null>(null);
 ## 📝 Exemplo de Uso Completo
 
 ### **1. Preparação**
+
 ```
 Engenheiro faz levantamento:
 - 5 rolos de cabo 2,5mm²
@@ -459,18 +501,21 @@ Engenheiro faz levantamento:
 ```
 
 ### **2. Solicitação ao Fornecedor**
+
 ```
 Email enviado para fornecedor com lista de materiais
 (sem preços, apenas códigos e quantidades)
 ```
 
 ### **3. Retorno do Fornecedor**
+
 ```
 Fornecedor retorna arquivo CSV com preços preenchidos:
 orcamento_fornecedor_xyz.csv
 ```
 
 ### **4. Upload no Sistema**
+
 ```
 - Acessar "Comparação de Preços"
 - Clicar em "Importar CSV"
@@ -480,6 +525,7 @@ orcamento_fornecedor_xyz.csv
 ```
 
 ### **5. Análise**
+
 ```
 Sistema mostra:
 ✅ Economia de R$ 75,00 (3 itens mais baratos)
@@ -488,6 +534,7 @@ Sistema mostra:
 ```
 
 ### **6. Decisão**
+
 ```
 Gerente analisa:
 - Itens com aumento: pode negociar?
@@ -496,6 +543,7 @@ Gerente analisa:
 ```
 
 ### **7. Criação de Orçamento**
+
 ```
 - Clicar em "Criar Orçamento com Estes Preços"
 - Sistema redireciona para Orçamentos
@@ -507,9 +555,11 @@ Gerente analisa:
 
 ## 🎉 Conclusão
 
-A funcionalidade de **Comparação de Preços** está 100% implementada no frontend e pronta para uso! 🚀
+A funcionalidade de **Comparação de Preços** está 100% implementada no frontend
+e pronta para uso! 🚀
 
 ### **✅ O que está funcionando:**
+
 - Interface completa e responsiva
 - Upload e processamento de CSV (mock)
 - Tabela comparativa com filtros
@@ -518,12 +568,11 @@ A funcionalidade de **Comparação de Preços** está 100% implementada no front
 - Histórico de importações
 
 ### **🔄 Próximos passos:**
+
 1. Implementar endpoints no backend
 2. Integrar com banco de dados real
 3. Conectar frontend com API
 4. Testes de integração completos
 
-**Documentação atualizada em:** Outubro 2025
-**Versão:** 1.0.0
-**Desenvolvido para:** S3E System PRO
-
+**Documentação atualizada em:** Outubro 2025 **Versão:** 1.0.0 **Desenvolvido
+para:** S3E System PRO

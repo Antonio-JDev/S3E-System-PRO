@@ -1,9 +1,12 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import FinanceiroDashboard from './FinanceiroDashboard';
 
 const ContasAReceber = lazy(() => import('./ContasAReceber'));
 const ContasAPagar = lazy(() => import('./ContasAPagar'));
 const ExportarRelatorioFinanceiro = lazy(() => import('./ExportarRelatorioFinanceiro'));
+const DRE = lazy(() => import('./DRE'));
+const FluxoCaixa = lazy(() => import('./FluxoCaixa'));
+const MovimentacoesCaixa = lazy(() => import('./MovimentacoesCaixa'));
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -14,85 +17,161 @@ const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
 
 interface FinanceiroProps {
     toggleSidebar: () => void;
+    initialAba?: string | null;
+    initialContaId?: string | null;
+    onClearInitialAba?: () => void;
+    onClearInitialContaId?: () => void;
 }
 
-type AbaType = 'dashboard' | 'receber' | 'pagar' | 'ajuda' | 'exportar';
+type AbaType = 'dashboard' | 'dre' | 'fluxo-caixa' | 'movimentacoes' | 'receber' | 'pagar' | 'ajuda' | 'exportar';
 
-const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
+const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, initialContaId, onClearInitialAba, onClearInitialContaId }) => {
     const [abaAtiva, setAbaAtiva] = useState<AbaType>('dashboard');
+
+    useEffect(() => {
+        if (initialAba && onClearInitialAba) {
+            const valid = ['dashboard', 'dre', 'fluxo-caixa', 'movimentacoes', 'receber', 'pagar', 'ajuda', 'exportar'];
+            if (valid.includes(initialAba)) {
+                setAbaAtiva(initialAba as AbaType);
+            }
+            onClearInitialAba();
+        }
+    }, [initialAba, onClearInitialAba]);
 
     // Renderização condicional baseada na aba ativa
     if (abaAtiva === 'dashboard') {
-    return (
-        <div className="min-h-screen p-4 sm:p-8">
-            {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
-                <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
-                        <Bars3Icon className="w-6 h-6" />
-                    </button>
-                    <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Financeiro</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Dashboard financeiro e controle de fluxo de caixa</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    <div className="text-right hidden sm:block">
-                        <p className="text-xs text-gray-500 font-medium">Última atualização</p>
-                        <p className="text-sm font-semibold text-gray-700 mt-0.5">{new Date().toLocaleString('pt-BR')}</p>
-                    </div>
-                    {abaAtiva === 'dashboard' && (
-                        <button
-                            onClick={() => setAbaAtiva('exportar' as AbaType)}
-                            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            <span className="hidden sm:inline">Exportar Relatório</span>
+        return (
+            <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
+                {/* Header */}
+                <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
+                    <div className="flex items-center gap-4">
+                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
+                            <Bars3Icon className="w-6 h-6" />
                         </button>
-                    )}
-                </div>
-            </header>
+                        <div>
+                            <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Financeiro</h1>
+                            <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Dashboard financeiro e controle de fluxo de caixa</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <div className="text-right hidden sm:block">
+                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary font-medium">Última atualização</p>
+                            <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mt-0.5">{new Date().toLocaleString('pt-BR')}</p>
+                        </div>
+                        {abaAtiva === 'dashboard' && (
+                            <button
+                                onClick={() => setAbaAtiva('exportar' as AbaType)}
+                                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span className="hidden sm:inline">Exportar Relatório</span>
+                            </button>
+                        )}
+                    </div>
+                </header>
 
-            {/* Tabs de Navegação */}
-            <div className="flex flex-wrap gap-2 mb-6">
-                <button
+                {/* Tabs de Navegação */}
+                <div className="flex flex-wrap gap-2 mb-6">
+                    <button
                         onClick={() => setAbaAtiva('dashboard')}
-                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${
-                            abaAtiva === 'dashboard'
+                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${abaAtiva === 'dashboard'
                                 ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-medium'
                                 : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50'
-                        }`}
-                >
-                    📊 Dashboard
-                </button>
-                <button
+                            }`}
+                    >
+                        📊 Dashboard
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('dre')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50"
+                    >
+                        📈 DRE
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('fluxo-caixa')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                    >
+                        💰 Fluxo de Caixa
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('movimentacoes')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 dark:bg-dark-card dark:text-dark-text dark:border-dark-border hover:border-[#0a1a2f]/40 hover:bg-[#0a1a2f]/5 dark:hover:bg-[#0a1a2f]/10"
+                    >
+                        📋 Movimentações de Caixa
+                    </button>
+                    <button
                         onClick={() => setAbaAtiva('receber')}
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50"
                     >
-                        📈 Contas a Receber
-                </button>
-                <button
+                        💰 Contas a Receber
+                    </button>
+                    <button
                         onClick={() => setAbaAtiva('pagar')}
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
                     >
-                        📉 Contas a Pagar
-                </button>
-                <button
+                        💸 Contas a Pagar
+                    </button>
+                    <button
                         onClick={() => setAbaAtiva('ajuda')}
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
                     >
                         ❓ Como Funcionam as Métricas
-                </button>
-            </div>
+                    </button>
+                </div>
 
                 {/* Dashboard Content */}
-            <div className="animate-fade-in">
-                    <FinanceiroDashboard setAbaAtiva={setAbaAtiva} />
+                <div className="animate-fade-in">
+                    <FinanceiroDashboard setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} />
+                </div>
             </div>
-        </div>
-    );
+        );
+    }
+
+    if (abaAtiva === 'dre') {
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 dark:border-purple-400 mx-auto mb-4"></div>
+                        <p className="text-gray-600 dark:text-dark-text-secondary">Carregando DRE...</p>
+                    </div>
+                </div>
+            }>
+                <DRE toggleSidebar={toggleSidebar} setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} />
+            </Suspense>
+        );
+    }
+
+    if (abaAtiva === 'fluxo-caixa') {
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Carregando Fluxo de Caixa...</p>
+                    </div>
+                </div>
+            }>
+                <FluxoCaixa toggleSidebar={toggleSidebar} setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} />
+            </Suspense>
+        );
+    }
+
+    if (abaAtiva === 'movimentacoes') {
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-amber-600 dark:border-amber-400 mx-auto mb-4"></div>
+                        <p className="text-gray-600 dark:text-dark-text-secondary">Carregando Movimentações de Caixa...</p>
+                    </div>
+                </div>
+            }>
+                <MovimentacoesCaixa toggleSidebar={toggleSidebar} setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} />
+            </Suspense>
+        );
     }
 
     if (abaAtiva === 'receber') {
@@ -105,7 +184,7 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             }>
-                <ContasAReceber setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+                <ContasAReceber setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} toggleSidebar={toggleSidebar} />
             </Suspense>
         );
     }
@@ -113,14 +192,14 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
     if (abaAtiva === 'pagar') {
         return (
             <Suspense fallback={
-                <div className="min-h-screen flex items-center justify-center">
+                <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                     <div className="text-center">
-                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-600 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Carregando Contas a Pagar...</p>
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-600 dark:border-red-400 mx-auto mb-4"></div>
+                        <p className="text-gray-600 dark:text-dark-text-secondary">Carregando Contas a Pagar...</p>
                     </div>
                 </div>
             }>
-                <ContasAPagar setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+                <ContasAPagar setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} toggleSidebar={toggleSidebar} initialContaId={initialContaId} onClearInitialContaId={onClearInitialContaId} />
             </Suspense>
         );
     }
@@ -128,30 +207,30 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
     if (abaAtiva === 'exportar') {
         return (
             <Suspense fallback={
-                <div className="min-h-screen flex items-center justify-center">
+                <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                     <div className="text-center">
-                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
-                        <p className="text-gray-600">Carregando Exportar Relatório...</p>
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 dark:border-purple-400 mx-auto mb-4"></div>
+                        <p className="text-gray-600 dark:text-dark-text-secondary">Carregando Exportar Relatório...</p>
                     </div>
                 </div>
             }>
-                <ExportarRelatorioFinanceiro setAbaAtiva={setAbaAtiva} toggleSidebar={toggleSidebar} />
+                <ExportarRelatorioFinanceiro setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} toggleSidebar={toggleSidebar} />
             </Suspense>
         );
     }
 
     if (abaAtiva === 'ajuda') {
         return (
-            <div className="min-h-screen p-4 sm:p-8">
+            <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
                 {/* Header */}
                 <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                     <div className="flex items-center gap-4">
-                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                        <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                             <Bars3Icon className="w-6 h-6" />
                         </button>
                         <div>
-                            <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Como Funcionam as Métricas</h1>
-                            <p className="text-sm sm:text-base text-gray-500 mt-1">Entenda cada indicador financeiro</p>
+                            <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Como Funcionam as Métricas</h1>
+                            <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Entenda cada indicador financeiro</p>
                         </div>
                     </div>
                     <button
@@ -171,16 +250,34 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
                         📊 Dashboard
                     </button>
                     <button
+                        onClick={() => setAbaAtiva('dre')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50"
+                    >
+                        📈 DRE
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('fluxo-caixa')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                    >
+                        💰 Fluxo de Caixa
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('movimentacoes')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-amber-300 hover:bg-amber-50"
+                    >
+                        📋 Movimentações de Caixa
+                    </button>
+                    <button
                         onClick={() => setAbaAtiva('receber')}
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50"
                     >
-                        📈 Contas a Receber
+                        💰 Contas a Receber
                     </button>
                     <button
                         onClick={() => setAbaAtiva('pagar')}
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
                     >
-                        📉 Contas a Pagar
+                        💸 Contas a Pagar
                     </button>
                     <button
                         onClick={() => setAbaAtiva('ajuda')}
@@ -271,11 +368,11 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="mt-3 space-y-2">
                                     <div className="text-sm">
-                                        <strong className="text-green-600">✅ Saldo Positivo:</strong> 
+                                        <strong className="text-green-600">✅ Saldo Positivo:</strong>
                                         <span className="text-gray-600 ml-2">Suas receitas superam as despesas - situação saudável!</span>
                                     </div>
                                     <div className="text-sm">
-                                        <strong className="text-red-600">⚠️ Saldo Negativo:</strong> 
+                                        <strong className="text-red-600">⚠️ Saldo Negativo:</strong>
                                         <span className="text-gray-600 ml-2">Suas despesas superam as receitas - atenção ao fluxo de caixa!</span>
                                     </div>
                                 </div>

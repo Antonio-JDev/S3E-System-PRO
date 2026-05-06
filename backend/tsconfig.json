@@ -20,7 +20,7 @@
     "noImplicitAny": false,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node", "jest"],
+    "types": ["node"],
     "paths": {
       "@/*": ["./src/*"]
     }

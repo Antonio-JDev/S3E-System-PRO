@@ -37,23 +37,26 @@ Na página "Atualização de Preços", abra console (F12) e execute:
 
 ```javascript
 // Cole isto no console e pressione Enter:
-fetch('http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json', {
-  headers: {
-    'Authorization': 'Bearer ' + localStorage.getItem('token')
+fetch(
+  "http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json",
+  {
+    headers: {
+      Authorization: "Bearer " + localStorage.getItem("token"),
+    },
   }
-})
-.then(r => r.json())
-.then(data => {
-  console.log('📄 Dados retornados:', data);
-  console.log('📊 Total de materiais:', data.materiais?.length || 0);
-  
-  if (data.materiais && data.materiais.length > 0) {
-    console.log('✅ BACKEND OK!');
-    console.log('Primeiro material:', data.materiais[0]);
-  } else {
-    console.log('❌ Backend retornou vazio!');
-  }
-});
+)
+  .then((r) => r.json())
+  .then((data) => {
+    console.log("📄 Dados retornados:", data);
+    console.log("📊 Total de materiais:", data.materiais?.length || 0);
+
+    if (data.materiais && data.materiais.length > 0) {
+      console.log("✅ BACKEND OK!");
+      console.log("Primeiro material:", data.materiais[0]);
+    } else {
+      console.log("❌ Backend retornou vazio!");
+    }
+  });
 ```
 
 **Veja o que aparece no console!**
@@ -68,28 +71,31 @@ Execute no console do navegador:
 // 1. Baixar template
 const baixarTemplate = async () => {
   try {
-    const response = await fetch('http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json', {
-      headers: {
-        'Authorization': 'Bearer ' + localStorage.getItem('token')
+    const response = await fetch(
+      "http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json",
+      {
+        headers: {
+          Authorization: "Bearer " + localStorage.getItem("token"),
+        },
       }
-    });
-    
+    );
+
     const dados = await response.json();
-    console.log('📄 Resposta completa:', dados);
-    
+    console.log("📄 Resposta completa:", dados);
+
     // Criar arquivo
     const jsonString = JSON.stringify(dados, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
+    const blob = new Blob([jsonString], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = 'teste-direto.json';
+    a.download = "teste-direto.json";
     a.click();
-    
-    console.log('✅ Arquivo baixado! Verifique Downloads');
-    console.log('📊 Total de materiais:', dados.materiais?.length);
+
+    console.log("✅ Arquivo baixado! Verifique Downloads");
+    console.log("📊 Total de materiais:", dados.materiais?.length);
   } catch (error) {
-    console.error('❌ Erro:', error);
+    console.error("❌ Erro:", error);
   }
 };
 
@@ -112,6 +118,7 @@ POST /api/materiais/preview-importacao 400
 ```
 
 **Significado:**
+
 - Backend está recebendo arquivo
 - Mas o JSON está vazio ou malformado
 - Backend retorna erro 400
@@ -157,27 +164,28 @@ Agora quando você tentar importar, verá logs assim:
 
 ## 💡 **SOLUÇÃO TEMPORÁRIA:**
 
-Enquanto debugamos, você pode usar o **teste direto** do Teste 3 acima para baixar o JSON.
+Enquanto debugamos, você pode usar o **teste direto** do Teste 3 acima para
+baixar o JSON.
 
 Ou use este script que garante funcionar:
 
 ```javascript
 // Cole no console do navegador:
 (async () => {
-  const token = localStorage.getItem('token');
-  
-  const response = await fetch('http://localhost:3000/api/materiais', {
-    headers: { 'Authorization': `Bearer ${token}` }
+  const token = localStorage.getItem("token");
+
+  const response = await fetch("http://localhost:3000/api/materiais", {
+    headers: { Authorization: `Bearer ${token}` },
   });
-  
+
   const materiais = await response.json();
-  
+
   const template = {
-    "versao": "1.0",
-    "geradoEm": new Date().toISOString(),
-    "empresa": "S3E Engenharia Elétrica",
-    "instrucoes": "Atualize apenas precoNovo",
-    "materiais": materiais.map(m => ({
+    versao: "1.0",
+    geradoEm: new Date().toISOString(),
+    empresa: "S3E Engenharia Elétrica",
+    instrucoes: "Atualize apenas precoNovo",
+    materiais: materiais.map((m) => ({
       id: m.id,
       sku: m.sku,
       nome: m.nome,
@@ -186,19 +194,19 @@ Ou use este script que garante funcionar:
       estoque: m.estoque,
       precoAtual: m.preco || 0,
       precoNovo: m.preco || 0,
-      fornecedor: 'N/A'
-    }))
+      fornecedor: "N/A",
+    })),
   };
-  
+
   const jsonString = JSON.stringify(template, null, 2);
-  const blob = new Blob([jsonString], { type: 'application/json' });
+  const blob = new Blob([jsonString], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
-  a.download = 'template-materiais.json';
+  a.download = "template-materiais.json";
   a.click();
-  
-  console.log('✅ Template gerado:', template.materiais.length, 'materiais');
+
+  console.log("✅ Template gerado:", template.materiais.length, "materiais");
 })();
 ```
 
@@ -211,6 +219,7 @@ Este script GARANTE gerar JSON correto!
 Para eu ajudar melhor, me mostre:
 
 ### **1. Console do navegador ao baixar JSON:**
+
 ```
 Após clicar "📄 JSON", veja console e me mostre:
 - O que aparece em "📄 Resposta do servidor:"
@@ -218,6 +227,7 @@ Após clicar "📄 JSON", veja console e me mostre:
 ```
 
 ### **2. Primeiras 20 linhas do JSON baixado:**
+
 ```
 Abra arquivo no Bloco de Notas
 Copie primeiras 20 linhas
@@ -225,6 +235,7 @@ Me envie
 ```
 
 ### **3. Console do backend ao importar:**
+
 ```
 Após clicar "Processar", veja terminal do backend
 Copie TODAS as linhas que aparecem
@@ -244,9 +255,9 @@ Execute o Teste 3 (script no console) e me diga:
 3. Quantos materiais tem?
 4. Consegue importar este arquivo?
 
-Se este arquivo funcionar, o problema é específico do botão "📄 JSON" do sistema.
+Se este arquivo funcionar, o problema é específico do botão "📄 JSON" do
+sistema.
 
 ---
 
 **AGUARDO SEU RETORNO COM OS LOGS! 🚀**
-

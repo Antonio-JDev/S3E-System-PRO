@@ -2,7 +2,9 @@
 
 ## 🎉 Resumo Executivo
 
-Implementado **módulo completo de Configurações** com backend e frontend modernos, substituindo o modal antigo por uma **página dedicada** com sistema de tabs, UI profissional e integração total com a API.
+Implementado **módulo completo de Configurações** com backend e frontend
+modernos, substituindo o modal antigo por uma **página dedicada** com sistema de
+tabs, UI profissional e integração total com a API.
 
 ---
 
@@ -27,6 +29,7 @@ model ConfiguracaoSistema {
 ```
 
 **Características**:
+
 - ✅ ID fixo (`"sistema-config"`) para garantir registro único
 - ✅ Cores padrão em hexadecimal
 - ✅ Campos opcionais para flexibilidade
@@ -37,15 +40,16 @@ model ConfiguracaoSistema {
 
 **Métodos Implementados**:
 
-| Método | Funcionalidade |
-|--------|----------------|
-| `getConfiguracoes()` | Busca config (cria se não existir) |
-| `salvarConfiguracoes(data)` | Upsert das configurações |
-| `listarUsuarios(filtros)` | Lista usuários (sem senha) |
-| `atualizarUsuarioRole(id, role)` | Muda permissão do usuário |
-| `toggleUsuarioStatus(id, active)` | Ativa/desativa usuário |
+| Método                            | Funcionalidade                     |
+| --------------------------------- | ---------------------------------- |
+| `getConfiguracoes()`              | Busca config (cria se não existir) |
+| `salvarConfiguracoes(data)`       | Upsert das configurações           |
+| `listarUsuarios(filtros)`         | Lista usuários (sem senha)         |
+| `atualizarUsuarioRole(id, role)`  | Muda permissão do usuário          |
+| `toggleUsuarioStatus(id, active)` | Ativa/desativa usuário             |
 
 **Validações**:
+
 - ✅ Roles permitidos: admin, gerente, orcamentista, compras, user
 - ✅ Cria config automaticamente se não existir
 - ✅ Não retorna senha dos usuários
@@ -56,15 +60,16 @@ model ConfiguracaoSistema {
 
 **Endpoints Implementados**:
 
-| Endpoint | Método | Autenticação | Autorização |
-|----------|--------|--------------|-------------|
-| `/api/configuracoes` | GET | ✅ Sim | Todos |
-| `/api/configuracoes` | PUT | ✅ Sim | Admin |
-| `/api/configuracoes/usuarios` | GET | ✅ Sim | Admin |
-| `/api/configuracoes/usuarios/:id/role` | PUT | ✅ Sim | Admin |
-| `/api/configuracoes/usuarios/:id/status` | PUT | ✅ Sim | Admin |
+| Endpoint                                 | Método | Autenticação | Autorização |
+| ---------------------------------------- | ------ | ------------ | ----------- |
+| `/api/configuracoes`                     | GET    | ✅ Sim       | Todos       |
+| `/api/configuracoes`                     | PUT    | ✅ Sim       | Admin       |
+| `/api/configuracoes/usuarios`            | GET    | ✅ Sim       | Admin       |
+| `/api/configuracoes/usuarios/:id/role`   | PUT    | ✅ Sim       | Admin       |
+| `/api/configuracoes/usuarios/:id/status` | PUT    | ✅ Sim       | Admin       |
 
 **Validações HTTP**:
+
 - ✅ Cores em formato hexadecimal (#RRGGBB)
 - ✅ Role válido ao atualizar
 - ✅ Campos obrigatórios checados
@@ -75,9 +80,9 @@ model ConfiguracaoSistema {
 ### ✅ 4. Rotas Registradas (`app.ts`)
 
 ```typescript
-import configuracaoRoutes from './routes/configuracao.routes.js';
+import configuracaoRoutes from "./routes/configuracao.routes.js";
 
-app.use('/api/configuracoes', configuracaoRoutes);
+app.use("/api/configuracoes", configuracaoRoutes);
 ```
 
 **✅ Endpoint Base**: `/api/configuracoes`
@@ -101,6 +106,7 @@ class ConfiguracoesService {
 ```
 
 **Interfaces**:
+
 - `ConfiguracaoSistema`
 - `UpdateConfiguracaoData`
 - `Usuario`
@@ -134,6 +140,7 @@ class ConfiguracoesService {
 Layout em 2 colunas:
 
 **Coluna 1 - Cor Primária**:
+
 ```
 ┌────────────────────────────┐
 │ 🎨 [Color Picker]          │
@@ -146,6 +153,7 @@ Layout em 2 colunas:
 ```
 
 **Coluna 2 - Cor Secundária**:
+
 ```
 ┌────────────────────────────┐
 │ 🎨 [Color Picker]          │
@@ -158,6 +166,7 @@ Layout em 2 colunas:
 ```
 
 **Seção 2: Logo da Empresa**:
+
 ```
 ┌──────────┐  URL da Logo:
 │  [Logo]  │  [https://exemplo.com/logo.png]
@@ -166,6 +175,7 @@ Layout em 2 colunas:
 ```
 
 **Botão de Salvar**:
+
 - Gradiente indigo
 - Ícone de check
 - Estado de loading
@@ -175,16 +185,18 @@ Layout em 2 colunas:
 #### **ABA 2: Gerenciamento de Usuários** 👥
 
 **Filtros**:
+
 - Campo de busca (nome/email)
 - Dropdown de função (Todos, Admin, Gerente, etc)
 
 **Tabela**:
 
-| Usuário | Email | Função | Status | Última Atualização |
-|---------|-------|--------|--------|-------------------|
-| João Silva | joao@email.com | [Admin ▼] | ✅ Ativo | 04/11/2025 |
+| Usuário    | Email            | Função    | Status   | Última Atualização |
+| ---------- | ---------------- | --------- | -------- | ------------------ |
+| João Silva | <joao@email.com> | [Admin ▼] | ✅ Ativo | 04/11/2025         |
 
 **Funcionalidades**:
+
 - ✅ **Dropdown de função**: Muda em tempo real
 - ✅ **Botão de status**: Toggle ativo/inativo
 - ✅ **Badges coloridos**:
@@ -201,11 +213,13 @@ Layout em 2 colunas:
 #### **ABA 3: Informações da Empresa** 🏢
 
 **Campos**:
-- Nome da Empresa *
+
+- Nome da Empresa \*
 - Email de Contato
 - Telefone de Contato
 
 **Botão de Salvar**:
+
 - Mesmo estilo da aba 1
 
 ---
@@ -214,17 +228,18 @@ Layout em 2 colunas:
 
 ### Paleta de Cores:
 
-| Cor | Código | Uso |
-|-----|--------|-----|
-| **Indigo** | #4f46e5 | Tabs ativas, botões principais |
-| **Cyan** | #0891b2 | Tema primário padrão |
-| **Roxo** | #9333ea | Admin badges |
-| **Azul** | #2563eb | Gerente badges |
-| **Verde** | #16a34a | Status ativo, orçamentista |
-| **Vermelho** | #dc2626 | Status inativo, exclusão |
-| **Amarelo** | #ca8a04 | Compras badges |
+| Cor          | Código  | Uso                            |
+| ------------ | ------- | ------------------------------ |
+| **Indigo**   | #4f46e5 | Tabs ativas, botões principais |
+| **Cyan**     | #0891b2 | Tema primário padrão           |
+| **Roxo**     | #9333ea | Admin badges                   |
+| **Azul**     | #2563eb | Gerente badges                 |
+| **Verde**    | #16a34a | Status ativo, orçamentista     |
+| **Vermelho** | #dc2626 | Status inativo, exclusão       |
+| **Amarelo**  | #ca8a04 | Compras badges                 |
 
 ### Componentes:
+
 - ✅ **Tabs horizontais**: Indigo quando ativa
 - ✅ **Color Picker**: Input nativo HTML5
 - ✅ **Preview de cores**: Box colorido dinâmico
@@ -237,6 +252,7 @@ Layout em 2 colunas:
 ## 🔄 Fluxo de Dados
 
 ### Aparência:
+
 ```
 Frontend → configuracoesService.salvarConfiguracoes()
   → PUT /api/configuracoes
@@ -247,6 +263,7 @@ Frontend → configuracoesService.salvarConfiguracoes()
 ```
 
 ### Usuários:
+
 ```
 Frontend → configuracoesService.listarUsuarios()
   → GET /api/configuracoes/usuarios
@@ -257,6 +274,7 @@ Frontend → configuracoesService.listarUsuarios()
 ```
 
 ### Atualizar Permissão:
+
 ```
 Frontend → configuracoesService.atualizarUsuarioRole(id, role)
   → PUT /api/configuracoes/usuarios/:id/role
@@ -292,6 +310,7 @@ npm run dev
 ### 4. **Personalizar o Sistema**
 
 #### **Aba Aparência**:
+
 1. Clique no color picker da cor primária
 2. Escolha uma cor (ex: roxo #9333ea)
 3. Veja o preview mudar em tempo real
@@ -301,6 +320,7 @@ npm run dev
 7. ✅ Alert: "Configurações salvas com sucesso!"
 
 #### **Aba Usuários**:
+
 1. Veja lista de todos os usuários
 2. Clique no dropdown de função (ex: mudar de "user" para "admin")
 3. ✅ Alert: "Permissão atualizada!"
@@ -308,6 +328,7 @@ npm run dev
 5. ✅ Alert: "Usuário desativado!"
 
 #### **Aba Empresa**:
+
 1. Atualize nome da empresa
 2. Adicione email e telefone
 3. Salve
@@ -317,11 +338,13 @@ npm run dev
 ## 📊 Endpoints da API
 
 ### **GET** `/api/configuracoes`
+
 - Retorna configurações do sistema
 - Cria registro se não existir
 - **Auth**: Todos os usuários autenticados
 
 **Response**:
+
 ```json
 {
   "success": true,
@@ -340,10 +363,12 @@ npm run dev
 ---
 
 ### **PUT** `/api/configuracoes`
+
 - Salva/atualiza configurações
 - **Auth**: Admin only
 
 **Body**:
+
 ```json
 {
   "temaPrimario": "#9333ea",
@@ -358,11 +383,13 @@ npm run dev
 ---
 
 ### **GET** `/api/configuracoes/usuarios`
+
 - Lista todos os usuários (sem senha)
 - **Auth**: Admin only
 - **Query params**: `search`, `role`, `active`
 
 **Response**:
+
 ```json
 {
   "success": true,
@@ -383,10 +410,12 @@ npm run dev
 ---
 
 ### **PUT** `/api/configuracoes/usuarios/:id/role`
+
 - Atualiza função do usuário
 - **Auth**: Admin only
 
 **Body**:
+
 ```json
 {
   "role": "gerente"
@@ -394,6 +423,7 @@ npm run dev
 ```
 
 **Roles Permitidos**:
+
 - `admin` - Administrador
 - `gerente` - Gerente
 - `orcamentista` - Orçamentista
@@ -403,10 +433,12 @@ npm run dev
 ---
 
 ### **PUT** `/api/configuracoes/usuarios/:id/status`
+
 - Ativa/desativa usuário
 - **Auth**: Admin only
 
 **Body**:
+
 ```json
 {
   "active": false
@@ -426,6 +458,7 @@ npm run dev
 ```
 
 **Estados**:
+
 - Aba ativa: Indigo-600, borda inferior, fundo indigo-50
 - Aba inativa: Gray-600, hover gray-900
 
@@ -487,6 +520,7 @@ npm run dev
 ### Aba 3: Empresa 🏢
 
 **Campos**:
+
 - Nome da Empresa (required)
 - Email de Contato
 - Telefone de Contato
@@ -500,7 +534,7 @@ npm run dev
 ### Proteções Implementadas:
 
 1. ✅ **Autenticação obrigatória** em todos os endpoints
-2. ✅ **Autorização RBAC**: 
+2. ✅ **Autorização RBAC**:
    - Salvar config: Apenas Admin
    - Gerenciar usuários: Apenas Admin
 3. ✅ **Senha NUNCA retornada** no GET de usuários
@@ -512,11 +546,13 @@ npm run dev
 ## 🎯 Mudanças no Sistema
 
 ### Removido:
+
 - ❌ `SettingsModal.tsx` (modal antigo)
 - ❌ Estado `isSettingsModalOpen` no App.tsx
 - ❌ Função `onOpenSettings` no Sidebar
 
 ### Adicionado:
+
 - ✅ Página `Configuracoes.tsx` (nova)
 - ✅ Service `configuracoesService.ts`
 - ✅ Model `ConfiguracaoSistema`
@@ -538,6 +574,7 @@ npx prisma migrate dev --name add_configuracao_sistema
 ```
 
 **Isso irá**:
+
 1. Criar a tabela `configuracoes_sistema`
 2. Gerar migration file
 3. Atualizar Prisma Client
@@ -594,6 +631,7 @@ npx prisma studio
 ## ✅ Checklist Completo
 
 ### Backend:
+
 - [x] Model `ConfiguracaoSistema` criado
 - [x] Service com 5 métodos
 - [x] Controller com 5 endpoints
@@ -602,6 +640,7 @@ npx prisma studio
 - [x] Segurança (Auth + RBAC)
 
 ### Frontend:
+
 - [x] Service `configuracoesService.ts`
 - [x] Página `Configuracoes.tsx`
 - [x] Sistema de tabs (3 abas)
@@ -613,6 +652,7 @@ npx prisma studio
 - [x] Modal antigo desativado
 
 ### UI/UX:
+
 - [x] Design moderno com Tailwind
 - [x] Gradientes e sombras
 - [x] Animações suaves
@@ -625,6 +665,7 @@ npx prisma studio
 ## 📚 Arquivos Criados/Modificados
 
 ### Backend (4 novos + 2 modificados):
+
 - ✅ `prisma/schema.prisma` (modificado)
 - ✅ `services/configuracao.service.ts` (novo)
 - ✅ `controllers/configuracaoController.ts` (novo)
@@ -632,6 +673,7 @@ npx prisma studio
 - ✅ `app.ts` (modificado)
 
 ### Frontend (3 novos + 2 modificados):
+
 - ✅ `services/configuracoesService.ts` (novo)
 - ✅ `components/Configuracoes.tsx` (novo)
 - ✅ `App.tsx` (modificado)
@@ -642,6 +684,7 @@ npx prisma studio
 ## 🎉 RESULTADO FINAL
 
 ### ✅ **Módulo Completo**:
+
 - Backend API funcionando
 - Frontend conectado
 - UI moderna e profissional
@@ -649,6 +692,7 @@ npx prisma studio
 - Validações completas
 
 ### ✅ **Funcionalidades**:
+
 - Personalizar cores do sistema
 - Upload de logo
 - Gerenciar permissões de usuários
@@ -660,4 +704,3 @@ npx prisma studio
 **🎊 MÓDULO DE CONFIGURAÇÕES TOTALMENTE IMPLEMENTADO E PRONTO PARA USO!**
 
 **Próximo passo**: Rodar a migration e testar! 🚀
-

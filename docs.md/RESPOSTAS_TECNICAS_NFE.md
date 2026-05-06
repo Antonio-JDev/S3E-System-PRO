@@ -4,7 +4,8 @@
 
 ### **NÃO estamos usando nfe-brasil**
 
-Após pesquisa, não encontrei uma biblioteca Node.js chamada `nfe-brasil` que seja amplamente utilizada ou mantida. As bibliotecas encontradas são:
+Após pesquisa, não encontrei uma biblioteca Node.js chamada `nfe-brasil` que
+seja amplamente utilizada ou mantida. As bibliotecas encontradas são:
 
 - **nfe-brasil (Python)** - Biblioteca em Python, não Node.js
 - **nfephp (PHP)** - Biblioteca em PHP, descontinuada
@@ -20,20 +21,25 @@ Após pesquisa, não encontrei uma biblioteca Node.js chamada `nfe-brasil` que s
 ### **Por que não usar uma biblioteca pronta?**
 
 **Vantagens da abordagem atual:**
+
 - ✅ Controle total sobre o código
 - ✅ Sem dependências externas não mantidas
 - ✅ Fácil de debugar e ajustar
 - ✅ Segue exatamente o padrão da SEFAZ
 
 **Desvantagens:**
+
 - ⚠️ Mais código para manter
 - ⚠️ Precisa implementar todas as funcionalidades manualmente
 
 ### **Validação XSD:**
 
-Atualmente, o XML é gerado seguindo a estrutura do leiaute 4.0, mas **não há validação automática contra XSD**. Os arquivos XSD estão disponíveis em `PL_010b_NT2025_002_v1.30/`, mas não estão sendo usados para validação.
+Atualmente, o XML é gerado seguindo a estrutura do leiaute 4.0, mas **não há
+validação automática contra XSD**. Os arquivos XSD estão disponíveis em
+`PL_010b_NT2025_002_v1.30/`, mas não estão sendo usados para validação.
 
-**Recomendação:** Implementar validação XSD usando biblioteca como `libxmljs` ou `xmllint`.
+**Recomendação:** Implementar validação XSD usando biblioteca como `libxmljs` ou
+`xmllint`.
 
 ---
 
@@ -41,7 +47,8 @@ Atualmente, o XML é gerado seguindo a estrutura do leiaute 4.0, mas **não há 
 
 ### **SIM, vai funcionar perfeitamente!**
 
-O TrueNAS Scale **NÃO interfere** na comunicação entre seu backend e a SEFAZ. Aqui está o porquê:
+O TrueNAS Scale **NÃO interfere** na comunicação entre seu backend e a SEFAZ.
+Aqui está o porquê:
 
 ### **Como funciona a comunicação:**
 
@@ -117,13 +124,23 @@ Se retornar o WSDL, está tudo OK! ✅
 - Valida chaves de acesso existentes
 
 **Antes:**
+
 ```typescript
-const dv = '5'; // Mock
+const dv = "5"; // Mock
 ```
 
 **Agora:**
+
 ```typescript
-const chave = NFeChaveAcessoUtil.gerarChaveAcesso(uf, cnpj, modelo, serie, numero, tpEmis, cNF);
+const chave = NFeChaveAcessoUtil.gerarChaveAcesso(
+  uf,
+  cnpj,
+  modelo,
+  serie,
+  numero,
+  tpEmis,
+  cNF
+);
 // Calcula DV automaticamente usando Módulo 11
 ```
 
@@ -136,6 +153,7 @@ const chave = NFeChaveAcessoUtil.gerarChaveAcesso(uf, cnpj, modelo, serie, numer
 - Extrai dados do protocolo automaticamente
 
 **Formato gerado:**
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
@@ -157,6 +175,7 @@ const chave = NFeChaveAcessoUtil.gerarChaveAcesso(uf, cnpj, modelo, serie, numer
 - Para se encontrar erro definitivo (não apenas "em processamento")
 
 **Código:**
+
 ```typescript
 let tentativas = 0;
 const maxTentativas = 5;
@@ -165,12 +184,12 @@ const delayInicial = 3000;
 while (tentativas < maxTentativas) {
   const delay = delayInicial * Math.pow(2, tentativas);
   await new Promise(resolve => setTimeout(resolve, delay));
-  
+
   consultaRecibo = await NFeSoapService.consultarRecibo(...);
-  
+
   if (consultaRecibo.sucesso) break;
   if (consultaRecibo.codigoStatus !== '105') break; // Erro definitivo
-  
+
   tentativas++;
 }
 ```
@@ -179,20 +198,22 @@ while (tentativas < maxTentativas) {
 
 ⚠️ **Ainda não implementado**
 
-**Recomendação:** Usar biblioteca `libxmljs` ou `xmllint` para validar XML contra XSD antes de enviar para SEFAZ.
+**Recomendação:** Usar biblioteca `libxmljs` ou `xmllint` para validar XML
+contra XSD antes de enviar para SEFAZ.
 
 **Exemplo futuro:**
+
 ```typescript
 import { parseString } from 'libxmljs';
 
 static validarContraXSD(xml: string): { valido: boolean; erros: string[] } {
   // Carregar XSD
   const xsd = fs.readFileSync('PL_010b_NT2025_002_v1.30/nfe_v4.00.xsd', 'utf8');
-  
+
   // Validar
   const doc = parseString(xml);
   const schema = parseString(xsd);
-  
+
   const valid = doc.validate(schema);
   return {
     valido: valid,
@@ -205,12 +226,12 @@ static validarContraXSD(xml: string): { valido: boolean; erros: string[] } {
 
 ## 4. 📊 Resumo das Melhorias
 
-| Item | Status | Arquivo |
-|------|--------|---------|
+| Item                   | Status          | Arquivo                    |
+| ---------------------- | --------------- | -------------------------- |
 | Cálculo DV (Módulo 11) | ✅ Implementado | `nfe-chave-acesso.util.ts` |
-| Geração procNFe | ✅ Implementado | `nfe-procnfe.util.ts` |
-| Retry com backoff | ✅ Implementado | `nfe.service.ts` |
-| Validação XSD | ⚠️ Pendente | - |
+| Geração procNFe        | ✅ Implementado | `nfe-procnfe.util.ts`      |
+| Retry com backoff      | ✅ Implementado | `nfe.service.ts`           |
+| Validação XSD          | ⚠️ Pendente     | -                          |
 
 ---
 
@@ -241,17 +262,21 @@ static validarContraXSD(xml: string): { valido: boolean; erros: string[] } {
 ## 6. ✅ Confirmações Finais
 
 ### **Biblioteca nfe-brasil:**
+
 ❌ **NÃO estamos usando** - Implementação manual
 
 ### **TrueNAS Scale:**
+
 ✅ **Vai funcionar** - Não interfere na comunicação
 
 ### **procNFe:**
+
 ✅ **Implementado** - Gera XML final automaticamente
 
 ### **Validação XSD:**
+
 ⚠️ **Pendente** - Recomendado implementar
 
 ### **Leiaute 4.0:**
-✅ **Seguindo padrão** - XML gerado conforme especificação
 
+✅ **Seguindo padrão** - XML gerado conforme especificação

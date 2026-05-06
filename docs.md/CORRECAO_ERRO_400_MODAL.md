@@ -3,6 +3,7 @@
 ## 🐛 **PROBLEMAS IDENTIFICADOS:**
 
 ### **1. Erro HTML (Console)**
+
 ```
 ❌ <p> cannot contain a nested <ul>
 ❌ <p> cannot contain a nested <div>
@@ -11,14 +12,17 @@
 **Causa:** Estrutura HTML inválida no `AlertDialogDescription`
 
 ### **2. Modal Não Fecha**
+
 **Causa:** Faltava fechar o modal antes de abrir AlertDialog
 
 ### **3. Erro 400 no Backend**
+
 ```
 POST /api/materiais/importar-precos 400
 ```
 
 **Causa:** Dados enviados no formato errado. Backend estava recebendo:
+
 - ❌ `{ itens: [...] }` (errado)
 - ✅ Esperava: `{ versao, materiais: [...] }` (correto)
 
@@ -29,19 +33,20 @@ POST /api/materiais/importar-precos 400
 ### **1. Corrigido HTML no AlertDialog** (`PreviewAtualizacaoModal.tsx`)
 
 **ANTES:**
+
 ```tsx
 <AlertDialogDescription>
   <p className="...">          ← ❌ <p> não pode ter <div> dentro
     Você está prestes...
   </p>
-  
+
   <div className="bg-yellow...">
     <p className="...">        ← ❌ <p> não pode ter <ul> dentro
       ⚠️ Atenção:
     </p>
     <ul>...</ul>
   </div>
-  
+
   <p className="...">
     Deseja continuar?
   </p>
@@ -49,19 +54,20 @@ POST /api/materiais/importar-precos 400
 ```
 
 **DEPOIS:**
+
 ```tsx
 <AlertDialogDescription>
   <div className="...">       ← ✅ <div> pode ter qualquer coisa
     Você está prestes...
   </div>
-  
+
   <div className="bg-yellow...">
     <div className="...">     ← ✅ <div> dentro de <div>
       ⚠️ Atenção:
     </div>
     <ul>...</ul>              ← ✅ <ul> dentro de <div>
   </div>
-  
+
   <div className="...">       ← ✅ <div> ao invés de <p>
     Deseja continuar?
   </div>
@@ -73,6 +79,7 @@ POST /api/materiais/importar-precos 400
 ### **2. Corrigido Envio de Dados** (`AtualizacaoPrecos.tsx`)
 
 **ANTES:**
+
 ```tsx
 const handleAtualizarPrecos = async () => {
   // ❌ Usava selectedImport que tinha dados errados
@@ -81,7 +88,7 @@ const handleAtualizarPrecos = async () => {
     nome: item.materialName,
     precoFornecedor: item.newPrice  // ❌ Backend não reconhece
   }));
-  
+
   // ❌ Formato errado
   const jsonData = JSON.stringify({ itens: dadosImportacao });
   ...
@@ -89,6 +96,7 @@ const handleAtualizarPrecos = async () => {
 ```
 
 **DEPOIS:**
+
 ```tsx
 const handleAtualizarPrecos = async () => {
   // ✅ Usa materiaisParaAtualizar (dados corretos do preview)
@@ -103,7 +111,7 @@ const handleAtualizarPrecos = async () => {
       precoNovo: m.newPrice           // ✅ Backend usa isso
     }))
   };
-  
+
   // ✅ Formato correto
   const jsonString = JSON.stringify(templateData);
   ...
@@ -115,11 +123,11 @@ const handleAtualizarPrecos = async () => {
 ### **3. Adicionado Logs Detalhados**
 
 ```tsx
-console.log('📤 Enviando materiais:', materiaisParaAtualizar);
-console.log('📦 Template criado:', templateData);
-console.log('📄 Arquivo:', file.name, file.size);
-console.log('📡 Enviando para API...');
-console.log('✅ Resposta:', response);
+console.log("📤 Enviando materiais:", materiaisParaAtualizar);
+console.log("📦 Template criado:", templateData);
+console.log("📄 Arquivo:", file.name, file.size);
+console.log("📡 Enviando para API...");
+console.log("✅ Resposta:", response);
 ```
 
 ---
@@ -127,11 +135,13 @@ console.log('✅ Resposta:', response);
 ## 🚀 **TESTE AGORA:**
 
 ### **Passo 1: Limpe o Console**
+
 ```
 F12 → Console → Ctrl+L
 ```
 
 ### **Passo 2: Importe JSON**
+
 ```
 1. Menu → Atualização de Preços
 2. Importar JSON com preços editados
@@ -139,12 +149,14 @@ F12 → Console → Ctrl+L
 ```
 
 ### **Passo 3: Modal Abre**
+
 ```
 ✅ Veja o preview dos materiais
 ✅ Clique: "✅ Confirmar Atualização"
 ```
 
 ### **Passo 4: AlertDialog Aparece**
+
 ```
 ✅ Veja o aviso de confirmação
 ✅ Clique: "✅ Sim, Atualizar Preços"
@@ -153,6 +165,7 @@ F12 → Console → Ctrl+L
 ### **Passo 5: Verifique Logs**
 
 **Console Frontend (F12):**
+
 ```
 📤 Enviando materiais para atualização: [...]
 📦 Template JSON criado: { versao: "1.0", materiais: [...] }
@@ -162,6 +175,7 @@ F12 → Console → Ctrl+L
 ```
 
 **Backend Console:**
+
 ```
 📥 Importando preços do arquivo: importacao-atualizacao.json
 📂 Lendo arquivo JSON: ...
@@ -176,6 +190,7 @@ POST /api/materiais/importar-precos 200  ← ✅ 200!
 ```
 
 ### **Passo 6: Confirmação**
+
 ```
 Alert: "✅ Preços atualizados com sucesso! 3 itens foram atualizados."
 ```
@@ -185,24 +200,28 @@ Alert: "✅ Preços atualizados com sucesso! 3 itens foram atualizados."
 ## ✅ **VERIFICAÇÕES:**
 
 ### **1. Sem Erros HTML:**
+
 ```
 ❌ ANTES: <p> cannot contain <ul>
 ✅ AGORA: Sem erros no console
 ```
 
 ### **2. Modal Fecha Corretamente:**
+
 ```
 ❌ ANTES: Modal ficava travado na tela
 ✅ AGORA: Modal fecha após confirmação
 ```
 
 ### **3. Backend Aceita Dados:**
+
 ```
 ❌ ANTES: POST 400 - formato inválido
 ✅ AGORA: POST 200 - preços atualizados
 ```
 
 ### **4. Preços Realmente Atualizam:**
+
 ```
 ✅ Banco de dados é atualizado
 ✅ Histórico de preços é salvo
@@ -277,4 +296,3 @@ Alert: "✅ Preços atualizados com sucesso! 3 itens foram atualizados."
 
 **Data:** 12/11/2025  
 **Status:** ✅ CORRIGIDO E VALIDADO
-

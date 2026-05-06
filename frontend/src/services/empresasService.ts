@@ -19,6 +19,10 @@ export interface Empresa {
   certificadoPath?: string;
   certificadoSenha?: string;
   certificadoValidade?: string;
+  /** Alíquota % DAS sobre venda de materiais (Simples Nacional). Usado em orçamentos para custo agregado e lucro líquido. */
+  aliquotaMaterial?: number;
+  /** Alíquota % DAS sobre venda de serviços (Simples Nacional). */
+  aliquotaServico?: number;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +50,8 @@ export interface CreateEmpresaData {
 
 export interface UpdateEmpresaData extends Partial<CreateEmpresaData> {
   ativo?: boolean;
+  aliquotaMaterial?: number;
+  aliquotaServico?: number;
 }
 
 export interface EmpresaFilters {

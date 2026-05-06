@@ -293,7 +293,12 @@ const GerenciamentoObras: React.FC<GerenciamentoObrasProps> = ({ toggleSidebar }
 
         {/* Lista de Equipes */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {loading && <div className="text-center text-brand-gray-500">Carregando...</div>}
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-amber-600 dark:border-amber-400 mx-auto mb-4"></div>
+              <p className="text-gray-600 dark:text-dark-text-secondary">Carregando gerenciamento de obras...</p>
+            </div>
+          )}
           
           {equipesComStatus.map(equipe => (
             <div

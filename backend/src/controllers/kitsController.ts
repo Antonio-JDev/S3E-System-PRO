@@ -36,6 +36,29 @@ export const buscarKitPorId = async (req: Request, res: Response) => {
     }
 };
 
+export const buscarKitComposicaoPorId = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const depthRaw = (req.query.depth as string | undefined) ?? '4';
+        const depth = Math.max(1, Math.min(8, Number(depthRaw) || 4));
+
+        const kit = await KitsService.buscarComposicaoPorId(id, depth);
+        if (!kit) {
+            return res.status(404).json({
+                success: false,
+                error: 'Kit não encontrado'
+            });
+        }
+        return res.json({ success: true, data: kit });
+    } catch (error: any) {
+        console.error('Erro ao buscar composição do kit:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Erro ao buscar composição do kit'
+        });
+    }
+};
+
 export const criarKit = async (req: Request, res: Response) => {
     try {
         const { nome, descricao, tipo, preco, items, itensBancoFrio, temItensCotacao } = req.body;

@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface EquipeData {
   nome: string;
@@ -34,6 +32,9 @@ export interface EquipeComMembros {
     status: string;
   }[];
 }
+
+/** Status de alocação de obra conforme `AlocacaoObra.status` no banco */
+const STATUS_ALOCACAO_OBRA_ATIVOS = ['Planejada', 'EmAndamento'] as const;
 
 export class EquipesService {
   /**
@@ -267,8 +268,24 @@ export class EquipesService {
         ? Array.from(new Set(data.membrosIds))
         : current.membros;
 
-      const removed = current.membros.filter((m) => !newMembros.includes(m));
       const added = newMembros.filter((m) => !current.membros.includes(m));
+      if (added.length > 0) {
+        for (const uid of added) {
+          const conflicto = await prisma.equipe.findFirst({
+            where: {
+              ativa: true,
+              id: { not: id },
+              membros: { has: uid }
+            },
+            select: { nome: true }
+          });
+          if (conflicto) {
+            throw new Error(
+              `O eletricista já está na equipe ativa "${conflicto.nome}". Remova-o da outra equipe antes.`
+            );
+          }
+        }
+      }
 
       const result = await prisma.$transaction(async (tx) => {
         const equipe = await tx.equipe.update({
@@ -315,7 +332,8 @@ export class EquipesService {
       // Se for um erro de validação (nome duplicado ou equipe não encontrada), relançar o erro original
       if (error instanceof Error && (
         error.message.includes('Já existe uma equipe') ||
-        error.message.includes('não encontrada')
+        error.message.includes('não encontrada') ||
+        error.message.includes('já está na equipe')
       )) {
         throw error;
       }
@@ -328,13 +346,10 @@ export class EquipesService {
    */
   async desativarEquipe(id: string): Promise<boolean> {
     try {
-      // Verificar se há alocações ativas
       const alocacoesAtivas = await prisma.alocacaoObra.findFirst({
         where: {
           equipeId: id,
-          status: {
-            in: ['ALOCADA', 'EM_ANDAMENTO']
-          }
+          status: { in: [...STATUS_ALOCACAO_OBRA_ATIVOS] }
         }
       });
 
@@ -348,16 +363,23 @@ export class EquipesService {
           throw new Error('Equipe não encontrada');
         }
 
-        if (equipe.membros.length > 0) {
-          await tx.pessoa.updateMany({
-            where: { id: { in: equipe.membros } },
-            data: { disponivel: true }
-          });
-        }
+        await tx.tarefaObra.updateMany({
+          where: { equipeId: id },
+          data: { equipeId: null }
+        });
+
+        await tx.alocacaoEquipe.updateMany({
+          where: { equipeId: id },
+          data: { status: 'CANCELADA' }
+        });
 
         await tx.equipe.update({
           where: { id },
-          data: { ativa: false, updatedAt: new Date() }
+          data: {
+            ativa: false,
+            membros: [],
+            updatedAt: new Date()
+          }
         });
       });
 
@@ -372,23 +394,34 @@ export class EquipesService {
   /**
    * Adicionar membro à equipe
    */
-  async adicionarMembro(equipeId: string, pessoaId: string): Promise<boolean> {
+  async adicionarMembro(equipeId: string, userId: string): Promise<boolean> {
     try {
       const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
       if (!equipe || !equipe.ativa) {
         throw new Error('Equipe não encontrada ou inativa');
       }
 
-      if (equipe.membros.includes(pessoaId)) {
+      if (equipe.membros.includes(userId)) {
         return true;
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.equipe.update({
-          where: { id: equipeId },
-          data: { membros: [...equipe.membros, pessoaId], updatedAt: new Date() }
-        });
-        await tx.pessoa.update({ where: { id: pessoaId }, data: { disponivel: false } });
+      const outraEquipe = await prisma.equipe.findFirst({
+        where: {
+          ativa: true,
+          id: { not: equipeId },
+          membros: { has: userId }
+        },
+        select: { nome: true }
+      });
+      if (outraEquipe) {
+        throw new Error(
+          `Este eletricista já está na equipe "${outraEquipe.nome}". Remova-o da outra equipe antes.`
+        );
+      }
+
+      await prisma.equipe.update({
+        where: { id: equipeId },
+        data: { membros: [...equipe.membros, userId], updatedAt: new Date() }
       });
 
       return true;
@@ -402,23 +435,23 @@ export class EquipesService {
   /**
    * Remover membro da equipe
    */
-  async removerMembro(equipeId: string, pessoaId: string): Promise<boolean> {
+  async removerMembro(equipeId: string, userId: string): Promise<boolean> {
     try {
       const equipe = await prisma.equipe.findUnique({ where: { id: equipeId } });
       if (!equipe) {
         throw new Error('Equipe não encontrada');
       }
 
-      if (!equipe.membros.includes(pessoaId)) {
+      if (!equipe.membros.includes(userId)) {
         return true;
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.equipe.update({
-          where: { id: equipeId },
-          data: { membros: equipe.membros.filter((m) => m !== pessoaId), updatedAt: new Date() }
-        });
-        await tx.pessoa.update({ where: { id: pessoaId }, data: { disponivel: true } });
+      await prisma.equipe.update({
+        where: { id: equipeId },
+        data: {
+          membros: equipe.membros.filter((m) => m !== userId),
+          updatedAt: new Date()
+        }
       });
 
       return true;
@@ -437,22 +470,15 @@ export class EquipesService {
       const equipes = await prisma.equipe.findMany({
         where: {
           ativa: true,
-          // Verificar se não há conflitos de alocação
           alocacoes: {
             none: {
-              OR: [
+              AND: [
+                { status: { in: [...STATUS_ALOCACAO_OBRA_ATIVOS] } },
                 {
-                  dataInicio: {
-                    lte: dataFim
-                  },
-                  dataFimPrevisto: {
-                    gte: dataInicio
-                  }
+                  dataInicio: { lte: dataFim },
+                  dataFimPrevisto: { gte: dataInicio }
                 }
-              ],
-              status: {
-                in: ['ALOCADA', 'EM_ANDAMENTO']
-              }
+              ]
             }
           }
         },
@@ -470,21 +496,21 @@ export class EquipesService {
         orderBy: { nome: 'asc' }
       });
 
-      const allPessoaIds = Array.from(new Set(equipes.flatMap((e) => e.membros)));
-      const pessoas = allPessoaIds.length
-        ? await prisma.pessoa.findMany({ where: { id: { in: allPessoaIds } } })
+      const allUserIds = Array.from(new Set(equipes.flatMap((e) => e.membros)));
+      const usuarios = allUserIds.length
+        ? await prisma.user.findMany({ where: { id: { in: allUserIds } } })
         : [];
-      const pessoaById = new Map(pessoas.map((p) => [p.id, p]));
+      const usuarioById = new Map(usuarios.map((u) => [u.id, u]));
 
       return equipes.map((equipe) => {
         const membros: EquipeMembro[] = equipe.membros
-          .map((id) => pessoaById.get(id))
-          .filter(Boolean)
-          .map((p) => ({
-            id: (p as any).id,
-            nome: (p as any).nome,
-            funcao: (p as any).funcao as unknown as string,
-            email: (p as any).email ?? null
+          .map((mid) => usuarioById.get(mid))
+          .filter((u): u is NonNullable<typeof u> => u != null)
+          .map((u) => ({
+            id: u.id,
+            nome: u.name,
+            funcao: u.role,
+            email: u.email ?? null
           }));
         return { 
           ...equipe, 
@@ -505,8 +531,6 @@ export class EquipesService {
     }
   }
 
-  // Removido mock: agora os membros vêm de Pessoa
-
   /**
    * Estatísticas das equipes
    */
@@ -526,9 +550,7 @@ export class EquipesService {
             ativa: true,
             alocacoes: {
               some: {
-                status: {
-                  in: ['ALOCADA', 'EM_ANDAMENTO']
-                }
+                status: { in: [...STATUS_ALOCACAO_OBRA_ATIVOS] }
               }
             }
           }

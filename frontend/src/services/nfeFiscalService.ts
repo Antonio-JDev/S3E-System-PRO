@@ -76,6 +76,21 @@ class NFeFiscalService {
   }
 
   /**
+   * Faturamento fracionado: N NF-es para N clientes a partir de um pedido
+   */
+  async emitirFracionado(data: {
+    vendaId: string;
+    empresaId: string;
+    ambiente?: '1' | '2';
+    cfop?: string;
+    naturezaOperacao?: string;
+    serie?: string;
+    fracoes: Array<{ clienteId: string; valor: number; dataVencimento: string }>;
+  }) {
+    return axiosApiService.post<{ success: boolean; notas: any[]; valorFaturado: number }>('/api/nfe/emitir-fracionado', data);
+  }
+
+  /**
    * Cancelar NF-e autorizada
    */
   async cancelarNFe(data: CancelamentoNFeRequest) {
@@ -97,6 +112,11 @@ class NFeFiscalService {
   async salvarConfigFiscal(data: ConfigFiscalRequest) {
     console.log('🔧 Salvando configurações fiscais');
     return axiosApiService.post<any>('/api/nfe/config', data);
+  }
+
+  /** Atualiza último número NF-e e/ou série NF-e da empresa (sincronização manual) */
+  async configurarNumeracaoNFe(empresaId: string, dados: { ultimoNumeroNFe?: number; serieNFe?: string }) {
+    return axiosApiService.patch(`/api/empresas/${empresaId}/numero-nfe`, dados);
   }
 
   /**

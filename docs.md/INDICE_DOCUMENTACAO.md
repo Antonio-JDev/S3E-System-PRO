@@ -9,6 +9,7 @@
 ### 👶 **INICIANTE** - Nunca usou o sistema
 
 **Comece por aqui:**
+
 1. **`IMPLEMENTADO_COMPLETO.md`** ⭐⭐⭐⭐⭐
    - Visão geral simples
    - Como usar passo a passo
@@ -32,6 +33,7 @@
 ### 👨‍💻 **INTERMEDIÁRIO** - Quer integrar em outros componentes
 
 **Leia estes:**
+
 1. **`GUIA_RAPIDO_INTEGRACAO.md`** ⭐⭐⭐⭐⭐
    - Como integrar flags em orçamentos
    - Código passo a passo
@@ -54,6 +56,7 @@
 ### 🧑‍💼 **AVANÇADO** - Desenvolvedor/Detalhes Técnicos
 
 **Para referência técnica:**
+
 1. **`SISTEMA_ATUALIZACAO_PRECOS.md`** ⭐⭐⭐⭐⭐
    - Documentação técnica completa
    - Todos os endpoints da API
@@ -124,31 +127,33 @@
 ## 🎯 GUIA RÁPIDO DE NAVEGAÇÃO
 
 ### "Preciso usar o sistema pela primeira vez"
-→ Leia: `IMPLEMENTADO_COMPLETO.md`
-→ Teste: Baixar JSON → Editar → Importar
+
+→ Leia: `IMPLEMENTADO_COMPLETO.md` → Teste: Baixar JSON → Editar → Importar
 
 ### "Quero ver a flag nos orçamentos"
-→ Leia: `GUIA_RAPIDO_INTEGRACAO.md`
-→ Copie código de: `EXEMPLO_INTEGRACAO_ORCAMENTO.tsx`
-→ Cole no seu componente
+
+→ Leia: `GUIA_RAPIDO_INTEGRACAO.md` → Copie código de:
+`EXEMPLO_INTEGRACAO_ORCAMENTO.tsx` → Cole no seu componente
 
 ### "Quero entender tecnicamente"
-→ Leia: `SISTEMA_ATUALIZACAO_PRECOS.md`
-→ Veja: `backend/src/controllers/materiaisController.ts`
+
+→ Leia: `SISTEMA_ATUALIZACAO_PRECOS.md` → Veja:
+`backend/src/controllers/materiaisController.ts`
 
 ### "Quero ver exemplos visuais"
-→ Leia: `RESUMO_VISUAL.md`
-→ Veja diagramas e mockups
+
+→ Leia: `RESUMO_VISUAL.md` → Veja diagramas e mockups
 
 ### "Preciso de JSON de exemplo"
-→ Abra: `backend/docs/exemplo_template_precos.json`
-→ Copie, edite e teste
+
+→ Abra: `backend/docs/exemplo_template_precos.json` → Copie, edite e teste
 
 ---
 
 ## 🎓 ROTEIRO DE APRENDIZAGEM
 
 ### Dia 1 - Conhecendo o Sistema (30 min)
+
 ```
 1. Ler: IMPLEMENTADO_COMPLETO.md
 2. Testar: Download JSON
@@ -157,6 +162,7 @@
 ```
 
 ### Dia 2 - Usando em Produção (1h)
+
 ```
 1. Consultar fornecedores reais
 2. Atualizar JSON com preços novos
@@ -166,6 +172,7 @@
 ```
 
 ### Dia 3 - Integrando em Orçamentos (2h)
+
 ```
 1. Ler: GUIA_RAPIDO_INTEGRACAO.md
 2. Abrir: Componente de orçamentos
@@ -180,18 +187,21 @@
 ## 📊 MÉTRICAS DE SUCESSO
 
 ### Após 1 Semana:
+
 - [ ] Realizou primeira importação de preços
 - [ ] Viu flags coloridas funcionando
 - [ ] Consultou histórico de pelo menos 1 material
 - [ ] Usou preview antes de aplicar alterações
 
 ### Após 1 Mês:
+
 - [ ] Atualizou preços 2-3 vezes
 - [ ] Integrou flags em orçamentos
 - [ ] Enviou PDF a fornecedor
 - [ ] Economizou 2-3 horas de trabalho
 
 ### Após 3 Meses:
+
 - [ ] Atualização de preços é rotina
 - [ ] Orçamentos sempre com preços válidos
 - [ ] Análise de variações é frequente
@@ -202,6 +212,7 @@
 ## 🎁 RECURSOS EXTRAS
 
 ### Scripts Úteis:
+
 ```bash
 # Inicializar datas (já executado)
 cd backend
@@ -215,11 +226,13 @@ https://jsonlint.com/
 ```
 
 ### Componentes Prontos:
+
 - `PrecoValidadeFlag.tsx` - Flag colorida
 - `HistoricoPrecosModal.tsx` - Modal histórico
 - `MaterialCardComValidade.tsx` - Card completo
 
 ### Serviços Helper:
+
 - `precosService.ts` - Funções utilitárias
   - calcularDiasDesdeAtualizacao()
   - getStatusPreco()
@@ -232,41 +245,47 @@ https://jsonlint.com/
 
 **Procurando algo específico?**
 
-| Procuro... | Arquivo |
-|------------|---------|
-| Como usar o sistema | `IMPLEMENTADO_COMPLETO.md` |
-| Como integrar em orçamentos | `GUIA_RAPIDO_INTEGRACAO.md` |
-| Endpoints da API | `SISTEMA_ATUALIZACAO_PRECOS.md` |
-| Código de exemplo | `EXEMPLO_INTEGRACAO_ORCAMENTO.tsx` |
-| JSON de exemplo | `backend/docs/exemplo_template_precos.json` |
-| Como funcionam as flags | `README_SISTEMA_PRECOS.md` |
-| Estrutura do banco | `backend/prisma/schema.prisma` |
-| Componente de flag | `frontend/src/components/PrecoValidadeFlag.tsx` |
-| Modal de histórico | `frontend/src/components/HistoricoPrecosModal.tsx` |
-| Funções helper | `frontend/src/services/precosService.ts` |
-| Interfaces visuais | `RESUMO_VISUAL.md` |
-| Relatório completo | `SUMARIO_SISTEMA_IMPLEMENTADO.md` |
+| Procuro...                  | Arquivo                                            |
+| --------------------------- | -------------------------------------------------- |
+| Como usar o sistema         | `IMPLEMENTADO_COMPLETO.md`                         |
+| Como integrar em orçamentos | `GUIA_RAPIDO_INTEGRACAO.md`                        |
+| Endpoints da API            | `SISTEMA_ATUALIZACAO_PRECOS.md`                    |
+| Código de exemplo           | `EXEMPLO_INTEGRACAO_ORCAMENTO.tsx`                 |
+| JSON de exemplo             | `backend/docs/exemplo_template_precos.json`        |
+| Como funcionam as flags     | `README_SISTEMA_PRECOS.md`                         |
+| Estrutura do banco          | `backend/prisma/schema.prisma`                     |
+| Componente de flag          | `frontend/src/components/PrecoValidadeFlag.tsx`    |
+| Modal de histórico          | `frontend/src/components/HistoricoPrecosModal.tsx` |
+| Funções helper              | `frontend/src/services/precosService.ts`           |
+| Interfaces visuais          | `RESUMO_VISUAL.md`                                 |
+| Relatório completo          | `SUMARIO_SISTEMA_IMPLEMENTADO.md`                  |
 
 ---
 
 ## 💬 PERGUNTAS FREQUENTES
 
 ### "Por onde começo?"
+
 → `IMPLEMENTADO_COMPLETO.md`
 
 ### "Como faço para atualizar preços?"
+
 → Seção "Como Usar" no `IMPLEMENTADO_COMPLETO.md`
 
 ### "Como integro nos orçamentos?"
+
 → `GUIA_RAPIDO_INTEGRACAO.md`
 
 ### "Quero ver código pronto"
+
 → `EXEMPLO_INTEGRACAO_ORCAMENTO.tsx`
 
 ### "Preciso de ajuda técnica"
+
 → `SISTEMA_ATUALIZACAO_PRECOS.md`
 
 ### "Quero ver como fica visualmente"
+
 → `RESUMO_VISUAL.md`
 
 ---
@@ -295,5 +314,4 @@ https://jsonlint.com/
 
 **Boa sorte e excelente trabalho! 🚀**
 
-*S3E Engenharia Elétrica - Gestão Inteligente de Preços*
-
+_S3E Engenharia Elétrica - Gestão Inteligente de Preços_

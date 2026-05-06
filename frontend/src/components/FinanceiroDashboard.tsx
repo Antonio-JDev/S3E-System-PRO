@@ -188,49 +188,6 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                 </div>
             </div>
 
-            {/* Botões de Navegação Rápida */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <button
-                    onClick={() => setAbaAtiva('receber')}
-                    className="group bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-green-300 transition-all text-left"
-                >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-green-100 to-green-200 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                <ArrowTrendingUpIcon className="w-7 h-7 text-green-600" />
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900 mb-1">Contas a Receber</h3>
-                                <p className="text-sm text-gray-600">Gerenciar recebimentos e parcelas</p>
-                            </div>
-                        </div>
-                        <svg className="w-6 h-6 text-gray-400 group-hover:text-green-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </div>
-                </button>
-
-                <button
-                    onClick={() => setAbaAtiva('pagar')}
-                    className="group bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-red-300 transition-all text-left"
-                >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-100 to-red-200 flex items-center justify-center group-hover:scale-110 transition-transform">
-                                <ArrowTrendingDownIcon className="w-7 h-7 text-red-600" />
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900 mb-1">Contas a Pagar</h3>
-                                <p className="text-sm text-gray-600">Gerenciar pagamentos e fornecedores</p>
-                            </div>
-                        </div>
-                        <svg className="w-6 h-6 text-gray-400 group-hover:text-red-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                    </div>
-                </button>
-            </div>
-
             {/* Alertas */}
             {(resumo && (resumo.receitaMes < resumo.despesaMes)) && (
                 <div className="bg-orange-50 border-2 border-orange-300 rounded-2xl p-6">

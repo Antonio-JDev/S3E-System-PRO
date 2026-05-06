@@ -17,7 +17,8 @@ router.patch('/:id/toggle', PlanosController.toggleStatus);
 router.get('/', PlanosController.listar);
 router.get('/:id', PlanosController.buscar);
 router.post('/', PlanosController.criar);
-router.put('/:id', PlanosController.atualizar);
+// Usamos PATCH para atualizações parciais (edições)
+router.patch('/:id', PlanosController.atualizar);
 router.delete('/:id', PlanosController.deletar);
 
 export default router;

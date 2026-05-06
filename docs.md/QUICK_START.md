@@ -242,7 +242,8 @@ docker-compose restart postgres
 
 ## 🎯 Próximos Passos
 
-1. ✅ Completar migração dos componentes (ver [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md))
+1. ✅ Completar migração dos componentes (ver
+   [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md))
 2. 🔧 Configurar autenticação
 3. 📊 Implementar endpoints da API
 4. 🔗 Conectar frontend com backend

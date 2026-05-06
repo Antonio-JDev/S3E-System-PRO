@@ -2,17 +2,22 @@
 
 ## ✅ Mudança Implementada
 
-O módulo de vendas foi atualizado para funcionar **exclusivamente com orçamentos aprovados**, seguindo o fluxo correto de negócio do sistema S3E.
+O módulo de vendas foi atualizado para funcionar **exclusivamente com orçamentos
+aprovados**, seguindo o fluxo correto de negócio do sistema S3E.
 
 ---
 
 ## 🎯 Motivação
 
-**Antes:** O formulário de venda pedia para preencher cliente, projeto e valor manualmente.
+**Antes:** O formulário de venda pedia para preencher cliente, projeto e valor
+manualmente.
 
-**Problema:** Isso duplicava informações que já existem nos orçamentos aprovados e não garantia a rastreabilidade da venda.
+**Problema:** Isso duplicava informações que já existem nos orçamentos aprovados
+e não garantia a rastreabilidade da venda.
 
-**Agora:** A venda é realizada selecionando um orçamento aprovado, que já contém todas as informações necessárias (cliente, projeto, valor, condições de pagamento, etc.).
+**Agora:** A venda é realizada selecionando um orçamento aprovado, que já contém
+todas as informações necessárias (cliente, projeto, valor, condições de
+pagamento, etc.).
 
 ---
 
@@ -39,13 +44,14 @@ O módulo de vendas foi atualizado para funcionar **exclusivamente com orçament
 ### Frontend (`frontend/src/components/Vendas.tsx`)
 
 #### Formulário Simplificado
+
 ```typescript
 interface VendaForm {
-    orcamentoId: string;        // NOVO: Orçamento aprovado
-    formaPagamento: string;
-    parcelas: number;
-    valorEntrada: number;
-    observacoes?: string;
+  orcamentoId: string; // NOVO: Orçamento aprovado
+  formaPagamento: string;
+  parcelas: number;
+  valorEntrada: number;
+  observacoes?: string;
 }
 
 // REMOVIDOS:
@@ -55,26 +61,30 @@ interface VendaForm {
 ```
 
 #### Filtro de Orçamentos
+
 ```typescript
 // Apenas orçamentos aprovados podem ser selecionados
 const orcamentosAprovados = useMemo(() => {
-    return budgetsData.filter(orc => orc.status === BudgetStatus.Aprovado);
+  return budgetsData.filter((orc) => orc.status === BudgetStatus.Aprovado);
 }, []);
 ```
 
 #### Informações Automáticas
+
 Quando um orçamento é selecionado, o formulário exibe automaticamente:
+
 - ✅ **Cliente**: Nome, CPF/CNPJ, Telefone
 - ✅ **Projeto**: Nome, Tipo
 - ✅ **Valor**: Valor total do orçamento
 - ✅ **Condições**: Condições de pagamento definidas no orçamento
 
 #### Validações
+
 ```typescript
 // Não permite realizar venda sem orçamento aprovado
 if (!orcamentoSelecionado) {
-    alert('Por favor, selecione um orçamento aprovado.');
-    return;
+  alert("Por favor, selecione um orçamento aprovado.");
+  return;
 }
 ```
 
@@ -83,27 +93,29 @@ if (!orcamentoSelecionado) {
 ### Backend (`backend/src/services/vendas.service.ts`)
 
 #### Interface Atualizada
+
 ```typescript
 export interface VendaPayload {
-    orcamentoId: string;  // NOVO: Obrigatório
-    clienteId: string;
-    projetoId?: string;
-    valorTotal: number;
-    formaPagamento: string;
-    parcelas?: number;
-    valorEntrada?: number;
-    observacoes?: string;
-    // REMOVIDO: itens[] (vem do orçamento)
+  orcamentoId: string; // NOVO: Obrigatório
+  clienteId: string;
+  projetoId?: string;
+  valorTotal: number;
+  formaPagamento: string;
+  parcelas?: number;
+  valorEntrada?: number;
+  observacoes?: string;
+  // REMOVIDO: itens[] (vem do orçamento)
 }
 ```
 
 #### Validação no Controller
+
 ```typescript
 // Validar dados obrigatórios
 if (!vendaData.orcamentoId || !vendaData.clienteId || !vendaData.valorTotal) {
-    return res.status(400).json({
-        error: 'Dados obrigatórios ausentes: orcamentoId, clienteId, valorTotal'
-    });
+  return res.status(400).json({
+    error: "Dados obrigatórios ausentes: orcamentoId, clienteId, valorTotal",
+  });
 }
 ```
 
@@ -112,6 +124,7 @@ if (!vendaData.orcamentoId || !vendaData.clienteId || !vendaData.valorTotal) {
 ## 🎨 Interface do Usuário
 
 ### Seletor de Orçamento
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ Orçamento Aprovado *                                         │
@@ -125,6 +138,7 @@ if (!vendaData.orcamentoId || !vendaData.clienteId || !vendaData.valorTotal) {
 ```
 
 ### Card de Informações (quando orçamento é selecionado)
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ 📋 Dados do Orçamento                                        │
@@ -144,38 +158,39 @@ if (!vendaData.orcamentoId || !vendaData.clienteId || !vendaData.valorTotal) {
 ## 📊 Dados Mockados
 
 ### Orçamentos Aprovados Disponíveis
+
 ```javascript
 budgetsData = [
-    {
-        id: 'ORC-2025-001',
-        clientId: 'CLI-001',
-        clientName: 'Construtora Alfa',
-        projectName: 'Edifício Residencial Sol',
-        projectType: 'CompletoComObra',
-        total: 75000.00,
-        paymentTerms: '50% adiantado, 50% na entrega',
-        status: BudgetStatus.Aprovado  // ✅
-    },
-    {
-        id: 'ORC-2025-003',
-        clientId: 'CLI-003',
-        clientName: 'Indústria Gama',
-        projectName: 'Automação Linha de Produção',
-        projectType: 'Montagem',
-        total: 120300.00,
-        paymentTerms: '45 dias',
-        status: BudgetStatus.Aprovado  // ✅
-    },
-    {
-        id: 'ORC-2025-005',
-        clientId: 'CLI-002',
-        clientName: 'Mariana Costa',
-        projectName: 'Instalação de Painéis Solares',
-        projectType: 'CompletoComObra',
-        total: 95000.00,
-        paymentTerms: '6x sem juros',
-        status: BudgetStatus.Aprovado  // ✅
-    }
+  {
+    id: "ORC-2025-001",
+    clientId: "CLI-001",
+    clientName: "Construtora Alfa",
+    projectName: "Edifício Residencial Sol",
+    projectType: "CompletoComObra",
+    total: 75000.0,
+    paymentTerms: "50% adiantado, 50% na entrega",
+    status: BudgetStatus.Aprovado, // ✅
+  },
+  {
+    id: "ORC-2025-003",
+    clientId: "CLI-003",
+    clientName: "Indústria Gama",
+    projectName: "Automação Linha de Produção",
+    projectType: "Montagem",
+    total: 120300.0,
+    paymentTerms: "45 dias",
+    status: BudgetStatus.Aprovado, // ✅
+  },
+  {
+    id: "ORC-2025-005",
+    clientId: "CLI-002",
+    clientName: "Mariana Costa",
+    projectName: "Instalação de Painéis Solares",
+    projectType: "CompletoComObra",
+    total: 95000.0,
+    paymentTerms: "6x sem juros",
+    status: BudgetStatus.Aprovado, // ✅
+  },
 ];
 ```
 
@@ -184,9 +199,11 @@ budgetsData = [
 ## 🔄 Exemplo de Uso
 
 ### 1. Usuário acessa "Nova Venda"
+
 - Seleciona um orçamento aprovado da lista dropdown
 
 ### 2. Sistema exibe informações do orçamento
+
 ```
 Cliente: Construtora Alfa (11.111.111/0001-11)
 Projeto: Edifício Residencial Sol (CompletoComObra)
@@ -195,6 +212,7 @@ Condições: 50% adiantado, 50% na entrega
 ```
 
 ### 3. Usuário configura forma de pagamento
+
 ```
 Forma de Pagamento: Parcelado
 Número de Parcelas: 3
@@ -202,6 +220,7 @@ Valor de Entrada: R$ 25.000,00
 ```
 
 ### 4. Sistema calcula parcelas automaticamente
+
 ```
 📋 Resumo das Parcelas
 - Valor de entrada: R$ 25.000,00
@@ -210,6 +229,7 @@ Valor de Entrada: R$ 25.000,00
 ```
 
 ### 5. Venda é realizada
+
 ```json
 POST /api/vendas/realizar
 {
@@ -224,41 +244,42 @@ POST /api/vendas/realizar
 ```
 
 ### 6. Sistema responde
+
 ```json
 {
-    "success": true,
-    "message": "Venda realizada com sucesso",
-    "data": {
-        "venda": {
-            "id": "VND-...",
-            "numeroVenda": "VND-1234567890",
-            "orcamentoId": "ORC-2025-001",
-            "clienteId": "CLI-001",
-            "valorTotal": 75000.00,
-            "status": "Concluida"
-        },
-        "contasReceber": [
-            {
-                "id": "CR-001",
-                "valorParcela": 41666.67,
-                "dataVencimento": "2025-11-20",
-                "status": "Pendente",
-                "descricao": "Parcela 1/3 - Venda VND-1234567890"
-            },
-            {
-                "id": "CR-002",
-                "valorParcela": 16666.67,
-                "dataVencimento": "2025-12-20",
-                "status": "Pendente"
-            },
-            {
-                "id": "CR-003",
-                "valorParcela": 16666.67,
-                "dataVencimento": "2026-01-20",
-                "status": "Pendente"
-            }
-        ]
-    }
+  "success": true,
+  "message": "Venda realizada com sucesso",
+  "data": {
+    "venda": {
+      "id": "VND-...",
+      "numeroVenda": "VND-1234567890",
+      "orcamentoId": "ORC-2025-001",
+      "clienteId": "CLI-001",
+      "valorTotal": 75000.0,
+      "status": "Concluida"
+    },
+    "contasReceber": [
+      {
+        "id": "CR-001",
+        "valorParcela": 41666.67,
+        "dataVencimento": "2025-11-20",
+        "status": "Pendente",
+        "descricao": "Parcela 1/3 - Venda VND-1234567890"
+      },
+      {
+        "id": "CR-002",
+        "valorParcela": 16666.67,
+        "dataVencimento": "2025-12-20",
+        "status": "Pendente"
+      },
+      {
+        "id": "CR-003",
+        "valorParcela": 16666.67,
+        "dataVencimento": "2026-01-20",
+        "status": "Pendente"
+      }
+    ]
+  }
 }
 ```
 
@@ -267,23 +288,28 @@ POST /api/vendas/realizar
 ## ✨ Benefícios da Mudança
 
 ### 1. **Rastreabilidade Completa**
+
 - Cada venda está vinculada a um orçamento específico
 - Histórico completo do processo comercial
 
 ### 2. **Consistência de Dados**
+
 - Informações do cliente vêm direto do orçamento
 - Não há risco de divergência de valores
 - Condições de pagamento respeitam o acordado
 
 ### 3. **Menos Erros Manuais**
+
 - Não precisa digitar cliente, projeto ou valor novamente
 - Campos preenchidos automaticamente
 
 ### 4. **Fluxo de Trabalho Correto**
+
 - Força o processo: Orçamento → Aprovação → Venda
 - Impede vendas sem orçamento aprovado
 
 ### 5. **Melhor Gestão**
+
 - Relatórios podem cruzar dados de orçamentos e vendas
 - Análise de taxa de conversão (orçamentos aprovados → vendas)
 - Controle de pipeline comercial
@@ -293,18 +319,21 @@ POST /api/vendas/realizar
 ## 🚀 Próximos Passos Sugeridos
 
 ### Fase 1: Backend
+
 - [ ] Validar se orçamento existe e está aprovado
 - [ ] Verificar se orçamento já tem venda vinculada
 - [ ] Atualizar status do orçamento para "Vendido"
 - [ ] Criar projeto automaticamente (se aplicável)
 
 ### Fase 2: Frontend
+
 - [ ] Adicionar filtros (por cliente, período)
 - [ ] Mostrar materiais/serviços do orçamento
 - [ ] Preview do orçamento antes de realizar venda
 - [ ] Histórico de orçamentos do cliente
 
 ### Fase 3: Integrações
+
 - [ ] Atualizar modelo Prisma (adicionar `orcamentoId` em `Venda`)
 - [ ] Criar relação entre Orçamento e Venda no banco
 - [ ] Impedir exclusão de orçamento com venda vinculada
@@ -349,12 +378,14 @@ model Orcamento {
 ## 🎓 Impacto no Sistema
 
 ### Módulos Afetados
+
 - ✅ **Vendas**: Formulário totalmente refatorado
 - ✅ **Orçamentos**: Serve como base para vendas
 - ⚠️ **Projetos**: Será criado automaticamente após venda (futuro)
 - ⚠️ **Financeiro**: Já integrado, mas pode exibir orçamento vinculado
 
 ### Compatibilidade
+
 - ✅ Frontend atualizado
 - ✅ Backend atualizado
 - ⏳ Banco de dados: Precisa adicionar campo `orcamentoId` em `Venda`
@@ -365,11 +396,11 @@ model Orcamento {
 ## 📞 Suporte
 
 Para dúvidas ou sugestões sobre esta mudança:
+
 - 📖 Ver também: `IMPLEMENTACAO_MODULO_VENDAS.md`
 - 🔧 Configuração: `GUIA_TESTES_COMPLETO.md`
 
 ---
 
-**Atualização implementada em 20/10/2025** 🔌⚡
-**Sistema S3E Engenharia Elétrica**
-
+**Atualização implementada em 20/10/2025** 🔌⚡ **Sistema S3E Engenharia
+Elétrica**

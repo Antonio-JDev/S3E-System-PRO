@@ -2,7 +2,8 @@
 
 ## 📋 Visão Geral
 
-A página de **Emissão de NF-e** agora possui duas seções principais acessíveis via navegação no topo:
+A página de **Emissão de NF-e** agora possui duas seções principais acessíveis
+via navegação no topo:
 
 1. **Emitir NF-e** (Verde) - Para emissão de notas fiscais
 2. **Configurar Empresas** (Azul) - Para gerenciar CNPJs e certificados digitais
@@ -12,7 +13,10 @@ A página de **Emissão de NF-e** agora possui duas seções principais acessív
 ## 🏢 Seção: Configurar Empresas
 
 ### Objetivo
-Permitir que a S3E Engenharia gerencie múltiplos CNPJs (matriz, filiais, ou empresas diferentes) com seus respectivos certificados digitais A1 para emissão de NF-e.
+
+Permitir que a S3E Engenharia gerencie múltiplos CNPJs (matriz, filiais, ou
+empresas diferentes) com seus respectivos certificados digitais A1 para emissão
+de NF-e.
 
 ### Funcionalidades
 
@@ -21,24 +25,26 @@ Permitir que a S3E Engenharia gerencie múltiplos CNPJs (matriz, filiais, ou emp
 Clique no botão **"+ Adicionar Empresa"**
 
 **Formulário - Seção 1: Dados da Empresa**
-- **CNPJ*** - Obrigatório, formato: 00.000.000/0000-00
-- **Inscrição Estadual*** - Obrigatório
-- **Razão Social*** - Nome completo da empresa
+
+- **CNPJ\*** - Obrigatório, formato: 00.000.000/0000-00
+- **Inscrição Estadual\*** - Obrigatório
+- **Razão Social\*** - Nome completo da empresa
 - **Nome Fantasia** - Nome comercial (opcional)
-- **Regime Tributário*** - Dropdown com opções:
+- **Regime Tributário\*** - Dropdown com opções:
   - Simples Nacional
   - Regime Normal
   - MEI
 
-**Formulário - Seção 2: Endereço Fiscal**
-Todos os campos necessários para o XML da NF-e:
-- **Logradouro*** - Rua, Avenida, etc
-- **Número*** - Número do endereço
+**Formulário - Seção 2: Endereço Fiscal** Todos os campos necessários para o XML
+da NF-e:
+
+- **Logradouro\*** - Rua, Avenida, etc
+- **Número\*** - Número do endereço
 - **Complemento** - Sala, Andar (opcional)
-- **Bairro*** - Obrigatório
-- **Cidade*** - Obrigatório
-- **Estado*** - Dropdown com estados
-- **CEP*** - Formato: 00000-000
+- **Bairro\*** - Obrigatório
+- **Cidade\*** - Obrigatório
+- **Estado\*** - Dropdown com estados
+- **CEP\*** - Formato: 00000-000
 - **Telefone** - Opcional
 - **E-mail** - Opcional
 
@@ -46,17 +52,17 @@ Todos os campos necessários para o XML da NF-e:
 
 ⚠️ **IMPORTANTE - Segurança do Certificado:**
 
-1. **Arquivo .pfx/.p12***
+1. **Arquivo .pfx/.p12\***
    - Upload do certificado digital A1
    - Aceita formatos: `.pfx` e `.p12`
    - Arquivo selecionado é exibido com ícone de confirmação
 
-2. **Senha do Certificado***
+2. **Senha do Certificado\***
    - Campo de senha (oculta)
    - Obrigatório para usar o certificado
-   
 3. **Segurança Implementada:**
-   - ✅ Certificado é armazenado em local seguro no servidor (`/data/certificados/`)
+   - ✅ Certificado é armazenado em local seguro no servidor
+     (`/data/certificados/`)
    - ✅ Nome do arquivo: `CNPJ_timestamp.pfx`
    - ✅ Senha é criptografada com bcrypt antes do armazenamento
    - ✅ Apenas path do arquivo e senha hash são salvos no banco
@@ -68,10 +74,12 @@ Todos os campos necessários para o XML da NF-e:
 Cards com informações completas:
 
 **Header do Card:**
+
 - Razão Social (em destaque)
 - Nome Fantasia (se houver)
 
 **Grid de Informações:**
+
 - CNPJ
 - Inscrição Estadual
 - Regime Tributário
@@ -79,15 +87,16 @@ Cards com informações completas:
   - ✅ Verde: "Válido até DD/MM/AAAA"
   - ❌ Vermelho: "Não configurado"
 
-**Endereço Completo:**
-Card azul com todos os dados do endereço fiscal
+**Endereço Completo:** Card azul com todos os dados do endereço fiscal
 
 **Ações:**
+
 - Botão "Excluir Configuração" (com confirmação)
 
 #### 3. **Estado Vazio**
 
 Se nenhuma empresa foi configurada:
+
 - Ícone grande de empresa
 - Mensagem explicativa
 - Botão destacado: "Adicionar Primeira Empresa"
@@ -99,12 +108,14 @@ Se nenhuma empresa foi configurada:
 ### Como Funciona (Backend)
 
 #### 1. **Upload do Certificado**
+
 ```typescript
 // Arquivo é enviado em Base64
-certificadoBase64: "MIIKs..." 
+certificadoBase64: "MIIKs...";
 ```
 
 #### 2. **Armazenamento no Servidor**
+
 ```
 backend/data/certificados/
 ├── 12345678000190_1697398400000.pfx
@@ -113,6 +124,7 @@ backend/data/certificados/
 ```
 
 #### 3. **Salvamento no Banco**
+
 ```typescript
 {
   cnpj: "12.345.678/0001-90",
@@ -123,6 +135,7 @@ backend/data/certificados/
 ```
 
 #### 4. **Proteção**
+
 - Diretório `/data/certificados/` não é versionado (`.gitignore`)
 - Senhas nunca são expostas nas APIs
 - Apenas hash bcrypt é retornado
@@ -153,6 +166,7 @@ backend/data/certificados/
 ### Endpoints Disponíveis
 
 #### GET /api/configuracoes-fiscais
+
 **Descrição:** Lista todas as configurações fiscais  
 **Autenticação:** Requerida (admin ou gerente)  
 **Resposta:** Array de empresas (sem dados sensíveis)
@@ -179,10 +193,12 @@ backend/data/certificados/
 ```
 
 #### POST /api/configuracoes-fiscais
+
 **Descrição:** Criar nova configuração  
-**Autenticação:** Requerida (apenas admin)  
+**Autenticação:** Requerida (apenas admin)
 
 **Body:**
+
 ```json
 {
   "cnpj": "12.345.678/0001-90",
@@ -200,20 +216,24 @@ backend/data/certificados/
   "email": "fiscal@s3e.com",
   "regimeTributario": "SimplesNacional",
   "certificadoBase64": "MIIKs...", // Arquivo .pfx em Base64
-  "certificadoSenha": "senha123"   // Será criptografada
+  "certificadoSenha": "senha123" // Será criptografada
 }
 ```
 
 #### GET /api/configuracoes-fiscais/:id
+
 **Descrição:** Buscar configuração específica  
 **Autenticação:** Requerida (admin ou gerente)
 
 #### PUT /api/configuracoes-fiscais/:id
+
 **Descrição:** Atualizar configuração  
 **Autenticação:** Requerida (apenas admin)  
-**Nota:** Para atualizar certificado, enviar novos `certificadoBase64` e `certificadoSenha`
+**Nota:** Para atualizar certificado, enviar novos `certificadoBase64` e
+`certificadoSenha`
 
 #### DELETE /api/configuracoes-fiscais/:id
+
 **Descrição:** Deletar configuração  
 **Autenticação:** Requerida (apenas admin)  
 **Ação:** Remove configuração do banco E deleta arquivo .pfx do servidor
@@ -253,11 +273,13 @@ model EmpresaFiscal {
 ## 🎨 UI/UX - Design Implementado
 
 ### Navegação
+
 - **Tabs no topo** da página
 - **Botão ativo:** Gradiente + sombra
 - **Botão inativo:** Cinza + hover
 
 ### Cards de Empresas
+
 - **Header gradiente azul** com nome da empresa
 - **Grid 2x2** com informações principais
 - **Card de endereço** destacado em azul claro
@@ -266,6 +288,7 @@ model EmpresaFiscal {
   - Vermelho se não configurado
 
 ### Modal de Configuração
+
 - **Header gradiente azul** com ícone de prédio
 - **3 seções coloridas:**
   - Cinza: Dados da empresa
@@ -283,7 +306,7 @@ model EmpresaFiscal {
 1. Acesse **"Emissão NF-e"** no menu
 2. Clique na aba **"Configurar Empresas"**
 3. Clique em **"Adicionar Empresa"**
-4. Preencha todos os campos obrigatórios (*)
+4. Preencha todos os campos obrigatórios (\*)
 5. Faça upload do certificado digital (.pfx)
 6. Digite a senha do certificado
 7. Clique em **"Salvar Configuração"**
@@ -296,6 +319,7 @@ Repita o processo para cada CNPJ/filial que precisar emitir NF-e.
 ### Usar na Emissão
 
 Ao emitir NF-e:
+
 1. Vá para aba **"Emitir NF-e"**
 2. Sistema usará automaticamente as configurações cadastradas
 3. Selecione qual CNPJ emissor usar (se houver múltiplos)
@@ -307,17 +331,20 @@ Ao emitir NF-e:
 ### Armazenamento do Certificado
 
 **Local:**
+
 ```
 backend/data/certificados/
 ```
 
 **Permissões recomendadas (Linux/Mac):**
+
 ```bash
 chmod 700 /path/to/backend/data/certificados
 chmod 600 /path/to/backend/data/certificados/*.pfx
 ```
 
 **Windows:**
+
 - Apenas administradores devem ter acesso à pasta
 
 ### Criptografia da Senha
@@ -325,6 +352,7 @@ chmod 600 /path/to/backend/data/certificados/*.pfx
 **Algoritmo:** bcrypt  
 **Salt Rounds:** 10  
 **Exemplo:**
+
 ```
 Senha original: "minhasenha123"
 Hash salvo no banco: "$2a$10$rOZUKq7..."
@@ -333,6 +361,7 @@ Hash salvo no banco: "$2a$10$rOZUKq7..."
 ### Validação de Acesso
 
 **Rotas protegidas:**
+
 - `POST /api/configuracoes-fiscais` - Apenas `admin`
 - `PUT /api/configuracoes-fiscais/:id` - Apenas `admin`
 - `DELETE /api/configuracoes-fiscais/:id` - Apenas `admin`
@@ -341,10 +370,12 @@ Hash salvo no banco: "$2a$10$rOZUKq7..."
 ### Dados Não Expostos
 
 Nunca são retornados nas APIs:
+
 - `certificadoPath` (path do arquivo)
 - `certificadoSenha` (hash bcrypt)
 
 Apenas retornado:
+
 - `certificadoValidade` (data de expiração)
 
 ---
@@ -366,10 +397,12 @@ npm run dev
 ### 2. Com Backend Integrado
 
 **Preparar certificado de teste:**
+
 - Se não tiver certificado real, a funcionalidade aceitará qualquer arquivo .pfx
 - Em produção, o backend validaria o certificado
 
 **Testar API:**
+
 ```bash
 # 1. Login (obter token)
 curl -X POST http://localhost:3000/api/auth/login \
@@ -405,12 +438,14 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ## 📝 Validações Implementadas
 
 ### Frontend
-- ✅ Campos obrigatórios marcados com *
+
+- ✅ Campos obrigatórios marcados com \*
 - ✅ Validação de formato de arquivo (.pfx, .p12)
 - ✅ Confirmação antes de excluir
 - ✅ Feedback visual ao selecionar certificado
 
 ### Backend
+
 - ✅ CNPJ único (não permite duplicados)
 - ✅ Criptografia automática da senha
 - ✅ Criação de diretório se não existir
@@ -453,6 +488,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ### Produção
 
 1. **NUNCA commitar certificados no Git**
+
    ```gitignore
    # .gitignore
    backend/data/certificados/*.pfx
@@ -460,6 +496,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    ```
 
 2. **Usar variáveis de ambiente fortes**
+
    ```env
    JWT_SECRET=chave-super-secreta-minimo-32-caracteres-aleatorios
    ```
@@ -469,6 +506,7 @@ curl http://localhost:3000/api/configuracoes-fiscais \
    - Armazenar em local seguro e criptografado
 
 4. **Permissões de Arquivo (Linux/Unix)**
+
    ```bash
    chmod 700 backend/data/certificados
    chmod 600 backend/data/certificados/*.pfx
@@ -490,13 +528,15 @@ curl http://localhost:3000/api/configuracoes-fiscais \
 ## 📖 Referências
 
 ### Certificado Digital A1
+
 - **Validade:** 1 ano
 - **Formato:** .pfx (PKCS#12)
 - **Uso:** Assinatura digital de NF-e
 - **Obtenção:** Autoridades Certificadoras (Serasa, Certisign, etc)
 
 ### NF-e - SEFAZ
-- **Portal Nacional:** https://www.nfe.fazenda.gov.br
+
+- **Portal Nacional:** <https://www.nfe.fazenda.gov.br>
 - **Manual de Integração:** Consulte documentação da SEFAZ do seu estado
 - **Ambiente de Homologação:** Use para testes antes da produção
 
@@ -522,4 +562,3 @@ R: Sim, mas cada servidor precisa ter o arquivo .pfx configurado.
 
 **Desenvolvido para S3E Engenharia** ⚡  
 **Segurança em Primeiro Lugar** 🔐
-

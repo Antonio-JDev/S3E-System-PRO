@@ -8,6 +8,7 @@ import CriacaoQuadroModular from './CriacaoQuadroModular';
 import CriacaoKitModal from './CriacaoKitModal';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { roundMoney } from '../utils/currency';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
@@ -119,8 +120,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                             });
                         }
                         
-                        // Usar preço calculado se for maior que 0, senão usar o preço salvo
-                        const precoFinal = precoTotal > 0 ? precoTotal : (kit.preco || 0);
+                        // Usar preço calculado se for maior que 0, senão usar o preço salvo (sempre 2 decimais)
+                        const precoFinal = roundMoney(precoTotal > 0 ? precoTotal : (kit.preco || 0));
                         
                         catalogItems.push({
                             id: kit.id,
@@ -178,7 +179,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
         if (searchTerm) {
             filtered = filtered.filter(item =>
                 item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                item.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (item.description && item.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
                 (item.category && item.category.toLowerCase().includes(searchTerm.toLowerCase()))
             );
         }
@@ -325,6 +326,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
         setKitDetalhes(null);
     };
 
+    useEscapeKey(!!selectedItem, handleCloseViewModal);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         
@@ -404,13 +407,13 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
     const getTypeColor = (type: CatalogItemType) => {
         switch (type) {
             case CatalogItemType.Produto:
-                return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200';
+                return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800';
             case CatalogItemType.Kit:
-                return 'bg-green-100 text-green-800 ring-1 ring-green-200';
+                return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800';
             case CatalogItemType.Servico:
-                return 'bg-purple-100 text-purple-800 ring-1 ring-purple-200';
+                return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 ring-1 ring-purple-200 dark:ring-purple-800';
             default:
-                return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
+                return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 ring-1 ring-gray-200 dark:ring-gray-700';
         }
     };
 
@@ -429,17 +432,17 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-teal-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando catálogo...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-teal-600 dark:border-teal-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando catálogo...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
@@ -471,8 +474,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
             {/* Error Message */}
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 animate-fade-in">
-                    <p className="text-red-800 font-medium">⚠️ {error}</p>
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-2xl p-4 mb-6 animate-fade-in">
+                    <p className="text-red-800 dark:text-red-300 font-medium">⚠️ {error}</p>
                 </div>
             )}
 
@@ -490,50 +493,50 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/50 dark:to-blue-800/50 flex items-center justify-center">
                             <span className="text-2xl">📦</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Produtos</p>
-                            <p className="text-2xl font-bold text-blue-600">{stats.produtos}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Produtos</p>
+                            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.produtos}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 flex items-center justify-center">
-                            <WrenchScrewdriverIcon className="w-6 h-6 text-green-600" />
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900/50 dark:to-green-800/50 flex items-center justify-center">
+                            <WrenchScrewdriverIcon className="w-6 h-6 text-green-600 dark:text-green-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Kits</p>
-                            <p className="text-2xl font-bold text-green-600">{stats.kits}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Kits</p>
+                            <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.kits}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-900/50 dark:to-purple-800/50 flex items-center justify-center">
                             <span className="text-2xl">⚙️</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Serviços</p>
-                            <p className="text-2xl font-bold text-purple-600">{stats.servicos}</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Serviços</p>
+                            <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.servicos}</p>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
+                <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-100 to-yellow-200 flex items-center justify-center">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-100 to-yellow-200 dark:from-yellow-900/50 dark:to-yellow-800/50 flex items-center justify-center">
                             <span className="text-2xl">💰</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Valor Médio</p>
-                            <p className="text-2xl font-bold text-yellow-600">
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Valor Médio</p>
+                            <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
                                 R$ {stats.totalItems > 0 ? (stats.totalValue / stats.totalItems).toFixed(0) : '0'}
                             </p>
                         </div>
@@ -542,7 +545,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             </div>
 
             {/* Filtros */}
-            <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-gray-700 mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
@@ -561,7 +564,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                         <select
                             value={filter}
                             onChange={(e) => setFilter(e.target.value as CatalogItemType | 'Todos')}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500"
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl focus:ring-2 focus:ring-teal-500"
                         >
                             <option value="Todos">Todos os Tipos</option>
                             <option value={CatalogItemType.Produto}>Produtos</option>
@@ -582,13 +585,13 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             </div>
 
             {/* Aviso sobre Produtos/Materiais */}
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6 mb-6 flex items-start gap-4">
-                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <div className="bg-blue-50 dark:bg-blue-900/30 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6 mb-6 flex items-start gap-4">
+                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/50 rounded-xl flex items-center justify-center flex-shrink-0">
                     <span className="text-2xl">ℹ️</span>
                 </div>
                 <div>
-                    <h3 className="text-lg font-bold text-blue-900 mb-2">Produtos/Materiais estão no Estoque</h3>
-                    <p className="text-blue-800">
+                    <h3 className="text-lg font-bold text-blue-900 dark:text-blue-300 mb-2">Produtos/Materiais estão no Estoque</h3>
+                    <p className="text-blue-800 dark:text-blue-300">
                         Esta página exibe apenas <strong>Kits</strong> e <strong>Serviços</strong>. 
                         Para visualizar produtos/materiais individuais, acesse a página de <strong>Estoque</strong>.
                     </p>
@@ -597,11 +600,11 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
             {/* Grid de Itens do Catálogo */}
             {filteredItems.length === 0 ? (
-                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
-                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-soft border border-gray-100 dark:border-gray-700 p-16 text-center">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
                         <span className="text-4xl">📋</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhum kit ou serviço encontrado</h3>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Nenhum kit ou serviço encontrado</h3>
                     <p className="text-gray-500 mb-6">
                         {searchTerm || filter !== 'Todos'
                             ? 'Tente ajustar os filtros de busca'
@@ -632,11 +635,11 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className="text-2xl font-bold text-teal-700">
-                                        R$ {item.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <p className="text-2xl font-bold text-teal-700 dark:text-teal-400">
+                                        R$ {roundMoney(item.price).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
                                     {(item as any).valorVenda && (item as any).valorVenda !== item.price && (
-                                        <p className="text-xs text-gray-500 mt-1">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                             Venda: R$ {(item as any).valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     )}
@@ -645,14 +648,14 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
 
                             {/* Informações */}
                             <div className="space-y-2 mb-4">
-                                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                                     <span>📂</span>
                                     <span className="truncate">{item.category || 'Sem categoria'}</span>
                                 </div>
-                                <div className="text-sm text-gray-600">
+                                <div className="text-sm text-gray-600 dark:text-gray-400">
                                     <p className="line-clamp-2">{item.description}</p>
                                 </div>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                                     <span>📅</span>
                                     <span>Criado em: {item.createdAt ? new Date(item.createdAt).toLocaleDateString('pt-BR') : 'Data não disponível'}</span>
                                 </div>
@@ -662,20 +665,20 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                             <div className="mb-4 space-y-2">
                                 <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${
                                     item.isActive 
-                                        ? 'bg-green-100 text-green-800 ring-1 ring-green-200' 
-                                        : 'bg-red-100 text-red-800 ring-1 ring-red-200'
+                                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800' 
+                                        : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 ring-1 ring-red-200 dark:ring-red-800'
                                 }`}>
                                     {item.isActive ? '✅ Ativo' : '❌ Inativo'}
                                 </span>
                                 
                                 {/* Flag de itens faltantes (para quadros elétricos) */}
                                 {(item as any).statusEstoque === 'PENDENTE' && (
-                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+                                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-2">
                                         <div className="flex items-center gap-2">
                                             <span className="text-lg">⚠️</span>
                                             <div className="flex-1">
-                                                <p className="text-xs font-bold text-yellow-900">Itens Faltantes</p>
-                                                <p className="text-xs text-yellow-700">
+                                                <p className="text-xs font-bold text-yellow-900 dark:text-yellow-300">Itens Faltantes</p>
+                                                <p className="text-xs text-yellow-700 dark:text-yellow-400">
                                                     {(item as any).itensFaltantes?.length || 0} item(ns) pendente(s)
                                                 </p>
                                             </div>
@@ -684,12 +687,12 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 )}
                                 
                                 {(item as any).temItensCotacao && (
-                                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
                                         <div className="flex items-center gap-2">
                                             <span className="text-lg">❄️</span>
                                             <div className="flex-1">
-                                                <p className="text-xs font-bold text-blue-900">Banco Frio</p>
-                                                <p className="text-xs text-blue-700">Requer compra de itens</p>
+                                                <p className="text-xs font-bold text-blue-900 dark:text-blue-300">Banco Frio</p>
+                                                <p className="text-xs text-blue-700 dark:text-blue-400">Requer compra de itens</p>
                                             </div>
                                         </div>
                                     </div>
@@ -697,24 +700,24 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                             </div>
 
                             {/* Botões de Ação */}
-                            <div className="flex gap-2 pt-4 border-t border-gray-100">
+                            <div className="flex gap-2 pt-4 border-t border-gray-100 dark:border-gray-700">
                                 <button
                                     onClick={() => handleViewItem(item)}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors text-sm font-semibold"
                                 >
                                     <EyeIcon className="w-4 h-4" />
                                     Ver
                                 </button>
                                 <button
                                     onClick={() => handleOpenModal(item)}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 transition-colors text-sm font-semibold"
+                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors text-sm font-semibold"
                                 >
                                     <PencilIcon className="w-4 h-4" />
                                     Editar
                                 </button>
                                 <button
                                     onClick={() => setItemToDelete(item)}
-                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors text-sm font-semibold"
                                 >
                                     <TrashIcon className="w-4 h-4" />
                                     Remover
@@ -727,32 +730,32 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                 /* Visualização em Lista */
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-soft">
                     <table className="w-full">
-                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
+                        <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600">
                             <tr>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Item</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Tipo</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Categoria</th>
-                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">Preço / Venda</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Item</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Tipo</th>
+                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Categoria</th>
+                                <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Preço / Venda</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Ações</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                             {filteredItems.map((item) => (
-                                <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                                <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                     <td className="px-6 py-4">
                                         <div>
                                             <p className="font-semibold text-gray-900 dark:text-white">{item.name}</p>
-                                            <p className="text-sm text-gray-500 line-clamp-1">{item.description}</p>
+                                            <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-1">{item.description}</p>
                                             {/* Flags */}
                                             <div className="flex gap-2 mt-2">
                                                 {(item as any).statusEstoque === 'PENDENTE' && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300">
                                                         ⚠️ {(item as any).itensFaltantes?.length || 0} Faltantes
                                                     </span>
                                                 )}
                                                 {(item as any).temItensCotacao && (
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">
                                                         ❄️ Banco Frio
                                                     </span>
                                                 )}
@@ -764,13 +767,13 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                             {getTypeIcon(item.type)} {getTypeName(item.type)}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-600">{item.category || 'Sem categoria'}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{item.category || 'Sem categoria'}</td>
                                     <td className="px-6 py-4 text-right">
-                                        <p className="text-lg font-bold text-teal-700">
-                                            R$ {item.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
+                                            R$ {roundMoney(item.price).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
                                         {(item as any).valorVenda && (item as any).valorVenda !== item.price && (
-                                            <p className="text-xs text-gray-500 mt-1">
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                                 Venda: R$ {(item as any).valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         )}
@@ -778,8 +781,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     <td className="px-6 py-4 text-center">
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${
                                             item.isActive 
-                                                ? 'bg-green-100 text-green-800' 
-                                                : 'bg-red-100 text-red-800'
+                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' 
+                                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
                                         }`}>
                                             {item.isActive ? '✅ Ativo' : '❌ Inativo'}
                                         </span>
@@ -788,21 +791,21 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                         <div className="flex items-center justify-center gap-2">
                                             <button
                                                 onClick={() => handleViewItem(item)}
-                                                className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                                className="p-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors"
                                                 title="Visualizar"
                                             >
                                                 <EyeIcon className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleOpenModal(item)}
-                                                className="p-2 bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 transition-colors"
+                                                className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors"
                                                 title="Editar"
                                             >
                                                 <PencilIcon className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => setItemToDelete(item)}
-                                                className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors"
                                                 title="Remover"
                                             >
                                                 <TrashIcon className="w-4 h-4" />
@@ -897,39 +900,39 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                                 {/* Coluna 1: Informações Básicas */}
                                 <div className="lg:col-span-2 space-y-4">
-                                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 p-5 rounded-xl border border-gray-200">
-                                        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Nome do Item</h3>
-                                        <p className="text-2xl font-bold text-gray-900">{selectedItem.name}</p>
+                                    <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-600">
+                                        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Nome do Item</h3>
+                                        <p className="text-2xl font-bold text-gray-900 dark:text-white">{selectedItem.name}</p>
                                     </div>
                                     
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Tipo</h3>
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Tipo</h3>
                                             <span className={`px-3 py-1.5 text-sm font-bold rounded-lg ${getTypeColor(selectedItem.type)}`}>
                                                 {getTypeIcon(selectedItem.type)} {getTypeName(selectedItem.type)}
                                             </span>
                                         </div>
-                                        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Categoria</h3>
-                                            <p className="text-lg font-semibold text-gray-900">{selectedItem.category || 'Sem categoria'}</p>
+                                        <div className="bg-white dark:bg-gray-700 p-4 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Categoria</h3>
+                                            <p className="text-lg font-semibold text-gray-900 dark:text-white">{selectedItem.category || 'Sem categoria'}</p>
                                         </div>
                                     </div>
 
                                     {selectedItem.description && (
-                                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                            <h3 className="text-xs font-semibold text-blue-700 uppercase mb-2">Descrição</h3>
-                                            <p className="text-gray-700">{selectedItem.description}</p>
+                                        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                                            <h3 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase mb-2">Descrição</h3>
+                                            <p className="text-gray-700 dark:text-gray-300">{selectedItem.description}</p>
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Coluna 2: Preço e Status */}
                                 <div className="space-y-4">
-                                    <div className="bg-gradient-to-br from-teal-50 to-teal-100 p-6 rounded-xl border-2 border-teal-200 shadow-lg">
-                                        <h3 className="text-xs font-semibold text-teal-700 uppercase mb-3">Valor Total</h3>
-                                        <p className="text-4xl font-bold text-teal-700 mb-2">
+                                    <div className="bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/30 p-6 rounded-xl border-2 border-teal-200 dark:border-teal-700 shadow-lg">
+                                        <h3 className="text-xs font-semibold text-teal-700 dark:text-teal-300 uppercase mb-3">Valor Total</h3>
+                                        <p className="text-4xl font-bold text-teal-700 dark:text-teal-400 mb-2">
                                             R$ {(() => {
-                                                // Calcular preço total do kit incluindo itens do banco frio
+                                                // Calcular preço total do kit incluindo itens do banco frio (sempre 2 decimais)
                                                 if (selectedItem.type === 'Kit' && kitDetalhes) {
                                                     let total = 0;
                                                     
@@ -949,28 +952,28 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                         });
                                                     }
                                                     
-                                                    return total > 0 ? total : selectedItem.price;
+                                                    return roundMoney(total > 0 ? total : selectedItem.price);
                                                 }
-                                                return selectedItem.price;
-                                            })().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                return roundMoney(selectedItem.price);
+                                            })().toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
-                                        <p className="text-xs text-teal-600">Preço total do kit</p>
+                                        <p className="text-xs text-teal-600 dark:text-teal-400">Preço total do kit</p>
                                     </div>
 
                                     <div className="bg-white dark:bg-gray-700 p-4 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
                                         <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Status</h3>
                                         <span className={`px-4 py-2 text-sm font-bold rounded-lg inline-block ${
                                             selectedItem.isActive 
-                                                ? 'bg-green-100 text-green-800 ring-2 ring-green-200' 
-                                                : 'bg-red-100 text-red-800 ring-2 ring-red-200'
+                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-2 ring-green-200 dark:ring-green-800' 
+                                                : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 ring-2 ring-red-200 dark:ring-red-800'
                                         }`}>
                                             {selectedItem.isActive ? '✅ Ativo' : '❌ Inativo'}
                                         </span>
                                     </div>
 
-                                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                                        <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Criado em</h3>
-                                        <p className="text-sm font-medium text-gray-900">{selectedItem.createdAt ? new Date(selectedItem.createdAt).toLocaleDateString('pt-BR') : 'Data não disponível'}</p>
+                                    <div className="bg-white dark:bg-gray-700 p-4 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+                                        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Criado em</h3>
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white">{selectedItem.createdAt ? new Date(selectedItem.createdAt).toLocaleDateString('pt-BR') : 'Data não disponível'}</p>
                                     </div>
                                 </div>
                             </div>
@@ -985,14 +988,14 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     
                                     {loadingKitDetalhes ? (
                                         <div className="text-center py-12">
-                                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mx-auto"></div>
-                                            <p className="text-sm text-gray-600 mt-3">Carregando composição...</p>
+                                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 dark:border-teal-400 mx-auto"></div>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-3">Carregando composição...</p>
                                         </div>
                                     ) : kitDetalhes ? (
                                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                             {/* Coluna 1: Itens do Estoque Real */}
                                             {kitDetalhes.items && kitDetalhes.items.length > 0 && (
-                                                <div className="bg-white rounded-xl border-2 border-green-200 shadow-lg overflow-hidden">
+                                                <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-green-200 dark:border-green-700 shadow-lg overflow-hidden">
                                                     <div className="bg-gradient-to-r from-green-500 to-green-600 p-4">
                                                         <h4 className="text-base font-bold text-white flex items-center gap-2">
                                                             <span>✅</span> Itens do Estoque Real ({kitDetalhes.items.length})
@@ -1011,22 +1014,22 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                                 {item.material?.nome || item.material?.descricao || 'Material'}
                                                                             </p>
                                                                             <div className="flex flex-wrap gap-2 items-center mt-2">
-                                                                                <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+                                                                                <span className="text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-700 px-2 py-1 rounded">
                                                                                     {item.quantidade} {item.material?.unidadeMedida || 'UN'}
                                                                                 </span>
-                                                                                <span className="text-xs text-gray-500">×</span>
-                                                                                <span className="text-xs font-semibold text-green-700">
+                                                                                <span className="text-xs text-gray-500 dark:text-gray-400">×</span>
+                                                                                <span className="text-xs font-semibold text-green-700 dark:text-green-400">
                                                                                     R$ {precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                 </span>
                                                                                 {item.material?.valorVenda && item.material?.valorVenda !== item.material?.preco && (
-                                                                                    <span className="text-xs text-gray-400 line-through">
+                                                                                    <span className="text-xs text-gray-400 dark:text-gray-500 line-through">
                                                                                         Compra: R$ {(item.material?.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                     </span>
                                                                                 )}
                                                                             </div>
                                                                         </div>
                                                                         <div className="text-right flex-shrink-0">
-                                                                            <p className="text-lg font-bold text-green-700">
+                                                                            <p className="text-lg font-bold text-green-700 dark:text-green-400">
                                                                                 R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                             </p>
                                                                         </div>
@@ -1057,28 +1060,28 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                     {itensBancoFrio.map((item: any, index: number) => {
                                                                         const nome = item.nome || item.materialNome || 'Item do Banco Frio';
                                                                         const quantidade = item.quantidade || 0;
-                                                                        const precoUnit = item.precoUnit || item.preco || item.valorUnitario || 0;
-                                                                        const subtotal = quantidade * precoUnit;
+                                                                        const precoUnit = roundMoney(item.precoUnit || item.preco || item.valorUnitario || 0);
+                                                                        const subtotal = roundMoney(quantidade * precoUnit);
                                                                         const unidadeMedida = item.unidadeMedida || 'UN';
                                                                         const dataUltimaCotacao = item.dataUltimaCotacao || item.dataAtualizacao;
                                                                         
                                                                         return (
-                                                                            <div key={index} className="bg-blue-50 border border-blue-200 p-4 rounded-lg hover:shadow-md transition-shadow">
+                                                                            <div key={index} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 p-4 rounded-lg hover:shadow-md transition-shadow">
                                                                                 <div className="flex justify-between items-start gap-4">
                                                                                     <div className="flex-1 min-w-0">
-                                                                                        <p className="font-bold text-gray-900 text-sm mb-1">
+                                                                                        <p className="font-bold text-gray-900 dark:text-white text-sm mb-1">
                                                                                             {nome}
                                                                                         </p>
                                                                                         <div className="flex flex-wrap gap-2 items-center mt-2">
-                                                                                            <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+                                                                                            <span className="text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-700 px-2 py-1 rounded">
                                                                                                 {quantidade} {unidadeMedida}
                                                                                             </span>
-                                                                                            <span className="text-xs text-gray-500">×</span>
-                                                                                            <span className="text-xs font-semibold text-blue-700">
+                                                                                            <span className="text-xs text-gray-500 dark:text-gray-400">×</span>
+                                                                                            <span className="text-xs font-semibold text-blue-700 dark:text-blue-400">
                                                                                                 R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                             </span>
                                                                                             {dataUltimaCotacao && (
-                                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300">
                                                                                                     📅 {(() => {
                                                                                                         try {
                                                                                                             const data = new Date(dataUltimaCotacao);
@@ -1092,7 +1095,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                                         </div>
                                                                                     </div>
                                                                                     <div className="text-right flex-shrink-0">
-                                                                                        <p className="text-lg font-bold text-blue-700">
+                                                                                        <p className="text-lg font-bold text-blue-700 dark:text-blue-400">
                                                                                             R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                         </p>
                                                                                     </div>
@@ -1101,8 +1104,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                         );
                                                                     })}
                                                                 </div>
-                                                                <div className="p-4 bg-orange-50 border-t border-orange-200">
-                                                                    <p className="text-xs text-orange-800 font-medium flex items-center gap-2">
+                                                                <div className="p-4 bg-orange-50 dark:bg-orange-900/30 border-t border-orange-200 dark:border-orange-800">
+                                                                    <p className="text-xs text-orange-800 dark:text-orange-300 font-medium flex items-center gap-2">
                                                                         <span>⚠️</span>
                                                                         Estes itens precisam ser comprados e adicionados ao estoque antes de usar o kit em obras
                                                                     </p>
@@ -1122,32 +1125,32 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                     {itensServicos.map((item: any, index: number) => {
                                                                         const nome = item.nome || item.servicoNome || 'Serviço';
                                                                         const quantidade = item.quantidade || 0;
-                                                                        const precoUnit = item.precoUnit || item.preco || 0;
-                                                                        const subtotal = quantidade * precoUnit;
+                                                                        const precoUnit = roundMoney(item.precoUnit || item.preco || 0);
+                                                                        const subtotal = roundMoney(quantidade * precoUnit);
                                                                         const unidadeMedida = item.unidade || item.unidadeMedida || 'UN';
                                                                         
                                                                         return (
-                                                                            <div key={index} className="bg-purple-50 border border-purple-200 p-4 rounded-lg hover:shadow-md transition-shadow">
+                                                                            <div key={index} className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 p-4 rounded-lg hover:shadow-md transition-shadow">
                                                                                 <div className="flex justify-between items-start gap-4">
                                                                                     <div className="flex-1 min-w-0">
-                                                                                        <p className="font-bold text-gray-900 text-sm mb-1">
+                                                                                        <p className="font-bold text-gray-900 dark:text-white text-sm mb-1">
                                                                                             {nome}
                                                                                         </p>
                                                                                         <div className="flex flex-wrap gap-2 items-center mt-2">
-                                                                                            <span className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+                                                                                            <span className="text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-700 px-2 py-1 rounded">
                                                                                                 {quantidade} {unidadeMedida}
                                                                                             </span>
-                                                                                            <span className="text-xs text-gray-500">×</span>
-                                                                                            <span className="text-xs font-semibold text-purple-700">
+                                                                                            <span className="text-xs text-gray-500 dark:text-gray-400">×</span>
+                                                                                            <span className="text-xs font-semibold text-purple-700 dark:text-purple-400">
                                                                                                 R$ {precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                             </span>
-                                                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                                                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300">
                                                                                                 ⚙️ Serviço
                                                                                             </span>
                                                                                         </div>
                                                                                     </div>
                                                                                     <div className="text-right flex-shrink-0">
-                                                                                        <p className="text-lg font-bold text-purple-700">
+                                                                                        <p className="text-lg font-bold text-purple-700 dark:text-purple-400">
                                                                                             R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                                         </p>
                                                                                     </div>
@@ -1156,8 +1159,8 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                                         );
                                                                     })}
                                                                 </div>
-                                                                <div className="p-4 bg-purple-50 border-t border-purple-200">
-                                                                    <p className="text-xs text-purple-800 font-medium flex items-center gap-2">
+                                                                <div className="p-4 bg-purple-50 dark:bg-purple-900/30 border-t border-purple-200 dark:border-purple-800">
+                                                                    <p className="text-xs text-purple-800 dark:text-purple-300 font-medium flex items-center gap-2">
                                                                         <span>⚙️</span>
                                                                         Estes serviços estão incluídos no kit personalizado
                                                                     </p>
@@ -1177,7 +1180,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                             )}
                                         </div>
                                     ) : (
-                                        <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-xl border border-gray-200">
+                                        <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 rounded-xl border border-gray-200 dark:border-gray-600">
                                             <p className="text-lg font-medium">Erro ao carregar composição do kit</p>
                                         </div>
                                     )}
@@ -1206,7 +1209,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                             });
                                                         }
                                                         
-                                                        return total.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                                                        return roundMoney(total).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                                                     })()}
                                                 </p>
                                             </div>
@@ -1245,14 +1248,14 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                     
                                     if (itensComEstoqueInsuficiente.length > 0) {
                                         return (
-                                            <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-6 shadow-lg">
+                                            <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 border-2 border-yellow-300 dark:border-yellow-700 rounded-xl p-6 shadow-lg">
                                                 <div className="flex items-center gap-4 mb-4">
-                                                    <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center">
+                                                    <div className="w-12 h-12 rounded-full bg-yellow-400 dark:bg-yellow-600 flex items-center justify-center">
                                                         <span className="text-2xl">⚠️</span>
                                                     </div>
                                                     <div>
-                                                        <h3 className="font-bold text-yellow-900 text-xl">Itens Faltantes em Estoque</h3>
-                                                        <p className="text-sm text-yellow-700 mt-1">
+                                                        <h3 className="font-bold text-yellow-900 dark:text-yellow-300 text-xl">Itens Faltantes em Estoque</h3>
+                                                        <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
                                                             Este kit possui itens de estoque real que precisam ser reabastecidos
                                                         </p>
                                                     </div>
@@ -1266,10 +1269,10 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                                             <div key={idx} className="bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4 hover:shadow-md transition-shadow">
                                                                 <p className="font-semibold text-gray-900 dark:text-white text-sm mb-2">{item.material?.nome || 'Item'}</p>
                                                                 <div className="flex justify-between items-center">
-                                                                    <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+                                                                    <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300">
                                                                         📦 Estoque Insuficiente
                                                                     </span>
-                                                                    <span className="text-sm font-bold text-yellow-700">
+                                                                    <span className="text-sm font-bold text-yellow-700 dark:text-yellow-400">
                                                                         {falta} un necessária(s)
                                                                     </span>
                                                                 </div>
@@ -1285,27 +1288,27 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                                 // Se houver itens faltantes já processados
                                 if (temItensFaltantesEstoque) {
                                     return (
-                                        <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-6 shadow-lg">
+                                        <div className="mt-6 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/30 dark:to-orange-900/30 border-2 border-yellow-300 dark:border-yellow-700 rounded-xl p-6 shadow-lg">
                                             <div className="flex items-center gap-4 mb-4">
-                                                <div className="w-12 h-12 rounded-full bg-yellow-400 flex items-center justify-center">
+                                                <div className="w-12 h-12 rounded-full bg-yellow-400 dark:bg-yellow-600 flex items-center justify-center">
                                                     <span className="text-2xl">⚠️</span>
                                                 </div>
                                                 <div>
-                                                    <h3 className="font-bold text-yellow-900 text-xl">Itens Faltantes em Estoque</h3>
-                                                    <p className="text-sm text-yellow-700 mt-1">
+                                                    <h3 className="font-bold text-yellow-900 dark:text-yellow-300 text-xl">Itens Faltantes em Estoque</h3>
+                                                    <p className="text-sm text-yellow-700 dark:text-yellow-400 mt-1">
                                                         Este kit possui itens de estoque real que precisam ser reabastecidos
                                                     </p>
                                                 </div>
                                             </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                 {itensFaltantesEstoque.map((item: any, idx: number) => (
-                                                    <div key={idx} className="bg-white border border-yellow-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                                                        <p className="font-semibold text-gray-900 text-sm mb-2">{item.nome}</p>
+                                                    <div key={idx} className="bg-white dark:bg-gray-700 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                                        <p className="font-semibold text-gray-900 dark:text-white text-sm mb-2">{item.nome}</p>
                                                         <div className="flex justify-between items-center">
-                                                            <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+                                                            <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300">
                                                                 📦 Estoque Insuficiente
                                                             </span>
-                                                            <span className="text-sm font-bold text-yellow-700">
+                                                            <span className="text-sm font-bold text-yellow-700 dark:text-yellow-400">
                                                                 {item.quantidadeFaltante || item.quantidade} un necessária(s)
                                                             </span>
                                                         </div>
@@ -1336,10 +1339,10 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
             {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
             {itemToDelete && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-strong max-w-md w-full p-6">
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">Remover Item</h3>
-                        <p className="text-gray-600 mb-6">
-                            Tem certeza que deseja remover o item <strong>"{itemToDelete.name}"</strong> do catálogo? 
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-strong max-w-md w-full p-6">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Remover Item</h3>
+                        <p className="text-gray-600 dark:text-gray-400 mb-6">
+                            Tem certeza que deseja remover o item <strong className="text-gray-900 dark:text-white">"{itemToDelete.name}"</strong> do catálogo? 
                             Esta ação não pode ser desfeita.
                         </p>
                         <div className="flex justify-end gap-3">

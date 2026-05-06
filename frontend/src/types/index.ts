@@ -304,6 +304,23 @@ export interface PurchaseOrder {
     notes?: string;
     // Data efetiva de recebimento da remessa
     dataRecebimento?: string | null;
+    // Empresa compradora (tomador/destinatário do XML)
+    empresaCompradoraNome?: string;
+    empresaCompradoraCNPJ?: string;
+    /** Alinhado ao backend (ClassificacaoCompra); ex.: DESPESAS_VARIADAS — sem fluxo de recebimento de mercadoria */
+    classificacao?: string;
+    valorDesconto?: number;
+    valorTotalProdutos?: number;
+    frete?: number;
+    valorIPI?: number;
+    outrasDespesas?: number;
+    valorTotalNota?: number;
+    /** Parcelas/contas a pagar (listagem enriquecida no backend) */
+    contasPagar?: Array<{ id?: string; status?: string; valor?: number; valorParcela?: number; dataVencimento?: string | Date }>;
+    fornecedorCNPJ?: string;
+    fornecedorTel?: string;
+    dataEmissaoNF?: string | Date;
+    xmlData?: string;
 }
 
 export interface Supplier {
@@ -427,8 +444,10 @@ export interface QualityCheckItem {
 export interface User {
     id: string;
     name: string;
+    setor?: string | null;
     email: string;
     role: UserRole;
+    isAdmin?: boolean; // Acesso a módulo Financeiro e todos os módulos (definido em Configurações)
     createdAt?: string;
     updatedAt?: string;
 }
@@ -590,32 +609,4 @@ export interface StatCardData {
     change?: number;
     trend?: 'up' | 'down' | 'neutral';
     icon?: React.ReactNode;
-}
-
-// Tipos para Atualização de Preços
-export enum PriceComparisonStatus {
-    PENDENTE = 'PENDENTE',
-    ATUALIZADO = 'ATUALIZADO',
-    ERRO = 'ERRO'
-}
-
-export interface PriceComparisonItem {
-    id: string;
-    materialId: string;
-    materialNome: string;
-    precoAtual: number;
-    precoNovo: number;
-    diferenca: number;
-    percentualDiferenca: number;
-    status: PriceComparisonStatus;
-    fornecedor?: string;
-    dataAtualizacao?: string;
-}
-
-export interface PriceComparisonImport {
-    items: PriceComparisonItem[];
-    totalItens: number;
-    itensAtualizados: number;
-    itensComErro: number;
-    dataImportacao: string;
 }

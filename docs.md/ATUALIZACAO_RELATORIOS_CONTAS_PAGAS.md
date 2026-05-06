@@ -2,22 +2,28 @@
 
 ## ✅ Mudanças Implementadas
 
-Ajustei a lógica de relatórios financeiros para considerar **apenas contas pagas** (status = 'Pago'), usando a **data de pagamento** ao invés da data de vencimento para agregação mensal.
+Ajustei a lógica de relatórios financeiros para considerar **apenas contas
+pagas** (status = 'Pago'), usando a **data de pagamento** ao invés da data de
+vencimento para agregação mensal.
 
 ---
 
 ## 🎯 Motivação
 
-**Antes:** Os relatórios agregavam todas as contas (pagas e pendentes) por data de vencimento.
+**Antes:** Os relatórios agregavam todas as contas (pagas e pendentes) por data
+de vencimento.
 
-**Problema:** 
+**Problema:**
+
 - Incluía valores que ainda não foram pagos/recebidos
 - Não refletia o fluxo de caixa real
 - Dados não representavam a situação financeira verdadeira
 
-**Agora:** Os relatórios agregam **apenas contas pagas** por **data de pagamento**.
+**Agora:** Os relatórios agregam **apenas contas pagas** por **data de
+pagamento**.
 
 **Benefícios:**
+
 - ✅ Reflete o fluxo de caixa real
 - ✅ Mostra receitas e despesas efetivamente realizadas
 - ✅ Permite análise histórica precisa
@@ -54,6 +60,7 @@ model ContaPagar {
 ```
 
 **Mudanças:**
+
 - ✅ `valorTotal` → `valorParcela` (consistência com ContaReceber)
 - ✅ `fornecedorId` agora é opcional (permite despesas sem fornecedor)
 - ✅ Relação `fornecedor` também opcional
@@ -65,46 +72,49 @@ model ContaPagar {
 **Arquivo:** `backend/src/services/relatorios.service.ts`
 
 #### Antes (❌):
+
 ```typescript
 // Buscava TODAS as contas por data de vencimento
 const contasReceber = await prisma.contaReceber.findMany({
-    where: {
-        dataVencimento: { gte: dataInicio }
-    }
+  where: {
+    dataVencimento: { gte: dataInicio },
+  },
 });
 
 // Agregava por data de vencimento
-contasReceber.forEach(conta => {
-    const data = new Date(conta.dataVencimento);
-    // ...
+contasReceber.forEach((conta) => {
+  const data = new Date(conta.dataVencimento);
+  // ...
 });
 ```
 
 #### Depois (✅):
+
 ```typescript
 // Busca APENAS contas PAGAS por data de pagamento
 const contasReceber = await prisma.contaReceber.findMany({
-    where: {
-        dataPagamento: { gte: dataInicio },
-        status: 'Pago'
-    },
-    select: {
-        dataPagamento: true,
-        valorParcela: true,
-        status: true
-    }
+  where: {
+    dataPagamento: { gte: dataInicio },
+    status: "Pago",
+  },
+  select: {
+    dataPagamento: true,
+    valorParcela: true,
+    status: true,
+  },
 });
 
 // Agrega por data de pagamento
-contasReceber.forEach(conta => {
-    if (conta.dataPagamento) {
-        const data = new Date(conta.dataPagamento);
-        // ...
-    }
+contasReceber.forEach((conta) => {
+  if (conta.dataPagamento) {
+    const data = new Date(conta.dataPagamento);
+    // ...
+  }
 });
 ```
 
 **Mudanças:**
+
 - ✅ Filtro adicional: `status: 'Pago'`
 - ✅ Usa `dataPagamento` ao invés de `dataVencimento`
 - ✅ Agregação baseada em quando foi efetivamente pago
@@ -119,14 +129,15 @@ contasReceber.forEach(conta => {
 ```typescript
 // Dados financeiros mensais (admin, financeiro)
 router.get(
-    '/financeiro',
-    authenticate,
-    authorize('admin', 'financeiro'),  // ✨ Simplificado
-    RelatoriosController.getDadosFinanceiros
+  "/financeiro",
+  authenticate,
+  authorize("admin", "financeiro"), // ✨ Simplificado
+  RelatoriosController.getDadosFinanceiros
 );
 ```
 
 **Mudanças:**
+
 - ✅ Permissões simplificadas: `admin` e `financeiro`
 - ✅ Removido `gerente` do endpoint específico de dados mensais
 
@@ -137,6 +148,7 @@ router.get(
 ### Exemplo: Agregação Mensal
 
 **Cenário:**
+
 ```
 Conta A: Vencimento 01/11/2024 | Pagamento 05/11/2024 | R$ 1.000
 Conta B: Vencimento 15/11/2024 | Pagamento 20/12/2024 | R$ 2.000
@@ -144,28 +156,31 @@ Conta C: Vencimento 20/11/2024 | Status: Pendente      | R$ 3.000
 ```
 
 **Antes (data de vencimento, todas as contas):**
+
 ```json
 {
   "mes": "Nov/2024",
-  "receita": 6000.00  // A + B + C
+  "receita": 6000.0 // A + B + C
 }
 ```
 
 **Depois (data de pagamento, apenas pagas):**
+
 ```json
 [
   {
     "mes": "Nov/2024",
-    "receita": 1000.00  // Apenas A (paga em nov)
+    "receita": 1000.0 // Apenas A (paga em nov)
   },
   {
     "mes": "Dez/2024",
-    "receita": 2000.00  // Apenas B (paga em dez)
+    "receita": 2000.0 // Apenas B (paga em dez)
   }
 ]
 ```
 
 **Resultado:**
+
 - ❌ Conta C não aparece (ainda não foi paga)
 - ✅ Conta A aparece em Nov (quando foi paga)
 - ✅ Conta B aparece em Dez (quando foi paga)
@@ -177,24 +192,28 @@ Conta C: Vencimento 20/11/2024 | Status: Pendente      | R$ 3.000
 ### Vantagens da Nova Abordagem
 
 #### 1. **Regime de Caixa**
+
 ```
 ✅ Registra quando o dinheiro efetivamente entra/sai
 ❌ Não registra apenas quando venceu
 ```
 
 #### 2. **Reconciliação Bancária**
+
 ```
 ✅ Dados batem com extrato bancário
 ✅ Fácil identificar discrepâncias
 ```
 
 #### 3. **Análise Histórica Precisa**
+
 ```
 ✅ "Em Nov/2024 recebemos X"
 ❌ "Em Nov/2024 venceu X" (mas pode não ter sido pago)
 ```
 
 #### 4. **Decisões Baseadas em Realidade**
+
 ```
 ✅ Lucro baseado em dinheiro real
 ❌ Lucro baseado em valores "teóricos"
@@ -212,15 +231,15 @@ Conta C: Vencimento 20/11/2024 | Status: Pendente      | R$ 3.000
   "data": [
     {
       "mes": "Jan/2025",
-      "receita": 45000.00,    // Receitas pagas em Jan
-      "despesa": 25000.00,    // Despesas pagas em Jan
-      "lucro": 20000.00       // Lucro real de Jan
+      "receita": 45000.0, // Receitas pagas em Jan
+      "despesa": 25000.0, // Despesas pagas em Jan
+      "lucro": 20000.0 // Lucro real de Jan
     },
     {
       "mes": "Fev/2025",
-      "receita": 52000.00,    // Receitas pagas em Fev
-      "despesa": 28000.00,    // Despesas pagas em Fev
-      "lucro": 24000.00       // Lucro real de Fev
+      "receita": 52000.0, // Receitas pagas em Fev
+      "despesa": 28000.0, // Despesas pagas em Fev
+      "lucro": 24000.0 // Lucro real de Fev
     }
     // ... últimos 12 meses
   ]
@@ -228,6 +247,7 @@ Conta C: Vencimento 20/11/2024 | Status: Pendente      | R$ 3.000
 ```
 
 **Interpretação:**
+
 - Cada mês mostra **apenas** valores efetivamente pagos/recebidos
 - Lucro representa **caixa real** do período
 - Contas pendentes **não** influenciam os números
@@ -237,6 +257,7 @@ Conta C: Vencimento 20/11/2024 | Status: Pendente      | R$ 3.000
 ## 🆚 Comparação: Regime de Competência vs Regime de Caixa
 
 ### Regime de Competência (Antes)
+
 ```
 Mês: Novembro 2024
 Receitas (vencidas):  R$ 100.000
@@ -247,6 +268,7 @@ Lucro (teórico):      R$ 40.000
 **Problema:** Pode não ter dinheiro no caixa!
 
 ### Regime de Caixa (Agora)
+
 ```
 Mês: Novembro 2024
 Receitas (pagas):     R$ 75.000
@@ -261,10 +283,11 @@ Lucro (real):         R$ 20.000
 ## 🎯 Casos de Uso
 
 ### 1. Dashboard Financeiro
+
 ```typescript
 // Gráfico de Barras: Receitas x Despesas
 // Mostra fluxo de caixa real mensal
-const dados = await fetch('/api/relatorios/financeiro');
+const dados = await fetch("/api/relatorios/financeiro");
 
 // Bar Chart:
 // Nov: Receita R$ 75k, Despesa R$ 55k
@@ -272,30 +295,32 @@ const dados = await fetch('/api/relatorios/financeiro');
 ```
 
 ### 2. Análise de Fluxo de Caixa
+
 ```typescript
 // Identificar meses com fluxo negativo
-const mesesNegativos = dados.filter(mes => mes.lucro < 0);
+const mesesNegativos = dados.filter((mes) => mes.lucro < 0);
 
 // Alerta: "Em Mar/2024 houve déficit de R$ 10.000"
 ```
 
 ### 3. Planejamento Financeiro
+
 ```typescript
 // Média de receitas dos últimos 6 meses
-const media = dados.slice(-6).reduce((sum, m) => 
-    sum + m.receita, 0) / 6;
+const media = dados.slice(-6).reduce((sum, m) => sum + m.receita, 0) / 6;
 
 // Projeção: "Média mensal: R$ 78.000"
 ```
 
 ### 4. Reconciliação Contábil
+
 ```typescript
 // Comparar com extratos bancários
-const receitasMes = dados.find(m => m.mes === 'Jan/2025').receita;
-const extratoBanco = 45000.00;
+const receitasMes = dados.find((m) => m.mes === "Jan/2025").receita;
+const extratoBanco = 45000.0;
 
 if (receitasMes === extratoBanco) {
-    console.log('✅ Valores conferem!');
+  console.log("✅ Valores conferem!");
 }
 ```
 
@@ -303,11 +328,11 @@ if (receitasMes === extratoBanco) {
 
 ## 🔐 Permissões Atualizadas
 
-| Endpoint | Permissões | Mudança |
-|----------|------------|---------|
-| `/financeiro` | admin, financeiro | ✅ Simplificado |
-| `/financeiro/resumo` | admin, gerente, financeiro | ⚪ Mantido |
-| `/dashboard` | admin, gerente | ⚪ Mantido |
+| Endpoint             | Permissões                 | Mudança         |
+| -------------------- | -------------------------- | --------------- |
+| `/financeiro`        | admin, financeiro          | ✅ Simplificado |
+| `/financeiro/resumo` | admin, gerente, financeiro | ⚪ Mantido      |
+| `/dashboard`         | admin, gerente             | ⚪ Mantido      |
 
 ---
 
@@ -321,6 +346,7 @@ dotenv -e .env.development -- npx prisma migrate dev --name "update_conta_pagar_
 ```
 
 **O que a migration faz:**
+
 1. Renomeia `valorTotal` → `valorParcela` em `ContaPagar`
 2. Remove `valorPago` (não mais necessário)
 3. Torna `fornecedorId` opcional
@@ -331,32 +357,36 @@ dotenv -e .env.development -- npx prisma migrate dev --name "update_conta_pagar_
 ## ⚠️ Considerações Importantes
 
 ### 1. Contas Pendentes
+
 ```
 ❌ NÃO aparecem nos gráficos mensais
 ✅ Aparecem no resumo financeiro (contasReceberPendentes)
 ```
 
 ### 2. Data de Pagamento Nula
+
 ```typescript
 // Apenas contas com dataPagamento são contabilizadas
 if (conta.dataPagamento) {
-    // Processa conta paga
+  // Processa conta paga
 }
 ```
 
 ### 3. Status Obrigatório
+
 ```typescript
 // Filtro explícito por status
 where: {
-    status: 'Pago'
+  status: "Pago";
 }
 ```
 
 ### 4. Período de Análise
+
 ```typescript
 // Últimos 12 meses a partir da data de pagamento
 dataPagamento: {
-    gte: dataInicio  // 12 meses atrás
+  gte: dataInicio; // 12 meses atrás
 }
 ```
 
@@ -368,7 +398,7 @@ dataPagamento: {
 // Frontend
 const Dashboard = () => {
     const [dados, setDados] = useState([]);
-    
+
     useEffect(() => {
         fetch('/api/relatorios/financeiro', {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -376,13 +406,13 @@ const Dashboard = () => {
         .then(res => res.json())
         .then(data => setDados(data.data));
     }, []);
-    
+
     return (
         <div>
             <h2>Fluxo de Caixa (Últimos 12 Meses)</h2>
             <BarChart>
                 {dados.map(mes => (
-                    <Bar 
+                    <Bar
                         key={mes.mes}
                         label={mes.mes}
                         receita={mes.receita}    // Valores PAGOS
@@ -391,7 +421,7 @@ const Dashboard = () => {
                     />
                 ))}
             </BarChart>
-            
+
             <p className="text-sm text-gray-600">
                 * Valores baseados em pagamentos efetivamente realizados
             </p>
@@ -405,11 +435,13 @@ const Dashboard = () => {
 ## 🎓 Conclusão
 
 ### Antes:
+
 - ❌ Relatórios por data de vencimento
 - ❌ Incluía contas não pagas
 - ❌ Não refletia realidade financeira
 
 ### Depois:
+
 - ✅ Relatórios por data de pagamento
 - ✅ Apenas contas efetivamente pagas
 - ✅ Fluxo de caixa real
@@ -419,4 +451,3 @@ const Dashboard = () => {
 
 **Atualização implementada em 20/10/2025** 💰  
 **Sistema S3E Engenharia Elétrica**
-

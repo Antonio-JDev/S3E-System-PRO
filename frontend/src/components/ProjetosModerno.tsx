@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef, useContext } from 'react';
 import { toast } from 'sonner';
 import ModalVizualizacaoProjeto from './ModalVizualizacaoProjeto';
-import TeamManagerModal from './TeamManagerModal';
+import OsEquipeAnalyticsModal from './OsEquipeAnalyticsModal';
+import { isAdmin, isDeveloper } from '../utils/permissions';
 import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
 import { clientesService, type Cliente } from '../services/clientesService';
 import { orcamentosService, type Orcamento } from '../services/orcamentosService';
@@ -12,6 +13,7 @@ import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { serverDateToInput, formatDateDisplay } from '../utils/date';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -139,11 +141,14 @@ interface ProjetosProps {
     onViewSale?: (saleId: string) => void;
     onViewClient?: (clientId: string) => void;
     onViewObra?: (obraId: string) => void;
+    initialProjectId?: string | null;
+    initialProjectTab?: ViewModalTab;
+    onClearInitialProject?: () => void;
 }
 
 type ViewModalTab = 'geral' | 'materiais' | 'etapas' | 'qualidade';
 
-const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, onViewBudget, onViewSale, onViewClient, onViewObra }) => {
+const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, onViewBudget, onViewSale, onViewClient, onViewObra, initialProjectId, initialProjectTab = 'geral', onClearInitialProject }) => {
     // ==================== AUTH ====================
     const authContext = useContext(AuthContext);
     const user = authContext?.user;
@@ -153,6 +158,11 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         const userRole = user?.role?.toLowerCase();
         return userRole === 'admin' || userRole === 'desenvolvedor';
     }, [user?.role]);
+
+    const canViewKanbanTempoRelatorio = useMemo(
+        () => isAdmin(user as any) || isDeveloper(user as any),
+        [user]
+    );
     
     // ==================== ESTADOS ====================
     const [projetos, setProjetos] = useState<Projeto[]>([]);
@@ -160,13 +170,23 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
     const [orcamentos, setOrcamentos] = useState<Orcamento[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [projectProgressMap, setProjectProgressMap] = useState<Record<string, {
+        percentual: number;
+        tasksTotal: number;
+        tasksConcluidas: number;
+        obrasTotal: number;
+        obrasConcluidas: number;
+    }>>({});
 
     // Filtros
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('Todos');
     const [responsavelFilter, setResponsavelFilter] = useState<string>('Todos');
     const [mostrarCancelados, setMostrarCancelados] = useState(false);
-    const [mostrarApenasOSRecentes, setMostrarApenasOSRecentes] = useState(true); // ✅ NOVO: Filtrar apenas OS >= 2155 por padrão
+    const [minhasTarefasFilter, setMinhasTarefasFilter] = useState(false);
+    const [projetoIdsComMinhasTarefas, setProjetoIdsComMinhasTarefas] = useState<Set<string>>(new Set());
+    const [projetoIdsComMinhasTarefasAtrasadas, setProjetoIdsComMinhasTarefasAtrasadas] = useState<Set<string>>(new Set());
+    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'concluidos'>('listagem');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Ordem De Serviços'));
     
     // Salvar viewMode no localStorage quando mudar
@@ -241,10 +261,53 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
     // Dropdown menu state
     const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
+    // Search input state para Cliente e Orçamento (filtrar ao digitar)
+    const [buscaCliente, setBuscaCliente] = useState('');
+    const [buscaOrcamento, setBuscaOrcamento] = useState('');
+    const [openDropdownCliente, setOpenDropdownCliente] = useState(false);
+    const [openDropdownOrcamento, setOpenDropdownOrcamento] = useState(false);
+
     // ==================== CARREGAMENTO DE DADOS ====================
     useEffect(() => {
         loadData();
     }, []);
+
+    // Recalcular progresso quando a lista de projetos mudar (após loadData)
+    useEffect(() => {
+        if (projetos && projetos.length > 0) {
+            fetchProgressForProjects(projetos);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [projetos]);
+
+    // Abrir modal de detalhes quando veio de notificação (botão IR) com projeto e aba Kanban
+    useEffect(() => {
+        if (!initialProjectId || !onClearInitialProject || projetos.length === 0) return;
+        const projeto = projetos.find((p) => p.id === initialProjectId);
+        if (projeto) {
+            setProjetoToView(projeto);
+            setViewModalActiveTab(initialProjectTab);
+            setIsViewModalOpen(true);
+            onClearInitialProject();
+        }
+    }, [initialProjectId, initialProjectTab, onClearInitialProject, projetos]);
+
+    // Listas filtradas para search input (Cliente e Orçamento) — filtram a cada caractere digitado
+    const clientesFiltrados = useMemo(() => {
+        const termo = (buscaCliente || '').trim().toLowerCase();
+        if (!termo) return clientes;
+        return clientes.filter(c => (c.nome || '').toLowerCase().includes(termo) || (c.documento || '').toString().toLowerCase().includes(termo));
+    }, [clientes, buscaCliente]);
+
+    const orcamentosFiltrados = useMemo(() => {
+        const termo = (buscaOrcamento || '').trim().toLowerCase();
+        if (!termo) return orcamentos;
+        return orcamentos.filter(o =>
+            (o.titulo || '').toLowerCase().includes(termo) ||
+            (o.cliente?.nome || '').toLowerCase().includes(termo) ||
+            (o.numeroSequencial != null && String(o.numeroSequencial).includes(termo))
+        );
+    }, [orcamentos, buscaOrcamento]);
 
     const loadData = async () => {
         try {
@@ -283,22 +346,43 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
             }
 
             if (usuariosRes.success && usuariosRes.data) {
-                // Filtrar apenas roles técnicas: engenheiro, tecnico, orcamentista, compras, gerente
+                // Permitir que todos os usuários possam ser selecionados/visíveis (não apenas roles técnicas)
                 const usuariosArray = Array.isArray(usuariosRes.data) ? usuariosRes.data : [];
-                const usuariosFiltrados = usuariosArray
-                    .filter((u: any) => 
-                        ['engenheiro', 'tecnico', 'técnico', 'orcamentista', 'compras', 'gerente'].includes(u.role?.toLowerCase())
-                    )
-                    .map((u: any) => ({
-                        id: u.id,
-                        nome: u.name || u.nome || '',
-                        email: u.email || '',
-                        funcao: u.role || u.funcao || '',
-                        role: u.role || ''
-                    }));
-                setUsuarios(usuariosFiltrados);
+                const usuariosMap = usuariosArray.map((u: any) => ({
+                    id: u.id,
+                    nome: u.name || u.nome || '',
+                    email: u.email || '',
+                    funcao: u.role || u.funcao || '',
+                    role: u.role || ''
+                }));
+                setUsuarios(usuariosMap);
             } else {
                 setUsuarios([]);
+            }
+
+            // Após carregar projetos, buscar tasks para calcular progresso real
+            if (projetosRes.success && projetosRes.data) {
+                fetchProgressForProjects(Array.isArray(projetosRes.data) ? projetosRes.data : []);
+            }
+
+            // Atualizar lista de OS com minhas tarefas (a fazer / em andamento)
+            try {
+                const resMinhas = await axiosApiService.get<{ success: boolean; data: string[] }>('/api/projetos/ids-com-minhas-tarefas');
+                if (resMinhas.success && Array.isArray(resMinhas.data)) {
+                    setProjetoIdsComMinhasTarefas(new Set(resMinhas.data));
+                }
+            } catch {
+                setProjetoIdsComMinhasTarefas(new Set());
+            }
+
+            // Atualizar lista de OS com minhas tarefas atrasadas (prazo expirado)
+            try {
+                const resAtrasadas = await axiosApiService.get<{ success: boolean; data: string[] }>('/api/projetos/ids-com-minhas-tarefas-atrasadas');
+                if (resAtrasadas.success && Array.isArray(resAtrasadas.data)) {
+                    setProjetoIdsComMinhasTarefasAtrasadas(new Set(resAtrasadas.data));
+                }
+            } catch {
+                setProjetoIdsComMinhasTarefasAtrasadas(new Set());
             }
 
         } catch (err) {
@@ -309,53 +393,85 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         }
     };
 
+    // Busca tasks por projeto e calcula progresso (mesma lógica do modal)
+    const fetchProgressForProjects = async (projetosArray: Projeto[]) => {
+        try {
+            const ids = (projetosArray || []).map(p => p.id).filter(Boolean);
+            if (ids.length === 0) return;
+            const resp = await axiosApiService.get<{ [key: string]: any }>(`/api/projetos/progresso?ids=${ids.join(',')}`);
+            if (resp.success && resp.data) {
+                setProjectProgressMap(resp.data);
+            } else {
+                console.warn('Resposta inesperada ao buscar progresso em lote, fallback para cálculo local');
+                // fallback: manter comportamento anterior simples
+                const map: Record<string, any> = {};
+                projetosArray.forEach(p => {
+                    map[p.id] = { percentual: calcularProgressoProjeto(p), tasksTotal: 0, tasksConcluidas: 0, obrasTotal: 0, obrasConcluidas: 0 };
+                });
+                setProjectProgressMap(map);
+            }
+        } catch (err) {
+            console.error('Erro ao buscar progresso de projetos:', err);
+            const map: Record<string, any> = {};
+            projetosArray.forEach(p => {
+                map[p.id] = { percentual: calcularProgressoProjeto(p), tasksTotal: 0, tasksConcluidas: 0, obrasTotal: 0, obrasConcluidas: 0 };
+            });
+            setProjectProgressMap(map);
+        }
+    };
+
+    const calcularProgressoProjeto = (projeto: Projeto): number => {
+        switch (projeto.status) {
+            case 'PROPOSTA': return 10;
+            case 'VALIDADO': return 25;
+            case 'APROVADO': return 40;
+            case 'EXECUCAO': return 60;
+            case 'CONCLUIDO': return 100;
+            case 'CANCELADO': return 0;
+            default: return 0;
+        }
+    };
+
+    // ==================== ABAS: Listagem (em andamento) vs Concluídos (100%) ====================
+    const projetosListagemBase = useMemo(() => {
+        if (!Array.isArray(projetos)) return [];
+        return projetos.filter(projeto => {
+            if (!mostrarCancelados && projeto.status === 'CANCELADO') return false;
+            const percentual = projectProgressMap[projeto.id]?.percentual ?? calcularProgressoProjeto(projeto);
+            const estaConcluido100 = projeto.status === 'CONCLUIDO' && percentual >= 100;
+            return !estaConcluido100; // Listagem: tudo que NÃO é concluído 100%
+        });
+    }, [projetos, mostrarCancelados, projectProgressMap]);
+
+    const projetosConcluidosBase = useMemo(() => {
+        if (!Array.isArray(projetos)) return [];
+        return projetos.filter(projeto => {
+            if (projeto.status === 'CANCELADO') return false;
+            const percentual = projectProgressMap[projeto.id]?.percentual ?? calcularProgressoProjeto(projeto);
+            return projeto.status === 'CONCLUIDO' && percentual >= 100;
+        });
+    }, [projetos, projectProgressMap]);
+
     // ==================== FILTROS ====================
     const filteredProjetos = useMemo(() => {
-        // Garantir que projetos seja sempre um array
-        if (!Array.isArray(projetos)) {
-            return [];
-        }
-        
-        return projetos.filter(projeto => {
-            // Ocultar cancelados por padrão (a menos que o usuário queira ver)
-            if (!mostrarCancelados && projeto.status === 'CANCELADO') {
-                return false;
-            }
-            
-            // ✅ NOVO: Filtrar apenas OS >= 2155 se o filtro estiver ativo
-            if (mostrarApenasOSRecentes) {
-                // Extrair número da OS diretamente
-                let numeroOS: number | null = null;
-                
-                // Prioridade: usar numeroSequencial do orçamento vinculado
-                if (projeto.orcamento?.numeroSequencial) {
-                    numeroOS = projeto.orcamento.numeroSequencial;
-                } else if (projeto.orcamentoId && orcamentos.length > 0) {
-                    // Fallback: buscar no array de orçamentos
-                    const orcamentoVinculado = orcamentos.find(o => o.id === projeto.orcamentoId);
-                    if (orcamentoVinculado?.numeroSequencial) {
-                        numeroOS = orcamentoVinculado.numeroSequencial;
-                    }
-                }
-                
-                // Se não encontrou número do orçamento, considera como OS antiga (< 2155)
-                if (numeroOS === null || numeroOS < 2155) {
-                    return false;
-                }
-            }
-            
-            const matchesSearch = 
+        const base = abaAtiva === 'concluidos' ? projetosConcluidosBase : projetosListagemBase;
+        if (!base.length) return [];
+
+        return base.filter(projeto => {
+            if (minhasTarefasFilter && !projetoIdsComMinhasTarefas.has(projeto.id)) return false;
+
+            const matchesSearch =
                 projeto.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 projeto.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 projeto.cliente?.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 projeto.id.toLowerCase().includes(searchTerm.toLowerCase());
-            
+
             const matchesStatus = statusFilter === 'Todos' || projeto.status === statusFilter;
             const matchesResponsavel = responsavelFilter === 'Todos' || projeto.responsavelId === responsavelFilter;
-            
+
             return matchesSearch && matchesStatus && matchesResponsavel;
         });
-    }, [projetos, searchTerm, statusFilter, responsavelFilter, mostrarCancelados, mostrarApenasOSRecentes, orcamentos]);
+    }, [abaAtiva, projetosListagemBase, projetosConcluidosBase, searchTerm, statusFilter, responsavelFilter, minhasTarefasFilter, projetoIdsComMinhasTarefas]);
 
     // Função para gerar número OS baseado no número do orçamento vinculado
     const gerarNumeroOS = (projeto: Projeto): string => {
@@ -405,8 +521,8 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 tipo: projeto.tipo,
                 clienteId: projeto.clienteId,
                 responsavelId: projeto.responsavelId,
-                dataInicio: projeto.dataInicio,
-                dataPrevisao: projeto.dataPrevisao,
+                dataInicio: serverDateToInput(projeto.dataInicio as any),
+                dataPrevisao: serverDateToInput(projeto.dataPrevisao as any),
                 orcamentoId: projeto.orcamentoId || ''
             });
         } else {
@@ -421,7 +537,11 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 dataPrevisao: '',
                 orcamentoId: ''
             });
+            setBuscaCliente('');
+            setBuscaOrcamento('');
         }
+        setOpenDropdownCliente(false);
+        setOpenDropdownOrcamento(false);
         setIsCreateModalOpen(true);
     };
 
@@ -457,7 +577,10 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        
+        if (!projetoToEdit && !formState.orcamentoId) {
+            toast.error('Selecione um orçamento aprovado');
+            return;
+        }
         try {
             if (projetoToEdit) {
                 const response = await projetosService.atualizar(projetoToEdit.id, formState);
@@ -644,13 +767,13 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 
                 if (response.success) {
                     toast.success('Obra gerada com sucesso!', {
-                        description: 'Você pode acessá-la na página de Obras'
+                        description: 'Você pode acessá-la em Execução Obra'
                     });
                     setProjetos(prev => prev.map(p => 
                         p.id === projetoToView.id ? { ...p, status: 'Em Execução' } : p
                     ));
                     setIsViewModalOpen(false);
-                    onNavigate('Obras');
+                    onNavigate('Execução Obra');
                 }
             } catch (err) {
                     toast.error('Erro ao gerar obra');
@@ -718,52 +841,29 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
         }
     };
 
-    const calcularProgressoProjeto = (projeto: Projeto): number => {
-        // Este é um cálculo simplificado para os cards
-        // O cálculo real completo é feito no modal quando o projeto é aberto
-        // Aqui usamos uma estimativa baseada no status do projeto
-        
-        switch (projeto.status) {
-            case 'PROPOSTA':
-                return 10; // Proposta inicial
-            case 'VALIDADO':
-                return 25; // Validado tecnicamente
-            case 'APROVADO':
-                return 40; // Aprovado pelo cliente
-            case 'EXECUCAO':
-                return 60; // Em execução (valor médio, será calculado precisamente no modal)
-            case 'CONCLUIDO':
-                return 100; // Concluído
-            case 'CANCELADO':
-                return 0; // Cancelado
-            default:
-                return 0;
-        }
-    };
-
     // ==================== RENDER ====================
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando projetos...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 dark:border-blue-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando projetos...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Ordem De Serviços</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Hub central de gerenciamento de ordens de serviço</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Ordem De Serviços</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Hub central de gerenciamento de ordens de serviço</p>
                     </div>
                 </div>
                 <div className="flex gap-3">
@@ -775,6 +875,13 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                         Gerenciar Equipe
                     </button>
                     <button
+                        onClick={() => { loadData(); fetchProgressForProjects(projetos); }}
+                        className="flex items-center gap-2 px-4 py-3 bg-yellow-50 text-yellow-800 rounded-xl hover:bg-yellow-100 transition-all font-semibold shadow-soft"
+                        title="Atualizar projetos"
+                    >
+                        ↻ Atualizar
+                    </button>
+                    <button
                         onClick={() => handleOpenCreateModal()}
                         className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
                     >
@@ -784,8 +891,60 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                 </div>
             </header>
 
+            {/* Abas de Navegação: Listagem | Concluídos (mesmo padrão da página de Orçamentos) */}
+            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
+                <div className="flex border-b border-gray-200 dark:border-dark-border">
+                    <button
+                        type="button"
+                        onClick={() => setAbaAtiva('listagem')}
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'listagem'
+                            ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                            : 'text-gray-600 dark:text-dark-text-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-dark-card'
+                        }`}
+                    >
+                        <div className="flex items-center justify-center gap-2">
+                            <span>📋</span>
+                            <span>Listagem</span>
+                            {abaAtiva === 'listagem' && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full">
+                                    {filteredProjetos.length}
+                                </span>
+                            )}
+                            {abaAtiva !== 'listagem' && projetosListagemBase.length > 0 && (
+                                <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full">
+                                    {projetosListagemBase.length}
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAbaAtiva('concluidos')}
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'concluidos'
+                            ? 'text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
+                            : 'text-gray-600 dark:text-dark-text-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-gray-50 dark:hover:bg-dark-card'
+                        }`}
+                    >
+                        <div className="flex items-center justify-center gap-2">
+                            <span>✅</span>
+                            <span>Concluídos</span>
+                            {abaAtiva === 'concluidos' && (
+                                <span className="px-2 py-0.5 text-xs bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full">
+                                    {filteredProjetos.length}
+                                </span>
+                            )}
+                            {abaAtiva !== 'concluidos' && projetosConcluidosBase.length > 0 && (
+                                <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full">
+                                    {projetosConcluidosBase.length}
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                </div>
+            </div>
+
             {/* Filtros e Busca */}
-            <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
+            <div className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     {/* Busca */}
                     <div className="md:col-span-2">
@@ -823,43 +982,45 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                         <select
                             value={responsavelFilter}
                             onChange={(e) => setResponsavelFilter(e.target.value)}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all dark:bg-dark-card dark:border-dark-border dark:text-dark-text"
                         >
                             <option value="Todos">Todos Responsáveis</option>
                             {/* opções de responsáveis poderão ser carregadas via API futura */}
                         </select>
                     </div>
+                    {abaAtiva === 'concluidos' && (
+                        <div className="md:col-span-4 flex items-center">
+                            <div className="bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-700 rounded-xl p-3 w-full">
+                                <p className="text-xs text-emerald-800 dark:text-emerald-300 font-semibold">
+                                    ✅ Exibindo apenas ordens de serviço concluídas (status Concluído e progresso 100%)
+                                </p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Resultado da Busca */}
                 <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
-                    <p className="text-sm text-gray-600">
-                        Exibindo <span className="font-bold text-gray-900">{filteredProjetos.length}</span> de <span className="font-bold text-gray-900">{projetos.length}</span> ordens de serviço
+                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                        {abaAtiva === 'concluidos' ? (
+                            <>Exibindo <span className="font-bold text-gray-900 dark:text-dark-text">{filteredProjetos.length}</span> de <span className="font-bold text-gray-900 dark:text-dark-text">{projetosConcluidosBase.length}</span> OS concluídas</>
+                        ) : (
+                            <>Exibindo <span className="font-bold text-gray-900 dark:text-dark-text">{filteredProjetos.length}</span> de <span className="font-bold text-gray-900 dark:text-dark-text">{projetosListagemBase.length}</span> ordens de serviço</>
+                        )}
                     </p>
                     <div className="flex items-center gap-3 flex-wrap">
                         <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         
-                        {/* ✅ NOVO: Botão para mostrar todas as OS ou apenas >= 2155 */}
-                        <button
-                            onClick={() => setMostrarApenasOSRecentes(!mostrarApenasOSRecentes)}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                                mostrarApenasOSRecentes
-                                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-300'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-                            }`}
-                            title={mostrarApenasOSRecentes ? 'Mostrar apenas OS a partir de 2155' : 'Mostrar todas as OS'}
-                        >
-                            {mostrarApenasOSRecentes ? (
-                                <span className="inline-flex items-center gap-1">
-                                    <span>📋 OS {'>='} 2155</span>
-                                </span>
-                            ) : (
-                                <span className="inline-flex items-center gap-1">
-                                    <span>📚 Todas as OS</span>
-                                </span>
-                            )}
-                        </button>
-                        
+                        {/* Filtro: Somente OS com minhas tarefas (a fazer / em andamento no Kanban) */}
+                        <label className="flex items-center gap-2 cursor-pointer" title="Exibir apenas OS em que você tem tarefas pendentes ou em andamento no Kanban">
+                            <input
+                                type="checkbox"
+                                checked={minhasTarefasFilter}
+                                onChange={(e) => setMinhasTarefasFilter(e.target.checked)}
+                                className="w-4 h-4 text-amber-500 border-gray-300 rounded focus:ring-amber-500"
+                            />
+                            <span className="text-sm text-gray-600">Somente OS com minhas tarefas</span>
+                        </label>
                         {/* Toggle Mostrar Cancelados */}
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -885,15 +1046,23 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
             {/* Grid de Ordens de Serviço */}
             {filteredProjetos.length === 0 ? (
-                <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-16 text-center">
-                    <ClipboardIcon className="w-20 h-20 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhuma ordem de serviço encontrada</h3>
-                    <p className="text-gray-500 mb-6">
-                        {searchTerm || statusFilter !== 'Todos' || responsavelFilter !== 'Todos'
-                            ? 'Tente ajustar os filtros de busca'
-                            : 'Comece criando sua primeira ordem de serviço'}
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border p-16 text-center">
+                    <div className="w-20 h-20 bg-gray-100 dark:bg-dark-border rounded-full flex items-center justify-center mx-auto mb-4">
+                        <span className="text-4xl">{abaAtiva === 'concluidos' ? '✅' : '📋'}</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">
+                        {abaAtiva === 'concluidos'
+                            ? 'Nenhuma OS concluída'
+                            : 'Nenhuma ordem de serviço encontrada'}
+                    </h3>
+                    <p className="text-gray-500 dark:text-dark-text-secondary mb-6">
+                        {abaAtiva === 'concluidos'
+                            ? 'Não há ordens de serviço com status Concluído e progresso 100% no momento.'
+                            : searchTerm || statusFilter !== 'Todos' || responsavelFilter !== 'Todos' || minhasTarefasFilter
+                                ? 'Tente ajustar os filtros de busca'
+                                : 'Comece criando sua primeira ordem de serviço'}
                     </p>
-                    {!searchTerm && statusFilter === 'Todos' && responsavelFilter === 'Todos' && (
+                    {abaAtiva === 'listagem' && !searchTerm && statusFilter === 'Todos' && responsavelFilter === 'Todos' && !minhasTarefasFilter && (
                         <button
                             onClick={() => handleOpenCreateModal()}
                             className="bg-gradient-to-r from-blue-600 to-blue-500 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
@@ -906,12 +1075,25 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredProjetos.map((projeto) => {
-                        // Calcular progresso real do projeto (mesmo cálculo do modal)
-                        const progresso = calcularProgressoProjeto(projeto);
+                        // Calcular progresso real do projeto (usar valor calculado por fetchProgressForProjects quando disponível)
+                        const progresso = projectProgressMap[projeto.id]?.percentual ?? calcularProgressoProjeto(projeto);
                         const numeroOS = gerarNumeroOS(projeto);
+                        const temMinhasTarefas = projetoIdsComMinhasTarefas.has(projeto.id);
+                        const temMinhasTarefasAtrasadas = projetoIdsComMinhasTarefasAtrasadas.has(projeto.id);
                         
                         return (
-                            <div key={projeto.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 hover:border-blue-300 relative group">
+                            <div
+                                key={projeto.id}
+                                className={`bg-white rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 relative group ${
+                                    temMinhasTarefasAtrasadas && temMinhasTarefas
+                                        ? 'border-2 border-red-600 hover:border-red-700 ring-2 ring-inset ring-amber-400 dark:ring-amber-500'
+                                        : temMinhasTarefasAtrasadas
+                                            ? 'border-2 border-red-600 hover:border-red-700'
+                                            : temMinhasTarefas
+                                                ? 'border-2 border-amber-400 hover:border-amber-500 dark:border-amber-500 dark:hover:border-amber-400'
+                                                : 'border border-gray-200 hover:border-blue-300'
+                                }`}
+                            >
                                 {/* Menu de Ações */}
                                 <div className="absolute top-4 right-4">
                                     <button
@@ -959,10 +1141,20 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
                                 {/* Conteúdo do Card */}
                                 <div className="mb-4">
-                                    <div className="flex items-center gap-2 mb-2">
+                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                                         <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded">
                                             {numeroOS}
                                         </span>
+                                        {temMinhasTarefasAtrasadas && (
+                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-white bg-red-600 px-2 py-1 rounded-md border border-red-700 shadow-sm" title="Você tem tarefa(s) atrasada(s) nesta OS">
+                                                Atrasada
+                                            </span>
+                                        )}
+                                            {temMinhasTarefas && (
+                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-200 px-2 py-1 rounded-md border border-amber-400 shadow-sm dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-600" title="Você tem tarefas a fazer ou em andamento nesta OS">
+                                                Minhas tarefas
+                                            </span>
+                                        )}
                                     </div>
                                     <h3 className="font-bold text-lg text-gray-900 mb-2 pr-8">{projeto.titulo}</h3>
                                     <p className="text-sm text-gray-600 line-clamp-2">{projeto.descricao}</p>
@@ -1003,8 +1195,8 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
                                 {/* Datas */}
                                 <div className="flex items-center justify-between text-xs text-gray-500 pt-4 border-t border-gray-100">
-                                    <span>Início: {new Date(projeto.dataInicio).toLocaleDateString('pt-BR')}</span>
-                                    <span>Previsão: {new Date(projeto.dataPrevisao).toLocaleDateString('pt-BR')}</span>
+                                    <span>Início: {formatDateDisplay(projeto.dataInicio as any)}</span>
+                                    <span>Previsão: {formatDateDisplay(projeto.dataPrevisao as any)}</span>
                                 </div>
                             </div>
                         );
@@ -1023,13 +1215,36 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                         <tbody className="divide-y divide-gray-200">
                             {filteredProjetos.map((projeto) => {
                                 const numeroOS = gerarNumeroOS(projeto);
+                                const temMinhasTarefasLista = projetoIdsComMinhasTarefas.has(projeto.id);
+                                const temMinhasTarefasAtrasadasLista = projetoIdsComMinhasTarefasAtrasadas.has(projeto.id);
                                 return (
-                                <tr key={projeto.id} className="hover:bg-gray-50 transition-colors">
+                                <tr
+                                    key={projeto.id}
+                                    className={`hover:bg-gray-50 transition-colors ${
+                                        temMinhasTarefasAtrasadasLista && temMinhasTarefasLista
+                                            ? 'border-l-4 border-l-red-600 shadow-[inset_4px_0_0_0_rgb(251,191,36)]'
+                                            : temMinhasTarefasAtrasadasLista
+                                                ? 'border-l-4 border-l-red-600'
+                                                : temMinhasTarefasLista
+                                                    ? 'border-l-4 border-l-amber-400'
+                                                    : ''
+                                    }`}
+                                >
                                     <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2 mb-1">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded">
                                                 {numeroOS}
                                             </span>
+                                            {temMinhasTarefasAtrasadasLista && (
+                                                <span className="text-xs font-bold text-white bg-red-600 px-2 py-1 rounded border border-red-700" title="Você tem tarefa(s) atrasada(s) nesta OS">
+                                                    Atrasada
+                                                </span>
+                                            )}
+                                            {temMinhasTarefasLista && (
+                                                <span className="text-xs font-bold text-amber-800 bg-amber-200 px-2 py-1 rounded border border-amber-400 dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-600" title="Você tem tarefas nesta OS">
+                                                    Minhas tarefas
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="font-semibold text-gray-900">{projeto.titulo}</p>
                                         <p className="text-xs text-gray-500">{projeto.descricao || 'Sem descrição'}</p>
@@ -1114,20 +1329,40 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                                     />
                                 </div>
 
-                                <div>
+                                <div className="relative">
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Cliente
                                     </label>
-                                    <select
-                                        value={formState.clienteId}
-                                        onChange={(e) => setFormState({...formState, clienteId: e.target.value})}
+                                    <input
+                                        type="text"
+                                        value={formState.clienteId ? (clientes.find(c => c.id === formState.clienteId)?.nome ?? '') : buscaCliente}
+                                        onChange={(e) => {
+                                            setBuscaCliente(e.target.value);
+                                            if (formState.clienteId) setFormState(prev => ({ ...prev, clienteId: '' }));
+                                            setOpenDropdownCliente(true);
+                                        }}
+                                        onFocus={() => setOpenDropdownCliente(true)}
+                                        onBlur={() => setTimeout(() => setOpenDropdownCliente(false), 200)}
+                                        placeholder="Digite para buscar o cliente..."
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    >
-                                        <option value="">Selecione o cliente</option>
-                                        {clientes.map(cliente => (
-                                            <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>
-                                        ))}
-                                    </select>
+                                    />
+                                    {openDropdownCliente && (
+                                        <ul className="absolute z-10 mt-1 w-full max-h-48 overflow-auto bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                                            {clientesFiltrados.length === 0 ? (
+                                                <li className="px-4 py-3 text-gray-500 text-sm">Nenhum cliente encontrado</li>
+                                            ) : (
+                                                clientesFiltrados.map(cliente => (
+                                                    <li
+                                                        key={cliente.id}
+                                                        onMouseDown={(e) => { e.preventDefault(); setFormState(prev => ({ ...prev, clienteId: cliente.id })); setBuscaCliente(''); setOpenDropdownCliente(false); }}
+                                                        className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                                    >
+                                                        {cliente.nome}{cliente.documento ? ` — ${cliente.documento}` : ''}
+                                                    </li>
+                                                ))
+                                            )}
+                                        </ul>
+                                    )}
                                 </div>
 
                                 <div>
@@ -1169,23 +1404,52 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
                                     </select>
                                 </div>
 
-                                <div className="md:col-span-2">
+                                <div className="md:col-span-2 relative">
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Orçamento *
                                     </label>
-                                    <select
-                                        value={formState.orcamentoId}
-                                        onChange={(e) => setFormState({...formState, orcamentoId: e.target.value})}
-                                        required
+                                    <input
+                                        type="text"
+                                        value={formState.orcamentoId ? (() => { const o = orcamentos.find(or => or.id === formState.orcamentoId); return o ? `${o.titulo} — ${o.cliente?.nome || ''} — R$ ${(o.precoVenda ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''; })() : buscaOrcamento}
+                                        onChange={(e) => {
+                                            setBuscaOrcamento(e.target.value);
+                                            if (formState.orcamentoId) setFormState(prev => ({ ...prev, orcamentoId: '' }));
+                                            setOpenDropdownOrcamento(true);
+                                        }}
+                                        onFocus={() => setOpenDropdownOrcamento(true)}
+                                        onBlur={() => setTimeout(() => setOpenDropdownOrcamento(false), 200)}
+                                        placeholder="Digite para buscar orçamento aprovado..."
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    >
-                                        <option value="">Selecione um orçamento aprovado</option>
-                                        {orcamentos.map(orcamento => (
-                                            <option key={orcamento.id} value={orcamento.id}>
-                                                {orcamento.titulo} - Cliente: {orcamento.cliente?.nome} - R$ {orcamento.precoVenda?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    />
+                                    {openDropdownOrcamento && (
+                                        <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                                            {orcamentosFiltrados.length === 0 ? (
+                                                <li className="px-4 py-3 text-gray-500 text-sm">Nenhum orçamento encontrado</li>
+                                            ) : (
+                                                orcamentosFiltrados.map(orcamento => (
+                                                    <li
+                                                        key={orcamento.id}
+                                                        onMouseDown={(e) => {
+                                                            e.preventDefault();
+                                                            const previsaoInicio = orcamento.previsaoInicio;
+                                                            const previsaoTermino = orcamento.previsaoTermino;
+                                                            setFormState(prev => ({
+                                                                ...prev,
+                                                                orcamentoId: orcamento.id,
+                                                                dataInicio: previsaoInicio ? serverDateToInput(previsaoInicio) : prev.dataInicio,
+                                                                dataPrevisao: previsaoTermino ? serverDateToInput(previsaoTermino) : prev.dataPrevisao
+                                                            }));
+                                                            setBuscaOrcamento('');
+                                                            setOpenDropdownOrcamento(false);
+                                                        }}
+                                                        className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                                    >
+                                                        {orcamento.titulo} — {orcamento.cliente?.nome || 'N/A'} — R$ {(orcamento.precoVenda ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    </li>
+                                                ))
+                                            )}
+                                        </ul>
+                                    )}
                                     {orcamentos.length === 0 && (
                                         <p className="text-xs text-orange-600 mt-1">
                                             ⚠️ Nenhum orçamento aprovado encontrado. Crie e aprove um orçamento primeiro.
@@ -1340,19 +1604,10 @@ const ProjetosModerno: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, o
 
             {/* MODAL: GERENCIAR EQUIPE */}
             {isTeamModalOpen && (
-                <TeamManagerModal
+                <OsEquipeAnalyticsModal
                     isOpen={isTeamModalOpen}
                     onClose={() => setIsTeamModalOpen(false)}
-                    usuarios={Array.isArray(usuarios) ? usuarios : []}
-                    onAddUsuario={(usuario) => {
-                        setUsuarios(prev => [...prev, usuario]);
-                    }}
-                    onUpdateUsuario={(usuario) => {
-                        setUsuarios(prev => prev.map(u => u.id === usuario.id ? usuario : u));
-                    }}
-                    onDeleteUsuario={(usuarioId) => {
-                        setUsuarios(prev => prev.filter(u => u.id !== usuarioId));
-                    }}
+                    canView={canViewKanbanTempoRelatorio}
                 />
             )}
 

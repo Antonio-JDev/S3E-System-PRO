@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export type NFeModoEnvio = 'NORMAL' | 'SVC-AN' | 'SVC-RS';
 export type NFeFilaStatus = 'PENDENTE' | 'ENVIANDO' | 'ENVIADA' | 'FALHA';
@@ -21,7 +19,7 @@ export class NFeFilaService {
   static async enfileirar(params: EnfileirarParams) {
     const { notaFiscalId, empresaFiscalId, ambiente, modo, xmlAssinado } = params;
 
-    const registro = await prisma.nFeFila.create({
+    const registro = await (prisma as any).nFeFila.create({
       data: {
         notaFiscalId: notaFiscalId || null,
         empresaFiscalId: empresaFiscalId || null,
@@ -53,7 +51,7 @@ export class NFeFilaService {
     status: NFeFilaStatus,
     options?: { erro?: string; proximaTentativa?: Date }
   ) {
-    const registro = await prisma.nFeFila.update({
+    const registro = await (prisma as any).nFeFila.update({
       where: { id },
       data: {
         status,
@@ -73,7 +71,7 @@ export class NFeFilaService {
    * Esta função deve ser chamada por um job/cron em background.
    */
   static async listarPendentes(limit = 20) {
-    return prisma.nFeFila.findMany({
+    return (prisma as any).nFeFila.findMany({
       where: {
         status: 'PENDENTE',
         proximaTentativa: {
@@ -85,6 +83,19 @@ export class NFeFilaService {
       },
       take: limit
     });
+  }
+
+  /**
+   * Remove um registro da fila (usado quando o item foi processado com sucesso)
+   */
+  static async remover(id: string) {
+    try {
+      return (prisma as any).nFeFila.delete({ where: { id } });
+    } catch (e) {
+      // se não puder deletar, apenas logar
+      console.warn('⚠️ Falha ao deletar item da NFeFila:', id, e instanceof Error ? e.message : e);
+      return null;
+    }
   }
 }
 

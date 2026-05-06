@@ -1,11 +1,31 @@
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
-import { API_CONFIG } from '../config/api';
+import axios, { AxiosError, AxiosInstance, AxiosResponse } from 'axios';
+import { API_CONFIG, getBackendUrl } from '../config/api';
+
+/** Extrai mensagem e status HTTP de erros Axios (corpo JSON com `error` / `message`). */
+function axiosErrorPayload(error: unknown): { message: string; status?: number } {
+  if (axios.isAxiosError(error)) {
+    const ax = error as AxiosError<{ error?: string; message?: string }>;
+    const status = ax.response?.status;
+    const data = ax.response?.data;
+    let msg = ax.message;
+    if (data && typeof data === 'object') {
+      const o = data as Record<string, unknown>;
+      if (typeof o.error === 'string' && o.error.trim()) msg = o.error.trim();
+      else if (typeof o.message === 'string' && o.message.trim()) msg = o.message.trim();
+    }
+    return { message: msg, status };
+  }
+  if (error instanceof Error) return { message: error.message };
+  return { message: String(error) };
+}
 
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   message?: string;
   error?: string;
+  status?: number;
+  headers?: Record<string, any>;
 }
 
 class AxiosApiService {
@@ -13,22 +33,19 @@ class AxiosApiService {
   private token: string | null = null;
 
   constructor(baseURL: string) {
-    // Validar e normalizar baseURL
+    // Validar e normalizar baseURL: prioriza VITE_API_URL; senão usa getBackendUrl() (dev → :3001, produção → mesma origem)
     let normalizedBaseURL = baseURL || '';
-    
-    // Se baseURL estiver vazio, tentar usar window.location.origin em desenvolvimento
     if (!normalizedBaseURL && typeof window !== 'undefined') {
-      // Em desenvolvimento, usar a origem atual
-      normalizedBaseURL = window.location.origin;
-      console.warn('⚠️ [AxiosApi] BASE_URL não configurado, usando origem atual:', normalizedBaseURL);
+      normalizedBaseURL = getBackendUrl();
+      if (!normalizedBaseURL) {
+        console.warn('⚠️ [AxiosApi] BASE_URL não configurado, usando origem atual');
+        normalizedBaseURL = window.location.origin;
+      }
     }
-    
-    // Remover barra final se houver
     if (normalizedBaseURL.endsWith('/')) {
       normalizedBaseURL = normalizedBaseURL.slice(0, -1);
     }
-
-    console.log('🔧 [AxiosApi] Inicializando com baseURL:', normalizedBaseURL || '(vazio - usando URLs relativas)');
+    console.log('🔧 [AxiosApi] Inicializando com baseURL:', normalizedBaseURL || '(vazio)');
 
     this.axiosInstance = axios.create({
       baseURL: normalizedBaseURL,
@@ -95,7 +112,9 @@ class AxiosApiService {
             return Promise.reject(new Error('Sessão expirada. Faça login novamente.'));
           }
           
-          return Promise.reject(new Error(data?.message || `HTTP error! status: ${status}`));
+          return Promise.reject(
+            new Error(data?.error || data?.message || `HTTP error! status: ${status}`)
+          );
         } else if (error.request) {
           // Erro de rede
           return Promise.reject(new Error('Erro de conexão. Verifique sua internet.'));
@@ -126,8 +145,25 @@ class AxiosApiService {
     localStorage.removeItem('token');
   }
 
+  /** GET que retorna o corpo como Blob (PDF, XML, etc.) - usa token do interceptor */
+  async getBlob(endpoint: string): Promise<Blob> {
+    const response = await this.axiosInstance.get(endpoint, { responseType: 'blob' });
+    return response.data as Blob;
+  }
+
+  /** POST que retorna o corpo como Blob (ex.: geração de PDF) - usa token do interceptor */
+  async postBlob(endpoint: string, data?: any): Promise<Blob> {
+    const response = await this.axiosInstance.post(endpoint, data, { responseType: 'blob' });
+    return response.data as Blob;
+  }
+
   // GET request
-  async get<T>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
+  async get<T>(
+    endpoint: string,
+    params?: Record<string, any>,
+    /** Sobrescreve timeout da instância (ex.: rotas lentas como lista de grupos). */
+    requestConfig?: { timeout?: number }
+  ): Promise<ApiResponse<T>> {
     try {
       // Validar endpoint
       if (!endpoint || !endpoint.startsWith('/')) {
@@ -138,7 +174,22 @@ class AxiosApiService {
         };
       }
 
-      const response = await this.axiosInstance.get(endpoint, { params });
+      const response = await this.axiosInstance.get(endpoint, {
+        params,
+        ...(requestConfig?.timeout != null ? { timeout: requestConfig.timeout } : {}),
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          Pragma: 'no-cache',
+          Expires: '0',
+        },
+      });
+      
+      console.log('📊 [AxiosApi] Response completa:', {
+        endpoint,
+        status: response.status,
+        data: response.data,
+        hasSuccess: 'success' in (response.data || {}),
+      });
       
       // Se o backend já retorna { success, data }, retornar direto
       if (response.data && typeof response.data === 'object' && 'success' in response.data) {
@@ -150,18 +201,20 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       console.error('❌ [AxiosApi] Erro na requisição GET:', {
         endpoint,
         params,
-        error: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
+        error: message,
+        status,
       });
-      
+
       return {
         success: false,
-        error: error?.response?.data?.error || error?.response?.data?.message || (error instanceof Error ? error.message : 'Unknown error'),
+        error: message,
+        status,
+        headers: axios.isAxiosError(error) ? error.response?.headers : undefined,
       };
     }
   }
@@ -181,10 +234,12 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
+        status,
       };
     }
   }
@@ -204,10 +259,12 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
+        status,
       };
     }
   }
@@ -227,10 +284,12 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
+        status,
       };
     }
   }
@@ -250,10 +309,12 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
+        status,
       };
     }
   }
@@ -277,10 +338,12 @@ class AxiosApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
+        status,
       };
     }
   }

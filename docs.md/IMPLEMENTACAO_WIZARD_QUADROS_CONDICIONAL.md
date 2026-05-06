@@ -2,7 +2,9 @@
 
 ## 🎯 Objetivo Alcançado
 
-Implementada **ramificação condicional** na **Etapa 1** do wizard de criação de quadros elétricos, que agora se adapta dinamicamente ao tipo de quadro selecionado (`POLICARBONATO`, `ALUMINIO`, `COMANDO`).
+Implementada **ramificação condicional** na **Etapa 1** do wizard de criação de
+quadros elétricos, que agora se adapta dinamicamente ao tipo de quadro
+selecionado (`POLICARBONATO`, `ALUMINIO`, `COMANDO`).
 
 ---
 
@@ -30,20 +32,23 @@ async buscarCaixasEstoque(tipo: 'ALUMINIO' | 'COMANDO'): Promise<CaixaEstoque[]>
 ```
 
 **Funcionalidades:**
+
 - ✅ Busca caixas específicas por tipo (ALUMINIO ou COMANDO)
 - ✅ Mock temporário implementado com dados realistas
-- ✅ Preparado para integração com endpoint real: `GET /api/estoque/caixas?tipo=ALUMINIO`
+- ✅ Preparado para integração com endpoint real:
+  `GET /api/estoque/caixas?tipo=ALUMINIO`
 - ✅ Simula latência de rede (500ms) para UX realista
 - ✅ Tratamento de erros robusto
 
 **Dados Mock:**
 
-| Tipo | Caixas Disponíveis |
-|------|-------------------|
+| Tipo         | Caixas Disponíveis                                |
+| ------------ | ------------------------------------------------- |
 | **ALUMINIO** | 4 modelos (500x700, 800x1200, 600x900, 1000x1500) |
-| **COMANDO** | 4 modelos (300x400, 500x600, 800x1000, 400x500) |
+| **COMANDO**  | 4 modelos (300x400, 500x600, 800x1000, 400x500)   |
 
 **Estrutura de uma Caixa:**
+
 ```typescript
 {
   id: 'caixa-alum-001',
@@ -67,11 +72,14 @@ async buscarCaixasEstoque(tipo: 'ALUMINIO' | 'COMANDO'): Promise<CaixaEstoque[]>
 // Estados específicos para ALUMINIO/COMANDO
 const [caixasDisponiveis, setCaixasDisponiveis] = useState<CaixaEstoque[]>([]);
 const [isLoadingCaixas, setIsLoadingCaixas] = useState(false);
-const [caixaSelecionada, setCaixaSelecionada] = useState<CaixaEstoque | null>(null);
-const [searchCaixaTerm, setSearchCaixaTerm] = useState('');
+const [caixaSelecionada, setCaixaSelecionada] = useState<CaixaEstoque | null>(
+  null
+);
+const [searchCaixaTerm, setSearchCaixaTerm] = useState("");
 ```
 
 **Propósito:**
+
 - `caixasDisponiveis`: Lista de caixas retornadas do service
 - `isLoadingCaixas`: Estado de carregamento
 - `caixaSelecionada`: Caixa única selecionada (apenas ALUMINIO/COMANDO)
@@ -82,17 +90,17 @@ const [searchCaixaTerm, setSearchCaixaTerm] = useState('');
 #### 2. **Nova Função: `loadCaixasDisponiveis()`**
 
 ```typescript
-const loadCaixasDisponiveis = async (tipo: 'ALUMINIO' | 'COMANDO') => {
+const loadCaixasDisponiveis = async (tipo: "ALUMINIO" | "COMANDO") => {
   try {
     setIsLoadingCaixas(true);
     console.log(`🔍 Carregando caixas de estoque do tipo: ${tipo}`);
-    
+
     const caixas = await quadrosService.buscarCaixasEstoque(tipo);
     setCaixasDisponiveis(caixas);
-    
+
     console.log(`✅ ${caixas.length} caixas carregadas`);
   } catch (error) {
-    console.error('❌ Erro ao carregar caixas disponíveis:', error);
+    console.error("❌ Erro ao carregar caixas disponíveis:", error);
     setCaixasDisponiveis([]);
   } finally {
     setIsLoadingCaixas(false);
@@ -101,6 +109,7 @@ const loadCaixasDisponiveis = async (tipo: 'ALUMINIO' | 'COMANDO') => {
 ```
 
 **Quando é chamada:**
+
 - Automaticamente quando o tipo muda para ALUMINIO ou COMANDO (via `useEffect`)
 - Exibe logs informativos para debug
 
@@ -110,13 +119,14 @@ const loadCaixasDisponiveis = async (tipo: 'ALUMINIO' | 'COMANDO') => {
 
 ```typescript
 useEffect(() => {
-  if (isOpen && (tipoQuadro === 'ALUMINIO' || tipoQuadro === 'COMANDO')) {
+  if (isOpen && (tipoQuadro === "ALUMINIO" || tipoQuadro === "COMANDO")) {
     loadCaixasDisponiveis(tipoQuadro);
   }
 }, [tipoQuadro, isOpen]);
 ```
 
 **Comportamento:**
+
 - ✅ Monitora mudanças no `tipoQuadro`
 - ✅ Carrega caixas automaticamente quando tipo é ALUMINIO ou COMANDO
 - ✅ Só executa se o modal estiver aberto
@@ -128,14 +138,16 @@ useEffect(() => {
 ```typescript
 const caixasFiltradas = useMemo(() => {
   if (!searchCaixaTerm) return caixasDisponiveis;
-  return caixasDisponiveis.filter(c =>
-    c.descricao.toLowerCase().includes(searchCaixaTerm.toLowerCase()) ||
-    c.codigo.toLowerCase().includes(searchCaixaTerm.toLowerCase())
+  return caixasDisponiveis.filter(
+    (c) =>
+      c.descricao.toLowerCase().includes(searchCaixaTerm.toLowerCase()) ||
+      c.codigo.toLowerCase().includes(searchCaixaTerm.toLowerCase())
   );
 }, [caixasDisponiveis, searchCaixaTerm]);
 ```
 
 **Funcionalidade:**
+
 - Busca por descrição ou código
 - Case-insensitive
 - Performance otimizada com `useMemo`
@@ -145,31 +157,35 @@ const caixasFiltradas = useMemo(() => {
 #### 5. **Novos Handlers**
 
 ##### `handleSelecionarCaixaEstoque()`
+
 ```typescript
 const handleSelecionarCaixaEstoque = (caixa: CaixaEstoque) => {
   setCaixaSelecionada(caixa);
-  
+
   // Atualizar config com a caixa selecionada
-  setConfig(prev => ({
+  setConfig((prev) => ({
     ...prev,
-    caixas: [{
-      materialId: caixa.id,
-      quantidade: 1
-    }]
+    caixas: [
+      {
+        materialId: caixa.id,
+        quantidade: 1,
+      },
+    ],
   }));
-  
-  setSearchCaixaTerm('');
+
+  setSearchCaixaTerm("");
   console.log(`✅ Caixa selecionada: ${caixa.descricao}`);
 };
 ```
 
 ##### `handleRemoverCaixaEstoque()`
+
 ```typescript
 const handleRemoverCaixaEstoque = () => {
   setCaixaSelecionada(null);
-  setConfig(prev => ({
+  setConfig((prev) => ({
     ...prev,
-    caixas: []
+    caixas: [],
   }));
 };
 ```
@@ -201,7 +217,9 @@ onClick={() => {
 ```
 
 **Lógica:**
-- **POLICARBONATO**: Valida se `config.caixas.length > 0` (múltiplas caixas permitidas)
+
+- **POLICARBONATO**: Valida se `config.caixas.length > 0` (múltiplas caixas
+  permitidas)
 - **ALUMINIO/COMANDO**: Valida se `caixaSelecionada !== null` (apenas uma caixa)
 
 ---
@@ -213,12 +231,14 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 ### 🔵 Fluxo A: POLICARBONATO (Original)
 
 **Características:**
+
 - Busca genérica de materiais em estoque
 - Permite adicionar **múltiplas caixas**
 - Lista de caixas adicionadas
 - Remove caixas individualmente
 
 **UI:**
+
 - Input de busca com ícone de lupa
 - Lista de materiais filtrados (max 10)
 - Cards roxos para caixas adicionadas
@@ -229,6 +249,7 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 ### 🔵 Fluxo B: ALUMINIO / COMANDO (Novo)
 
 **Características:**
+
 - Busca **específica** em caixas de estoque
 - Permite selecionar **apenas UMA caixa**
 - Tabela profissional com caixas disponíveis
@@ -237,39 +258,51 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 **UI Componentes:**
 
 1. **Header Informativo:**
+
 ```tsx
 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border border-blue-200">
   <h3>Etapa 1: Seleção da Caixa de Estoque</h3>
-  <p>Tipo: <span className="font-semibold text-blue-700">{tipoQuadro}</span></p>
+  <p>
+    Tipo: <span className="font-semibold text-blue-700">{tipoQuadro}</span>
+  </p>
 </div>
 ```
 
 2. **Loading State:**
+
 ```tsx
-{isLoadingCaixas && (
-  <div className="text-center py-8">
-    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
-    <p>Carregando caixas disponíveis...</p>
-  </div>
-)}
+{
+  isLoadingCaixas && (
+    <div className="text-center py-8">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      <p>Carregando caixas disponíveis...</p>
+    </div>
+  );
+}
 ```
 
 3. **Card de Caixa Selecionada:**
+
 ```tsx
-{caixaSelecionada && (
-  <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
-    <span className="text-2xl">✅</span>
-    <h4>Caixa Selecionada</h4>
-    <p>{caixaSelecionada.descricao}</p>
-    <p>Código: {caixaSelecionada.codigo}</p>
-    <p>Estoque: {caixaSelecionada.estoque} {caixaSelecionada.unidadeMedida}</p>
-    <p>R$ {caixaSelecionada.preco}</p>
-    <button onClick={handleRemoverCaixaEstoque}>Remover</button>
-  </div>
-)}
+{
+  caixaSelecionada && (
+    <div className="bg-green-50 border-2 border-green-300 rounded-xl p-4">
+      <span className="text-2xl">✅</span>
+      <h4>Caixa Selecionada</h4>
+      <p>{caixaSelecionada.descricao}</p>
+      <p>Código: {caixaSelecionada.codigo}</p>
+      <p>
+        Estoque: {caixaSelecionada.estoque} {caixaSelecionada.unidadeMedida}
+      </p>
+      <p>R$ {caixaSelecionada.preco}</p>
+      <button onClick={handleRemoverCaixaEstoque}>Remover</button>
+    </div>
+  );
+}
 ```
 
 4. **Tabela de Seleção:**
+
 ```tsx
 <table className="w-full">
   <thead className="bg-gray-100 sticky top-0">
@@ -282,7 +315,7 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
     </tr>
   </thead>
   <tbody>
-    {caixasFiltradas.map(caixa => (
+    {caixasFiltradas.map((caixa) => (
       <tr className="hover:bg-blue-50">
         <td>{caixa.codigo}</td>
         <td>{caixa.descricao}</td>
@@ -304,14 +337,19 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 ```
 
 **Badges de Estoque com Cores:**
+
 - Verde: `estoque > 5`
 - Amarelo: `estoque > 2 && estoque <= 5`
 - Vermelho: `estoque <= 2`
 
 5. **Dica Informativa:**
+
 ```tsx
 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-  <p>💡 Dica: Para quadros tipo {tipoQuadro}, selecione apenas UMA caixa do estoque.</p>
+  <p>
+    💡 Dica: Para quadros tipo {tipoQuadro}, selecione apenas UMA caixa do
+    estoque.
+  </p>
 </div>
 ```
 
@@ -321,17 +359,18 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 
 ### Estados Visuais:
 
-| Estado | Descrição | Cor |
-|--------|-----------|-----|
-| **Loading** | Spinner animado | Roxo |
-| **Sem caixas** | Mensagem centralizada | Cinza |
-| **Caixa selecionada** | Card destacado com ✅ | Verde |
-| **Hover na tabela** | Linha destacada | Azul claro |
-| **Estoque alto** | Badge verde | Verde |
-| **Estoque médio** | Badge amarelo | Amarelo |
-| **Estoque baixo** | Badge vermelho | Vermelho |
+| Estado                | Descrição             | Cor        |
+| --------------------- | --------------------- | ---------- |
+| **Loading**           | Spinner animado       | Roxo       |
+| **Sem caixas**        | Mensagem centralizada | Cinza      |
+| **Caixa selecionada** | Card destacado com ✅ | Verde      |
+| **Hover na tabela**   | Linha destacada       | Azul claro |
+| **Estoque alto**      | Badge verde           | Verde      |
+| **Estoque médio**     | Badge amarelo         | Amarelo    |
+| **Estoque baixo**     | Badge vermelho        | Vermelho   |
 
 ### Responsividade:
+
 - ✅ Tabela com scroll vertical (max-height: 96)
 - ✅ Header sticky na tabela
 - ✅ Layout adaptativo com Tailwind CSS
@@ -361,7 +400,8 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 5. Usuário busca por "800x1200"
 6. Seleciona "Quadro de Distribuição Alumínio 800x1200mm"
 7. ✅ Card verde aparece mostrando caixa selecionada
-8. `config.caixas` é atualizado com `[{ materialId: 'caixa-alum-002', quantidade: 1 }]`
+8. `config.caixas` é atualizado com
+   `[{ materialId: 'caixa-alum-002', quantidade: 1 }]`
 9. Clica em "Próxima Etapa →"
 10. ✅ Validação: Verifica se `caixaSelecionada !== null`
 11. Avança para Etapa 2
@@ -390,6 +430,7 @@ A renderização da Etapa 1 agora possui **dois fluxos completamente diferentes*
 ```
 
 **Útil para:**
+
 - Debug de fluxo de dados
 - Verificar quando chamadas são feitas
 - Monitorar seleções do usuário
@@ -405,6 +446,7 @@ GET /api/estoque/caixas?tipo=ALUMINIO
 ```
 
 **Response esperado:**
+
 ```json
 {
   "success": true,
@@ -414,7 +456,7 @@ GET /api/estoque/caixas?tipo=ALUMINIO
       "codigo": "QDA-500x700",
       "descricao": "Quadro de Distribuição Alumínio 500x700mm - 12 Disjuntores",
       "estoque": 5,
-      "preco": 450.00,
+      "preco": 450.0,
       "unidadeMedida": "un"
     }
   ]
@@ -424,6 +466,7 @@ GET /api/estoque/caixas?tipo=ALUMINIO
 **Para ativar a integração real:**
 
 1. Descomentar no `quadrosService.ts`:
+
 ```typescript
 const response = await axiosApiService.get(`/api/estoque/caixas?tipo=${tipo}`);
 if (response.success && response.data) {
@@ -488,7 +531,6 @@ if (response.success && response.data) {
    - Verificar se mostra busca genérica
    - Adicionar múltiplas caixas
    - Tentar avançar sem caixas (deve bloquear)
-   
 3. **Testar ALUMINIO:**
    - Selecionar tipo ALUMINIO
    - Aguardar carregamento (500ms)
@@ -517,5 +559,6 @@ if (response.success && response.data) {
 
 ## 🎉 IMPLEMENTAÇÃO COMPLETA E FUNCIONAL!
 
-**O wizard de quadros elétricos agora é totalmente adaptável ao tipo selecionado, proporcionando uma experiência otimizada para cada cenário de uso!** 🚀
-
+**O wizard de quadros elétricos agora é totalmente adaptável ao tipo
+selecionado, proporcionando uma experiência otimizada para cada cenário de
+uso!** 🚀

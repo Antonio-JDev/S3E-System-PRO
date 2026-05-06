@@ -11,6 +11,20 @@ const router = Router();
 router.use(authenticate);
 
 /**
+ * @route GET /api/configuracoes/meta-vendas
+ * @desc Meta de faturamento (global + por mês)
+ * @access Authenticated
+ */
+router.get('/meta-vendas', ConfiguracaoController.getMetaVendas);
+
+/**
+ * @route PUT /api/configuracoes/meta-vendas
+ * @desc Atualiza meta de um mês (e opcionalmente o valor padrão)
+ * @access Admin ou Desenvolvedor
+ */
+router.put('/meta-vendas', authorize('admin', 'desenvolvedor'), ConfiguracaoController.salvarMetaVendas);
+
+/**
  * @route GET /api/configuracoes
  * @desc Busca configurações do sistema
  * @access Authenticated
@@ -63,11 +77,25 @@ router.put('/logo-login', authorize('admin'), ConfiguracaoController.atualizarLo
 router.put('/logo-danfe', authorize('admin'), ConfiguracaoController.atualizarLogoDanfe);
 
 /**
- * @route GET /api/configuracoes/usuarios
- * @desc Lista todos os usuários
- * @access Admin only
+ * @route GET /api/configuracoes/usuarios/me/preferencias
+ * @desc Retorna preferências do usuário logado (ex: orcamentoInsercaoModo)
+ * @access Authenticated
  */
-router.get('/usuarios', authorize('admin'), ConfiguracaoController.listarUsuarios);
+router.get('/usuarios/me/preferencias', ConfiguracaoController.getPreferencias);
+
+/**
+ * @route PUT /api/configuracoes/usuarios/me/preferencias
+ * @desc Atualiza preferências do usuário logado
+ * @access Authenticated
+ */
+router.put('/usuarios/me/preferencias', ConfiguracaoController.salvarPreferencias);
+
+/**
+ * @route GET /api/configuracoes/usuarios
+ * @desc Lista todos os usuários (para atribuição em tarefas, kanban, etc. - qualquer usuário autenticado)
+ * @access Authenticated
+ */
+router.get('/usuarios', ConfiguracaoController.listarUsuarios);
 
 /**
  * @route PUT /api/configuracoes/usuarios/:id/role

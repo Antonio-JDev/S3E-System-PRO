@@ -19,13 +19,16 @@ export interface Venda {
   valorPago: number;
   valorPendente: number;
   dataVenda: string;
-  status: 'Ativa' | 'Cancelada' | 'Finalizada';
+  status: 'Ativa' | 'Cancelada' | 'Finalizada' | 'Pendente' | 'Faturado';
   formaPagamento: string;
   numeroParcelas: number;
   observacoes?: string;
   contasReceber?: ContaReceber[];
   orcamento?: any;
   cliente?: any;
+  contratoPdfUrl?: string | null;
+  contratoHtml?: string | null;
+  vendedorNome?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -375,6 +378,132 @@ class VendasService {
       return {
         success: false,
         error: 'Erro de conexão ao pagar conta'
+      };
+    }
+  }
+
+  /**
+   * Atualização parcial da venda: parcelas (datas/valores) e NCM dos itens do orçamento.
+   */
+  async atualizarVenda(
+    vendaId: string,
+    payload: {
+      parcelas?: Array<{ id: string; dataVencimento?: string; valorParcela?: number }>;
+      itensNcm?: Array<{ id: string; ncm: string }>;
+    }
+  ) {
+    try {
+      const response = await axiosApiService.patch<Venda>(`/api/vendas/${vendaId}`, payload);
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao atualizar venda.' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão.'
+      };
+    }
+  }
+
+  /**
+   * Atualiza o valor total da venda e das parcelas (contas a receber) com o valor final do orçamento.
+   * Apenas role desenvolvedor (backend retorna 403 para outros).
+   */
+  async atualizarValorDoOrcamento(vendaId: string) {
+    try {
+      const response = await axiosApiService.patch<{
+        success: boolean;
+        message: string;
+        valorAnterior: number;
+        valorNovo: number;
+        contasAtualizadas: number;
+      }>(`/api/vendas/${vendaId}/atualizar-valor-orcamento`);
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: (response as any).error || 'Erro ao atualizar valor.' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão.'
+      };
+    }
+  }
+
+  /**
+   * Atualiza o status da venda (ex.: Faturado após emissão de NF-e/NFS-e)
+   */
+  async atualizarStatus(vendaId: string, status: string) {
+    try {
+      const response = await axiosApiService.put<Venda>(`/api/vendas/${vendaId}/status`, { status });
+      if (response.success && response.data) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao atualizar status.' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão.'
+      };
+    }
+  }
+
+  /**
+   * Upload do PDF do contrato assinado pelo cliente (PV)
+   */
+  async uploadContratoAssinado(vendaId: string, file: File) {
+    try {
+      const formData = new FormData();
+      formData.append('arquivo', file);
+      const response = await axiosApiService.put<{ contratoPdfUrl: string }>(
+        `/api/vendas/${vendaId}/contrato-assinado`,
+        formData as any
+      );
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          message: response.message || 'Contrato assinado enviado com sucesso.'
+        };
+      }
+      return {
+        success: false,
+        error: response.error || 'Erro ao enviar contrato.'
+      };
+    } catch (error) {
+      console.error('❌ Erro ao enviar contrato assinado:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão ao enviar contrato.'
+      };
+    }
+  }
+
+  /**
+   * Salvar HTML do contrato editado (Jodit) no PV
+   */
+  async saveContratoHtml(vendaId: string, contratoHtml: string) {
+    try {
+      const response = await axiosApiService.put<{ contratoHtml: string }>(
+        `/api/vendas/${vendaId}/contrato`,
+        { contratoHtml }
+      );
+      if (response.success) {
+        return {
+          success: true,
+          message: response.message || 'Contrato salvo com sucesso.'
+        };
+      }
+      return {
+        success: false,
+        error: response.error || 'Erro ao salvar contrato.'
+      };
+    } catch (error) {
+      console.error('❌ Erro ao salvar contrato:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão ao salvar contrato.'
       };
     }
   }

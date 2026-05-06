@@ -2,13 +2,15 @@
 
 ## ✅ Implementação 100% Concluída
 
-O sistema S3E agora possui um **módulo financeiro completo** com gestão de vendas, contas a receber, contas a pagar e relatórios gerenciais.
+O sistema S3E agora possui um **módulo financeiro completo** com gestão de
+vendas, contas a receber, contas a pagar e relatórios gerenciais.
 
 ---
 
 ## 🎯 Módulos Implementados
 
 ### 1. 💰 VENDAS
+
 - ✅ Criar venda baseada em orçamento aprovado
 - ✅ Geração automática de contas a receber
 - ✅ Cálculo de parcelas e vencimentos
@@ -16,12 +18,14 @@ O sistema S3E agora possui um **módulo financeiro completo** com gestão de ven
 - ✅ Dashboard de vendas
 
 ### 2. 📥 CONTAS A RECEBER (Receitas)
+
 - ✅ Criadas automaticamente via vendas
 - ✅ Marcação de pagamento
 - ✅ Controle de vencimentos
 - ✅ Alertas de inadimplência
 
 ### 3. 📤 CONTAS A PAGAR (Despesas)
+
 - ✅ Criar conta manual
 - ✅ Criar contas parceladas
 - ✅ Integração com compras (automático)
@@ -29,6 +33,7 @@ O sistema S3E agora possui um **módulo financeiro completo** com gestão de ven
 - ✅ Alertas de vencimento
 
 ### 4. 📊 RELATÓRIOS E DASHBOARD
+
 - ✅ Dados financeiros mensais (12 meses)
 - ✅ Gráficos de receita x despesa
 - ✅ Resumo financeiro geral
@@ -40,6 +45,7 @@ O sistema S3E agora possui um **módulo financeiro completo** com gestão de ven
 ## 🔌 Endpoints Completos
 
 ### VENDAS (`/api/vendas`)
+
 ```
 POST   /realizar                - Criar venda
 GET    /                        - Listar vendas
@@ -50,6 +56,7 @@ PUT    /contas/:id/pagar        - Pagar conta a receber
 ```
 
 ### CONTAS A PAGAR (`/api/contas-pagar`)
+
 ```
 POST   /                        - Criar conta única
 POST   /parceladas              - Criar contas parceladas
@@ -63,6 +70,7 @@ GET    /alertas/a-vencer        - Contas a vencer
 ```
 
 ### RELATÓRIOS (`/api/relatorios`)
+
 ```
 GET    /dashboard               - Dashboard completo
 GET    /financeiro              - Dados mensais (12 meses)
@@ -82,18 +90,18 @@ GET    /clientes/top            - Top clientes
 ```
 1. ORÇAMENTO
    Cliente solicita → S3E cria → Cliente aprova ✅
-   
+
 2. VENDA
    POST /api/vendas/realizar
    → Sistema cria venda
    → Sistema gera contas a receber automaticamente
-   
+
 3. RECEBIMENTO
    Cliente paga parcela
    PUT /api/vendas/contas/:id/pagar
    → Status: "Pago"
    → dataPagamento registrada
-   
+
 4. RELATÓRIO
    GET /api/relatorios/financeiro
    → Receita aparece no mês do pagamento
@@ -116,13 +124,13 @@ GET    /clientes/top            - Top clientes
    → Sistema cria compra
    → Sistema atualiza estoque
    → Sistema gera contas a pagar automaticamente ✨
-   
+
 2. PAGAMENTO
    Vencimento chega
    PUT /api/contas-pagar/:id/pagar
    → Status: "Pago"
    → dataPagamento registrada
-   
+
 3. RELATÓRIO
    GET /api/relatorios/financeiro
    → Despesa aparece no mês do pagamento
@@ -136,11 +144,12 @@ GET    /clientes/top            - Top clientes
 ### Mês 1: Outubro 2025
 
 **Operações:**
+
 ```
 ✅ Venda: R$ 75.000 (3x)
    → Parcela 1 paga: R$ 41.666,67
 
-✅ Compra: R$ 30.000 (3x) 
+✅ Compra: R$ 30.000 (3x)
    → Parcela 1 paga: R$ 10.000
 
 ✅ Despesa Manual: Aluguel R$ 5.000
@@ -148,12 +157,13 @@ GET    /clientes/top            - Top clientes
 ```
 
 **Relatório Out/2025:**
+
 ```json
 {
   "mes": "Out/2025",
-  "receita": 41666.67,    // Venda parcela 1
-  "despesa": 15000.00,    // Compra parcela 1 + Aluguel
-  "lucro": 26666.67       // Lucro real
+  "receita": 41666.67, // Venda parcela 1
+  "despesa": 15000.0, // Compra parcela 1 + Aluguel
+  "lucro": 26666.67 // Lucro real
 }
 ```
 
@@ -162,6 +172,7 @@ GET    /clientes/top            - Top clientes
 ### Mês 2: Novembro 2025
 
 **Operações:**
+
 ```
 ✅ Parcela 2 da venda recebida: R$ 16.666,67
 ✅ Parcela 2 da compra paga: R$ 10.000
@@ -169,11 +180,12 @@ GET    /clientes/top            - Top clientes
 ```
 
 **Relatório Nov/2025:**
+
 ```json
 {
   "mes": "Nov/2025",
   "receita": 16666.67,
-  "despesa": 15000.00,
+  "despesa": 15000.0,
   "lucro": 1666.67
 }
 ```
@@ -183,6 +195,7 @@ GET    /clientes/top            - Top clientes
 ### Mês 3: Dezembro 2025
 
 **Operações:**
+
 ```
 ✅ Parcela 3 da venda recebida: R$ 16.666,67
 ✅ Parcela 3 da compra paga: R$ 10.000
@@ -190,11 +203,12 @@ GET    /clientes/top            - Top clientes
 ```
 
 **Relatório Dez/2025:**
+
 ```json
 {
   "mes": "Dez/2025",
   "receita": 16666.67,
-  "despesa": 15000.00,
+  "despesa": 15000.0,
   "lucro": 1666.67
 }
 ```
@@ -224,53 +238,47 @@ GET /api/relatorios/financeiro/resumo
 
 ```tsx
 <div className="p-8">
-    {/* Header */}
-    <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Contas a Pagar</h1>
-        <button className="bg-red-600 text-white px-4 py-2 rounded-lg">
-            ➕ Nova Conta
-        </button>
-    </div>
-    
-    {/* Cards de Resumo */}
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <Card>
-            <h3>Total a Pagar</h3>
-            <p className="text-3xl font-bold text-red-600">
-                R$ 45.000,00
-            </p>
-            <p className="text-sm text-gray-600">12 contas pendentes</p>
-        </Card>
-        
-        <Card>
-            <h3>Vence em 7 Dias</h3>
-            <p className="text-3xl font-bold text-yellow-600">
-                R$ 12.500,00
-            </p>
-            <p className="text-sm text-gray-600">3 contas</p>
-        </Card>
-        
-        <Card>
-            <h3>Atrasadas</h3>
-            <p className="text-3xl font-bold text-red-700">
-                R$ 5.000,00
-            </p>
-            <p className="text-sm text-gray-600">⚠️ 2 contas</p>
-        </Card>
-    </div>
-    
-    {/* Tabs */}
-    <Tabs>
-        <Tab label="Pendentes">
-            <TabelaContasPagar status="Pendente" />
-        </Tab>
-        <Tab label="Pagas">
-            <TabelaContasPagar status="Pago" />
-        </Tab>
-        <Tab label="Atrasadas">
-            <ContasAtrasadas />
-        </Tab>
-    </Tabs>
+  {/* Header */}
+  <div className="flex justify-between items-center mb-6">
+    <h1 className="text-2xl font-bold">Contas a Pagar</h1>
+    <button className="bg-red-600 text-white px-4 py-2 rounded-lg">
+      ➕ Nova Conta
+    </button>
+  </div>
+
+  {/* Cards de Resumo */}
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <Card>
+      <h3>Total a Pagar</h3>
+      <p className="text-3xl font-bold text-red-600">R$ 45.000,00</p>
+      <p className="text-sm text-gray-600">12 contas pendentes</p>
+    </Card>
+
+    <Card>
+      <h3>Vence em 7 Dias</h3>
+      <p className="text-3xl font-bold text-yellow-600">R$ 12.500,00</p>
+      <p className="text-sm text-gray-600">3 contas</p>
+    </Card>
+
+    <Card>
+      <h3>Atrasadas</h3>
+      <p className="text-3xl font-bold text-red-700">R$ 5.000,00</p>
+      <p className="text-sm text-gray-600">⚠️ 2 contas</p>
+    </Card>
+  </div>
+
+  {/* Tabs */}
+  <Tabs>
+    <Tab label="Pendentes">
+      <TabelaContasPagar status="Pendente" />
+    </Tab>
+    <Tab label="Pagas">
+      <TabelaContasPagar status="Pago" />
+    </Tab>
+    <Tab label="Atrasadas">
+      <ContasAtrasadas />
+    </Tab>
+  </Tabs>
 </div>
 ```
 
@@ -280,56 +288,47 @@ GET /api/relatorios/financeiro/resumo
 
 ```tsx
 <Modal title="Nova Conta a Pagar">
-    <form onSubmit={handleSubmit}>
-        {/* Fornecedor (opcional) */}
-        <Select name="fornecedorId" label="Fornecedor (Opcional)">
-            <option value="">Sem fornecedor</option>
-            {fornecedores.map(f => (
-                <option value={f.id}>{f.nome}</option>
-            ))}
-        </Select>
-        
-        {/* Descrição */}
-        <Input 
-            name="descricao"
-            label="Descrição"
-            placeholder="Ex: Aluguel Escritório - Nov/2025"
-            required
-        />
-        
-        {/* Valor */}
-        <Input 
-            name="valorParcela"
-            label="Valor (R$)"
-            type="number"
-            required
-        />
-        
-        {/* Vencimento */}
-        <Input 
-            name="dataVencimento"
-            label="Data de Vencimento"
-            type="date"
-            required
-        />
-        
-        {/* Observações */}
-        <Textarea 
-            name="observacoes"
-            label="Observações"
-            rows={3}
-        />
-        
-        {/* Botões */}
-        <div className="flex gap-3">
-            <button type="button" onClick={onClose}>
-                Cancelar
-            </button>
-            <button type="submit" className="bg-brand-blue text-white">
-                💰 Criar Conta
-            </button>
-        </div>
-    </form>
+  <form onSubmit={handleSubmit}>
+    {/* Fornecedor (opcional) */}
+    <Select name="fornecedorId" label="Fornecedor (Opcional)">
+      <option value="">Sem fornecedor</option>
+      {fornecedores.map((f) => (
+        <option value={f.id}>{f.nome}</option>
+      ))}
+    </Select>
+
+    {/* Descrição */}
+    <Input
+      name="descricao"
+      label="Descrição"
+      placeholder="Ex: Aluguel Escritório - Nov/2025"
+      required
+    />
+
+    {/* Valor */}
+    <Input name="valorParcela" label="Valor (R$)" type="number" required />
+
+    {/* Vencimento */}
+    <Input
+      name="dataVencimento"
+      label="Data de Vencimento"
+      type="date"
+      required
+    />
+
+    {/* Observações */}
+    <Textarea name="observacoes" label="Observações" rows={3} />
+
+    {/* Botões */}
+    <div className="flex gap-3">
+      <button type="button" onClick={onClose}>
+        Cancelar
+      </button>
+      <button type="submit" className="bg-brand-blue text-white">
+        💰 Criar Conta
+      </button>
+    </div>
+  </form>
 </Modal>
 ```
 
@@ -338,6 +337,7 @@ GET /api/relatorios/financeiro/resumo
 ## 🎓 Boas Práticas Aplicadas
 
 ### 1. Separação de Responsabilidades
+
 ```
 Service  → Lógica de negócio
 Controller → Validações e HTTP
@@ -345,38 +345,42 @@ Route → Proteção e mapeamento
 ```
 
 ### 2. Validações em Camadas
+
 ```typescript
 // Controller: Dados obrigatórios
 if (!descricao || !valorParcela) {
-    return res.status(400).json({ error: '...' });
+  return res.status(400).json({ error: "..." });
 }
 
 // Service: Regras de negócio
 if (valorParcela <= 0) {
-    throw new Error('Valor deve ser positivo');
+  throw new Error("Valor deve ser positivo");
 }
 ```
 
 ### 3. Tratamento de Erros
+
 ```typescript
 try {
-    const resultado = await Service.metodo();
-    res.json({ success: true, data: resultado });
+  const resultado = await Service.metodo();
+  res.json({ success: true, data: resultado });
 } catch (error) {
-    res.status(500).json({ 
-        error: 'Erro interno',
-        message: error.message 
-    });
+  res.status(500).json({
+    error: "Erro interno",
+    message: error.message,
+  });
 }
 ```
 
 ### 4. Autorização Granular
+
 ```typescript
 // Apenas admin e financeiro podem criar contas
-router.post('/', 
-    authenticate, 
-    authorize('admin', 'financeiro'),
-    Controller.criar
+router.post(
+  "/",
+  authenticate,
+  authorize("admin", "financeiro"),
+  Controller.criar
 );
 ```
 
@@ -430,6 +434,7 @@ Relatórios:
 ### 📊 Total: 20 Endpoints
 
 #### Vendas (6)
+
 - POST /api/vendas/realizar
 - GET /api/vendas
 - GET /api/vendas/:id
@@ -438,6 +443,7 @@ Relatórios:
 - PUT /api/vendas/contas/:id/pagar
 
 #### Contas a Pagar (9) ← NOVOS! ✨
+
 - POST /api/contas-pagar
 - POST /api/contas-pagar/parceladas
 - GET /api/contas-pagar
@@ -449,6 +455,7 @@ Relatórios:
 - GET /api/contas-pagar/alertas/a-vencer
 
 #### Relatórios (5)
+
 - GET /api/relatorios/dashboard
 - GET /api/relatorios/financeiro
 - GET /api/relatorios/financeiro/resumo
@@ -586,22 +593,25 @@ Margem:         44,4% ✅
 ### Alertas Implementados
 
 1. **Contas em Atraso**
+
    ```
    GET /api/contas-pagar/alertas/atrasadas
-   
+
    → Lista todas as contas vencidas e não pagas
    → Frontend: Badge vermelho no menu
    ```
 
 2. **Contas a Vencer**
+
    ```
    GET /api/contas-pagar/alertas/a-vencer?dias=7
-   
+
    → Lista contas que vencem nos próximos 7 dias
    → Frontend: Notificação amarela
    ```
 
 3. **Dashboard de Cobranças**
+
    ```
    - Contas vencendo hoje: 2
    - Contas vencendo esta semana: 5
@@ -614,28 +624,31 @@ Margem:         44,4% ✅
 
 ### Permissões por Perfil
 
-| Perfil | Criar | Ver | Pagar | Cancelar | Alertas |
-|--------|-------|-----|-------|----------|---------|
-| admin | ✅ | ✅ | ✅ | ✅ | ✅ |
-| financeiro | ✅ | ✅ | ✅ | ✅ | ✅ |
-| gerente | ❌ | ✅ | ❌ | ❌ | ✅ |
-| comercial | ❌ | ❌ | ❌ | ❌ | ❌ |
-| user | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Perfil     | Criar | Ver | Pagar | Cancelar | Alertas |
+| ---------- | ----- | --- | ----- | -------- | ------- |
+| admin      | ✅    | ✅  | ✅    | ✅       | ✅      |
+| financeiro | ✅    | ✅  | ✅    | ✅       | ✅      |
+| gerente    | ❌    | ✅  | ❌    | ❌       | ✅      |
+| comercial  | ❌    | ❌  | ❌    | ❌       | ❌      |
+| user       | ❌    | ❌  | ❌    | ❌       | ❌      |
 
 ---
 
 ## 📝 Arquivos Criados/Modificados
 
 ### Criados (3 arquivos)
+
 1. `backend/src/services/contasPagar.service.ts`
 2. `backend/src/controllers/contasPagarController.ts`
 3. `backend/src/routes/contasPagar.routes.ts`
 
 ### Modificados (2 arquivos)
+
 4. `backend/src/controllers/comprasController.ts` - Integração automática
 5. `backend/src/app.ts` - Rotas registradas
 
 ### Documentação (1 arquivo)
+
 6. `IMPLEMENTACAO_CONTAS_PAGAR.md`
 
 ---
@@ -643,6 +656,7 @@ Margem:         44,4% ✅
 ## 🧪 Testes Sugeridos
 
 ### Teste 1: Criar Conta Manual
+
 ```bash
 curl -X POST http://localhost:3001/api/contas-pagar \
   -H "Authorization: Bearer TOKEN" \
@@ -655,6 +669,7 @@ curl -X POST http://localhost:3001/api/contas-pagar \
 ```
 
 ### Teste 2: Criar Contas Parceladas
+
 ```bash
 curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
   -H "Authorization: Bearer TOKEN" \
@@ -668,18 +683,21 @@ curl -X POST http://localhost:3001/api/contas-pagar/parceladas \
 ```
 
 ### Teste 3: Listar Contas
+
 ```bash
 curl -X GET "http://localhost:3001/api/contas-pagar?status=Pendente" \
   -H "Authorization: Bearer TOKEN"
 ```
 
 ### Teste 4: Pagar Conta
+
 ```bash
 curl -X PUT http://localhost:3001/api/contas-pagar/ID/pagar \
   -H "Authorization: Bearer TOKEN"
 ```
 
 ### Teste 5: Ver Alertas
+
 ```bash
 curl -X GET http://localhost:3001/api/contas-pagar/alertas/atrasadas \
   -H "Authorization: Bearer TOKEN"
@@ -690,6 +708,7 @@ curl -X GET http://localhost:3001/api/contas-pagar/alertas/atrasadas \
 ## ✨ Funcionalidades Extras
 
 ### 1. Cancelamento de Contas
+
 ```bash
 PUT /api/contas-pagar/:id/cancelar
 
@@ -700,6 +719,7 @@ PUT /api/contas-pagar/:id/cancelar
 ```
 
 ### 2. Prorrogação de Vencimento
+
 ```bash
 PUT /api/contas-pagar/:id/vencimento
 {
@@ -713,6 +733,7 @@ PUT /api/contas-pagar/:id/vencimento
 ```
 
 ### 3. Filtros Avançados
+
 ```bash
 # Por fornecedor
 GET /api/contas-pagar?fornecedorId=FORN-001
@@ -758,6 +779,7 @@ GET /api/contas-pagar?page=2&limit=20
 ## 🚀 Próximos Passos Sugeridos
 
 ### Fase 1: Frontend
+
 - [ ] Criar página ContasPagar.tsx
 - [ ] Modal de nova conta
 - [ ] Tabela de listagem
@@ -765,12 +787,14 @@ GET /api/contas-pagar?page=2&limit=20
 - [ ] Alertas visuais
 
 ### Fase 2: Automações
+
 - [ ] Criar contas recorrentes (aluguel mensal automático)
 - [ ] Lembretes por email
 - [ ] WhatsApp Bot para alertas
 - [ ] Integração bancária
 
 ### Fase 3: Análises Avançadas
+
 - [ ] Gráfico de despesas por categoria
 - [ ] Análise de fornecedores (melhor custo-benefício)
 - [ ] Previsão de gastos
@@ -794,10 +818,10 @@ Total: ~3.000 linhas de código
 Total: 100% operacional
 ```
 
-**O sistema financeiro mais completo e personalizado para engenharia elétrica!** 🎊⚡💰
+**O sistema financeiro mais completo e personalizado para engenharia elétrica!**
+🎊⚡💰
 
 ---
 
 **Implementado em 20/10/2025**  
 **Sistema S3E Engenharia Elétrica**
-

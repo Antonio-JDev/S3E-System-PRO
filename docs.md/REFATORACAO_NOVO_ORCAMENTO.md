@@ -2,13 +2,16 @@
 
 ## 📋 Resumo da Refatoração
 
-A funcionalidade de **"Novo Orçamento"** foi migrada de um modal para uma **página dedicada**, melhorando significativamente a **Experiência do Usuário (UX)** ao trabalhar com o formulário extenso.
+A funcionalidade de **"Novo Orçamento"** foi migrada de um modal para uma
+**página dedicada**, melhorando significativamente a **Experiência do Usuário
+(UX)** ao trabalhar com o formulário extenso.
 
 ---
 
 ## 🎯 Problema Anterior
 
 **❌ Modal para Formulário Extenso:**
+
 - Modal muito longo com scroll
 - Campos comprimidos
 - Difícil navegação entre seções
@@ -19,6 +22,7 @@ A funcionalidade de **"Novo Orçamento"** foi migrada de um modal para uma **pá
 ## ✅ Solução Implementada
 
 **✅ Página Dedicada:**
+
 - Espaço amplo para o formulário
 - Navegação clara entre seções
 - Melhor organização visual
@@ -31,9 +35,11 @@ A funcionalidade de **"Novo Orçamento"** foi migrada de um modal para uma **pá
 ### 1. **Novo Arquivo Criado**
 
 #### `frontend/src/pages/NovoOrcamentoPage.tsx`
+
 **Descrição**: Página dedicada para criação de novos orçamentos.
 
 **Responsabilidades**:
+
 - Gerenciar todo o formulário de criação
 - Carregar dados (clientes e materiais)
 - Adicionar/remover itens do orçamento
@@ -42,14 +48,16 @@ A funcionalidade de **"Novo Orçamento"** foi migrada de um modal para uma **pá
 - Voltar para listagem após sucesso/cancelamento
 
 **Props**:
+
 ```typescript
 interface NovoOrcamentoPageProps {
-    setAbaAtiva: (aba: 'listagem' | 'novo') => void;
-    onOrcamentoCriado?: () => void;
+  setAbaAtiva: (aba: "listagem" | "novo") => void;
+  onOrcamentoCriado?: () => void;
 }
 ```
 
 **Características**:
+
 - ✅ 100% Dark Mode compatível
 - ✅ Usa Design System (classes `card-primary`, `input-field`, `btn-*`)
 - ✅ Layout responsivo
@@ -60,9 +68,13 @@ interface NovoOrcamentoPageProps {
 ### 2. **Arquivo Modificado**
 
 #### `frontend/src/components/Orcamentos.tsx`
+
 **Mudanças**:
-1. ✅ **Import** da nova página: `import NovoOrcamentoPage from '../pages/NovoOrcamentoPage'`
-2. ✅ **Estado de navegação**: `const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'novo'>('listagem')`
+
+1. ✅ **Import** da nova página:
+   `import NovoOrcamentoPage from '../pages/NovoOrcamentoPage'`
+2. ✅ **Estado de navegação**:
+   `const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'novo'>('listagem')`
 3. ✅ **Renderização condicional**:
    - Se `abaAtiva === 'novo'` → Renderiza `<NovoOrcamentoPage />`
    - Se `abaAtiva === 'listagem'` → Renderiza listagem normal
@@ -145,6 +157,7 @@ interface NovoOrcamentoPageProps {
 ## 💡 Benefícios da Refatoração
 
 ### Experiência do Usuário (UX)
+
 - ✅ **Mais espaço**: Formulário não limitado por modal
 - ✅ **Melhor organização**: Seções bem separadas e legíveis
 - ✅ **Navegação clara**: Botão "Voltar" sempre visível
@@ -152,12 +165,14 @@ interface NovoOrcamentoPageProps {
 - ✅ **Ações visíveis**: Botões fixos no rodapé
 
 ### Manutenção do Código
+
 - ✅ **Separação de responsabilidades**: Criação em arquivo separado
 - ✅ **Código mais limpo**: Menos lógica no componente principal
 - ✅ **Fácil evolução**: Nova página pode crescer independentemente
 - ✅ **Reutilização**: Lógica isolada e reutilizável
 
 ### Performance
+
 - ✅ **Lazy loading**: Página só carrega quando necessário
 - ✅ **Menos re-renders**: Estado isolado
 
@@ -168,6 +183,7 @@ interface NovoOrcamentoPageProps {
 Toda a nova página usa o **Design System** criado:
 
 ### Classes Utilizadas
+
 ```css
 ✅ card-primary        → Cards de seção
 ✅ input-field         → Todos os inputs de texto
@@ -180,6 +196,7 @@ Toda a nova página usa o **Design System** criado:
 ```
 
 ### Dark Mode
+
 - 🌙 100% compatível com dark mode
 - 🌙 Cores adaptadas automaticamente
 - 🌙 Gradientes com opacidade em dark mode
@@ -213,25 +230,27 @@ Toda a nova página usa o **Design System** criado:
 
 ## 📊 Antes vs Depois
 
-| Aspecto | Antes (Modal) | Depois (Página) |
-|---------|---------------|-----------------|
-| **Espaço** | Limitado | Amplo |
-| **Scroll** | Modal pequeno | Página inteira |
-| **Seções** | Comprimidas | Bem espaçadas |
-| **UX** | Adequada | Profissional |
-| **Mobile** | Difícil | Responsivo |
-| **Manutenção** | Complexa | Simples |
+| Aspecto        | Antes (Modal) | Depois (Página) |
+| -------------- | ------------- | --------------- |
+| **Espaço**     | Limitado      | Amplo           |
+| **Scroll**     | Modal pequeno | Página inteira  |
+| **Seções**     | Comprimidas   | Bem espaçadas   |
+| **UX**         | Adequada      | Profissional    |
+| **Mobile**     | Difícil       | Responsivo      |
+| **Manutenção** | Complexa      | Simples         |
 
 ---
 
 ## 🔧 Detalhes Técnicos
 
 ### Estado de Navegação
+
 ```typescript
-const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'novo'>('listagem');
+const [abaAtiva, setAbaAtiva] = useState<"listagem" | "novo">("listagem");
 ```
 
 ### Renderização Condicional
+
 ```typescript
 if (abaAtiva === 'novo') {
     return <NovoOrcamentoPage setAbaAtiva={setAbaAtiva} onOrcamentoCriado={loadData} />;
@@ -243,7 +262,9 @@ return (
 ```
 
 ### Callback de Sucesso
+
 Quando o orçamento é criado com sucesso, a nova página:
+
 1. Chama `onOrcamentoCriado()` → recarrega a listagem
 2. Chama `setAbaAtiva('listagem')` → volta para a lista
 
@@ -251,10 +272,13 @@ Quando o orçamento é criado com sucesso, a nova página:
 
 ## ⚠️ Notas Importantes
 
-1. **Modal de Edição Mantido**: O modal existente ainda é usado para **editar** orçamentos (não foi removido)
+1. **Modal de Edição Mantido**: O modal existente ainda é usado para **editar**
+   orçamentos (não foi removido)
 2. **Modal de Visualização Mantido**: O modal de detalhes também permanece
-3. **Apenas Criação Migrada**: Somente a funcionalidade de **criar novo** foi para página dedicada
-4. **Sem Perda de Funcionalidades**: Todas as funcionalidades anteriores foram preservadas
+3. **Apenas Criação Migrada**: Somente a funcionalidade de **criar novo** foi
+   para página dedicada
+4. **Sem Perda de Funcionalidades**: Todas as funcionalidades anteriores foram
+   preservadas
 
 ---
 
@@ -290,4 +314,3 @@ A refatoração foi **100% bem-sucedida**:
 
 **Data da Refatoração**: 06/11/2025  
 **Status**: ✅ Concluído
-

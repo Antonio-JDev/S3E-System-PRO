@@ -2,7 +2,9 @@
 
 ## 📌 Visão Geral
 
-Sistema completo para gerenciar **3 equipes fixas** (2 membros/equipe) e suas alocações em diferentes **Obras/Projetos**, com cálculo automático de prazos considerando **20 dias úteis por mês**.
+Sistema completo para gerenciar **3 equipes fixas** (2 membros/equipe) e suas
+alocações em diferentes **Obras/Projetos**, com cálculo automático de prazos
+considerando **20 dias úteis por mês**.
 
 ---
 
@@ -74,8 +76,9 @@ npx ts-node prisma/seed-equipes.ts
 ```
 
 Isso cria automaticamente:
+
 - **Equipe A** (MONTAGEM) - 2 membros
-- **Equipe B** (CAMPO) - 2 membros  
+- **Equipe B** (CAMPO) - 2 membros
 - **Equipe C** (DISTINTA) - 2 membros
 
 ### 3️⃣ Iniciar Servidor
@@ -113,24 +116,28 @@ curl -X POST http://localhost:3000/api/obras/alocar \
 ## 🎯 Funcionalidades Principais
 
 ### 1. Gestão de Equipes
+
 - ✅ Criar, listar, atualizar e desativar equipes
 - ✅ Validação de membros (vinculados a usuários existentes)
 - ✅ Tipos: MONTAGEM, CAMPO, DISTINTA
 - ✅ Soft delete (desativação sem exclusão)
 
 ### 2. Alocação Inteligente
+
 - ✅ Alocação de equipes a projetos
 - ✅ Cálculo automático de data fim (dias úteis)
 - ✅ **Verificação de conflitos** - impede dupla alocação
 - ✅ Status: Planejada → EmAndamento → Concluida/Cancelada
 
 ### 3. Consultas e Filtros
+
 - ✅ Listar alocações com filtros (equipe, projeto, status, período)
 - ✅ Calendário mensal otimizado
 - ✅ Consultar equipes disponíveis por período
 - ✅ Estatísticas gerais (ocupação, disponibilidade)
 
 ### 4. Controle de Workflow
+
 - ✅ Iniciar alocação
 - ✅ Concluir alocação (com data real)
 - ✅ Cancelar alocação (com motivo)
@@ -142,26 +149,26 @@ curl -X POST http://localhost:3000/api/obras/alocar \
 
 ### Base URL: `http://localhost:3000/api/obras`
 
-| Método | Endpoint | Descrição | Permissão |
-|--------|----------|-----------|-----------|
-| **EQUIPES** ||||
-| POST | `/equipes` | Criar equipe | Admin |
-| GET | `/equipes` | Listar equipes | User |
-| GET | `/equipes/disponiveis` | Equipes disponíveis | User |
-| GET | `/equipes/:id` | Buscar equipe | User |
-| PUT | `/equipes/:id` | Atualizar equipe | Admin |
-| DELETE | `/equipes/:id` | Desativar equipe | Admin |
-| **ALOCAÇÕES** ||||
-| POST | `/alocar` | Alocar equipe | Admin |
-| GET | `/alocacoes` | Listar alocações | User |
-| GET | `/alocacoes/calendario` | Calendário mensal | User |
-| GET | `/alocacoes/:id` | Buscar alocação | User |
-| PUT | `/alocacoes/:id` | Atualizar alocação | Admin |
-| PUT | `/alocacoes/:id/iniciar` | Iniciar alocação | Admin |
-| PUT | `/alocacoes/:id/concluir` | Concluir alocação | Admin |
-| PUT | `/alocacoes/:id/cancelar` | Cancelar alocação | Admin |
-| **OUTROS** ||||
-| GET | `/estatisticas` | Dashboard stats | User |
+| Método        | Endpoint                  | Descrição           | Permissão |
+| ------------- | ------------------------- | ------------------- | --------- |
+| **EQUIPES**   |                           |                     |           |
+| POST          | `/equipes`                | Criar equipe        | Admin     |
+| GET           | `/equipes`                | Listar equipes      | User      |
+| GET           | `/equipes/disponiveis`    | Equipes disponíveis | User      |
+| GET           | `/equipes/:id`            | Buscar equipe       | User      |
+| PUT           | `/equipes/:id`            | Atualizar equipe    | Admin     |
+| DELETE        | `/equipes/:id`            | Desativar equipe    | Admin     |
+| **ALOCAÇÕES** |                           |                     |           |
+| POST          | `/alocar`                 | Alocar equipe       | Admin     |
+| GET           | `/alocacoes`              | Listar alocações    | User      |
+| GET           | `/alocacoes/calendario`   | Calendário mensal   | User      |
+| GET           | `/alocacoes/:id`          | Buscar alocação     | User      |
+| PUT           | `/alocacoes/:id`          | Atualizar alocação  | Admin     |
+| PUT           | `/alocacoes/:id/iniciar`  | Iniciar alocação    | Admin     |
+| PUT           | `/alocacoes/:id/concluir` | Concluir alocação   | Admin     |
+| PUT           | `/alocacoes/:id/cancelar` | Cancelar alocação   | Admin     |
+| **OUTROS**    |                           |                     |           |
+| GET           | `/estatisticas`           | Dashboard stats     | User      |
 
 **Total:** 15 endpoints implementados
 
@@ -188,6 +195,7 @@ O sistema calcula automaticamente a data fim considerando:
 - ✅ Algoritmo otimizado
 
 **Exemplo:**
+
 ```
 Data início: 01/03/2025 (sábado)
 Duração: 20 dias úteis
@@ -209,14 +217,17 @@ Equipe B: 10/03 - 25/03 (OCUPADA)
 ## 📖 Documentação Completa
 
 ### 🎯 Para Usuários
+
 - **`GUIA_RAPIDO_GESTAO_EQUIPES.md`** - Comece aqui!
 - **`EXEMPLOS_API_GESTAO_EQUIPES.md`** - Exemplos práticos com cURL
 
 ### 🛠️ Para Desenvolvedores
+
 - **`GESTAO_OPERACIONAL_EQUIPES.md`** - Documentação técnica completa
 - **`RESUMO_IMPLEMENTACAO_GESTAO_EQUIPES.md`** - Resumo da implementação
 
 ### 🚀 Para DevOps
+
 - **`CHECKLIST_DEPLOYMENT_GESTAO_EQUIPES.md`** - Passo a passo de deploy
 
 ---
@@ -224,6 +235,7 @@ Equipe B: 10/03 - 25/03 (OCUPADA)
 ## 🎨 Casos de Uso
 
 ### Cenário 1: Planejamento Mensal
+
 ```
 1. Ver calendário do mês → GET /alocacoes/calendario
 2. Verificar disponibilidade → GET /equipes/disponiveis
@@ -231,6 +243,7 @@ Equipe B: 10/03 - 25/03 (OCUPADA)
 ```
 
 ### Cenário 2: Execução de Projeto
+
 ```
 1. Iniciar alocação → PUT /alocacoes/:id/iniciar
 2. Acompanhar progresso → GET /alocacoes
@@ -238,6 +251,7 @@ Equipe B: 10/03 - 25/03 (OCUPADA)
 ```
 
 ### Cenário 3: Remanejamento Urgente
+
 ```
 1. Cancelar alocação atual → PUT /alocacoes/:id/cancelar
 2. Criar nova alocação → POST /alocar
@@ -274,12 +288,14 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ## 🔮 Roadmap Futuro
 
 ### Fase 2 (Planejado)
+
 - [ ] Frontend React/Vue para gestão visual
 - [ ] Calendário interativo (Gantt)
 - [ ] Notificações por email/SMS
 - [ ] Integração com feriados nacionais
 
 ### Fase 3 (Futuro)
+
 - [ ] App mobile para check-in/check-out
 - [ ] Registro de horas trabalhadas
 - [ ] Custo de mão de obra por alocação
@@ -290,6 +306,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ## 📊 Estatísticas da Implementação
 
 ### Código Produzido
+
 - **Linhas de código:** ~1.186 linhas
 - **Arquivos TypeScript:** 3
 - **Arquivos de documentação:** 6
@@ -297,6 +314,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 - **Modelos Prisma:** 2
 
 ### Funcionalidades
+
 - ✅ CRUD completo de equipes
 - ✅ CRUD completo de alocações
 - ✅ Verificação de conflitos
@@ -305,6 +323,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 - ✅ Sistema de permissões
 
 ### Qualidade
+
 - ✅ Zero erros de linting
 - ✅ TypeScript strict mode
 - ✅ Validações em todos os endpoints
@@ -318,18 +337,22 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ### Problemas Comuns
 
 **"Equipe não encontrada"**
+
 - Verifique o ID da equipe
 - Execute o seed: `npx ts-node prisma/seed-equipes.ts`
 
 **"Conflito detectado"**
+
 - Normal! O sistema está funcionando corretamente
 - Escolha outra equipe ou período
 
 **"Token inválido"**
+
 - Faça login novamente
 - Verifique se o token não expirou
 
 **"Acesso negado"**
+
 - Verifique se o usuário tem role de admin
 - Apenas admins podem criar/editar
 
@@ -338,6 +361,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ## 📞 Contato
 
 Para dúvidas ou suporte:
+
 1. Consulte a documentação completa
 2. Verifique os exemplos práticos
 3. Revise o checklist de deployment
@@ -346,9 +370,11 @@ Para dúvidas ou suporte:
 
 ## 🎉 Conclusão
 
-O **Módulo de Gestão Operacional de Equipes** está **100% implementado** e **pronto para uso em produção**!
+O **Módulo de Gestão Operacional de Equipes** está **100% implementado** e
+**pronto para uso em produção**!
 
 ### Próximos Passos:
+
 1. ✅ Aplicar migrations no banco
 2. ✅ Executar seed de equipes
 3. ✅ Testar endpoints principais
@@ -365,4 +391,3 @@ O **Módulo de Gestão Operacional de Equipes** está **100% implementado** e **
 ---
 
 **Desenvolvido com ❤️ pela equipe S3E System**
-

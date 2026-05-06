@@ -19,11 +19,17 @@ jest.mock('@prisma/client', () => {
       update: jest.fn(),
       findMany: jest.fn(),
     },
+    user: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     contaReceber: {
       create: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn(),
       update: jest.fn(),
+    },
+    recebimentoParcial: {
+      create: jest.fn(),
     },
     orcamento: {
       findUnique: jest.fn(),
@@ -246,11 +252,113 @@ describe('VendasService', () => {
     });
   });
 
+  describe('atualizarValorDoOrcamento', () => {
+    it('deve recalcular valorTotal do PV/financeiro subtraindo itens vendaDiretaFornecedor', async () => {
+      const vendaId = 'venda-123';
+
+      const mockVendaComOrcamento = {
+        id: vendaId,
+        valorEntrada: 0,
+        valorTotal: 12000,
+        orcamento: {
+          precoVenda: 12000,
+          items: [
+            { vendaDiretaFornecedor: true, subtotal: 2000 },
+            { vendaDiretaFornecedor: false, subtotal: 10000 }
+          ]
+        }
+      };
+
+      mockPrisma.venda.findUnique.mockResolvedValue(mockVendaComOrcamento);
+
+      const contas = [
+        {
+          id: 'conta-1',
+          vendaId,
+          numeroParcela: 1,
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          valorParcela: 6000
+        },
+        {
+          id: 'conta-2',
+          vendaId,
+          numeroParcela: 2,
+          createdAt: new Date('2024-01-02T00:00:00.000Z'),
+          valorParcela: 6000
+        }
+      ];
+
+      const tx = {
+        venda: {
+          update: jest.fn().mockResolvedValue({ id: vendaId, valorTotal: 10000 })
+        },
+        contaReceber: {
+          findMany: jest.fn().mockResolvedValue(contas),
+          update: jest.fn().mockResolvedValue(undefined)
+        }
+      };
+
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => {
+        return callback(tx);
+      });
+
+      const resultado = await VendasService.atualizarValorDoOrcamento(vendaId);
+
+      // Novo valor = precoVenda - venda direta
+      expect(resultado.valorNovo).toBe(10000);
+      expect(resultado.valorAnterior).toBe(12000);
+      expect(resultado.contasAtualizadas).toBe(2);
+
+      expect(tx.venda.update).toHaveBeenCalledWith({
+        where: { id: vendaId },
+        data: { valorTotal: 10000 }
+      });
+
+      // Deve atualizar valorParcela das 2 parcelas
+      expect(tx.contaReceber.update).toHaveBeenCalledWith({
+        where: { id: 'conta-1' },
+        data: { valorParcela: 5000 }
+      });
+      expect(tx.contaReceber.update).toHaveBeenCalledWith({
+        where: { id: 'conta-2' },
+        data: { valorParcela: 5000 }
+      });
+    });
+
+    it('deve retornar sucesso sem alterar quando valorTotal já está correto', async () => {
+      const vendaId = 'venda-456';
+
+      const mockVendaComOrcamento = {
+        id: vendaId,
+        valorEntrada: 0,
+        valorTotal: 10000,
+        orcamento: {
+          precoVenda: 10000,
+          items: [
+            { vendaDiretaFornecedor: true, subtotal: 0 },
+            { vendaDiretaFornecedor: false, subtotal: 10000 }
+          ]
+        }
+      };
+
+      mockPrisma.venda.findUnique.mockResolvedValue(mockVendaComOrcamento);
+
+      const resultado = await VendasService.atualizarValorDoOrcamento(vendaId);
+
+      expect(resultado.success).toBe(true);
+      expect(resultado.valorNovo).toBe(10000);
+      expect(resultado.contasAtualizadas).toBe(0);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
   describe('pagarConta', () => {
     it('deve marcar conta como paga e atualizar status da venda para Concluida quando todas as parcelas forem pagas', async () => {
       const conta = {
         id: 'conta-1',
         vendaId: 'venda-123',
+        valorParcela: 100,
+        valorRecebido: 0,
         status: ContaStatus.Pendente,
         observacoes: null,
       };
@@ -295,6 +403,8 @@ describe('VendasService', () => {
       const conta = {
         id: 'conta-1',
         vendaId: 'venda-123',
+        valorParcela: 100,
+        valorRecebido: 0,
         status: ContaStatus.Pendente,
         observacoes: null,
       };
@@ -330,6 +440,55 @@ describe('VendasService', () => {
       await expect(VendasService.pagarConta('conta-1')).rejects.toThrow(
         'Esta parcela já está marcada como paga'
       );
+    });
+  });
+
+  describe('atualizarVenda', () => {
+    it('deve atualizar datas/valores das parcelas fornecidas e retornar a venda atualizada', async () => {
+      const vendaMock = {
+        id: 'venda-123',
+        orcamentoId: 'orc-1',
+        contasReceber: [{ id: 'conta-1' }, { id: 'conta-2' }],
+      };
+
+      mockPrisma.venda.findUnique.mockResolvedValue(vendaMock);
+
+      const contaUpdate = jest.fn().mockResolvedValue({});
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => {
+        const tx = {
+          contaReceber: { update: contaUpdate },
+          orcamentoItem: {
+            findMany: jest.fn(),
+            update: jest.fn(),
+          },
+        };
+        return callback(tx);
+      });
+
+      const buscarSpy = jest
+        .spyOn(VendasService, 'buscarVenda')
+        .mockResolvedValue({ id: 'venda-123', atualizado: true } as any);
+
+      const res = await VendasService.atualizarVenda('venda-123', {
+        parcelas: [
+          { id: 'conta-1', dataVencimento: '2026-03-01', valorParcela: 123.45 },
+          // Deve ser ignorada por não pertencer à venda
+          { id: 'conta-xyz', dataVencimento: '2026-04-01', valorParcela: 999 },
+        ],
+      });
+
+      expect(contaUpdate).toHaveBeenCalledTimes(1);
+      expect(contaUpdate).toHaveBeenCalledWith({
+        where: { id: 'conta-1' },
+        data: expect.objectContaining({
+          updatedAt: expect.any(Date),
+          dataVencimento: new Date(2026, 2, 1, 12, 0, 0, 0),
+          valorParcela: 123.45,
+        }),
+      });
+
+      expect(res).toEqual({ id: 'venda-123', atualizado: true });
+      buscarSpy.mockRestore();
     });
   });
 });

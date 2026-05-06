@@ -2,7 +2,8 @@
 
 ## 📋 **RESUMO DA IMPLEMENTAÇÃO**
 
-Sistema completo de cotações de fornecedores (banco frio) integrado com orçamentos.
+Sistema completo de cotações de fornecedores (banco frio) integrado com
+orçamentos.
 
 ---
 
@@ -11,6 +12,7 @@ Sistema completo de cotações de fornecedores (banco frio) integrado com orçam
 ### **1. Database (Prisma Schema)** ✅ COMPLETO
 
 **Novo Model:**
+
 ```prisma
 model Cotacao {
   id                    String    @id @default(uuid())
@@ -36,6 +38,7 @@ model Cotacao {
 ```
 
 **Atualizações:**
+
 - ✅ `Fornecedor`: Adicionado relação `cotacoes`
 - ✅ `OrcamentoItem`: Adicionado campo `cotacaoId` e relação `cotacao`
 - ✅ Migration criada e aplicada
@@ -47,6 +50,7 @@ model Cotacao {
 #### **Controller:** `backend/src/controllers/cotacoesController.ts`
 
 **Endpoints criados:**
+
 - ✅ `GET /api/cotacoes` - Listar todas
 - ✅ `GET /api/cotacoes/:id` - Buscar por ID
 - ✅ `POST /api/cotacoes` - Criar nova
@@ -57,11 +61,13 @@ model Cotacao {
 - ✅ `POST /api/cotacoes/importar` - Importar JSON
 
 #### **Routes:** `backend/src/routes/cotacoes.routes.ts`
+
 - ✅ Configurado multer para upload
 - ✅ Todas as rotas registradas
 - ✅ Filtro para aceitar apenas JSON
 
 #### **Registrado em** `app.ts`:
+
 - ✅ Import da rota
 - ✅ Adicionado ao uploadRoutes
 - ✅ Registrado com `app.use('/api/cotacoes', cotacoesRoutes)`
@@ -75,6 +81,7 @@ model Cotacao {
 **Arquivo:** `frontend/src/components/Cotacoes.tsx`
 
 **Funcionalidades necessárias:**
+
 - 📋 **Lista em formato tabela** (não grid de cards)
 - 🔍 **Busca/filtros** (nome, fornecedor)
 - 📥 **Botão importar JSON**
@@ -86,6 +93,7 @@ model Cotacao {
 - 🏢 **Exibir fornecedor**
 
 **Campos na lista:**
+
 - Nome do produto
 - NCM
 - Valor unitário
@@ -100,11 +108,12 @@ model Cotacao {
 **Arquivo:** `frontend/src/constants/index.tsx`
 
 **Adicionar na seção COMERCIAL:**
+
 ```tsx
-{ 
-  name: 'Cotações', 
+{
+  name: 'Cotações',
   icon: PriceTagIcon, // Criar ícone
-  requiredPermission: 'view_cotacoes' 
+  requiredPermission: 'view_cotacoes'
 }
 ```
 
@@ -122,16 +131,21 @@ case 'Cotações':
 **Componente:** `frontend/src/pages/NovoOrcamentoPage.tsx`
 
 **Mudanças necessárias:**
+
 1. **Adicionar toggle** "Banco de Cotações" ao lado de "Materiais"
 2. **Buscar cotações** ao invés de materiais quando toggle ativo
 3. **Exibir flag visual** nos itens:
+
    ```tsx
-   {item.cotacaoId && (
-     <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-       📦 Banco Frio - Atualizado em {formatDate(item.dataAtualizacao)}
-     </span>
-   )}
+   {
+     item.cotacaoId && (
+       <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+         📦 Banco Frio - Atualizado em {formatDate(item.dataAtualizacao)}
+       </span>
+     );
+   }
    ```
+
 4. **Salvar tipo** correto: `tipo: 'COTACAO'` e `cotacaoId`
 
 ---
@@ -141,6 +155,7 @@ case 'Cotações':
 **Arquivo:** `backend/src/controllers/orcamentosController.ts`
 
 **Na função de gerar PDF:**
+
 ```typescript
 // Não mostrar flag de "Banco Frio" no PDF
 // Mostrar apenas:
@@ -169,7 +184,7 @@ case 'Cotações':
     {
       "nome": "Cabo de Cobre 2,5mm",
       "ncm": "85444200",
-      "valorUnitario": 100.50,
+      "valorUnitario": 100.5,
       "fornecedorNome": "Fornecedor Exemplo Ltda",
       "observacoes": "Cotação válida por 30 dias"
     }
@@ -206,6 +221,7 @@ case 'Cotações':
 ## 🎯 **FLUXO DE USO:**
 
 ### **Cadastrar Cotações:**
+
 ```
 1. Fornecedor envia lista de preços
 2. Usuário baixa template JSON
@@ -215,6 +231,7 @@ case 'Cotações':
 ```
 
 ### **Usar em Orçamento:**
+
 ```
 1. Criar novo orçamento
 2. Toggle: "Banco de Cotações" ON
@@ -243,12 +260,14 @@ case 'Cotações':
 ## 📚 **ARQUIVOS CRIADOS:**
 
 ### **Backend:**
+
 - ✅ `backend/src/controllers/cotacoesController.ts`
 - ✅ `backend/src/routes/cotacoes.routes.ts`
 - ✅ `backend/prisma/schema.prisma` (atualizado)
 - ✅ `backend/src/app.ts` (atualizado)
 
 ### **Frontend (a criar):**
+
 - ⏳ `frontend/src/components/Cotacoes.tsx`
 - ⏳ `frontend/src/types/cotacoes.ts`
 - ⏳ `frontend/src/services/cotacoesService.ts`
@@ -290,4 +309,3 @@ GET http://localhost:3000/api/cotacoes/exportar
 
 **Data:** 12/11/2025  
 **Status:** Backend 100% | Frontend 0%
-

@@ -4,6 +4,7 @@ export interface AlocacaoEquipeDTO {
   id: string;
   tarefaId: string;
   obraId: string;
+  obraNome?: string;
   equipeId: string;
   equipeNome: string;
   membros: Array<{

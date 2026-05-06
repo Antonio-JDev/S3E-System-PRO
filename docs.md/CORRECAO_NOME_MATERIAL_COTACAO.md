@@ -3,11 +3,13 @@
 ## 🐛 **PROBLEMA IDENTIFICADO:**
 
 Ao adicionar cotação do banco frio, estava salvando:
+
 ```
 descricao: "NCM: 85444200 | Fornecedor: Eletromar"
 ```
 
 E essa descrição aparecia em:
+
 - ❌ Modal de visualização
 - ❌ Preview do PDF
 - ❌ PDF final gerado
@@ -19,6 +21,7 @@ E essa descrição aparecia em:
 ### **1. Ao Adicionar Cotação** (`Orcamentos.tsx` + `NovoOrcamentoPage.tsx`)
 
 **ANTES:**
+
 ```tsx
 const newItem = {
   nome: cotacao.nome,
@@ -28,6 +31,7 @@ const newItem = {
 ```
 
 **DEPOIS:**
+
 ```tsx
 const newItem = {
   nome: cotacao.nome,
@@ -39,11 +43,13 @@ const newItem = {
 ### **2. Modal de Visualização** (`Orcamentos.tsx`)
 
 **ANTES:**
+
 ```tsx
 <p>{item.nome || item.descricao || 'Item'}</p>  ❌ Podia mostrar descricao
 ```
 
 **DEPOIS:**
+
 ```tsx
 <p>{item.nome || 'Item'}</p>  ✅ Sempre mostra nome
 ```
@@ -51,6 +57,7 @@ const newItem = {
 ### **3. Preparação do PDF** (`Orcamentos.tsx`)
 
 **ANTES:**
+
 ```tsx
 items.map(item => ({
   nome: item.nome || item.descricao,  ❌
@@ -60,6 +67,7 @@ items.map(item => ({
 ```
 
 **DEPOIS:**
+
 ```tsx
 items.map(item => ({
   nome: item.nome || 'Item',          ✅ Sempre nome
@@ -73,6 +81,7 @@ items.map(item => ({
 ## 🎯 **RESULTADO:**
 
 ### **ANTES (Errado):**
+
 ```
 Modal de Visualização:
 ┌────────────────────────────────────┐
@@ -88,6 +97,7 @@ Eletromar                    |     |
 ```
 
 ### **DEPOIS (Correto):**
+
 ```
 Modal de Visualização:
 ┌────────────────────────────────────┐
@@ -106,6 +116,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ## 🚀 **TESTE AGORA:**
 
 ### **1. Criar Novo Item:**
+
 ```
 1. Orçamentos → Editar
 2. Adicionar Item → 🏷️ Cotações
@@ -114,6 +125,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ```
 
 ### **2. Verificar na Lista:**
+
 ```
 Item aparece:
 ✓ Nome: "Cabo de Cobre 2,5mm - Rolo 100m"
@@ -122,6 +134,7 @@ Item aparece:
 ```
 
 ### **3. Visualizar Detalhes:**
+
 ```
 1. Salvar orçamento
 2. Fechar modal
@@ -134,6 +147,7 @@ Modal mostra:
 ```
 
 ### **4. Gerar PDF:**
+
 ```
 1. No modal de visualização
 2. Clique: "Gerar PDF Rápido"
@@ -149,6 +163,7 @@ PDF mostra:
 ## ✅ **VERIFICAÇÕES:**
 
 ### **Adição de Item:**
+
 ```
 ✓ descricao = cotacao.nome (limpo)
 ✓ Sem NCM na descrição
@@ -156,6 +171,7 @@ PDF mostra:
 ```
 
 ### **Modal de Visualização:**
+
 ```
 ✓ Mostra item.nome
 ✓ Flag "Banco Frio" aparece
@@ -163,6 +179,7 @@ PDF mostra:
 ```
 
 ### **PDF:**
+
 ```
 ✓ Nome do material limpo
 ✓ Sem descrição extra para cotações
@@ -209,4 +226,3 @@ PDF mostra:
 
 **Data:** 12/11/2025  
 **Status:** ✅ CORRIGIDO
-

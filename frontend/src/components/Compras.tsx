@@ -5,15 +5,19 @@ import { type PurchaseOrder, type Supplier, PurchaseStatus, type PurchaseOrderIt
 import { parseNFeXML, readFileAsText } from '../utils/xmlParser';
 import { comprasService } from '../services/comprasService';
 import { obrasService, type Obra } from '../services/obrasService';
+import { formatDateBR, parseLocalDate } from '../utils/dateUtils';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { AuthContext } from '../contexts/AuthContext';
 import EditarFracionamentoModal from './EditarFracionamentoModal';
+import MaterialDetailsModal, { type MaterialDetailsItem } from './modals/MaterialDetailsModal';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { axiosApiService } from '../services/axiosApi';
 import { empresaFiscalService } from '../services/empresaFiscalService';
+import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { formatCNPJ, formatTelefoneBR, onlyDigits } from '../utils/inputMasks';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -75,6 +79,111 @@ const getStatusClass = (status: PurchaseStatus) => {
     }
 };
 
+/** Despesas variadas não têm remessa física — ocultar fluxo "Receber remessa". */
+const isCompraDespesasVariadas = (p: PurchaseOrder | null | undefined) =>
+    p?.classificacao === 'DESPESAS_VARIADAS';
+
+/** Situação financeira da compra já recebida (para badge lateral). */
+type FinanceiroCompraVisual = 'faturado' | 'pago_parcial' | 'recebido';
+
+function getFinanceiroCompraVisual(p: PurchaseOrder): FinanceiroCompraVisual | null {
+    if (p.status !== PurchaseStatus.Recebido) return null;
+    const contas = p.contasPagar;
+    if (!contas || contas.length === 0) return 'recebido';
+    const ativas = contas.filter((c) => c.status !== 'Cancelado');
+    if (ativas.length === 0) return 'recebido';
+    const pagas = ativas.filter((c) => c.status === 'Pago').length;
+    if (pagas === ativas.length) return 'faturado';
+    if (pagas > 0) return 'pago_parcial';
+    return 'recebido';
+}
+
+/** Barra lateral + rótulo: azul faturado, laranja recebido, amarelo pago parcial. */
+function getCompraBadgeLateral(p: PurchaseOrder): { barClass: string; tag: string | null; tagClass: string } {
+    if (p.status === PurchaseStatus.Cancelado) {
+        return { barClass: 'bg-red-400', tag: null, tagClass: '' };
+    }
+    if (p.status === PurchaseStatus.Pendente) {
+        return { barClass: 'bg-slate-300', tag: null, tagClass: '' };
+    }
+    if (p.status === PurchaseStatus.Recebido) {
+        const fin = getFinanceiroCompraVisual(p);
+        if (fin === 'faturado') {
+            return { barClass: 'bg-blue-600', tag: 'FATURADO', tagClass: 'text-blue-700' };
+        }
+        if (fin === 'pago_parcial') {
+            return { barClass: 'bg-yellow-400', tag: 'PAGO PARCIAL', tagClass: 'text-yellow-800' };
+        }
+        return { barClass: 'bg-orange-500', tag: 'RECEBIDO', tagClass: 'text-orange-700' };
+    }
+    return { barClass: 'bg-slate-300', tag: null, tagClass: '' };
+}
+
+/** Borda esquerda da linha (use no primeiro <td> — em tabelas collapse, border em <tr> costuma não pintar). */
+function getCompraRowBorderClass(p: PurchaseOrder): string {
+    if (p.status === PurchaseStatus.Cancelado) return 'border-l-4 border-red-400';
+    if (p.status === PurchaseStatus.Pendente) return 'border-l-4 border-slate-300';
+    if (p.status === PurchaseStatus.Recebido) {
+        const fin = getFinanceiroCompraVisual(p);
+        if (fin === 'faturado') return 'border-l-4 border-blue-600';
+        if (fin === 'pago_parcial') return 'border-l-4 border-yellow-400';
+        return 'border-l-4 border-orange-500';
+    }
+    return 'border-l-4 border-slate-300';
+}
+
+/** Parcelas do modal: duplicatas da API, contas a pagar ou xmlData. */
+function normalizeParcelasFromPurchase(purchase: any): Array<{ numero: string; dataVencimento: string; valor: number }> {
+    const mapDup = (d: any, i: number) => {
+        const dv = d?.dataVencimento;
+        const dataStr = dv
+            ? typeof dv === 'string'
+                ? dv.split('T')[0]
+                : new Date(dv).toISOString().slice(0, 10)
+            : '';
+        return {
+            numero: String(d?.numero ?? String(i + 1).padStart(3, '0')),
+            dataVencimento: dataStr,
+            valor: Number(d?.valor) || 0
+        };
+    };
+
+    if (purchase?.duplicatas && Array.isArray(purchase.duplicatas) && purchase.duplicatas.length > 0) {
+        return purchase.duplicatas.map(mapDup);
+    }
+
+    if (purchase?.contasPagar && Array.isArray(purchase.contasPagar) && purchase.contasPagar.length > 0) {
+        return purchase.contasPagar.map((cp: any, index: number) => {
+            const rawValor = cp.valorParcela ?? cp.valor ?? 0;
+            const dv = cp.dataVencimento;
+            const dataStr = dv
+                ? typeof dv === 'string'
+                    ? dv.split('T')[0]
+                    : new Date(dv).toISOString().slice(0, 10)
+                : '';
+            const num =
+                cp.numeroParcela != null
+                    ? String(cp.numeroParcela).padStart(3, '0')
+                    : String(index + 1).padStart(3, '0');
+            return { numero: num, dataVencimento: dataStr, valor: Number(rawValor) || 0 };
+        });
+    }
+
+    if (purchase?.xmlData && typeof purchase.xmlData === 'string') {
+        try {
+            const meta = JSON.parse(purchase.xmlData);
+            const dups = meta?.duplicatas;
+            if (Array.isArray(dups) && dups.length > 0) {
+                return dups.map(mapDup);
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+
+    return [];
+}
+
 interface ComprasProps {
     toggleSidebar: () => void;
 }
@@ -86,6 +195,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
     const [filter, setFilter] = useState<PurchaseStatus | 'Todos'>('Todos');
+    const [filterEmpresaCNPJ, setFilterEmpresaCNPJ] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Compras'));
     
@@ -124,6 +234,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     // Form state
     const [selectedSupplierId, setSelectedSupplierId] = useState('');
     const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
+    const [dataEmissaoNF, setDataEmissaoNF] = useState(new Date().toISOString().split('T')[0]);
     const [invoiceNumber, setInvoiceNumber] = useState('');
     const [serieNF, setSerieNF] = useState<string>('1'); // Série da NF (padrão "1")
     const [status, setStatus] = useState<PurchaseStatus>(PurchaseStatus.Pendente);
@@ -148,16 +259,23 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [supplierPhone, setSupplierPhone] = useState('');
     const [supplierEmail, setSupplierEmail] = useState('');
     const [supplierAddress, setSupplierAddress] = useState('');
+    const [fornecedoresCadastrados, setFornecedoresCadastrados] = useState<Fornecedor[]>([]);
+    const [showFornecedorDropdown, setShowFornecedorDropdown] = useState(false);
+    const fornecedorDropdownRef = useRef<HTMLDivElement>(null);
+    /** Data de recebimento da mercadoria (edição) */
+    const [dataRecebimentoCompra, setDataRecebimentoCompra] = useState('');
 
     // XML Import states
     const [selectedXMLFile, setSelectedXMLFile] = useState<File | null>(null);
     const [parsedXMLData, setParsedXMLData] = useState<ParsedXMLData | null>(null);
     const [isProcessingXML, setIsProcessingXML] = useState(false);
     const [xmlError, setXmlError] = useState<string | null>(null);
+    const [showXMLImportInsideModal, setShowXMLImportInsideModal] = useState(false);
 
     // Campos de custos e pagamento
     const [frete, setFrete] = useState<string>('0');
     const [outrasDespesas, setOutrasDespesas] = useState<string>('0');
+    const [descontos, setDescontos] = useState<string>('0');
     const [condicaoPagamento, setCondicaoPagamento] = useState<'AVISTA' | 'PARCELADO'>('AVISTA');
     const [numParcelas, setNumParcelas] = useState<string>('1');
     const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState<string>('');
@@ -171,12 +289,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [empresaCompradoraNome, setEmpresaCompradoraNome] = useState<string>('');
     const [empresaCompradoraCNPJ, setEmpresaCompradoraCNPJ] = useState<string>('');
     const [valorIPI, setValorIPI] = useState<string>('0');
-    const [valorTotalProdutos, setValorTotalProdutos] = useState<string>('0');
-    const [valorTotalNota, setValorTotalNota] = useState<string>('0');
     // Duplicatas/Parcelas
     const [duplicatas, setDuplicatas] = useState<Array<{numero: string, dataVencimento: string, valor: number}>>([]);
     const [parcelas, setParcelas] = useState<Array<{ numero: string; dataVencimento: string; valor: number }>>([]);
-    
+    const [observacoesCompra, setObservacoesCompra] = useState('');
+    const [observacoesDetalheDraft, setObservacoesDetalheDraft] = useState('');
+    const [salvandoObservacoes, setSalvandoObservacoes] = useState(false);
+
     // Estados para editar fracionamento
     const [fracionamentoModalOpen, setFracionamentoModalOpen] = useState(false);
     const [itemFracionamentoEditando, setItemFracionamentoEditando] = useState<{
@@ -188,11 +307,25 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         unidadeEmbalagem?: string;
     } | null>(null);
     
+    // Estado para conversão de unidade (ex: km -> m) dos itens
+    const [unitConversionModalOpen, setUnitConversionModalOpen] = useState(false);
+    const [itemUnidadeEditando, setItemUnidadeEditando] = useState<{
+        index: number;
+        productName?: string;
+        quantity?: number;
+        unitCost?: number;
+        totalCost?: number;
+        unidadeMedida?: string;
+    } | null>(null);
+    const [targetUnit, setTargetUnit] = useState<'km' | 'm' | 'cm'>('m');
+    
     // Estados para busca de material do estoque
     const [materiais, setMateriais] = useState<any[]>([]);
     const [buscaMaterialPorItem, setBuscaMaterialPorItem] = useState<{ [key: number]: string }>({});
     const [materialVisualizando, setMaterialVisualizando] = useState<{ itemIndex: number; material: any } | null>(null);
-    
+    const [isMaterialDetailsModalOpen, setIsMaterialDetailsModalOpen] = useState(false);
+    const [selectedMaterialItem, setSelectedMaterialItem] = useState<MaterialDetailsItem | null>(null);
+
     // Carregar materiais do estoque
     useEffect(() => {
         const carregarMateriais = async () => {
@@ -260,12 +393,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     }, [purchaseItems]);
 
     const valorTotalNotaCalculado = useMemo(() => {
+        const sub = totalProdutosCalculado;
+        const desc = Math.min(parseFloat(descontos || '0') || 0, sub);
+        const baseProdutos = Math.max(0, sub - desc);
         const freteNum = parseFloat(frete || '0') || 0;
         const outrasNum = parseFloat(outrasDespesas || '0') || 0;
         const ipiNum = parseFloat(valorIPI || '0') || 0;
-        const totalProdutosNum = parseFloat(valorTotalProdutos || String(totalProdutosCalculado)) || 0;
-        return totalProdutosNum + ipiNum + freteNum + outrasNum;
-    }, [valorIPI, frete, outrasDespesas, valorTotalProdutos, totalProdutosCalculado]);
+        return baseProdutos + ipiNum + freteNum + outrasNum;
+    }, [valorIPI, frete, outrasDespesas, descontos, totalProdutosCalculado]);
 
     // Carregar compras reais
     const loadPurchaseOrders = useCallback(async () => {
@@ -306,37 +441,143 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         carregarObras();
     }, []);
 
-    const filteredPurchases = useMemo(() => {
+interface ComprasPropsExtended {
+    toggleSidebar?: () => void;
+    suppressSuspenseSpinner?: boolean;
+}
+
+const filteredPurchases = useMemo(() => {
         let filtered = purchaseOrders;
         
         if (filter !== 'Todos') {
             filtered = filtered.filter(purchase => purchase.status === filter);
         }
         
+        if (filterEmpresaCNPJ) {
+            filtered = filtered.filter(purchase => {
+                const cnpjCompra = (purchase as any).empresaCompradoraCNPJ || '';
+                const cnpjLimpoCompra = cnpjCompra.replace(/\D/g, '');
+                const cnpjLimpoFiltro = filterEmpresaCNPJ.replace(/\D/g, '');
+                return cnpjLimpoCompra === cnpjLimpoFiltro;
+            });
+        }
+        
         if (searchTerm) {
             filtered = filtered.filter(purchase => {
+                const term = searchTerm.toLowerCase();
                 const supplierName = (purchase.supplierName || '').toLowerCase();
                 const invoice = (purchase.invoiceNumber || '').toLowerCase();
-                const term = searchTerm.toLowerCase();
-                return supplierName.includes(term) || invoice.includes(term);
+                const numeroSeq = purchase.numeroSequencial !== undefined && purchase.numeroSequencial !== null ? String(purchase.numeroSequencial) : (purchase.numero ? String(purchase.numero) : '');
+                const idLower = (purchase.id || '').toLowerCase();
+                return supplierName.includes(term) || invoice.includes(term) || numeroSeq.includes(term) || idLower.includes(term);
             });
         }
         
         return filtered;
-    }, [filter, searchTerm, purchaseOrders]);
+    }, [filter, filterEmpresaCNPJ, searchTerm, purchaseOrders]);
+
+    const normalizarParaBusca = useCallback(
+        (texto: string) =>
+            (texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+        []
+    );
+
+    const fornecedoresFiltrados = useMemo(() => {
+        const termo = supplierName.trim();
+        if (!termo) return fornecedoresCadastrados.slice(0, 10);
+        const termoNorm = normalizarParaBusca(termo);
+        const termoDigitos = termo.replace(/\D/g, '');
+        return fornecedoresCadastrados
+            .map((f) => {
+                const nomeNorm = normalizarParaBusca(f.nome);
+                const cnpjDigits = (f.cnpj || '').replace(/\D/g, '');
+                const palavras = nomeNorm.split(/\s+/);
+                const nomeComecaCom = nomeNorm.startsWith(termoNorm);
+                const algumaPalavraComeca = palavras.some((p) => p.startsWith(termoNorm));
+                const nomeContem = nomeNorm.includes(termoNorm);
+                const cnpjContem = termoDigitos.length >= 2 && cnpjDigits.includes(termoDigitos);
+                if (!nomeComecaCom && !algumaPalavraComeca && !nomeContem && !cnpjContem) return null;
+                let score = 0;
+                if (nomeComecaCom) score = 100;
+                else if (algumaPalavraComeca) score = 80;
+                else if (nomeContem) score = 50;
+                else if (cnpjContem) score = 30;
+                return { fornecedor: f, score };
+            })
+            .filter((x): x is { fornecedor: Fornecedor; score: number } => x !== null)
+            .sort((a, b) => b.score - a.score)
+            .map((x) => x.fornecedor)
+            .slice(0, 10);
+    }, [fornecedoresCadastrados, supplierName, normalizarParaBusca]);
+
+    const handlePhoneChangeEdit = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSupplierPhone(formatTelefoneBR(e.target.value));
+    };
+
+    const handleCnpjFornecedorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSupplierCNPJ(formatCNPJ(e.target.value));
+    };
+
+    const handleCnpjDestinatarioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setDestinatarioCNPJ(formatCNPJ(e.target.value));
+    };
+
+    const handleCnpjEmpresaCompradoraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setEmpresaCompradoraCNPJ(formatCNPJ(e.target.value));
+    };
+
+    const handleSelecionarFornecedor = (f: Fornecedor) => {
+        setSupplierName(f.nome);
+        setSupplierCNPJ(f.cnpj ? formatCNPJ(f.cnpj) : '');
+        setSupplierPhone(f.telefone ? formatTelefoneBR(f.telefone) : '');
+        setSupplierEmail(f.email || '');
+        const partes = [f.endereco, f.cidade, f.estado, f.cep].filter(Boolean);
+        setSupplierAddress(partes.join(partes.length > 1 ? ', ' : ''));
+        setShowFornecedorDropdown(false);
+    };
 
     // Handlers
     const handleOpenModal = (purchase: PurchaseOrder | null = null, compraAvulsa: boolean = false) => {
         if (purchase) {
             setPurchaseToEdit(purchase);
             setSelectedSupplierId(purchase.supplierId || '');
-            setPurchaseDate(purchase.orderDate || new Date().toISOString().split('T')[0]);
+            // Formatar data corretamente
+            const dataCompra = purchase.orderDate ? purchase.orderDate.split('T')[0] : new Date().toISOString().split('T')[0];
+            setPurchaseDate(dataCompra);
+            const emissaoNF = (purchase as any).dataEmissaoNF;
+            setDataEmissaoNF(emissaoNF ? (typeof emissaoNF === 'string' ? emissaoNF.slice(0, 10) : new Date(emissaoNF).toISOString().slice(0, 10)) : dataCompra);
             setInvoiceNumber(purchase.invoiceNumber || '');
+            setSerieNF((purchase as any).serieNF || '1');
             setStatus(purchase.status);
             setPurchaseItems(purchase.items);
             setSupplierName(purchase.supplierName || '');
+            const cnpjRaw = (purchase as any).fornecedorCNPJ || '';
+            setSupplierCNPJ(cnpjRaw ? formatCNPJ(String(cnpjRaw)) : '');
+            setSupplierPhone((purchase as any).fornecedorTel ? formatTelefoneBR(String((purchase as any).fornecedorTel)) : '');
             setIsCompraAvulsa(false); // Edição não é compra avulsa
             setObraId((purchase as any).obraId || '');
+            // Carregar valores financeiros
+            setFrete(String((purchase as any).frete || (purchase as any).valorFrete || 0));
+            setOutrasDespesas(String((purchase as any).outrasDespesas || 0));
+            setDescontos(String((purchase as any).valorDesconto ?? 0));
+            setValorIPI(String((purchase as any).valorIPI || 0));
+            setCondicaoPagamento((purchase as any).condicoesPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA');
+            // Empresa compradora (para edição)
+            setEmpresaCompradoraNome((purchase as any).empresaCompradoraNome || '');
+            setObservacoesCompra(purchase.notes || purchase.observacoes || '');
+            const dr = (purchase as any).dataRecebimento;
+            setDataRecebimentoCompra(
+                dr
+                    ? typeof dr === 'string'
+                        ? dr.split('T')[0]
+                        : new Date(dr).toISOString().slice(0, 10)
+                    : ''
+            );
+            const parcelasNorm = normalizeParcelasFromPurchase(purchase);
+            setDuplicatas(parcelasNorm);
+            setParcelas(parcelasNorm);
+            setDestinatarioCNPJ((purchase as any).destinatarioCNPJ ? formatCNPJ(String((purchase as any).destinatarioCNPJ)) : '');
+            setEmpresaCompradoraCNPJ((purchase as any).empresaCompradoraCNPJ ? formatCNPJ(String((purchase as any).empresaCompradoraCNPJ)) : '');
         } else {
             resetForm();
             setIsCompraAvulsa(compraAvulsa); // ✅ NOVO: Definir modo compra avulsa
@@ -348,6 +589,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setPurchaseToEdit(null);
         setSelectedSupplierId('');
         setPurchaseDate(new Date().toISOString().split('T')[0]);
+        setDataEmissaoNF(new Date().toISOString().split('T')[0]);
         setInvoiceNumber('');
         setSerieNF('1');
         setStatus(PurchaseStatus.Pendente);
@@ -363,6 +605,47 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         setEmpresaCompradoraId('');
         setEmpresaCompradoraNome('');
         setEmpresaCompradoraCNPJ('');
+        // Resetar campos financeiros
+        setFrete('0');
+        setOutrasDespesas('0');
+        setDescontos('0');
+        setValorIPI('0');
+        setDestinatarioCNPJ('');
+        setCondicaoPagamento('AVISTA');
+        setNumParcelas('1');
+        setDataPrimeiroVencimento('');
+        setDuplicatas([]);
+        setParcelas([]);
+        setDataRecebimentoCompra('');
+        setShowFornecedorDropdown(false);
+        setShowXMLImportInsideModal(false);
+        setSelectedXMLFile(null);
+        setXmlError(null);
+        setObservacoesCompra('');
+    };
+
+    useEffect(() => {
+        if (purchaseToView) {
+            setObservacoesDetalheDraft(purchaseToView.notes || purchaseToView.observacoes || '');
+        }
+    }, [purchaseToView]);
+
+    const salvarObservacoesDetalhe = async () => {
+        if (!purchaseToView) return;
+        setSalvandoObservacoes(true);
+        try {
+            await comprasService.updateCompra(purchaseToView.id, { observacoes: observacoesDetalheDraft });
+            const refreshed = await comprasService.getCompraById(purchaseToView.id);
+            setPurchaseToView(refreshed);
+            const data = await comprasService.getCompras();
+            setPurchaseOrders(data);
+            toast.success('Observações salvas');
+        } catch (e) {
+            console.error(e);
+            toast.error('Não foi possível salvar as observações');
+        } finally {
+            setSalvandoObservacoes(false);
+        }
     };
 
     const handleOpenReceivingModal = () => {
@@ -442,12 +725,38 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         resetForm();
     };
 
-    // ✅ NOVO: Carregar empresas fiscais quando o modal abrir
+    // Carregar empresas fiscais na montagem da página (para filtro) e quando o modal abrir
+    useEffect(() => {
+        loadEmpresasFiscais();
+    }, []);
     useEffect(() => {
         if (isModalOpen) {
             loadEmpresasFiscais();
         }
     }, [isModalOpen]);
+
+    useEffect(() => {
+        if (!isModalOpen) return;
+        (async () => {
+            try {
+                const resp = await fornecedoresService.listar({ ativo: true });
+                const data = (resp as any)?.data ?? resp;
+                setFornecedoresCadastrados(Array.isArray(data) ? data : []);
+            } catch {
+                setFornecedoresCadastrados([]);
+            }
+        })();
+    }, [isModalOpen]);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (fornecedorDropdownRef.current && !fornecedorDropdownRef.current.contains(e.target as Node)) {
+                setShowFornecedorDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const loadEmpresasFiscais = async () => {
         try {
@@ -465,7 +774,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         const empresa = empresasFiscais.find(e => e.id === empresaId);
         if (empresa) {
             setEmpresaCompradoraNome(empresa.razaoSocial || empresa.nomeFantasia || '');
-            setEmpresaCompradoraCNPJ(empresa.cnpj || '');
+            setEmpresaCompradoraCNPJ(empresa.cnpj ? formatCNPJ(String(empresa.cnpj)) : '');
         } else {
             setEmpresaCompradoraNome('');
             setEmpresaCompradoraCNPJ('');
@@ -526,29 +835,58 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        // Validar se há pelo menos uma parcela na seção Faturas / Parcelas (Duplicatas)
+        if (parcelas.length === 0) {
+            toast.error('Registre no mínimo uma parcela para registrar essa compra!');
+            return;
+        }
+
+        // Validar se as parcelas têm data e valor válidos
+        const parcelasInvalidas = parcelas.filter(p => !p.dataVencimento || p.valor <= 0);
+        if (parcelasInvalidas.length > 0) {
+            toast.error('Existem parcelas incompletas', {
+                description: 'Todas as parcelas devem ter data de vencimento e valor maior que zero.',
+                duration: 5000
+            });
+            return;
+        }
+
         try {
-            // Se está editando, apenas atualizar o status
+            // Se está editando, atualizar a compra completa
             if (purchaseToEdit) {
-                console.log('✏️ Atualizando status da compra:', purchaseToEdit.id, 'para', status);
-                const response = await comprasService.updateCompraStatus(purchaseToEdit.id, status);
-                const estatisticas = (response as any)?.estatisticas || (response as any)?.data?.estatisticas;
+                console.log('✏️ Atualizando compra completa:', purchaseToEdit.id);
+                
+                const updatePayload = {
+                    fornecedorNome: supplierName,
+                    fornecedorCNPJ: onlyDigits(supplierCNPJ) || supplierCNPJ,
+                    fornecedorTel: onlyDigits(supplierPhone) || undefined,
+                    numeroNF: invoiceNumber,
+                    serieNF: serieNF || '1',
+                    dataEmissaoNF: dataEmissaoNF || purchaseDate,
+                    dataCompra: purchaseDate,
+                    dataRecebimento: dataRecebimentoCompra || undefined,
+                    status: status,
+                    valorFrete: parseFloat(frete || '0') || 0,
+                    outrasDespesas: parseFloat(outrasDespesas || '0') || 0,
+                    valorDesconto: parseFloat(descontos || '0') || 0,
+                    condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
+                    destinatarioCNPJ: onlyDigits(destinatarioCNPJ) || destinatarioCNPJ || undefined,
+                    valorIPI: parseFloat(valorIPI || '0') || 0,
+                    valorTotalProdutos: totalProdutosCalculado,
+                    valorTotalNota: valorTotalNotaCalculado,
+                    duplicatas: parcelas,
+                    empresaCompradoraNome: empresaCompradoraNome || undefined,
+                    empresaCompradoraCNPJ: onlyDigits(empresaCompradoraCNPJ) || empresaCompradoraCNPJ || undefined,
+                    observacoes: observacoesCompra
+                };
+
+                const response = await comprasService.updateCompra(purchaseToEdit.id, updatePayload);
                 
                 // reload list
                 const data = await comprasService.getCompras();
                 setPurchaseOrders(data);
 
-                // Exibir resumo se houver estatísticas (quando mudar para Recebido)
-                if (estatisticas && status === 'Recebido') {
-                    const mensagem = `✅ Status da compra atualizado para Recebido!\n\n` +
-                        `📦 ${estatisticas.materiaisIncrementados || 0} item(ns) tiveram estoque incrementado em materiais existentes\n` +
-                        `🆕 ${estatisticas.materiaisCriados || 0} novo(s) material(is) foram criados`;
-                    toast.success('Status atualizado', {
-                        description: mensagem,
-                        duration: 5000
-                    });
-                } else {
-                    toast.success('✅ Status da compra atualizado com sucesso!');
-                }
+                toast.success('✅ Compra atualizada com sucesso!');
                 handleCloseModal();
                 return;
             }
@@ -556,15 +894,16 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             // Se não está editando, criar nova compra
             const payload: any = {
                 fornecedorNome: supplierName,
-                fornecedorCNPJ: supplierCNPJ,
-                fornecedorTel: supplierPhone,
+                fornecedorCNPJ: onlyDigits(supplierCNPJ) || supplierCNPJ,
+                fornecedorTel: onlyDigits(supplierPhone) || undefined,
                 numeroNF: invoiceNumber,
                 serieNF: serieNF || '1',
-                dataEmissaoNF: purchaseDate,
+                dataEmissaoNF: dataEmissaoNF || purchaseDate,
                 dataCompra: purchaseDate,
                 status: status,
                 valorFrete: parseFloat(frete || '0') || 0,
                 outrasDespesas: parseFloat(outrasDespesas || '0') || 0,
+                valorDesconto: parseFloat(descontos || '0') || 0,
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
@@ -578,19 +917,17 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                     tipoEmbalagem: (it as any).tipoEmbalagem,
                     unidadeEmbalagem: (it as any).unidadeEmbalagem
                 })),
-                observacoes: '',
+                observacoes: observacoesCompra.trim() || undefined,
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
-                parcelas: condicaoPagamento === 'PARCELADO' ? parseInt(numParcelas || '1') : 1,
-                dataPrimeiroVencimento: condicaoPagamento === 'PARCELADO' && dataPrimeiroVencimento ? dataPrimeiroVencimento : undefined,
-                destinatarioCNPJ,
+                destinatarioCNPJ: onlyDigits(destinatarioCNPJ) || destinatarioCNPJ || undefined,
                 statusImportacao,
                 valorIPI: parseFloat(valorIPI || '0') || 0,
-                valorTotalProdutos: parseFloat(valorTotalProdutos || '0') || 0,
+                valorTotalProdutos: totalProdutosCalculado,
                 valorTotalNota: valorTotalNotaCalculado,
-                duplicatas,
+                duplicatas: parcelas,
                 obraId: isCompraAvulsa && obraId ? obraId : undefined, // ✅ NOVO: Incluir obraId se for compra avulsa
                 empresaCompradoraNome: empresaCompradoraNome || undefined, // ✅ NOVO: Nome da empresa compradora
-                empresaCompradoraCNPJ: empresaCompradoraCNPJ || undefined // ✅ NOVO: CNPJ da empresa compradora
+                empresaCompradoraCNPJ: onlyDigits(empresaCompradoraCNPJ) || empresaCompradoraCNPJ || undefined // ✅ NOVO: CNPJ da empresa compradora
             };
 
             console.log('📤 Criando nova compra:', payload);
@@ -650,7 +987,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     };
 
     // Novo: upload e preenchimento automático a partir do XML
-    const handleXMLUpload = async (file: File | null | undefined) => {
+    // fromInsideModal = true: chamado de dentro do modal de compra (não faz switch de modais)
+    const handleXMLUpload = async (file: File | null | undefined, fromInsideModal = false) => {
         if (!file) {
             setXmlError('Nenhum arquivo selecionado.');
             return;
@@ -686,7 +1024,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             setSerieNF(data.serieNF || '1');
             
             console.log('📅 Data Emissão:', data.dataEmissao);
-            setPurchaseDate(data.dataEmissao ? String(data.dataEmissao).slice(0, 10) : new Date().toISOString().split('T')[0]);
+            const dataEmissaoStr = data.dataEmissao ? String(data.dataEmissao).slice(0, 10) : new Date().toISOString().split('T')[0];
+            setDataEmissaoNF(dataEmissaoStr);
+            setPurchaseDate(dataEmissaoStr);
             
             console.log('📦 Items do XML:', data.items);
             setPurchaseItems(
@@ -722,12 +1062,21 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
             // Custos e Totais
             setFrete(String(data.valorFrete ?? '0'));
             setOutrasDespesas(String(data.outrasDespesas ?? '0'));
+            setDescontos(String(data.valorDesconto ?? '0'));
             setValorIPI(String(data.valorIPI ?? '0'));
-            setValorTotalProdutos(String(data.valorTotalProdutos ?? '0'));
-            setValorTotalNota(String(data.valorTotalNota ?? '0'));
 
-            // Destinatário
-            setDestinatarioCNPJ(data.destinatarioCNPJ || '');
+            // Destinatário e Empresa Compradora (garantir string para .replace)
+            const cnpjDest = String(data.destinatarioCNPJ || '');
+            setDestinatarioCNPJ(cnpjDest);
+            if (cnpjDest && empresasFiscais.length > 0) {
+                const cnpjLimpo = cnpjDest.replace(/\D/g, '');
+                const empresaMatch = empresasFiscais.find((e: any) => (e.cnpj || '').replace(/\D/g, '') === cnpjLimpo);
+                if (empresaMatch) {
+                    setEmpresaCompradoraId(empresaMatch.id);
+                    setEmpresaCompradoraNome(empresaMatch.razaoSocial || empresaMatch.nomeFantasia || '');
+                    setEmpresaCompradoraCNPJ(empresaMatch.cnpj || '');
+                }
+            }
             setStatusImportacao('XML');
 
             // Duplicatas / Parcelas
@@ -754,24 +1103,31 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 setDataPrimeiroVencimento('');
             }
 
-            // Abrir modal de compra preenchido
-            console.log('✅ XML processado com sucesso! Abrindo modal de compra...');
+            console.log('✅ XML processado com sucesso!');
             console.log('📝 Estados populados:');
             console.log('  - Fornecedor:', data.fornecedor?.nome || '❌ VAZIO');
             console.log('  - CNPJ:', data.fornecedor?.cnpj || '❌ VAZIO');
             console.log('  - NF:', data.numeroNF || '❌ VAZIO');
             console.log('  - Items:', (data.items || []).length, 'itens');
-            
-            setIsXMLModalOpen(false);
-            setTimeout(() => {
-                setIsModalOpen(true);
-                console.log('🎯 Modal de compra aberto!');
-                
+
+            if (fromInsideModal) {
+                setShowXMLImportInsideModal(false);
+                setSelectedXMLFile(null);
                 toast.success('XML importado com sucesso!', {
                     description: `${(data.items || []).length} itens carregados. Revise e salve a compra.`,
                     duration: 4000
                 });
-            }, 100);
+            } else {
+                setIsXMLModalOpen(false);
+                setTimeout(() => {
+                    setIsModalOpen(true);
+                    console.log('🎯 Modal de compra aberto!');
+                    toast.success('XML importado com sucesso!', {
+                        description: `${(data.items || []).length} itens carregados. Revise e salve a compra.`,
+                        duration: 4000
+                    });
+                }, 100);
+            }
         } catch (error) {
             console.error('❌ Erro ao processar XML:', error);
             setXmlError('Erro ao processar arquivo XML: ' + (error as Error).message);
@@ -842,16 +1198,16 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     };
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-soft">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Compras</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie pedidos de compra e fornecedores</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Compras</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie pedidos de compra e fornecedores</p>
                     </div>
                 </div>
                 <div className="flex gap-3 flex-wrap">
@@ -881,7 +1237,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
 
             {/* Filtros */}
             <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="md:col-span-2">
                         <div className="relative">
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -907,13 +1263,28 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             <option value={PurchaseStatus.Cancelado}>Cancelado</option>
                         </select>
                     </div>
+                    <div>
+                        <select
+                            value={filterEmpresaCNPJ}
+                            onChange={(e) => setFilterEmpresaCNPJ(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                            title="Filtrar por empresa compradora (CNPJ)"
+                        >
+                            <option value="">Todas as empresas</option>
+                            {empresasFiscais.map((empresa) => (
+                                <option key={empresa.id} value={empresa.cnpj || ''}>
+                                    {empresa.razaoSocial || empresa.nomeFantasia || empresa.cnpj || 'Empresa'}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
                     <p className="text-sm text-gray-600">
                         Exibindo <span className="font-bold text-gray-900">{filteredPurchases.length}</span> de <span className="font-bold text-gray-900">{purchaseOrders.length}</span> compras
                     </p>
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                         <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
@@ -926,6 +1297,19 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                             <span className="text-xs text-gray-600">Cancelado: {purchaseOrders.filter(p => p.status === PurchaseStatus.Cancelado).length}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 hidden sm:inline">|</span>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1 h-4 bg-blue-600 rounded-sm" title="Faturado" />
+                            <span className="text-xs text-gray-600">Faturado (parcelas quitadas)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1 h-4 bg-orange-500 rounded-sm" title="Recebido" />
+                            <span className="text-xs text-gray-600">Recebido (sem pagamento ou sem parcelas)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-1 h-4 bg-yellow-400 rounded-sm" title="Pago parcial" />
+                            <span className="text-xs text-gray-600">Pago parcial</span>
                         </div>
                     </div>
                 </div>
@@ -955,15 +1339,31 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 </div>
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredPurchases.map((purchase) => (
-                        <div key={purchase.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-orange-300 transition-all duration-200">
+                    {filteredPurchases.map((purchase) => {
+                        const lateral = getCompraBadgeLateral(purchase);
+                        return (
+                        <div
+                            key={purchase.id}
+                            className="flex rounded-2xl overflow-hidden border-2 border-gray-200 shadow-soft hover:shadow-medium hover:border-orange-300 transition-all duration-200 bg-white"
+                        >
+                            <div
+                                className={`w-1.5 shrink-0 min-h-[8rem] ${lateral.barClass}`}
+                                title={lateral.tag || undefined}
+                                aria-hidden
+                            />
+                            <div className="flex-1 p-6 min-w-0">
                             {/* Header do Card */}
                             <div className="flex justify-between items-start mb-4">
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded">
+                                    <div className="flex flex-col gap-0.5 mb-1">
+                                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-1 rounded w-fit">
                                             Compra #{purchase.numeroSequencial || 'N/A'}
                                         </span>
+                                        {lateral.tag && (
+                                            <span className={`text-[10px] font-bold tracking-wider ${lateral.tagClass}`}>
+                                                {lateral.tag}
+                                            </span>
+                                        )}
                                     </div>
                                     <h3 className="font-bold text-lg text-gray-900 mb-1">{purchase.supplierName}</h3>
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -1035,7 +1435,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     <EyeIcon className="w-4 h-4" />
                                     Ver Detalhes
                                 </button>
-                                {purchase.status === PurchaseStatus.Pendente && (
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            console.log('✏️ Carregando compra para edição:', purchase.id);
+                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
+                                            handleOpenModal(compraCompleta);
+                                        } catch (error) {
+                                            console.error('Erro ao carregar compra para edição:', error);
+                                            toast.error('Erro ao carregar compra para edição');
+                                        }
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg transition-colors text-sm font-semibold"
+                                    title="Editar compra (parcelas e datas)"
+                                >
+                                    <PencilIcon className="w-4 h-4" />
+                                    Editar
+                                </button>
+                                {purchase.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchase) && (
                                     <>
                                         <button
                                             onClick={() => {
@@ -1075,8 +1492,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </button>
                                 )}
                             </div>
+                            </div>
                         </div>
-                    ))}
+                    );
+                    })}
                 </div>
             ) : (
                 <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
@@ -1095,12 +1514,21 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {filteredPurchases.map((purchase) => (
+                                {filteredPurchases.map((purchase) => {
+                                    const lateralRow = getCompraBadgeLateral(purchase);
+                                    return (
                                     <tr key={purchase.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className="font-bold text-orange-700">
-                                                #{purchase.numeroSequencial || 'N/A'}
-                                            </span>
+                                        <td className={`px-6 py-4 whitespace-nowrap ${getCompraRowBorderClass(purchase)}`}>
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="font-bold text-orange-700">
+                                                    #{purchase.numeroSequencial || 'N/A'}
+                                                </span>
+                                                {lateralRow.tag && (
+                                                    <span className={`text-[10px] font-bold tracking-wider ${lateralRow.tagClass}`}>
+                                                        {lateralRow.tag}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="font-bold text-gray-900">{purchase.supplierName}</div>
@@ -1146,8 +1574,25 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                         }
                                                     }}
                                                     className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                                    title="Ver detalhes"
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={async () => {
+                                                        try {
+                                                            console.log('✏️ Carregando compra para edição:', purchase.id);
+                                                            const compraCompleta = await comprasService.getCompraById(purchase.id);
+                                                            handleOpenModal(compraCompleta);
+                                                        } catch (error) {
+                                                            console.error('Erro ao carregar compra para edição:', error);
+                                                            toast.error('Erro ao carregar compra para edição');
+                                                        }
+                                                    }}
+                                                    className="px-3 py-2 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 rounded-lg transition-colors text-sm font-semibold"
+                                                    title="Editar compra (parcelas e datas)"
+                                                >
+                                                    <PencilIcon className="w-4 h-4" />
                                                 </button>
                                                 {canDelete(user) && (
                                                     <button
@@ -1161,7 +1606,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                         <TrashIcon className="w-4 h-4" />
                                                     </button>
                                                 )}
-                                                {purchase.status === PurchaseStatus.Pendente && (
+                                                {purchase.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchase) && (
                                                     <>
                                                         <button
                                                             onClick={() => {
@@ -1190,7 +1635,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -1213,7 +1659,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                 }
                 confirmText="Cancelar Compra"
                 cancelText="Manter Compra"
-                confirmButtonClass="bg-orange-600 hover:bg-orange-700"
+                variant="warning"
             />
 
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
@@ -1228,38 +1674,138 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </div>
                                 <div className="flex-1">
                                     <h2 className="text-2xl font-bold text-white">
-                                        {purchaseToEdit ? 'Editar Compra' : 'Nova Compra'}
+                                        {purchaseToEdit ? 'Editar Compra' : isCompraAvulsa ? 'Compra Avulsa' : 'Nova Compra'}
                                     </h2>
                                     <p className="text-sm text-white/80 mt-1">
                                         {purchaseToEdit ? 'Atualize as informações da compra' : 'Registre uma nova compra ou pedido'}
                                     </p>
                                 </div>
                             </div>
-                            <button
-                                onClick={handleCloseModal}
-                                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
+                            <div className="absolute top-4 right-4 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowXMLImportInsideModal(!showXMLImportInsideModal);
+                                        setXmlError(null);
+                                        setSelectedXMLFile(null);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl transition-all font-semibold"
+                                >
+                                    <DocumentArrowUpIcon className="w-5 h-5" />
+                                    Importar XML da NF-e
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleCloseModal}
+                                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                >
+                                    <XMarkIcon className="w-6 h-6" />
+                                </button>
+                            </div>
                         </div>
+
+                        {purchaseToEdit?.status === PurchaseStatus.Recebido && (
+                            <div className="mx-6 mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-800 dark:text-amber-200 text-sm">
+                                Compra já recebida: você pode corrigir <strong>NF, fornecedor, datas, parcelas e valores</strong>. Os itens da nota não são alterados por aqui (evita divergência com o estoque).
+                            </div>
+                        )}
+
+                        {/* Seção de Importar XML (dentro do modal) */}
+                        {showXMLImportInsideModal && (
+                            <div className="mx-6 mt-6 p-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+                                <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                                    <DocumentArrowUpIcon className="w-5 h-5 text-blue-600" />
+                                    Importar XML da NF-e
+                                </h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                                    Selecione um arquivo XML da NF-e para preencher automaticamente todos os campos da compra (fornecedor, itens, parcelas, valores).
+                                </p>
+                                <div className="space-y-4">
+                                    <input
+                                        type="file"
+                                        accept=".xml"
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) setSelectedXMLFile(file);
+                                        }}
+                                        className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-blue-500 dark:bg-dark-bg dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-100 file:text-blue-700 file:font-semibold file:cursor-pointer hover:file:bg-blue-200"
+                                    />
+                                    {xmlError && (
+                                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+                                            <p className="text-red-800 dark:text-red-300 font-medium">❌ {xmlError}</p>
+                                        </div>
+                                    )}
+                                    <div className="flex gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setShowXMLImportInsideModal(false);
+                                                setXmlError(null);
+                                                setSelectedXMLFile(null);
+                                            }}
+                                            className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-dark-hover rounded-xl hover:bg-gray-200 dark:hover:bg-dark-border transition-all font-semibold"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => selectedXMLFile && handleXMLUpload(selectedXMLFile, true)}
+                                            disabled={!selectedXMLFile || isProcessingXML}
+                                            className="px-6 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {isProcessingXML ? 'Processando...' : 'Processar e Preencher'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         <form onSubmit={handleSubmit} className="p-6 space-y-6">
                             {/* Informações do Fornecedor */}
                             <div>
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Informações do Fornecedor</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
+                                    <div className="relative md:col-span-2" ref={fornecedorDropdownRef}>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                                             Nome do Fornecedor *
                                         </label>
                                         <input
-                                            type="text"
+                                            type="search"
                                             value={supplierName}
-                                            onChange={(e) => setSupplierName(e.target.value)}
+                                            onChange={(e) => {
+                                                setSupplierName(e.target.value);
+                                                setShowFornecedorDropdown(true);
+                                            }}
+                                            onFocus={() => setShowFornecedorDropdown(true)}
                                             required
+                                            autoComplete="off"
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                            placeholder="Nome da empresa fornecedora"
+                                            placeholder="Digite para buscar fornecedores cadastrados ou o nome da empresa"
                                         />
+                                        {showFornecedorDropdown && fornecedoresFiltrados.length > 0 && (
+                                            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-60 overflow-auto">
+                                                {fornecedoresFiltrados.map((f) => (
+                                                    <button
+                                                        key={f.id}
+                                                        type="button"
+                                                        onClick={() => handleSelecionarFornecedor(f)}
+                                                        className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="font-medium text-gray-900">{f.nome}</span>
+                                                            {f.cnpj && (
+                                                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono shrink-0">
+                                                                    {f.cnpj}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {f.endereco && (
+                                                            <div className="text-xs text-gray-500 mt-0.5 truncate">{f.endereco}</div>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div>
@@ -1268,8 +1814,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         </label>
                                         <input
                                             type="text"
+                                            inputMode="numeric"
                                             value={supplierCNPJ}
-                                            onChange={(e) => setSupplierCNPJ(e.target.value)}
+                                            onChange={handleCnpjFornecedorChange}
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                                             placeholder="00.000.000/0000-00"
                                         />
@@ -1280,11 +1827,12 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             Telefone
                                         </label>
                                         <input
-                                            type="text"
+                                            type="tel"
+                                            inputMode="tel"
                                             value={supplierPhone}
-                                            onChange={(e) => setSupplierPhone(e.target.value)}
+                                            onChange={handlePhoneChangeEdit}
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                            placeholder="(00) 0000-0000"
+                                            placeholder="(00) 00000-0000"
                                         />
                                     </div>
 
@@ -1376,6 +1924,30 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                                         />
                                     </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Data de recebimento (chegada)
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={dataRecebimentoCompra}
+                                            onChange={(e) => setDataRecebimentoCompra(e.target.value)}
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                            title="Quando a mercadoria ou o serviço foi efetivamente recebido"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Data de Emissão da NF
+                                        </label>
+                                        <input
+                                            type="date"
+                                            value={dataEmissaoNF}
+                                            onChange={(e) => setDataEmissaoNF(e.target.value)}
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                            title="Data de emissão contida na nota fiscal (XML)"
+                                        />
+                                    </div>
 
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -1396,8 +1968,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">CNPJ Destinatário</label>
                                         <input
                                             type="text"
+                                            inputMode="numeric"
                                             value={destinatarioCNPJ}
-                                            onChange={(e) => setDestinatarioCNPJ(e.target.value)}
+                                            onChange={handleCnpjDestinatarioChange}
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                                             placeholder="00.000.000/0000-00"
                                         />
@@ -1460,7 +2033,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     </p>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Status de Importação</label>
                                         <select
@@ -1472,38 +2045,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <option value="XML">XML</option>
                                         </select>
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Valor IPI</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={valorIPI}
-                                            onChange={(e) => setValorIPI(e.target.value)}
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Total Produtos</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={valorTotalProdutos}
-                                            onChange={(e) => setValorTotalProdutos(e.target.value)}
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Total da Nota</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={valorTotalNota}
-                                            onChange={(e) => setValorTotalNota(e.target.value)}
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                        />
+                                    <div className="flex flex-col justify-end">
+                                        <p className="text-sm text-gray-500">
+                                            Total de produtos e total da nota são calculados automaticamente em <strong>Custos e Pagamento</strong> e no resumo.
+                                        </p>
                                     </div>
                                 </div>
                                 
@@ -1612,7 +2157,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                     <td className="px-6 py-4">
                                                                         <div>
                                                                             <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
-                                                                            {(item as any).quantidadeFracionada && (
+                                                                            {(item as any).quantidadeFracionada && item.quantity && (
                                                                                 <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
                                                                                     📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
                                                                                 </p>
@@ -1641,6 +2186,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-gray-700 dark:text-dark-text font-medium">
                                                                     {item.quantity}
+                                                                    {item.unidadeMedida && (
+                                                                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+                                                                            {item.unidadeMedida}
+                                                                        </span>
+                                                                    )}
                                                                     {(item as any).quantidadeFracionada && (
                                                                         <span className="text-blue-600 dark:text-blue-400 ml-1">
                                                                             ({(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'})
@@ -1670,17 +2220,29 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <div className="flex items-center justify-center gap-2">
-                                                                    {/* Botão de olho para visualizar material (mostrar se houver materialId E materialVinculado) */}
-                                                                    {itemExtended.materialId && itemExtended.materialVinculado && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setMaterialVisualizando({ itemIndex: index, material: itemExtended.materialVinculado })}
-                                                                            className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                                                            title={itemExtended.matchAutomatico ? "Verificar material sugerido pelo sistema" : "Visualizar material vinculado"}
-                                                                        >
-                                                                            <EyeIcon className="w-4 h-4" />
-                                                                        </button>
-                                                                    )}
+                                                                    {/* Ver Detalhes do Material */}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setSelectedMaterialItem({
+                                                                                nomeProduto: item.productName,
+                                                                                nome: itemExtended.materialVinculado?.nome,
+                                                                                sku: item.sku ?? itemExtended.materialVinculado?.sku,
+                                                                                ncm: item.ncm ?? itemExtended.materialVinculado?.ncm,
+                                                                                quantidade: item.quantity,
+                                                                                valorUnit: item.unitCost,
+                                                                                preco: itemExtended.materialVinculado?.preco,
+                                                                                valorVenda: itemExtended.materialVinculado?.valorVenda,
+                                                                                material: itemExtended.materialVinculado ?? null,
+                                                                                fornecedor: undefined
+                                                                            });
+                                                                            setIsMaterialDetailsModalOpen(true);
+                                                                        }}
+                                                                        className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                                        title="Ver detalhes do material"
+                                                                    >
+                                                                        <EyeIcon className="w-4 h-4" />
+                                                                    </button>
                                                                     
                                                                     {/* Botão de busca */}
                                                                     <button
@@ -1702,14 +2264,39 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                         <MagnifyingGlassIcon className="w-4 h-4" />
                                                                     </button>
                                                                     
+                                                                    {/* Botão para converter unidade (ex: km -> m) */}
+                                                                    {(item.unidadeMedida || '').toLowerCase() === 'km' ||
+                                                                    (item.unidadeMedida || '').toLowerCase() === 'm' ||
+                                                                    (item.unidadeMedida || '').toLowerCase() === 'cm' ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setItemUnidadeEditando({
+                                                                                    index,
+                                                                                    productName: item.productName,
+                                                                                    quantity: item.quantity,
+                                                                                    unitCost: item.unitCost,
+                                                                                    totalCost: item.totalCost,
+                                                                                    unidadeMedida: item.unidadeMedida
+                                                                                });
+                                                                                const currentUnit = (item.unidadeMedida || 'm').toLowerCase() as 'km' | 'm' | 'cm';
+                                                                                setTargetUnit(currentUnit === 'km' ? 'm' : currentUnit);
+                                                                                setUnitConversionModalOpen(true);
+                                                                            }}
+                                                                            className="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors font-semibold"
+                                                                            title="Converter unidade (ex: km → m, m → cm)"
+                                                                        >
+                                                                            ⇄
+                                                                        </button>
+                                                                    ) : null}
+                                                                    
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => {
                                                                             setItemFracionamentoEditando({
                                                                                 id: (item as any).id,
-                                                                                compraId: purchaseToEdit?.id,
-                                                                                productName: item.productName,
-                                                                                quantity: item.quantity,
+                                                                                productName: item.productName || '',
+                                                                                quantity: item.quantity || 0,
                                                                                 quantidadeFracionada: (item as any).quantidadeFracionada,
                                                                                 tipoEmbalagem: (item as any).tipoEmbalagem,
                                                                                 unidadeEmbalagem: (item as any).unidadeEmbalagem
@@ -1805,7 +2392,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                             {/* Custos e Pagamento */}
                             <div>
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Custos e Pagamento</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Valor do Frete</label>
                                         <input
@@ -1819,13 +2406,27 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Outras Despesas/Descontos</label>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Outras despesas</label>
+                                        <p className="text-xs text-gray-500 mb-1">Somam ao total</p>
                                         <input
                                             type="number"
                                             min="0"
                                             step="0.01"
                                             value={outrasDespesas}
                                             onChange={(e) => setOutrasDespesas(e.target.value)}
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                            placeholder="0,00"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Descontos</label>
+                                        <p className="text-xs text-gray-500 mb-1">Reduzem o valor dos produtos</p>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="0.01"
+                                            value={descontos}
+                                            onChange={(e) => setDescontos(e.target.value)}
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                                             placeholder="0,00"
                                         />
@@ -1843,15 +2444,11 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Total Produtos</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
-                                            value={valorTotalProdutos || String(totalProdutosCalculado)}
-                                            onChange={(e) => setValorTotalProdutos(e.target.value)}
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                        />
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Total produtos (automático)</label>
+                                        <div className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-gray-900 font-semibold">
+                                            R$ {totalProdutosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-1">Soma dos itens</p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">Condição de Pagamento</label>
@@ -1881,33 +2478,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             ⚠️ Somente compras com status "Recebido" atualizam o estoque
                                         </p>
                                     </div>
-                                    {condicaoPagamento === 'PARCELADO' && (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Número de Parcelas</label>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                step="1"
-                                                value={numParcelas}
-                                                onChange={(e) => setNumParcelas(e.target.value)}
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                            />
-                                        </div>
-                                    )}
                                 </div>
-                                {condicaoPagamento === 'PARCELADO' && (
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Data do 1º Vencimento</label>
-                                            <input
-                                                type="date"
-                                                value={dataPrimeiroVencimento}
-                                                onChange={(e) => setDataPrimeiroVencimento(e.target.value)}
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                                            />
-                                        </div>
-                                    </div>
-                                )}
                             </div>
 
                             {/* Parcialmento (Duplicatas) */}
@@ -1960,12 +2531,31 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </div>
                             </div>
 
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-800 mb-2">Observações</h3>
+                                <p className="text-sm text-gray-500 mb-3">
+                                    Visíveis nos detalhes da compra; podem ser alteradas depois pelo mesmo modal ou em &quot;Ver detalhes&quot;.
+                                </p>
+                                <textarea
+                                    value={observacoesCompra}
+                                    onChange={(e) => setObservacoesCompra(e.target.value)}
+                                    rows={4}
+                                    maxLength={8000}
+                                    placeholder="Ex.: condições combinadas com o fornecedor, referência de pedido, etc."
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 resize-y min-h-[100px]"
+                                />
+                            </div>
+
                             {/* Resumo de Totais */}
                             <div className="bg-gradient-to-r from-orange-50 to-yellow-50 border-2 border-orange-200 p-4 rounded-xl">
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                                     <div className="text-sm text-gray-700">
-                                        <div className="font-semibold">Produtos</div>
-                                        <div>R$ {(valorTotalProdutos ? parseFloat(valorTotalProdutos) : totalProdutosCalculado).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                        <div className="font-semibold">Produtos (itens)</div>
+                                        <div>R$ {totalProdutosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                    </div>
+                                    <div className="text-sm text-gray-700">
+                                        <div className="font-semibold">Descontos</div>
+                                        <div className="text-red-700">− R$ {Math.min(parseFloat(descontos || '0') || 0, totalProdutosCalculado).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                     </div>
                                     <div className="text-sm text-gray-700">
                                         <div className="font-semibold">IPI</div>
@@ -1976,10 +2566,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                         <div>R$ {parseFloat(frete || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                     </div>
                                     <div className="text-sm text-gray-700">
-                                        <div className="font-semibold">Outras Despesas</div>
+                                        <div className="font-semibold">Outras despesas</div>
                                         <div>R$ {parseFloat(outrasDespesas || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                     </div>
-                                    <div className="text-right">
+                                    <div className="text-right sm:col-span-2 lg:col-span-1">
                                         <div className="text-lg font-semibold text-gray-800">TOTAL GERAL DA NOTA</div>
                                         <div className="text-2xl font-bold text-orange-700">R$ {valorTotalNotaCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                     </div>
@@ -2134,11 +2724,41 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                     <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data da Compra</h4>
                                         <p className="text-gray-900 font-medium">
-                                            {new Date(
-                                                purchaseToView.orderDate ||
-                                                (purchaseToView as any).data ||
-                                                new Date().toISOString()
-                                            ).toLocaleDateString('pt-BR')}
+                                            {(() => {
+                                                const dataStr = purchaseToView.orderDate || (purchaseToView as any).dataCompra || (purchaseToView as any).data;
+                                                if (!dataStr) return '—';
+                                                if (typeof dataStr === 'string' && dataStr.includes('T')) {
+                                                    const [dataPart] = dataStr.split('T');
+                                                    const [ano, mes, dia] = dataPart.split('-');
+                                                    return `${dia}/${mes}/${ano}`;
+                                                }
+                                                const d = new Date(dataStr);
+                                                if (isNaN(d.getTime())) return '—';
+                                                const dia = String(d.getUTCDate()).padStart(2, '0');
+                                                const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                                const ano = d.getUTCFullYear();
+                                                return `${dia}/${mes}/${ano}`;
+                                            })()}
+                                        </p>
+                                    </div>
+                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Data de Emissão da NF</h4>
+                                        <p className="text-gray-900 font-medium">
+                                            {(() => {
+                                                const dataStr = (purchaseToView as any).dataEmissaoNF;
+                                                if (!dataStr) return '—';
+                                                if (typeof dataStr === 'string' && dataStr.includes('T')) {
+                                                    const [dataPart] = dataStr.split('T');
+                                                    const [ano, mes, dia] = dataPart.split('-');
+                                                    return `${dia}/${mes}/${ano}`;
+                                                }
+                                                const d = new Date(dataStr);
+                                                if (isNaN(d.getTime())) return '—';
+                                                const dia = String(d.getUTCDate()).padStart(2, '0');
+                                                const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+                                                const ano = d.getUTCFullYear();
+                                                return `${dia}/${mes}/${ano}`;
+                                            })()}
                                         </p>
                                     </div>
                                     <div
@@ -2196,20 +2816,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <p className="text-gray-900 font-medium">{(purchaseToView as any).destinatarioCNPJ}</p>
                                         </div>
                                     )}
-                                    {/* ✅ NOVO: Empresa Compradora */}
-                                    {((purchaseToView as any).empresaCompradoraNome || (purchaseToView as any).empresaCompradoraCNPJ) && (
-                                        <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
-                                            <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1 flex items-center gap-1">
-                                                🏢 Empresa Compradora
-                                            </h4>
-                                            {(purchaseToView as any).empresaCompradoraNome && (
-                                                <p className="text-blue-900 font-bold text-base">{(purchaseToView as any).empresaCompradoraNome}</p>
-                                            )}
-                                            {(purchaseToView as any).empresaCompradoraCNPJ && (
-                                                <p className="text-blue-700 font-medium text-sm mt-1">CNPJ: {(purchaseToView as any).empresaCompradoraCNPJ}</p>
-                                            )}
-                                        </div>
-                                    )}
+                                    {/* Empresa Compradora - sempre visível para identificar qual CNPJ efetuou a compra */}
+                                    <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
+                                        <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1 flex items-center gap-1">
+                                            🏢 Empresa que comprou
+                                        </h4>
+                                        {(purchaseToView as any).empresaCompradoraNome || (purchaseToView as any).empresaCompradoraCNPJ ? (
+                                            <>
+                                                {(purchaseToView as any).empresaCompradoraNome && (
+                                                    <p className="text-blue-900 font-bold text-base">{(purchaseToView as any).empresaCompradoraNome}</p>
+                                                )}
+                                                {(purchaseToView as any).empresaCompradoraCNPJ && (
+                                                    <p className="text-blue-700 font-medium text-sm mt-1">CNPJ: {(purchaseToView as any).empresaCompradoraCNPJ}</p>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <p className="text-blue-600/80 text-sm">Não informada</p>
+                                        )}
+                                    </div>
                                     {(purchaseToView as any).statusImportacao && (
                                         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                                             <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">Tipo de Importação</h4>
@@ -2227,8 +2851,8 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1 flex items-center gap-1">
                                                 🏗️ Obra Vinculada
                                             </h4>
-                                            <p className="text-purple-900 font-bold">{purchaseToView.obra.nomeObra}</p>
-                                            <p className="text-xs text-purple-600 mt-1">Status: {purchaseToView.obra.status}</p>
+                                            <p className="text-purple-900 font-bold">{(purchaseToView as any).obra?.nomeObra || ''}</p>
+                                            <p className="text-xs text-purple-600 mt-1">Status: {(purchaseToView as any).obra?.status || ''}</p>
                                         </div>
                                     )}
                                 </div>
@@ -2282,7 +2906,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                     )}
                                                                     <div className="flex-1">
                                                                         <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
-                                                                        {(item as any).quantidadeFracionada && (
+                                                                        {(item as any).quantidadeFracionada && item.quantity && (
                                                                             <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
                                                                                 📦 {item.quantity} {(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * (item as any).quantidadeFracionada} unidades
                                                                             </p>
@@ -2347,26 +2971,37 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                     
                                                                     {/* Botões de ação */}
                                                                     <div className="flex items-center gap-2">
-                                                                        {/* Botão de olho para visualizar material */}
-                                                                        {(item as any).materialId && (item as any).material && (
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setMaterialVisualizando({ itemIndex: index, material: (item as any).material })}
-                                                                                className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                                                                title="Visualizar material vinculado"
-                                                                            >
-                                                                                <EyeIcon className="w-4 h-4" />
-                                                                            </button>
-                                                                        )}
+                                                                        {/* Ver Detalhes do Material */}
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setSelectedMaterialItem({
+                                                                                    nomeProduto: item.productName,
+                                                                                    nome: (item as any).material?.nome,
+                                                                                    sku: (item as any).material?.sku ?? (item as any).sku,
+                                                                                    ncm: (item as any).material?.ncm ?? (item as any).ncm,
+                                                                                    quantidade: item.quantity,
+                                                                                    valorUnit: item.unitCost,
+                                                                                    preco: (item as any).material?.preco,
+                                                                                    valorVenda: (item as any).material?.valorVenda,
+                                                                                    material: (item as any).material ?? null,
+                                                                                    fornecedor: (purchaseToView as any).fornecedor ?? undefined
+                                                                                });
+                                                                                setIsMaterialDetailsModalOpen(true);
+                                                                            }}
+                                                                            className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                                            title="Ver detalhes do material"
+                                                                        >
+                                                                            <EyeIcon className="w-4 h-4" />
+                                                                        </button>
                                                                         
                                                                         {/* Botão de editar fracionamento */}
                                                                         <button
                                                                             onClick={() => {
                                                                                 setItemFracionamentoEditando({
                                                                                     id: (item as any).id,
-                                                                                    compraId: purchaseToView.id,
-                                                                                    productName: item.productName,
-                                                                                    quantity: item.quantity,
+                                                                                    productName: item.productName || '',
+                                                                                    quantity: item.quantity || 0,
                                                                                     quantidadeFracionada: (item as any).quantidadeFracionada,
                                                                                     tipoEmbalagem: (item as any).tipoEmbalagem,
                                                                                     unidadeEmbalagem: (item as any).unidadeEmbalagem
@@ -2427,6 +3062,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <h4 className="text-xs font-semibold text-gray-700 uppercase mb-1">Outras Despesas</h4>
                                             <p className="text-xl font-bold text-gray-900">
                                                 R$ {parseFloat((purchaseToView as any).outrasDespesas || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {(purchaseToView as any).valorDesconto !== undefined && parseFloat((purchaseToView as any).valorDesconto || '0') > 0 && (
+                                        <div className="bg-red-50 border border-red-200 p-4 rounded-xl">
+                                            <h4 className="text-xs font-semibold text-red-700 uppercase mb-1">Descontos</h4>
+                                            <p className="text-xl font-bold text-red-900">
+                                                − R$ {parseFloat((purchaseToView as any).valorDesconto || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </div>
                                     )}
@@ -2505,7 +3148,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                 <div>
                                                                     <p className="text-xs font-semibold text-gray-600 uppercase">Duplicata {dup.numero || (idx + 1).toString().padStart(3, '0')}</p>
                                                                     <p className="text-sm font-medium text-gray-900 mt-1">
-                                                                        📅 Vencimento: {new Date(dup.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                        📅 Vencimento: {formatDateBR(dup.dataVencimento)}
                                                                     </p>
                                                                 </div>
                                                             </div>
@@ -2553,13 +3196,13 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 <span className="text-sm text-gray-700">
-                                                                    {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
+                                                                    {formatDateBR(conta.dataVencimento)}
                                                                 </span>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
                                                                 {conta.dataAgendamento ? (
                                                                     <span className="text-sm text-blue-600 font-medium">
-                                                                        📅 {new Date(conta.dataAgendamento).toLocaleDateString('pt-BR')}
+                                                                        📅 {formatDateBR(conta.dataAgendamento)}
                                                                     </span>
                                                                 ) : (
                                                                     <span className="text-xs text-gray-400">-</span>
@@ -2568,7 +3211,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                             <td className="px-4 py-4 text-center">
                                                                 {conta.dataPagamento ? (
                                                                     <span className="text-sm text-green-600 font-medium">
-                                                                        ✅ {new Date(conta.dataPagamento).toLocaleDateString('pt-BR')}
+                                                                        ✅ {formatDateBR(conta.dataPagamento)}
                                                                     </span>
                                                                 ) : (
                                                                     <span className="text-xs text-gray-400">-</span>
@@ -2593,6 +3236,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                                                     {conta.status || 'Pendente'}
                                                                 </span>
                                                             </td>
+                                                                    <td className="px-4 py-4 text-center">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                try {
+                                                                                    localStorage.setItem('s3e_initial_financeiro_aba', 'pagar');
+                                                                                    localStorage.setItem('s3e_initial_conta_pagar_id', conta.id);
+                                                                                } catch (err) {
+                                                                                    // ignore
+                                                                                }
+                                                                                window.dispatchEvent(new CustomEvent('s3e-open-conta-pagar', { detail: { contaId: conta.id } }));
+                                                                                navigate('/');
+                                                                            }}
+                                                                            className="px-3 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm font-semibold"
+                                                                        >
+                                                                            Ver / Pagar
+                                                                        </button>
+                                                                    </td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -2602,18 +3263,34 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                 </div>
                             )}
 
-                            {/* Observações */}
-                            {purchaseToView.notes && (
-                                <div>
-                                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                        <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📝</span>
-                                        Observações
-                                    </h3>
-                                    <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                        <p className="text-gray-700">{purchaseToView.notes}</p>
-                                    </div>
+                            {/* Observações (edição rápida; mesmo dado do formulário / API) */}
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                                    <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📝</span>
+                                    Observações
+                                </h3>
+                                <p className="text-sm text-gray-500 mb-3">
+                                    Texto livre sobre esta compra. Altere abaixo e clique em salvar; também é possível editar em &quot;Editar compra&quot;.
+                                </p>
+                                <textarea
+                                    value={observacoesDetalheDraft}
+                                    onChange={(e) => setObservacoesDetalheDraft(e.target.value)}
+                                    rows={5}
+                                    maxLength={8000}
+                                    placeholder="Nenhuma observação ainda. Digite aqui e salve."
+                                    className="w-full px-4 py-3 border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-gray-800 resize-y min-h-[120px] bg-white"
+                                />
+                                <div className="mt-3 flex justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={salvarObservacoesDetalhe}
+                                        disabled={salvandoObservacoes}
+                                        className="px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        {salvandoObservacoes ? 'Salvando…' : 'Salvar observações'}
+                                    </button>
                                 </div>
-                            )}
+                            </div>
                         </div>
 
                         {/* Rodapé com Ações */}
@@ -2659,7 +3336,7 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
 
                                 {/* Botões de Ação */}
                                 <div className="flex gap-3">
-                                    {purchaseToView.status === PurchaseStatus.Pendente && (
+                                    {purchaseToView.status === PurchaseStatus.Pendente && !isCompraDespesasVariadas(purchaseToView) && (
                                         <button
                                             onClick={handleOpenReceivingModal}
                                             className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
@@ -2675,7 +3352,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
-                                            Remessa Recebida
+                                            {isCompraDespesasVariadas(purchaseToView)
+                                                ? 'Despesa registrada (sem remessa de estoque)'
+                                                : 'Remessa Recebida'}
                                         </div>
                                     )}
                                     <button
@@ -2927,6 +3606,223 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                         toast.success('Fracionamento atualizado!');
                     }
                 }}
+            />
+
+            {/* Modal de Conversão de Unidade (ex: km -> m) */}
+            {unitConversionModalOpen && itemUnidadeEditando && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                        <div className="px-6 py-4 border-b border-gray-200 dark:border-dark-border flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+                                    Converter unidade do item
+                                </h2>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Use este recurso para converter cabos/fios de km para metros (ou outras combinações), mantendo o valor total da nota.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setUnitConversionModalOpen(false);
+                                    setItemUnidadeEditando(null);
+                                }}
+                                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {(() => {
+                            const currentUnit = (itemUnidadeEditando.unidadeMedida || 'un').toLowerCase();
+                            const quantity = itemUnidadeEditando.quantity ?? 0;
+                            const unitCost = itemUnidadeEditando.unitCost ?? 0;
+                            const totalCost =
+                                itemUnidadeEditando.totalCost ??
+                                (quantity || 0) * (unitCost || 0);
+
+                            const unitToMeters: Record<string, number> = {
+                                km: 1000,
+                                m: 1,
+                                cm: 0.01
+                            };
+
+                            const currentFactor = unitToMeters[currentUnit] ?? 1;
+                            const targetFactor = unitToMeters[targetUnit] ?? 1;
+
+                            const baseInMeters = quantity * currentFactor;
+                            const newQuantity =
+                                targetFactor > 0 ? baseInMeters / targetFactor : quantity;
+
+                            const pricePerMeter =
+                                baseInMeters > 0 ? totalCost / baseInMeters : 0;
+                            const newUnitCost =
+                                pricePerMeter * (targetFactor || 1);
+
+                            return (
+                                <div className="p-6 space-y-5">
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                                            Item selecionado
+                                        </p>
+                                        <p className="text-sm text-gray-700 dark:text-gray-200">
+                                            {itemUnidadeEditando.productName || 'Item sem nome'}
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="p-3 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg">
+                                            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
+                                                Situação atual
+                                            </p>
+                                            <p className="text-sm text-gray-800 dark:text-gray-100">
+                                                Quantidade:{' '}
+                                                <span className="font-semibold">
+                                                    {quantity.toLocaleString('pt-BR', {
+                                                        minimumFractionDigits: 3,
+                                                        maximumFractionDigits: 3
+                                                    })}{' '}
+                                                    {currentUnit}
+                                                </span>
+                                            </p>
+                                            <p className="text-sm text-gray-800 dark:text-gray-100">
+                                                Valor unitário:{' '}
+                                                <span className="font-semibold">
+                                                    R${' '}
+                                                    {unitCost.toLocaleString('pt-BR', {
+                                                        minimumFractionDigits: 4,
+                                                        maximumFractionDigits: 4
+                                                    })}{' '}
+                                                    / {currentUnit}
+                                                </span>
+                                            </p>
+                                            <p className="text-sm text-gray-800 dark:text-gray-100">
+                                                Total do item:{' '}
+                                                <span className="font-semibold text-orange-600 dark:text-orange-400">
+                                                    R${' '}
+                                                    {totalCost.toLocaleString('pt-BR', {
+                                                        minimumFractionDigits: 2,
+                                                        maximumFractionDigits: 2
+                                                    })}
+                                                </span>
+                                            </p>
+                                        </div>
+
+                                        <div className="p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20">
+                                            <p className="text-xs font-semibold text-purple-700 dark:text-purple-300 mb-1">
+                                                Conversão proposta
+                                            </p>
+                                            <div className="mb-2">
+                                                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">
+                                                    Unidade desejada
+                                                </label>
+                                                <select
+                                                    value={targetUnit}
+                                                    onChange={(e) =>
+                                                        setTargetUnit(
+                                                            e.target.value as 'km' | 'm' | 'cm'
+                                                        )
+                                                    }
+                                                    className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg text-sm focus:ring-2 focus:ring-purple-500 dark:bg-dark-bg dark:text-white"
+                                                >
+                                                    <option value="km">km (quilômetro)</option>
+                                                    <option value="m">m (metro)</option>
+                                                    <option value="cm">cm (centímetro)</option>
+                                                </select>
+                                            </div>
+
+                                            <p className="text-sm text-gray-800 dark:text-gray-100">
+                                                Nova quantidade:{' '}
+                                                <span className="font-semibold">
+                                                    {newQuantity.toLocaleString('pt-BR', {
+                                                        minimumFractionDigits: 3,
+                                                        maximumFractionDigits: 3
+                                                    })}{' '}
+                                                    {targetUnit}
+                                                </span>
+                                            </p>
+                                            <p className="text-sm text-gray-800 dark:text-gray-100">
+                                                Novo valor unitário:{' '}
+                                                <span className="font-semibold">
+                                                    R${' '}
+                                                    {newUnitCost.toLocaleString('pt-BR', {
+                                                        minimumFractionDigits: 4,
+                                                        maximumFractionDigits: 4
+                                                    })}{' '}
+                                                    / {targetUnit}
+                                                </span>
+                                            </p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                O valor total do item permanece o mesmo. Apenas a
+                                                unidade e a granularidade serão ajustadas.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between gap-3 pt-4 border-t border-gray-200 dark:border-dark-border">
+                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                            Dica: use principalmente para cabos/fios que vieram em
+                                            km na nota fiscal, mas serão controlados em metros ou
+                                            centímetros no estoque.
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setUnitConversionModalOpen(false);
+                                                    setItemUnidadeEditando(null);
+                                                }}
+                                                className="px-4 py-2 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setPurchaseItems((prev) =>
+                                                        prev.map((item, idx) => {
+                                                            if (
+                                                                idx !==
+                                                                (itemUnidadeEditando.index ?? -1)
+                                                            ) {
+                                                                return item;
+                                                            }
+
+                                                            return {
+                                                                ...item,
+                                                                quantity: newQuantity,
+                                                                unitCost: newUnitCost,
+                                                                totalCost,
+                                                                unidadeMedida: targetUnit
+                                                            };
+                                                        })
+                                                    );
+
+                                                    toast.success(
+                                                        `Unidade convertida para ${targetUnit} com sucesso!`
+                                                    );
+
+                                                    setUnitConversionModalOpen(false);
+                                                    setItemUnidadeEditando(null);
+                                                }}
+                                                className="px-5 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                                            >
+                                                Aplicar conversão
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de detalhes do material (compra avulsa / visualização de compra) */}
+            <MaterialDetailsModal
+                open={isMaterialDetailsModalOpen}
+                onClose={() => { setIsMaterialDetailsModalOpen(false); setSelectedMaterialItem(null); }}
+                item={selectedMaterialItem}
             />
         </div>
     );

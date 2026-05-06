@@ -27,6 +27,8 @@ export interface JwtPayload {
 export interface DecodedToken extends JwtPayload {
   iat?: number;  // Issued at
   exp?: number;  // Expiration time
+  isAdmin?: boolean;  // Flag de admin (acesso universal exceto Logs)
+  name?: string;  // Nome do usuário (usado como orçamentista ao criar orçamento)
 }
 
 /**

@@ -1,9 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from './auditoria.service';
 import bcrypt from 'bcryptjs';
 import { generateToken, verifyToken } from './jwt.service';
 import jwt from 'jsonwebtoken';
-
-const prisma = new PrismaClient();
 
 /**
  * Serviço de Autenticação
@@ -21,7 +20,9 @@ export interface AuthResult {
     id: string;
     email: string;
     name: string;
+    setor?: string | null;
     role: string;
+    isAdmin?: boolean;
   };
 }
 
@@ -32,6 +33,7 @@ export interface CreateUserData {
   email: string;
   password: string;
   name: string;
+  setor?: string | null;
   role?: string;
 }
 
@@ -79,11 +81,12 @@ export const authenticateUser = async (
     throw new Error('Credenciais inválidas');
   }
 
-  // 4. Gerar token JWT
-  const token = generateToken({ 
-    id: user.id, 
-    role: user.role 
-  });
+  // 4. Gerar token JWT (incluir isAdmin e name para orçamentista / RBAC no backend)
+  const token = generateToken(
+    { id: user.id, role: user.role },
+    undefined,
+    { isAdmin: (user as any).isAdmin ?? false, name: user.name, setor: (user as any).setor ?? null }
+  );
 
   // 5. Retornar token e dados do usuário (sem a senha)
   return {
@@ -92,7 +95,9 @@ export const authenticateUser = async (
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role
+      setor: (user as any).setor ?? null,
+      role: user.role,
+      isAdmin: (user as any).isAdmin ?? false
     }
   };
 };
@@ -135,15 +140,17 @@ export const registerUser = async (
       email: data.email,
       password: hashedPassword,
       name: data.name,
+      setor: data.setor?.trim() || null,
       role: data.role || 'user'
     }
   });
 
-  // 4. Gerar token JWT
-  const token = generateToken({ 
-    id: user.id, 
-    role: user.role 
-  });
+  // 4. Gerar token JWT (incluir isAdmin e name para orçamentista / RBAC no backend)
+  const token = generateToken(
+    { id: user.id, role: user.role },
+    undefined,
+    { isAdmin: (user as any).isAdmin ?? false, name: user.name, setor: (user as any).setor ?? null }
+  );
 
   // 5. Retornar token e dados do usuário
   return {
@@ -152,7 +159,9 @@ export const registerUser = async (
       id: user.id,
       email: user.email,
       name: user.name,
-      role: user.role
+      setor: (user as any).setor ?? null,
+      role: user.role,
+      isAdmin: (user as any).isAdmin ?? false
     }
   };
 };
@@ -177,7 +186,9 @@ export const getUserById = async (userId: string) => {
       id: true, 
       email: true, 
       name: true, 
+      setor: true,
       role: true, 
+      isAdmin: true,
       active: true,
       createdAt: true,
       updatedAt: true
@@ -372,21 +383,17 @@ export const resetPasswordWithToken = async (token: string, newPassword: string)
       data: { password: hashedPassword }
     });
 
-    // 6. Registrar no audit log
+    // 6. Registrar no audit log (auditoria stub)
     try {
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          userName: user.name,
-          userRole: user.role,
-          action: 'PASSWORD_RESET',
-          description: `Usuário ${user.name} redefiniu a senha via recuperação`,
-          ipAddress: null,
-          userAgent: null
-        }
+      await AuditoriaService.registrarEvento({
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        action: 'PASSWORD_RESET',
+        description: `Usuário ${user.name} redefiniu a senha via recuperação`
       });
     } catch (logError) {
-      console.error('Erro ao registrar reset de senha no audit log:', logError);
+      console.error('Erro ao registrar reset de senha (auditoria stub):', logError);
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes('jwt')) {
@@ -414,7 +421,9 @@ export const getAllUsers = async () => {
       id: true, 
       email: true, 
       name: true, 
+      setor: true,
       role: true, 
+      isAdmin: true,
       active: true,
       createdAt: true,
       updatedAt: true
@@ -423,5 +432,17 @@ export const getAllUsers = async () => {
   });
 
   return users;
+};
+
+/**
+ * Atualiza flag isAdmin de um usuário
+ * @param userId - ID do usuário a atualizar
+ * @param isAdmin - boolean indicando se o usuário terá privilégios de admin
+ */
+export const updateIsAdmin = async (userId: string, isAdmin: boolean): Promise<void> => {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { isAdmin }
+  });
 };
 

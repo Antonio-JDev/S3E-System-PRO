@@ -150,12 +150,22 @@ export class NFeXMLValidatorService {
         throw new Error(`Erro ao fazer parse do XML: ${parseError.message}`);
       }
 
-      // Validar XML contra o schema
-      // libxmljs2 usa validate() com o schema como parâmetro
+      // ========== CORREÇÃO 4: FIX DE VALIDAÇÃO XSD ==========
+      // Para evitar erro 'Invalid XSD schema' na libxmljs2
+      // Muda diretório para que biblioteca resolva includes internos da SEFAZ
+      console.log('🔧 [Fix XSD] Aplicando correção process.chdir para resolver includes XSD...');
+      
+      const diretorioOriginal = process.cwd();
+      const xsdPathParaValidacao = this.getXsdPath();
       let valido = false;
+      
       try {
+        // Muda para diretório dos XSDs para resolver includes
+        process.chdir(path.dirname(xsdPathParaValidacao + '/nfe_v4.00.xsd'));
+        console.log('🔧 [Fix XSD] Diretório alterado para:', process.cwd());
+        
         // O método validate() do libxmljs2 valida contra um schema
-        // Precisamos usar a API correta: xmlDoc.validate(schemaDoc)
+        // Com chdir correto, biblioteca resolve includes automaticamente
         valido = xmlDoc.validate(this.xsdCache.schemaDoc);
         
         if (!valido) {
@@ -173,6 +183,8 @@ export class NFeXMLValidatorService {
             erros.push('XML não passou na validação XSD (sem detalhes disponíveis)');
           }
         }
+        
+        console.log('✅ [Fix XSD] Validação executada com sucesso');
       } catch (validationError: any) {
         // Se a validação lançar uma exceção, tratar como erro técnico
         const errorMsg = validationError.message || validationError.toString() || 'Erro desconhecido na validação XSD';
@@ -200,6 +212,15 @@ export class NFeXMLValidatorService {
           // Outros erros podem ser problemas reais
           erros.push(`Erro ao validar XML contra XSD: ${errorMsg}`);
         }
+      } finally {
+        // ========== RESTAURAR DIRETÓRIO ORIGINAL ==========
+        // CRÍTICO: Sempre restaurar diretório original no finally
+        try {
+          process.chdir(diretorioOriginal);
+          console.log('🔧 [Fix XSD] Diretório restaurado para:', process.cwd());
+        } catch (chdirError: any) {
+          console.error('⚠️ [Fix XSD] Erro ao restaurar diretório:', chdirError.message);
+        }
       }
 
       return {
@@ -221,8 +242,10 @@ export class NFeXMLValidatorService {
   static validarEstruturaBasica(xml: string): {
     valido: boolean;
     erros: string[];
+    avisos: string[];
   } {
     const erros: string[] = [];
+    const avisos: string[] = [];
 
     try {
       // Parse do XML
@@ -233,7 +256,7 @@ export class NFeXMLValidatorService {
       const parserErrors = doc.getElementsByTagName('parsererror');
       if (parserErrors.length > 0) {
         erros.push('XML malformado ou inválido');
-        return { valido: false, erros };
+        return { valido: false, erros, avisos };
       }
 
       // Verificar elemento raiz
@@ -285,12 +308,14 @@ export class NFeXMLValidatorService {
 
       return {
         valido: erros.length === 0,
-        erros
+        erros,
+        avisos
       };
     } catch (error: any) {
       return {
         valido: false,
-        erros: [`Erro ao validar XML: ${error.message}`]
+        erros: [`Erro ao validar XML: ${error.message}`],
+        avisos: []
       };
     }
   }

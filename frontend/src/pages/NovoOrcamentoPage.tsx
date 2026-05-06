@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useContext, useRef } from 'react';
 import { toast } from 'sonner';
 import { orcamentosService, type CreateOrcamentoData } from '../services/orcamentosService';
 import { clientesService } from '../services/clientesService';
@@ -8,19 +8,22 @@ import { servicosService, type Servico } from '../services/servicosService';
 import { quadrosService } from '../services/quadrosService';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
-import JoditEditorComponent from '../components/JoditEditor';
+import TechnicalEditor from '../components/TechnicalEditor';
 import PrecoValidadeFlag from '../components/PrecoValidadeFlag';
 import HistoricoPrecosModal from '../components/HistoricoPrecosModal';
 import UnitSelector from '../components/UnitSelector';
 import UnitDisplay from '../components/UnitDisplay';
-import { identificarTipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento } from '../utils/unitConverter';
+import { identificarTipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento, normalizarUnidadeMedidaOrcamento } from '../utils/unitConverter';
 import { matchCrossSearch } from '../utils/searchUtils';
+import { roundMoney } from '../utils/currency';
 import { getUploadUrl } from '../config/api';
 import ClienteCombobox from '../components/ui/ClienteCombobox';
 import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
 import CidadeAutocomplete from '../components/ui/CidadeAutocomplete';
+import { configuracoesService, type OrcamentoInsercaoModo } from '../services/configuracoesService';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import ModalItensKit from '../components/ModalItensKit';
 import { AuthContext } from '../contexts/AuthContext';
 import {
     AlertDialog,
@@ -103,7 +106,9 @@ interface Kit {
     id: string;
     nome: string;
     descricao: string;
-    items: { materialId: string; quantidade: number }[];
+    items: Array<{ materialId: string; quantidade: number; material?: any }>;
+    /** Itens extras do kit (banco frio / serviços) vindos do catálogo */
+    itensFaltantes?: any[];
     custoTotal: number;
     precoSugerido: number;
     ativo: boolean;
@@ -114,7 +119,9 @@ interface OrcamentoItem {
     tipo: 'MATERIAL' | 'KIT' | 'SERVICO' | 'QUADRO_PRONTO' | 'CUSTO_EXTRA' | 'COTACAO';
     materialId?: string;
     kitId?: string;
+    quadroId?: string;
     cotacaoId?: string; // Novo: ID da cotação do banco frio
+    servicoId?: string;
     servicoNome?: string;
     descricao?: string;
     dataAtualizacaoCotacao?: string; // Novo: data da cotação para exibir flag
@@ -125,10 +132,13 @@ interface OrcamentoItem {
     ncm?: string; // Nomenclatura Comum do Mercosul (para faturamento NF-e/NFS-e)
     quantidade: number;
     custoUnit: number;
-    precoBase?: number; // Preço base sem BDI
+    custoAgregadoUnit?: number; // Custo agregado (preço compra + imposto) para lucro líquido
+    precoBase?: number; // Preço base
     precoUnit: number;
     subtotal: number;
     precoEditadoManual?: boolean; // Flag para indicar se o preço foi editado manualmente
+    /** Venda direta do fornecedor para o cliente: não gera contas a receber, nem estoque, nem NF-e */
+    vendaDiretaFornecedor?: boolean;
 }
 
 interface Foto {
@@ -139,12 +149,30 @@ interface Foto {
     preview?: string;
 }
 
+export interface InitialDataFromLead {
+    nome?: string;
+    cpfCnpj?: string;
+    observacoes?: string;
+    logradouro?: string;
+    numero?: string;
+    bairro?: string;
+    cep?: string;
+    cidade?: string;
+    estado?: string;
+    clienteId?: string;
+    contatoLeadId?: string;
+}
+
 interface NovoOrcamentoPageProps {
     setAbaAtiva: (aba: 'listagem' | 'novo') => void;
     onOrcamentoCriado?: () => void;
+    /** Dados vindos do Funil de Atendimento (CRM) ao clicar em "Gerar Proposta Comercial" */
+    initialDataFromLead?: InitialDataFromLead;
+    /** Chamado após aplicar initialDataFromLead no formulário */
+    onConsumedInitialData?: () => void;
 }
 
-const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOrcamentoCriado }) => {
+const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOrcamentoCriado, initialDataFromLead, onConsumedInitialData }) => {
 
     const authContext = useContext(AuthContext);
     const userId = authContext?.user?.id || null;
@@ -172,6 +200,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const [cotacoes, setCotacoes] = useState<any[]>([]); // Novo: cotações do banco frio
     const [loading, setLoading] = useState(true);
     const [salvando, setSalvando] = useState(false);
+    const [atualizandoPrecos, setAtualizandoPrecos] = useState(false);
+    const [sincronizando, setSincronizando] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     
@@ -182,6 +212,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     // Estado para controlar se está usando endereço do cliente
     const [usandoEnderecoCliente, setUsandoEnderecoCliente] = useState(false);
 
+    // CEP: loading + debounce + abort controller
+    const [cepLoading, setCepLoading] = useState(false);
+    const cepTimeoutRef = useRef<number | null>(null);
+    const cepAbortRef = useRef<AbortController | null>(null);
+
     // Form state
     const [formState, setFormState] = useState({
         clienteId: '',
@@ -189,10 +224,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         descricao: '',
         descricaoProjeto: '',
         validade: calcularDataValidadePadrao(), // Data padrão de 30 dias
-        bdi: 20,
+        bdi: 0,
         observacoes: '',
         empresaCNPJ: '',
         enderecoObra: '',
+        numeroObra: '',
         cidade: '',
         bairro: '',
         cep: '',
@@ -205,6 +241,19 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     });
 
     const [items, setItems] = useState<OrcamentoItem[]>([]);
+    // Busca na lista de itens já adicionados ao orçamento (sem precisar abrir o modal)
+    const [itemListSearch, setItemListSearch] = useState('');
+    const itensFiltradosCount = useMemo(() => {
+        if (!itemListSearch.trim()) return items.length;
+        const termo = itemListSearch.toLowerCase();
+        return items.filter((item) => {
+            return (
+                matchCrossSearch(itemListSearch, item.nome || '') ||
+                (item.ncm || '').toLowerCase().includes(termo) ||
+                (item.tipo || '').toLowerCase().includes(termo)
+            );
+        }).length;
+    }, [items, itemListSearch]);
     
     // Estado para controlar valores em edição (para melhorar UX ao digitar)
     const [valorEditando, setValorEditando] = useState<{ [index: number]: string }>({});
@@ -214,6 +263,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const [modalExpandido, setModalExpandido] = useState(false); // Novo: controla se o modal está expandido
     const [showCriarKitModal, setShowCriarKitModal] = useState(false);
     const [nomeKit, setNomeKit] = useState('');
+    const [ncmKit, setNcmKit] = useState('');
     
     // Estado para modal de visualização de itens do kit
     const [showModalItensKit, setShowModalItensKit] = useState(false);
@@ -224,6 +274,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const [showModalEditarKit, setShowModalEditarKit] = useState(false);
     const [kitEmEdicao, setKitEmEdicao] = useState<{ index: number; item: OrcamentoItem & { itensDoKit?: any[] } } | null>(null);
     const [itensKitEdicao, setItensKitEdicao] = useState<any[]>([]);
+    /** Estado local: itens “baixados” do kit só entram na lista do orçamento ao salvar */
+    const [pendentesBaixarDoKit, setPendentesBaixarDoKit] = useState<OrcamentoItem[]>([]);
+    const [buscaKitEdicao, setBuscaKitEdicao] = useState('');
+    const [snapshotItemsAntesKitEdicao, setSnapshotItemsAntesKitEdicao] = useState<string | null>(null);
+    const [snapshotItensDoKitInicial, setSnapshotItensDoKitInicial] = useState<string | null>(null);
+    const [showConfirmarCancelarEdicaoKit, setShowConfirmarCancelarEdicaoKit] = useState(false);
     
     // Estado para modal de detalhes de sub-kit (kit dentro de kit)
     const [showModalDetalhesSubKit, setShowModalDetalhesSubKit] = useState(false);
@@ -260,23 +316,36 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     });
     
     // Estado para modo de adição (com novas opções)
-    const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'cotacoes' | 'manual' | 'comparacao'>('materiais');
+    const [modoAdicao, setModoAdicao] = useState<'materiais' | 'servicos' | 'kits' | 'quadros' | 'cotacoes' | 'comparacao'>('materiais');
     // Estado para seleção múltipla no modal
     const [itensSelecionadosModal, setItensSelecionadosModal] = useState<Set<string>>(new Set()); // IDs dos itens selecionados no modal
     const [unidadeVendaSelecionada, setUnidadeVendaSelecionada] = useState<{ [key: string]: string }>({}); // Unidade de venda selecionada para cada item
-    const [novoItemManual, setNovoItemManual] = useState({
-        nome: '',
-        descricao: '',
-        unidadeMedida: 'UN',
-        quantidade: 1,
-        custoUnit: 0,
-        tipo: 'MATERIAL' as const
-    });
+    const [quantidadesPorItem, setQuantidadesPorItem] = useState<{ [key: string]: number }>({}); // Quantidade para cada item selecionado
 
     // Estados para cliente rápido
     const [showClienteRapidoModal, setShowClienteRapidoModal] = useState(false);
     const [criandoClienteRapido, setCriandoClienteRapido] = useState(false);
 
+    // Busca direta do catálogo na página (fora do modal)
+    const [orcamentoInsercaoModo, setOrcamentoInsercaoModo] = useState<OrcamentoInsercaoModo>('check');
+    const [buscaCatalogoPagina, setBuscaCatalogoPagina] = useState('');
+    const [itemSelecionadoCatalogo, setItemSelecionadoCatalogo] = useState<{
+        tipo: 'MATERIAL' | 'SERVICO' | 'KIT' | 'QUADRO_PRONTO' | 'COTACAO';
+        id: string;
+        codigo: string;
+        descricao: string;
+        raw: Material | Servico | Kit | Quadro | any;
+    } | null>(null);
+    const [quantidadeCatalogoPagina, setQuantidadeCatalogoPagina] = useState(1);
+    const [unidadeVendaCatalogoPagina, setUnidadeVendaCatalogoPagina] = useState<'m' | 'cm'>('m'); // Unidade ao adicionar cotação pelo catálogo da página (M/CM)
+    const [dropdownCatalogoAberto, setDropdownCatalogoAberto] = useState(false);
+    const [dropdownHighlightIndex, setDropdownHighlightIndex] = useState(-1);
+    const dropdownHighlightRef = useRef<HTMLLIElement>(null);
+    useEffect(() => {
+        if (dropdownCatalogoAberto && dropdownHighlightIndex >= 0) {
+            dropdownHighlightRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }, [dropdownHighlightIndex, dropdownCatalogoAberto]);
 
     // Funções para gerenciar rascunho
     const getRascunhoKey = () => {
@@ -422,6 +491,52 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
     }, []);
 
+    // Aplicar dados do Funil de Atendimento (CRM) quando vier "Gerar Proposta Comercial"
+    const initialDataFromLeadAppliedRef = useRef(false);
+    const contatoLeadIdParaVincularRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!initialDataFromLead || initialDataFromLeadAppliedRef.current) return;
+        const temCpfCnpj = !!(initialDataFromLead.cpfCnpj || '').trim();
+        if (temCpfCnpj && clientes.length === 0 && !initialDataFromLead.clienteId) return; // esperar clientes carregarem para tentar vincular (salvo se já veio clienteId)
+        initialDataFromLeadAppliedRef.current = true;
+        const idLead = initialDataFromLead.contatoLeadId?.trim();
+        contatoLeadIdParaVincularRef.current = idLead || null;
+        const norm = (s: string) => (s || '').replace(/\D/g, '');
+        const cpfCnpjLead = norm(initialDataFromLead.cpfCnpj || '');
+        const clienteById = initialDataFromLead.clienteId && clientes.find((c) => c.id === initialDataFromLead.clienteId);
+        const clienteByCpfCnpj = cpfCnpjLead && clientes.find((c) => norm(c.cpfCnpj) === cpfCnpjLead);
+        const clienteEncontrado = clienteById || clienteByCpfCnpj;
+        const clienteIdFinal = clienteEncontrado ? clienteEncontrado.id : initialDataFromLead.clienteId || '';
+        setFormState((prev) => ({
+            ...prev,
+            ...(clienteIdFinal && { clienteId: clienteIdFinal }),
+            ...(initialDataFromLead.nome && !clienteEncontrado && { titulo: initialDataFromLead.nome }),
+            ...(initialDataFromLead.observacoes && { observacoes: [prev.observacoes, initialDataFromLead.observacoes].filter(Boolean).join('\n\n') }),
+            ...(initialDataFromLead.logradouro
+                ? { enderecoObra: [prev.enderecoObra, initialDataFromLead.logradouro].filter(Boolean).join(', ') }
+                : (clienteEncontrado?.endereco && !prev.enderecoObra ? { enderecoObra: clienteEncontrado.endereco } : null)),
+            ...(initialDataFromLead.numero
+                ? { numeroObra: initialDataFromLead.numero }
+                : (clienteEncontrado?.numero && !prev.numeroObra ? { numeroObra: clienteEncontrado.numero } : null)),
+            ...(initialDataFromLead.bairro
+                ? { bairro: initialDataFromLead.bairro }
+                : (clienteEncontrado?.bairro && !prev.bairro ? { bairro: clienteEncontrado.bairro } : null)),
+            ...(initialDataFromLead.cep
+                ? { cep: initialDataFromLead.cep }
+                : (clienteEncontrado?.cep && !prev.cep ? { cep: clienteEncontrado.cep } : null)),
+            ...(initialDataFromLead.cidade
+                ? { cidade: initialDataFromLead.cidade }
+                : (clienteEncontrado?.cidade && !prev.cidade ? { cidade: clienteEncontrado.cidade } : null)),
+            ...((initialDataFromLead as any).estado
+                ? { estado: (initialDataFromLead as any).estado }
+                : (clienteEncontrado?.estado && !(prev as any).estado ? { estado: clienteEncontrado.estado } : null)),
+        }));
+        onConsumedInitialData?.();
+        if (initialDataFromLead.nome || initialDataFromLead.observacoes || initialDataFromLead.clienteId) {
+            toast.success('Dados do lead aplicados', { description: 'Preencha o restante e gere a proposta.' });
+        }
+    }, [clientes, initialDataFromLead, onConsumedInitialData]);
+
     // Salvar rascunho automaticamente ao sair da página
     useEffect(() => {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -457,8 +572,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             if (materiaisRes.success && materiaisRes.data) {
                 const materiaisArray = Array.isArray(materiaisRes.data) ? materiaisRes.data : [];
                 setMateriais(materiaisArray);
-                // Filtrar apenas materiais com estoque > 0 para comparação
-                setMateriaisComEstoque(materiaisArray.filter((m: Material) => m.estoque > 0));
+                // Incluir todos os materiais ativos para permitir buscar e adicionar itens esgotados
+                setMateriaisComEstoque(materiaisArray.filter((m: Material) => m.ativo));
             }
 
             if (servicosRes.success && servicosRes.data) {
@@ -527,12 +642,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
     };
 
-    // Filtrar materiais para seleção
+    // Filtrar materiais para seleção (agora inclui materiais mesmo sem estoque)
     const filteredMaterials = useMemo(() => {
-
-        if (!itemSearchTerm.trim()) return (materiais || []).filter(m => m && m.ativo && (m.estoque ?? 0) > 0);
-        return (materiais || []).filter(m => 
-            m && m.ativo && (m.estoque ?? 0) > 0 && (
+        if (!itemSearchTerm.trim()) return (materiais || []).filter(m => m && m.ativo);
+        return (materiais || []).filter(m =>
+            m && m.ativo && (
                 matchCrossSearch(itemSearchTerm, m.nome || '') ||
                 (m.sku || '').toLowerCase().includes(itemSearchTerm.toLowerCase())
             )
@@ -562,10 +676,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         if (showItemModal && buscaGlobal.trim()) {
             setModalExpandido(true);
         } else if (showItemModal && !buscaGlobal.trim() && modalExpandido && modoAdicao !== 'comparacao') {
-            // Não colapsar automaticamente se estiver em modo comparação manual
-            // setModalExpandido(false);
+            setModalExpandido(false);
         }
-    }, [buscaGlobal, showItemModal]);
+    }, [buscaGlobal, showItemModal, modalExpandido, modoAdicao]);
 
     // Filtrar serviços para seleção (apenas ativos)
     const filteredServicos = useMemo(() => {
@@ -679,33 +792,30 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         );
     }, [cotacoes, itemSearchTerm]);
 
-    // Filtrar materiais com estoque para comparação (com busca global ou específica)
+    // Filtrar materiais com estoque para comparação (com busca global ou específica; * e % = palavras cruzadas)
     const filteredMateriaisEstoque = useMemo(() => {
         const termoBusca = searchGlobalComparacao || searchEstoque;
 
-        if (!termoBusca) return materiaisComEstoque || [];
-        
-        return (materiaisComEstoque || []).filter(material =>
-            material && (
-                (material.nome || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
-                (material.sku || '').toLowerCase().includes(termoBusca.toLowerCase())
-            )
-        );
+        if (!termoBusca.trim()) return materiaisComEstoque || [];
+
+        return (materiaisComEstoque || []).filter(material => {
+            if (!material) return false;
+            const haystack = [material.nome, material.sku].filter(Boolean).join(' ');
+            return matchCrossSearch(termoBusca, haystack);
+        });
     }, [materiaisComEstoque, searchEstoque, searchGlobalComparacao]);
 
-    // Filtrar cotações para comparação (com busca global ou específica)
+    // Filtrar cotações para comparação (com busca global ou específica; * e % = palavras cruzadas)
     const filteredCotacoesComparacao = useMemo(() => {
         const termoBusca = searchGlobalComparacao || searchCotacoes;
 
-        if (!termoBusca) return cotacoesBancoFrio || [];
-        
-        return (cotacoesBancoFrio || []).filter(cotacao =>
-            cotacao && (
-                (cotacao.nome || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
-                (cotacao.ncm || '').toLowerCase().includes(termoBusca.toLowerCase()) ||
-                (cotacao.fornecedorNome || '').toLowerCase().includes(termoBusca.toLowerCase())
-            )
-        );
+        if (!termoBusca.trim()) return cotacoesBancoFrio || [];
+
+        return (cotacoesBancoFrio || []).filter(cotacao => {
+            if (!cotacao) return false;
+            const haystack = [cotacao.nome, cotacao.ncm, cotacao.fornecedorNome].filter(Boolean).join(' ');
+            return matchCrossSearch(termoBusca, haystack);
+        });
     }, [cotacoesBancoFrio, searchCotacoes, searchGlobalComparacao]);
 
     // Busca global em todos os tipos de itens
@@ -722,7 +832,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }
 
         const materiaisEncontrados = (materiais || [])
-            .filter(m => m && m.ativo && (m.estoque ?? 0) > 0)
+            .filter(m => m && m.ativo)
             .filter(m => 
                 matchCrossSearch(buscaGlobal, m.nome || '') ||
                 (m.sku || '').toLowerCase().includes(buscaGlobal.toLowerCase())
@@ -767,6 +877,71 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         });
     }, [buscaGlobal, materiais, servicos, kits, quadros, cotacoes]);
 
+    // Carregar preferência do usuário (modo check vs ocultar)
+    useEffect(() => {
+        configuracoesService.getPreferenciasUsuario().then((res) => {
+            if (res.success && res.data?.orcamentoInsercaoModo) {
+                setOrcamentoInsercaoModo(res.data.orcamentoInsercaoModo);
+            }
+        }).catch(() => {});
+    }, []);
+
+    // Helper: verifica se um item do catálogo já está no orçamento
+    const itemJaNoOrcamento = (itemsOrc: OrcamentoItem[], tipo: string, id: string): boolean => {
+        return itemsOrc.some((it) => {
+            if (tipo === 'MATERIAL' && it.materialId === id) return true;
+            if (tipo === 'SERVICO' && it.servicoId === id) return true;
+            if (tipo === 'KIT' && it.kitId === id) return true;
+            if (tipo === 'QUADRO_PRONTO' && it.quadroId === id) return true;
+            if (tipo === 'COTACAO' && it.cotacaoId === id) return true;
+            return false;
+        });
+    };
+
+    // Resultados da busca do catálogo na página (mesma lógica da buscaGlobal, lista flat para dropdown)
+    type ItemCatalogoLinha = { tipo: 'MATERIAL' | 'SERVICO' | 'KIT' | 'QUADRO_PRONTO' | 'COTACAO'; id: string; codigo: string; descricao: string; raw: Material | Servico | Kit | Quadro | any };
+    const resultadosBuscaCatalogoPagina = useMemo((): ItemCatalogoLinha[] => {
+        if (!buscaCatalogoPagina.trim()) return [];
+        const termo = buscaCatalogoPagina.trim();
+        const linhas: ItemCatalogoLinha[] = [];
+        const materiaisFilt = (materiais || []).filter(m => m && m.ativo).filter(m =>
+            matchCrossSearch(termo, m.nome || '') || (m.sku || '').toLowerCase().includes(termo.toLowerCase())
+        );
+        const servicosFilt = (servicos || []).filter(s => s && s.ativo).filter(s =>
+            matchCrossSearch(termo, s.nome || '') || (s.codigo || '').toLowerCase().includes(termo.toLowerCase()) || (s.descricao || '').toLowerCase().includes(termo.toLowerCase())
+        );
+        const kitsFilt = (kits || []).filter(k => k && k.ativo).filter(k =>
+            matchCrossSearch(termo, k.nome || '') || (k.descricao || '').toLowerCase().includes(termo.toLowerCase())
+        );
+        const quadrosFilt = (quadros || []).filter(q => q && q.ativo).filter(q =>
+            matchCrossSearch(termo, q.nome || '') || (q.descricao || '').toLowerCase().includes(termo.toLowerCase())
+        );
+        const cotacoesFilt = (cotacoes || []).filter(c => c && c.ativo !== false).filter(c =>
+            matchCrossSearch(termo, c.nome || '') || (c.ncm || '').toLowerCase().includes(termo.toLowerCase()) || (c.fornecedorNome || '').toLowerCase().includes(termo.toLowerCase())
+        );
+        materiaisFilt.forEach(m => {
+            if (orcamentoInsercaoModo === 'ocultar' && itemJaNoOrcamento(items, 'MATERIAL', m.id)) return;
+            linhas.push({ tipo: 'MATERIAL', id: m.id, codigo: m.sku || '', descricao: m.nome || '', raw: m });
+        });
+        servicosFilt.forEach(s => {
+            if (orcamentoInsercaoModo === 'ocultar' && itemJaNoOrcamento(items, 'SERVICO', s.id)) return;
+            linhas.push({ tipo: 'SERVICO', id: s.id, codigo: (s as any).codigo || '', descricao: s.nome || '', raw: s });
+        });
+        kitsFilt.forEach(k => {
+            if (orcamentoInsercaoModo === 'ocultar' && itemJaNoOrcamento(items, 'KIT', k.id)) return;
+            linhas.push({ tipo: 'KIT', id: k.id, codigo: '', descricao: k.nome || '', raw: k });
+        });
+        quadrosFilt.forEach(q => {
+            if (orcamentoInsercaoModo === 'ocultar' && itemJaNoOrcamento(items, 'QUADRO_PRONTO', q.id)) return;
+            linhas.push({ tipo: 'QUADRO_PRONTO', id: q.id, codigo: '', descricao: q.nome || '', raw: q });
+        });
+        cotacoesFilt.forEach(c => {
+            if (orcamentoInsercaoModo === 'ocultar' && itemJaNoOrcamento(items, 'COTACAO', c.id)) return;
+            linhas.push({ tipo: 'COTACAO', id: c.id, codigo: c.ncm || '', descricao: c.nome || '', raw: c });
+        });
+        return linhas;
+    }, [buscaCatalogoPagina, materiais, servicos, kits, quadros, cotacoes, items, orcamentoInsercaoModo]);
+
     // Adicionar item com validação de estoque vs cotação
     const handleAddItemComValidacao = (material?: Material, cotacao?: any, quantidade?: number) => {
         const qtd = quantidade || 1;
@@ -774,16 +949,17 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         // Validar estoque se for material
         if (material) {
             if (material.estoque < qtd) {
-                toast.error('Estoque insuficiente', {
+                // Antes bloqueávamos a inserção — agora apenas alertamos e permitimos adicionar ao orçamento.
+                toast.warning('Estoque insuficiente', {
                     description: `Estoque disponível: ${material.estoque} ${material.unidadeMedida}. Solicitado: ${qtd} ${material.unidadeMedida}`
                 });
-                return;
+                // continuar e permitir adicionar mesmo com estoque insuficiente
             }
             
 
             // Usar valorVenda se disponível, senão usar preco (preço de compra)
             const precoVenda = material.valorVenda || material.preco;
-            const precoBase = precoVenda; // Base para aplicar BDI
+            const precoBase = precoVenda;
 
             const newItem: OrcamentoItem = {
                 tipo: 'MATERIAL',
@@ -794,9 +970,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
                 quantidade: qtd,
                 custoUnit: material.preco, // Custo de compra
-                precoBase: precoBase, // Valor de venda base (sem BDI)
-                precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-                subtotal: precoBase * (1 + formState.bdi / 100) * qtd
+                precoBase: precoBase,
+                precoUnit: precoBase,
+                subtotal: precoBase * qtd
             };
             
             setItems(prev => [...prev, newItem]);
@@ -809,20 +985,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         if (cotacao) {
             // Usar valorVenda se disponível; senão, aplicar markup padrão de 40% sobre o valor da cotação
             const valorVenda = cotacao.valorVenda || (cotacao.valorUnitario || 0) * 1.4;
-            const precoBase = valorVenda; // Base para aplicar BDI
+            const precoBase = valorVenda;
 
             const newItem: OrcamentoItem = {
                 tipo: 'COTACAO',
                 cotacaoId: cotacao.id,
                 nome: cotacao.nome,
                 descricao: cotacao.observacoes || cotacao.nome,
-                unidadeMedida: cotacao.unidadeMedida || 'UN',
+                unidadeMedida: normalizarUnidadeMedidaOrcamento(cotacao.unidadeMedida) || 'un',
                 ncm: cotacao.ncm || undefined, // ✅ NCM da cotação para faturamento
                 quantidade: qtd,
                 custoUnit: cotacao.valorUnitario || 0, // Custo da cotação
-                precoBase: precoBase, // Valor de venda base (sem BDI)
-                precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-                subtotal: precoBase * (1 + formState.bdi / 100) * qtd,
+                precoBase: precoBase,
+                precoUnit: precoBase,
+                subtotal: precoBase * qtd,
                 dataAtualizacaoCotacao: cotacao.dataAtualizacao
             };
             
@@ -845,8 +1021,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             const novo = new Set(prev);
             if (novo.has(materialId)) {
                 novo.delete(materialId);
+                setQuantidadesPorItem(prevQtd => {
+                    const next = { ...prevQtd };
+                    delete next[materialId];
+                    return next;
+                });
             } else {
                 novo.add(materialId);
+                setQuantidadesPorItem(prevQtd => ({ ...prevQtd, [materialId]: prevQtd[materialId] || 1 }));
             }
             return novo;
         });
@@ -857,8 +1039,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             const novo = new Set(prev);
             if (novo.has(cotacaoId)) {
                 novo.delete(cotacaoId);
+                setQuantidadesPorItem(prevQtd => {
+                    const next = { ...prevQtd };
+                    delete next[cotacaoId];
+                    return next;
+                });
             } else {
                 novo.add(cotacaoId);
+                setQuantidadesPorItem(prevQtd => ({ ...prevQtd, [cotacaoId]: prevQtd[cotacaoId] || 1 }));
             }
             return novo;
         });
@@ -872,7 +1060,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         materiaisSelecionadosComparacao.forEach(materialId => {
             const material = materiaisComEstoque.find(m => m.id === materialId);
             if (material) {
-                handleAddItemComValidacao(material, undefined, 1);
+                const qtd = quantidadesPorItem[materialId] || 1;
+                handleAddItemComValidacao(material, undefined, qtd);
                 inseridos++;
             }
         });
@@ -881,7 +1070,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         cotacoesSelecionadasComparacao.forEach(cotacaoId => {
             const cotacao = cotacoesBancoFrio.find(c => c.id === cotacaoId);
             if (cotacao) {
-                handleAddItemComValidacao(undefined, cotacao, 1);
+                const qtd = quantidadesPorItem[cotacaoId] || 1;
+                handleAddItemComValidacao(undefined, cotacao, qtd);
                 inseridos++;
             }
         });
@@ -891,6 +1081,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             // Limpar seleções
             setMateriaisSelecionadosComparacao(new Set());
             setCotacoesSelecionadasComparacao(new Set());
+            setQuantidadesPorItem({});
         }
     };
 
@@ -904,7 +1095,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     }, [items, formState.descontoValor, formState.impostoPercentual]);
 
     // Adicionar material do estoque ao orçamento
-    const handleAddItem = (material: Material, manterModalAberto = false, unidadeVendaParam?: string) => {
+    const handleAddItem = (material: Material, manterModalAberto = false, unidadeVendaParam?: string, quantidade = 1) => {
         const unidadeVenda = unidadeVendaParam || material.unidadeMedida;
         
         // Determinar preço de venda e custo baseado na unidade
@@ -932,21 +1123,25 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             custoUnit = material.preco; // Custo padrão
         }
         
-        const precoBase = precoVenda; // Base para aplicar BDI
+        const precoBase = precoVenda;
+        const empresaAdd = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+        const aliquotaMat = empresaAdd?.aliquotaMaterial ?? 8;
+        const custoAgregado = (material as any).custoAgregado ?? (custoUnit + (precoBase * aliquotaMat / 100));
 
         const newItem: OrcamentoItem = {
             tipo: 'MATERIAL',
             materialId: material.id,
             nome: material.nome,
             descricao: material.nome, // Usar o nome como descrição
-            unidadeMedida: material.unidadeMedida,
-            unidadeVenda: unidadeVenda, // ✅ Unidade de venda
+            unidadeMedida: normalizarUnidadeMedidaOrcamento(material.unidadeMedida),
+            unidadeVenda: normalizarUnidadeMedidaOrcamento(unidadeVenda), // ✅ Unidade de venda (metros/cm herdam)
             ncm: material.ncm || undefined, // ✅ NCM do material para faturamento
-            quantidade: 1,
+            quantidade,
             custoUnit: custoUnit, // Custo baseado na unidade de venda
-            precoBase: precoBase, // Valor de venda base (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            custoAgregadoUnit: custoAgregado, // Custo agregado (compra + imposto) para lucro líquido
+            precoBase: precoBase,
+            precoUnit: precoBase,
+            subtotal: precoBase * quantidade
         };
 
         setItems(prev => [...prev, newItem]);
@@ -967,6 +1162,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         setModalExpandido(false);
         setItensSelecionadosModal(new Set());
         setUnidadeVendaSelecionada({});
+        setQuantidadesPorItem({});
     });
 
     // Função para adicionar múltiplos itens selecionados
@@ -984,37 +1180,42 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             filteredMaterials.forEach(material => {
                 if (itensSelecionadosModal.has(material.id)) {
                     const unidadeVenda = unidadeVendaSelecionada[material.id] || material.unidadeMedida;
-                    handleAddItem(material, true, unidadeVenda);
-                    adicionados++;
+                    const quantidade = quantidadesPorItem[material.id] || 1;
+                    handleAddItem(material, true, unidadeVenda, quantidade);
+                    adicionados += 1;
                 }
             });
         } else if (modoAdicao === 'servicos') {
             filteredServicos.forEach(servico => {
                 if (itensSelecionadosModal.has(servico.id)) {
-                    handleAddServico(servico, true);
-                    adicionados++;
+                    const quantidade = quantidadesPorItem[servico.id] || 1;
+                    handleAddServico(servico, true, quantidade);
+                    adicionados += 1;
                 }
             });
         } else if (modoAdicao === 'kits') {
             filteredKits.forEach(kit => {
                 if (itensSelecionadosModal.has(kit.id)) {
-                    handleAddKit(kit, true);
-                    adicionados++;
+                    const quantidade = quantidadesPorItem[kit.id] || 1;
+                    handleAddKit(kit, true, quantidade);
+                    adicionados += 1;
                 }
             });
         } else if (modoAdicao === 'quadros') {
             filteredQuadros.forEach(quadro => {
                 if (itensSelecionadosModal.has(quadro.id)) {
-                    handleAddQuadro(quadro, true);
-                    adicionados++;
+                    const quantidade = quantidadesPorItem[quadro.id] || 1;
+                    handleAddQuadro(quadro, true, quantidade);
+                    adicionados += 1;
                 }
             });
         } else if (modoAdicao === 'cotacoes') {
             filteredCotacoes.forEach(cotacao => {
                 if (itensSelecionadosModal.has(cotacao.id)) {
                     const unidadeVenda = unidadeVendaSelecionada[cotacao.id] || cotacao.unidadeMedida || 'UN';
-                    handleAddCotacao(cotacao, true, unidadeVenda);
-                    adicionados++;
+                    const quantidade = Math.max(0.01, parseFloat(String(quantidadesPorItem[cotacao.id])) || 1);
+                    handleAddCotacao(cotacao, true, unidadeVenda, quantidade);
+                    adicionados += 1;
                 }
             });
         }
@@ -1026,6 +1227,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         // Limpar seleção
         setItensSelecionadosModal(new Set());
         setUnidadeVendaSelecionada({});
+        setQuantidadesPorItem({});
     };
 
     // Função para selecionar/deselecionar item
@@ -1038,8 +1240,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 const novasUnidades = { ...unidadeVendaSelecionada };
                 delete novasUnidades[itemId];
                 setUnidadeVendaSelecionada(novasUnidades);
+                
+                // Remover quantidade
+                const novasQuantidades = { ...quantidadesPorItem };
+                delete novasQuantidades[itemId];
+                setQuantidadesPorItem(novasQuantidades);
             } else {
                 novo.add(itemId);
+                // Inicializar quantidade com 1
+                setQuantidadesPorItem(prev => ({ ...prev, [itemId]: 1 }));
             }
             return novo;
         });
@@ -1071,19 +1280,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Adicionar serviço ao orçamento
-    const handleAddServico = (servico: Servico, manterModalAberto = false) => {
-        const precoBase = servico.preco; // Base para aplicar BDI
+    const handleAddServico = (servico: Servico, manterModalAberto = false, quantidade = 1) => {
+        const precoBase = servico.preco;
         const newItem: OrcamentoItem = {
             tipo: 'SERVICO',
+            servicoId: servico.id,
             servicoNome: servico.nome,
             nome: servico.nome,
             descricao: servico.descricao,
-            unidadeMedida: servico.unidade || 'UN',
-            quantidade: 1,
+            unidadeMedida: normalizarUnidadeMedidaOrcamento(servico.unidade) || 'un',
+            quantidade,
             custoUnit: servico.custo || 0, // Custo do serviço (se não houver, usar 0)
-            precoBase: precoBase, // Valor base (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase,
+            precoUnit: precoBase,
+            subtotal: precoBase * quantidade
         };
 
         setItems(prev => [...prev, newItem]);
@@ -1098,19 +1308,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Adicionar quadro ao orçamento
-    const handleAddQuadro = (quadro: Quadro, manterModalAberto = false) => {
+    const handleAddQuadro = (quadro: Quadro, manterModalAberto = false, quantidade = 1) => {
         const precoVenda = quadro.precoSugerido || quadro.custoTotal;
-        const precoBase = precoVenda; // Base para aplicar BDI
+        const precoBase = precoVenda;
         const newItem: OrcamentoItem = {
             tipo: 'QUADRO_PRONTO',
+            quadroId: quadro.id,
             nome: quadro.nome,
             descricao: quadro.descricao,
             unidadeMedida: 'UN',
-            quantidade: 1,
+            quantidade,
             custoUnit: quadro.custoTotal, // Custo do quadro
-            precoBase: precoBase, // Valor base (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase,
+            precoUnit: precoBase,
+            subtotal: precoBase * quantidade
         };
 
         setItems(prev => [...prev, newItem]);
@@ -1125,19 +1336,58 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Adicionar cotação ao orçamento (BANCO FRIO)
-    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVendaParam?: string) => {
-        const unidadeVenda = unidadeVendaParam || cotacao.unidadeMedida || 'UN';
-        
+    const handleAddCotacao = (cotacao: any, manterModalAberto = false, unidadeVendaParam?: string, quantidade = 1) => {
+        const fracionado = cotacao.quantidadePorEmbalagem != null && Number(cotacao.quantidadePorEmbalagem) > 0;
+        const qtdEmbalagem = fracionado ? Number(cotacao.quantidadePorEmbalagem) : 1;
+
+        const rawUnit = (unidadeVendaParam || cotacao.unidadeMedida || 'UN').toLowerCase().trim();
+        const unidadeVenda = rawUnit === 'cm' ? 'cm' : (rawUnit === 'm' ? 'm' : rawUnit);
+        const unidadeLower = unidadeVenda.toLowerCase();
+
+        // Fracionamento: 1 pacote = quantidadePorEmbalagem unidades → inserir por unidade com valor convertido
+        if (fracionado) {
+            const custoUnitario = roundMoney((cotacao.valorUnitario || 0) / qtdEmbalagem);
+            const valorVendaUn = roundMoney((cotacao.valorVenda ?? (cotacao.valorUnitario || 0) * 1.4) / qtdEmbalagem);
+            const precoBase = valorVendaUn;
+            const qtd = Math.max(0.01, quantidade);
+            const newItem: OrcamentoItem = {
+                tipo: 'COTACAO',
+                cotacaoId: cotacao.id,
+                nome: cotacao.nome,
+                descricao: cotacao.nome,
+                dataAtualizacaoCotacao: cotacao.dataAtualizacao,
+                unidadeMedida: 'UN',
+                unidadeVenda: 'UN',
+                quantidade: qtd,
+                custoUnit: custoUnitario,
+                precoBase,
+                precoUnit: precoBase,
+                subtotal: roundMoney(precoBase * qtd),
+                ncm: cotacao.ncm ?? undefined
+            };
+            setItems(prev => [...prev, newItem]);
+            if (!manterModalAberto) setShowItemModal(false);
+            setItemSearchTerm('');
+            setBuscaGlobal('');
+            toast.success('Cotação adicionada (fracionada por unidade)', {
+                description: `${cotacao.nome} - 1 un = 1/${qtdEmbalagem} pacote • ${qtd} un`
+            });
+            return;
+        }
+
         // Calcular custo baseado na unidade de venda
         let custoUnitario = cotacao.valorUnitario || 0;
-        // Se a unidade de medida permitir venda em M/cm e estiver vendendo em cm, dividir por 100
-        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeVenda === 'cm') {
+        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeLower === 'cm') {
             custoUnitario = cotacao.valorUnitario / 100;
         }
-        
-        // Usar valorVenda da cotação se disponível, senão aplicar markup de 40% sobre o custo
-        const valorVenda = cotacao.valorVenda || (custoUnitario * 1.4);
-        const precoBase = valorVenda; // Base para aplicar BDI
+        custoUnitario = roundMoney(custoUnitario);
+
+        // Valor de venda: quando em CM, usar valor por metro / 100
+        let valorVenda = cotacao.valorVenda ?? (cotacao.valorUnitario || 0) * 1.4;
+        if (podeVenderEmMetroOuCm(cotacao.unidadeMedida) && unidadeLower === 'cm') {
+            valorVenda = valorVenda / 100;
+        }
+        const precoBase = roundMoney(valorVenda);
         
         // Identificar tipo de material baseado no nome da cotação
         const tipoMaterial = identificarTipoMaterial(cotacao.nome);
@@ -1148,14 +1398,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             nome: cotacao.nome,
             descricao: cotacao.nome, // ✅ Apenas o nome do material (não mostrar fornecedor)
             dataAtualizacaoCotacao: cotacao.dataAtualizacao,
-            unidadeMedida: unidadeVenda,
-            unidadeVenda: unidadeVenda, // ✅ NOVO: Unidade de venda
+            unidadeMedida: unidadeLower === 'cm' ? 'cm' : (unidadeLower === 'm' ? 'm' : unidadeVenda),
+            unidadeVenda: unidadeLower === 'cm' ? 'cm' : (unidadeLower === 'm' ? 'm' : unidadeVenda), // ✅ Unidade de venda (m ou cm)
             tipoMaterial: tipoMaterial, // ✅ NOVO: Tipo para conversão
-            quantidade: 1,
+            quantidade,
             custoUnit: custoUnitario, // Custo é sempre o valor da cotação (valorUnitario)
-            precoBase: precoBase, // Valor de venda base (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            precoBase: precoBase,
+            precoUnit: precoBase,
+            subtotal: roundMoney(precoBase * quantidade),
+            ncm: cotacao.ncm ?? undefined
         };
 
         setItems(prev => [...prev, newItem]);
@@ -1170,21 +1421,79 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Adicionar kit ao orçamento
-    const handleAddKit = (kit: Kit, manterModalAberto = false) => {
-        const custoTotalKit = getKitCustoTotal(kit);
-        const precoVendaTotalKit = getKitPrecoVendaTotal(kit);
-        const precoBase = precoVendaTotalKit; // Base para aplicar BDI
+    const handleAddKit = (kit: Kit, manterModalAberto = false, quantidade = 1) => {
+        const kitCompleto = kits.find((k: any) => k.id === kit.id) || kit;
+        const custoTotalKit = roundMoney(getKitCustoTotal(kitCompleto));
+        const precoVendaTotalKit = roundMoney(getKitPrecoVendaTotal(kitCompleto));
+        const precoBase = precoVendaTotalKit;
+
+        // ✅ Materializar composição do kit do catálogo como itensDoKit (igual kit unificado)
+        const itensDoKitParaSalvar: any[] = [];
+
+        // Materiais do estoque (kit.items)
+        (kitCompleto.items || []).forEach((it: any) => {
+            const materialRef = it.material || materiais.find((m: any) => m.id === it.materialId);
+            itensDoKitParaSalvar.push({
+                tipo: 'MATERIAL',
+                materialId: it.materialId,
+                nome: materialRef?.nome || 'Material',
+                codigo: materialRef?.sku || '',
+                ncm: materialRef?.ncm,
+                unidadeMedida: normalizarUnidadeMedidaOrcamento(materialRef?.unidadeMedida) || 'UN',
+                quantidade: it.quantidade || 1,
+                custoUnit: materialRef?.preco || 0,
+                valorVenda: materialRef?.valorVenda ?? materialRef?.preco ?? 0,
+                valorVendaOriginal: materialRef?.valorVenda ?? materialRef?.preco ?? 0
+            });
+        });
+
+        // Banco frio / serviços (kit.itensFaltantes)
+        (kitCompleto.itensFaltantes || []).forEach((extra: any) => {
+            const tipoExtra = (extra.tipo || '').toUpperCase();
+            if (tipoExtra === 'SERVICO' && extra.servicoId) {
+                const servicoRef = servicos.find((s: any) => s.id === extra.servicoId);
+                itensDoKitParaSalvar.push({
+                    tipo: 'SERVICO',
+                    servicoId: extra.servicoId,
+                    nome: servicoRef?.nome || extra.nome || 'Serviço',
+                    codigo: servicoRef?.codigo || extra.codigo || '',
+                    unidadeMedida: normalizarUnidadeMedidaOrcamento(servicoRef?.unidade) || 'UN',
+                    quantidade: extra.quantidade || 1,
+                    custoUnit: servicoRef?.custo || 0,
+                    valorVenda: servicoRef?.preco || 0,
+                    valorVendaOriginal: servicoRef?.preco || 0
+                });
+            } else if (tipoExtra === 'COTACAO' && extra.cotacaoId) {
+                const cotacaoRef = cotacoes.find((c: any) => c.id === extra.cotacaoId);
+                const valorVenda = cotacaoRef?.valorVenda ?? (cotacaoRef?.valorUnitario || extra.valorUnitario || 0) * 1.4;
+                itensDoKitParaSalvar.push({
+                    tipo: 'COTACAO',
+                    cotacaoId: extra.cotacaoId,
+                    nome: cotacaoRef?.nome || extra.nome || extra.materialNome || 'Item do Banco Frio',
+                    codigo: cotacaoRef?.fornecedorNome || cotacaoRef?.sku || extra.codigo || '',
+                    ncm: cotacaoRef?.ncm || extra.ncm,
+                    unidadeMedida: normalizarUnidadeMedidaOrcamento(cotacaoRef?.unidadeMedida || extra.unidadeMedida) || 'UN',
+                    quantidade: extra.quantidade || 1,
+                    custoUnit: cotacaoRef?.valorUnitario || extra.valorUnitario || 0,
+                    valorVenda,
+                    valorVendaOriginal: valorVenda,
+                    dataUltimaCotacao: cotacaoRef?.dataAtualizacao || extra.dataUltimaCotacao || extra.dataAtualizacao
+                });
+            }
+        });
+
         const newItem: OrcamentoItem = {
             tipo: 'KIT',
             kitId: kit.id,
             nome: kit.nome,
             descricao: kit.descricao,
             unidadeMedida: 'UN',
-            quantidade: 1,
-            custoUnit: custoTotalKit, // Custo do kit
-            precoBase: precoBase, // Valor de venda base (sem BDI)
-            precoUnit: precoBase * (1 + formState.bdi / 100), // Aplica BDI
-            subtotal: precoBase * (1 + formState.bdi / 100)
+            quantidade,
+            custoUnit: custoTotalKit, // Custo do kit (2 decimais)
+            precoBase: precoBase,
+            precoUnit: precoBase,
+            subtotal: roundMoney(precoBase * quantidade),
+            ...(itensDoKitParaSalvar.length > 0 ? ({ itensDoKit: itensDoKitParaSalvar } as any) : {})
         };
 
         setItems(prev => [...prev, newItem]);
@@ -1198,58 +1507,56 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         });
     };
 
-    // Adicionar item manual (sem estoque)
-    const handleAddItemManual = () => {
-        // Validação
-        if (!novoItemManual.nome.trim()) {
-            toast.error('Nome do item obrigatório', {
-                description: 'Digite o nome ou descrição do item'
-            });
-            return;
+    // Incluir item selecionado da busca do catálogo na página
+    const handleIncluirCatalogoPagina = () => {
+        if (!itemSelecionadoCatalogo) return;
+        const qty = Math.max(0.01, quantidadeCatalogoPagina);
+        const { tipo, raw } = itemSelecionadoCatalogo;
+        if (tipo === 'MATERIAL') {
+            const m = raw as Material;
+            if (m.estoque < qty) {
+                // Avisar, mas não bloquear a inclusão no orçamento — regra de negócio: propostas podem usar itens esgotados
+                toast.warning('Estoque insuficiente', { description: `Disponível: ${m.estoque} ${m.unidadeMedida}` });
+            }
+            handleAddItem(m, false, m.unidadeMedida, qty);
+        } else if (tipo === 'SERVICO') {
+            handleAddServico(raw as Servico, false, qty);
+        } else if (tipo === 'KIT') {
+            handleAddKit(raw as Kit, false, qty);
+        } else if (tipo === 'QUADRO_PRONTO') {
+            handleAddQuadro(raw as Quadro, false, qty);
+        } else if (tipo === 'COTACAO') {
+            const c = raw as any;
+            const unidade = podeVenderEmMetroOuCm(c.unidadeMedida) ? unidadeVendaCatalogoPagina : (c.unidadeMedida || 'UN');
+            handleAddCotacao(c, false, unidade, qty);
         }
-        if (novoItemManual.custoUnit <= 0) {
-            toast.error('Custo unitário inválido', {
-                description: 'Digite um custo unitário maior que zero'
-            });
-            return;
-        }
-        if (novoItemManual.quantidade <= 0) {
-            toast.error('Quantidade inválida', {
-                description: 'Digite uma quantidade maior que zero'
-            });
-            return;
-        }
-
-        const precoUnit = novoItemManual.custoUnit * (1 + formState.bdi / 100);
-        const newItem: OrcamentoItem = {
-            tipo: novoItemManual.tipo,
-            nome: novoItemManual.nome,
-            descricao: novoItemManual.descricao,
-            unidadeMedida: novoItemManual.unidadeMedida,
-            quantidade: novoItemManual.quantidade,
-            custoUnit: novoItemManual.custoUnit,
-            precoUnit: precoUnit,
-            subtotal: precoUnit * novoItemManual.quantidade
-        };
-
-        setItems(prev => [...prev, newItem]);
-        
-        // Resetar formulário
-        setNovoItemManual({
-            nome: '',
-            descricao: '',
-            unidadeMedida: 'UN',
-            quantidade: 1,
-            custoUnit: 0,
-            tipo: 'MATERIAL'
-        });
-        
-        setShowItemModal(false);
-        toast.success('Item adicionado!', {
-            description: `${novoItemManual.nome} - ${novoItemManual.quantidade} ${novoItemManual.unidadeMedida}`,
-            icon: '✏️'
-        });
+        setItemSelecionadoCatalogo(null);
+        setQuantidadeCatalogoPagina(1);
+        setBuscaCatalogoPagina('');
+        setDropdownCatalogoAberto(false);
     };
+
+    // Preço unitário e total do item selecionado na busca da página (para exibição)
+    const precoUnitarioCatalogoPagina = useMemo(() => {
+        if (!itemSelecionadoCatalogo) return 0;
+        const { tipo, raw } = itemSelecionadoCatalogo;
+        if (tipo === 'MATERIAL') {
+            const m = raw as Material;
+            return m.valorVenda || m.preco;
+        }
+        if (tipo === 'SERVICO') return (raw as Servico).preco;
+        if (tipo === 'KIT') return getKitPrecoVendaTotal(raw as Kit);
+        if (tipo === 'QUADRO_PRONTO') return ((raw as Quadro).precoSugerido || (raw as Quadro).custoTotal);
+        if (tipo === 'COTACAO') {
+            const c = raw as any;
+            let v = c.valorVenda ?? (c.valorUnitario || 0) * 1.4;
+            if (podeVenderEmMetroOuCm(c.unidadeMedida) && unidadeVendaCatalogoPagina === 'cm') v = v / 100;
+            return v;
+        }
+        return 0;
+    }, [itemSelecionadoCatalogo, unidadeVendaCatalogoPagina]);
+
+    const totalCatalogoPagina = precoUnitarioCatalogoPagina * Math.max(1, quantidadeCatalogoPagina);
 
     // Remover item
     const handleRemoveItem = (index: number) => {
@@ -1327,16 +1634,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const subtotalTotal = itensParaKit.reduce((sum, item) => sum + item.subtotal, 0);
         const precoUnit = subtotalTotal; // Preço unitário do kit é o subtotal total
         
-        // Calcular precoBase do kit (valor sem BDI)
-        // Se todos os itens têm precoBase, usar a soma dos precoBase
-        // Caso contrário, calcular removendo o BDI do subtotal total
+        // Calcular precoBase do kit
         const precoBaseTotal = itensParaKit.reduce((sum, item) => {
             if (item.precoBase !== undefined) {
                 return sum + (item.precoBase * item.quantidade);
             } else {
-                // Se não tem precoBase, calcular removendo o BDI
-                const bdi = formState.bdi || 0;
-                return sum + ((item.precoUnit / (1 + bdi / 100)) * item.quantidade);
+                return sum + (item.precoUnit * item.quantidade);
             }
         }, 0);
 
@@ -1361,10 +1664,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             }
 
             // IMPORTANTE: Sempre usar o precoUnit atual do item no orçamento
-            // Este valor já inclui:
-            // - BDI aplicado
-            // - Edições manuais do usuário (se houver)
-            // - Qualquer ajuste feito no contexto deste orçamento específico
+            // Este valor já inclui edições manuais do usuário e ajustes feitos neste orçamento
             // O valorVendaOriginal é usado apenas para referência (mostrar valor original riscado)
             const valorVendaAtualizado = item.precoUnit || 0;
 
@@ -1372,10 +1672,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 nome: item.nome,
                 codigo: codigo,
                 custoUnit: item.custoUnit || 0, // ✅ Incluir custo unitário de cada item
-                valorVenda: valorVendaAtualizado, // Sempre usar o precoUnit atual (com BDI e edições manuais)
+                valorVenda: valorVendaAtualizado, // Sempre usar o precoUnit atual (com edições manuais)
                 valorVendaOriginal: valorVendaOriginal, // Valor de venda original do cadastro (para referência)
                 quantidade: item.quantidade,
-                unidadeMedida: item.unidadeMedida,
+                unidadeMedida: normalizarUnidadeMedidaOrcamento(item.unidadeMedida),
                 materialId: item.materialId || null,
                 cotacaoId: item.cotacaoId || null,
                 kitId: item.kitId || null, // ✅ Preservar kitId se for um kit do catálogo
@@ -1392,18 +1692,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const novoKit: OrcamentoItem & { itensDoKit?: any } = {
             tipo: 'KIT',
             nome: nomeKit.trim(),
-            // ✅ Para kits customizados, usar o nome do usuário como descricao (será salvo no backend)
-            // A descrição detalhada dos itens está em itensDoKit
             descricao: nomeKit.trim(),
             unidadeMedida: 'UN',
             quantidade: 1,
             custoUnit: custoTotal,
-            precoBase: precoBaseTotal, // Base sem BDI (soma dos precoBase dos itens ou calculado)
-            precoUnit: precoUnit, // Preço com BDI (soma dos subtotais dos itens)
+            precoBase: precoBaseTotal,
+            precoUnit: precoUnit,
             subtotal: precoUnit,
-            // Marcar como kit customizado
-            kitId: undefined, // Será undefined para kits customizados
-            // Salvar itens do kit para exibição posterior
+            ncm: ncmKit.trim() || undefined,
+            kitId: undefined,
             itensDoKit: itensDoKitParaSalvar
         };
 
@@ -1422,10 +1719,184 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         setItems(novosItems);
         setItensSelecionados(new Set());
         setNomeKit('');
+        setNcmKit('');
         setShowCriarKitModal(false);
 
         toast.success('Kit criado com sucesso!', {
             description: `${nomeKit.trim()} - R$ ${precoUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+        });
+    };
+
+    // Inserir itens já existentes no orçamento dentro do kit unificado selecionado
+    const handleInserirItemAoKit = () => {
+        const selectedIndices = Array.from(itensSelecionados);
+        const isKitUnificado = (i: number) => {
+            const it = items[i];
+            return it.tipo === 'KIT' && !it.kitId && Array.isArray((it as any).itensDoKit);
+        };
+        const kitSelecionados = selectedIndices.filter(isKitUnificado);
+        const itensParaMoverIndices = selectedIndices.filter(i => !isKitUnificado(i));
+        if (kitSelecionados.length !== 1 || itensParaMoverIndices.length === 0) return;
+
+        const kitIndex = kitSelecionados[0];
+        const kit = items[kitIndex] as OrcamentoItem & { itensDoKit?: any[] };
+        if (!kit.itensDoKit) return;
+
+        const itensParaMoverOrdenados = [...itensParaMoverIndices].sort((a, b) => a - b);
+        const novosItensDoKit = itensParaMoverOrdenados.map(itemIndex => {
+            const itemToMove = items[itemIndex];
+            let codigo = '';
+            if (itemToMove.materialId) {
+                const m = materiais.find(m => m.id === itemToMove.materialId);
+                if (m) codigo = m.sku || '';
+            } else if (itemToMove.cotacaoId) {
+                const c = cotacoes.find(c => c.id === itemToMove.cotacaoId);
+                if (c) codigo = c.ncm || c.fornecedorNome || '';
+            } else if (itemToMove.servicoId) {
+                const s = servicos.find(s => s.id === itemToMove.servicoId);
+                if (s) codigo = s.codigo || '';
+            }
+
+            return {
+                nome: itemToMove.nome,
+                codigo,
+                tipo: itemToMove.tipo,
+                quantidade: itemToMove.quantidade,
+                unidadeMedida: normalizarUnidadeMedidaOrcamento(itemToMove.unidadeMedida) || 'un',
+                valorVenda: itemToMove.precoUnit || 0,
+                custoUnit: itemToMove.custoUnit || 0,
+                custoAgregadoUnit: (itemToMove as any).custoAgregadoUnit,
+                materialId: itemToMove.materialId || null,
+                cotacaoId: itemToMove.cotacaoId || null,
+                servicoId: itemToMove.servicoId || null,
+                kitId: itemToMove.kitId || null,
+                subtotal: itemToMove.subtotal,
+            };
+        });
+
+        const indicesParaRemover = new Set(itensParaMoverIndices);
+        const newItems = items.filter((_, i) => !indicesParaRemover.has(i));
+        const removidosAntesDoKit = itensParaMoverIndices.filter(i => i < kitIndex).length;
+        const kitNewIdx = kitIndex - removidosAntesDoKit;
+        const kitAtual = newItems[kitNewIdx] as OrcamentoItem & { itensDoKit?: any[] };
+        const newItensDoKit = [...(kitAtual.itensDoKit || []), ...novosItensDoKit];
+        const subtotalTotal = newItensDoKit.reduce((s, it) => s + ((it.valorVenda || 0) * (it.quantidade || 1)), 0);
+        const custoTotalKit = newItensDoKit.reduce((s, it) => s + ((it.custoUnit || 0) * (it.quantidade || 1)), 0);
+
+        newItems[kitNewIdx] = {
+            ...kitAtual,
+            itensDoKit: newItensDoKit,
+            precoUnit: subtotalTotal,
+            subtotal: subtotalTotal,
+            custoUnit: custoTotalKit,
+        } as OrcamentoItem & { itensDoKit?: any[] };
+
+        setItems(newItems);
+        setItensSelecionados(new Set());
+        toast.success('Itens inseridos ao kit', {
+            description: `${novosItensDoKit.length} item(ns) foram adicionados à composição do kit ${kit.nome}`,
+        });
+    };
+
+    const selecaoKitMaisUmItem = (() => {
+        const sel = Array.from(itensSelecionados);
+        const isKit = (i: number) => {
+            const it = items[i];
+            return it.tipo === 'KIT' && !it.kitId && Array.isArray((it as any).itensDoKit);
+        };
+        const kitsSelecionados = sel.filter(isKit).length;
+        return kitsSelecionados === 1 && sel.length >= 2;
+    })();
+
+    const kitEdicaoDirty = useMemo(() => {
+        if (!snapshotItensDoKitInicial) return false;
+        if (pendentesBaixarDoKit.length > 0) return true;
+        return JSON.stringify(itensKitEdicao) !== snapshotItensDoKitInicial;
+    }, [itensKitEdicao, snapshotItensDoKitInicial, pendentesBaixarDoKit]);
+
+    const totaisResumoKitEdicao = useMemo(() => {
+        const empresaKit = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+        const aliquotaMaterialKit = empresaKit?.aliquotaMaterial ?? 8;
+        let custoAgTotal = 0;
+        let vendaTotal = 0;
+        for (const item of itensKitEdicao) {
+            const vv = item.valorVenda || 0;
+            const q = item.quantidade || 1;
+            const custoAgregadoUnit = item.custoAgregadoUnit ?? (item.custoUnit ?? 0) + (vv * aliquotaMaterialKit / 100);
+            custoAgTotal += custoAgregadoUnit * q;
+            vendaTotal += vv * q;
+        }
+        return {
+            custoAgTotal,
+            vendaTotal,
+            lucro: vendaTotal - custoAgTotal
+        };
+    }, [itensKitEdicao, empresas, formState.empresaCNPJ]);
+
+    const labelTipoKitItem = (itemKit: any) => {
+        const tipoItem = itemKit.tipo || 'MATERIAL';
+        if (tipoItem === 'MATERIAL') return 'Estoque';
+        if (tipoItem === 'COTACAO') return 'Banco Frio';
+        if (tipoItem === 'SERVICO') return 'Serviço';
+        if (tipoItem === 'KIT') return 'Kit';
+        return String(tipoItem);
+    };
+
+    const itemKitPassaBuscaEdicao = (itemKit: any) => {
+        const termo = buscaKitEdicao.trim();
+        if (!termo) return true;
+        const tipoStr = labelTipoKitItem(itemKit);
+        return (
+            matchCrossSearch(termo, itemKit.nome || '') ||
+            matchCrossSearch(termo, itemKit.codigo || '') ||
+            matchCrossSearch(termo, tipoStr)
+        );
+    };
+
+    const limparEstadoModalKitEdicao = () => {
+        setShowModalEditarKit(false);
+        setKitEmEdicao(null);
+        setItensKitEdicao([]);
+        setPendentesBaixarDoKit([]);
+        setBuscaKitEdicao('');
+        setSnapshotItemsAntesKitEdicao(null);
+        setSnapshotItensDoKitInicial(null);
+        setShowConfirmarCancelarEdicaoKit(false);
+    };
+
+    const solicitarFecharModalKitEdicao = () => {
+        if (!kitEdicaoDirty) {
+            limparEstadoModalKitEdicao();
+            return;
+        }
+        setShowConfirmarCancelarEdicaoKit(true);
+    };
+
+    const confirmarCancelarEdicaoKit = () => {
+        if (snapshotItemsAntesKitEdicao) {
+            try {
+                setItems(JSON.parse(snapshotItemsAntesKitEdicao));
+            } catch {
+                /* ignore */
+            }
+        }
+        limparEstadoModalKitEdicao();
+    };
+
+    const handleQuantidadeKitItemChange = (indexItem: number, raw: string) => {
+        const parsed = parseFloat(String(raw).replace(',', '.'));
+        const q = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+        setItensKitEdicao(prev => {
+            const next = [...prev];
+            const cur = next[indexItem];
+            if (!cur) return prev;
+            const vv = cur.valorVenda || 0;
+            next[indexItem] = {
+                ...cur,
+                quantidade: q,
+                subtotal: vv * q
+            };
+            return next;
         });
     };
 
@@ -1440,7 +1911,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const novoItemOrcamento: OrcamentoItem = {
             tipo: itemParaBaixar.tipo || 'MATERIAL',
             nome: itemParaBaixar.nome,
-            unidadeMedida: itemParaBaixar.unidadeMedida || 'UN',
+            unidadeMedida: normalizarUnidadeMedidaOrcamento(itemParaBaixar.unidadeMedida) || 'un',
             quantidade: itemParaBaixar.quantidade || 1,
             custoUnit: itemParaBaixar.custoUnit || 0,
             precoUnit: itemParaBaixar.valorVenda || 0,
@@ -1454,36 +1925,18 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             })
         };
 
-        // Remover item do kit em edição
+        // Remover item do kit em edição (somente estado local até salvar)
         const novosItensKit = itensKitEdicao.filter((_, i) => i !== indexItem);
         setItensKitEdicao(novosItensKit);
+        setPendentesBaixarDoKit(prev => [...prev, novoItemOrcamento]);
 
-        // Adicionar item à lista do orçamento E atualizar o kit
-        const novosItems = [...items];
-        
-        // Inserir novo item antes do kit
-        novosItems.splice(kitEmEdicao.index, 0, novoItemOrcamento);
-        
-        // Atualizar o kit (agora está no índice + 1) com a nova composição
-        const novoIndiceKit = kitEmEdicao.index + 1;
-        const custoTotal = novosItensKit.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
-        const subtotalTotal = novosItensKit.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
-        
-        novosItems[novoIndiceKit] = {
-            ...novosItems[novoIndiceKit],
-            custoUnit: custoTotal,
-            precoUnit: subtotalTotal,
-            subtotal: subtotalTotal,
-            itensDoKit: novosItensKit
-        } as OrcamentoItem & { itensDoKit?: any[] };
-        
-        setItems(novosItems);
-        
-        // Atualizar o índice do kit em edição
-        setKitEmEdicao({ index: novoIndiceKit, item: novosItems[novoIndiceKit] as any });
+        setKitEmEdicao(prev => prev ? {
+            ...prev,
+            item: { ...prev.item, itensDoKit: novosItensKit }
+        } : null);
 
-        toast.success('Item baixado para lista', {
-            description: `${itemParaBaixar.nome} foi adicionado à lista do orçamento`,
+        toast.success('Item preparado para baixar', {
+            description: `${itemParaBaixar.nome} será inserido na lista ao salvar o kit`,
             icon: '⬇️'
         });
     };
@@ -1494,28 +1947,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         const itemParaRemover = itensKitEdicao[indexItem];
         if (!itemParaRemover) return;
 
-        // Remover item do kit em edição
         const novosItensKit = itensKitEdicao.filter((_, i) => i !== indexItem);
         setItensKitEdicao(novosItensKit);
-        
-        // Atualizar o kit no orçamento imediatamente
-        const custoTotal = novosItensKit.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
-        const subtotalTotal = novosItensKit.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
-        
-        setItems(prev => prev.map((item, i) => {
-            if (i === kitEmEdicao.index) {
-                return {
-                    ...item,
-                    custoUnit: custoTotal,
-                    precoUnit: subtotalTotal,
-                    subtotal: subtotalTotal,
-                    itensDoKit: novosItensKit
-                } as OrcamentoItem & { itensDoKit?: any[] };
-            }
-            return item;
-        }));
-        
-        // Atualizar o kitEmEdicao também
+
         setKitEmEdicao(prev => prev ? {
             ...prev,
             item: {
@@ -1525,7 +1959,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         } : null);
         
         toast.success('Item removido do kit', {
-            description: `${itemParaRemover.nome} foi removido da composição`,
+            description: `${itemParaRemover.nome} será removido ao salvar`,
             icon: '🗑️'
         });
     };
@@ -1533,42 +1967,57 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const handleSalvarEdicaoKit = () => {
         if (!kitEmEdicao) return;
 
-        if (itensKitEdicao.length === 0) {
-            // Se não sobrou nenhum item, remover o kit completamente
+        if (itensKitEdicao.length === 0 && pendentesBaixarDoKit.length === 0) {
             setItems(prev => prev.filter((_, i) => i !== kitEmEdicao.index));
-            setShowModalEditarKit(false);
-            setKitEmEdicao(null);
-            setItensKitEdicao([]);
+            limparEstadoModalKitEdicao();
             toast.info('Kit removido', {
                 description: 'O kit foi removido pois não há mais itens na composição'
             });
             return;
         }
 
-        // Recalcular valores do kit
-        const custoTotal = itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
-        const subtotalTotal = itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+        if (itensKitEdicao.length === 0 && pendentesBaixarDoKit.length > 0) {
+            const novosItems = [...items];
+            novosItems.splice(kitEmEdicao.index, 1);
+            novosItems.splice(kitEmEdicao.index, 0, ...pendentesBaixarDoKit);
+            setItems(novosItems);
+            limparEstadoModalKitEdicao();
+            toast.success('Kit atualizado', {
+                description: 'Itens foram movidos para a lista do orçamento',
+                icon: '✅'
+            });
+            return;
+        }
 
-        // Atualizar o kit na lista de itens
-        setItems(prev => prev.map((item, i) => {
-            if (i === kitEmEdicao.index) {
-                return {
-                    ...item,
-                    custoUnit: custoTotal,
-                    precoUnit: subtotalTotal,
-                    subtotal: subtotalTotal,
-                    itensDoKit: itensKitEdicao
-                } as OrcamentoItem & { itensDoKit?: any[] };
-            }
-            return item;
+        const itensDoKitComSubtotal = itensKitEdicao.map((item: any) => ({
+            ...item,
+            subtotal: (item.valorVenda || 0) * (item.quantidade || 1)
         }));
 
-        setShowModalEditarKit(false);
-        setKitEmEdicao(null);
-        setItensKitEdicao([]);
+        const custoTotal = itensDoKitComSubtotal.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
+        const subtotalTotal = itensDoKitComSubtotal.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
+
+        let novosItems = [...items];
+        const pos = kitEmEdicao.index;
+
+        if (pendentesBaixarDoKit.length > 0) {
+            novosItems.splice(pos, 0, ...pendentesBaixarDoKit);
+        }
+        const novoKitIdx = pos + pendentesBaixarDoKit.length;
+
+        novosItems[novoKitIdx] = {
+            ...novosItems[novoKitIdx],
+            custoUnit: custoTotal,
+            precoUnit: subtotalTotal,
+            subtotal: subtotalTotal,
+            itensDoKit: itensDoKitComSubtotal
+        } as OrcamentoItem & { itensDoKit?: any[] };
+
+        setItems(novosItems);
+        limparEstadoModalKitEdicao();
 
         toast.success('Kit atualizado com sucesso!', {
-            description: `${itensKitEdicao.length} ${itensKitEdicao.length === 1 ? 'item mantido' : 'itens mantidos'} na composição`,
+            description: `${itensDoKitComSubtotal.length} ${itensDoKitComSubtotal.length === 1 ? 'item mantido' : 'itens mantidos'} na composição`,
             icon: '✅'
         });
     };
@@ -1576,54 +2025,46 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     const handleDesunificarKit = () => {
         if (!kitEmEdicao) return;
 
-        // Baixar todos os itens do kit para a lista
         const novosItems = [...items];
-        
-        // Remover o kit
         novosItems.splice(kitEmEdicao.index, 1);
-        
-        // Adicionar todos os itens do kit na posição onde estava o kit
-        itensKitEdicao.forEach((itemKit, idx) => {
-            const novoItemOrcamento: OrcamentoItem = {
-                tipo: itemKit.tipo || 'MATERIAL',
-                nome: itemKit.nome,
-                unidadeMedida: itemKit.unidadeMedida || 'UN',
-                quantidade: itemKit.quantidade || 1,
-                custoUnit: itemKit.custoUnit || 0,
-                precoUnit: itemKit.valorVenda || 0,
-                subtotal: (itemKit.valorVenda || 0) * (itemKit.quantidade || 1),
-                materialId: itemKit.materialId,
-                cotacaoId: itemKit.cotacaoId,
-                kitId: itemKit.kitId,
-                descricao: itemKit.nome,
-                // Se for um kit unificado, preservar sua composição
-                ...(itemKit.tipo === 'KIT' && itemKit.itensDoKit && {
-                    itensDoKit: itemKit.itensDoKit
-                })
-            };
-            
-            novosItems.splice(kitEmEdicao.index + idx, 0, novoItemOrcamento);
-        });
+
+        const itensSolto: OrcamentoItem[] = itensKitEdicao.map((itemKit) => ({
+            tipo: itemKit.tipo || 'MATERIAL',
+            nome: itemKit.nome,
+            unidadeMedida: normalizarUnidadeMedidaOrcamento(itemKit.unidadeMedida) || 'un',
+            quantidade: itemKit.quantidade || 1,
+            custoUnit: itemKit.custoUnit || 0,
+            precoUnit: itemKit.valorVenda || 0,
+            subtotal: (itemKit.valorVenda || 0) * (itemKit.quantidade || 1),
+            materialId: itemKit.materialId,
+            cotacaoId: itemKit.cotacaoId,
+            kitId: itemKit.kitId,
+            descricao: itemKit.nome,
+            ...(itemKit.tipo === 'KIT' && itemKit.itensDoKit && {
+                itensDoKit: itemKit.itensDoKit
+            })
+        }));
+
+        novosItems.splice(kitEmEdicao.index, 0, ...pendentesBaixarDoKit, ...itensSolto);
         
         setItems(novosItems);
-        setShowModalEditarKit(false);
-        setKitEmEdicao(null);
-        setItensKitEdicao([]);
+        limparEstadoModalKitEdicao();
 
         toast.success('Kit desunificado!', {
-            description: `${itensKitEdicao.length} ${itensKitEdicao.length === 1 ? 'item foi adicionado' : 'itens foram adicionados'} à lista do orçamento`,
+            description: `${pendentesBaixarDoKit.length + itensKitEdicao.length} ${pendentesBaixarDoKit.length + itensKitEdicao.length === 1 ? 'item foi adicionado' : 'itens foram adicionados'} à lista do orçamento`,
             icon: '📦'
         });
     };
 
-    // Atualizar quantidade do item
+    // Atualizar quantidade do item (aceita decimais: 0,5; 0,12; 1,0)
     const handleUpdateItemQuantity = (index: number, quantidade: number) => {
+        const qtd = Math.max(0.01, quantidade);
         setItems(prev => prev.map((item, i) => {
             if (i === index) {
                 return {
                     ...item,
-                    quantidade,
-                    subtotal: item.precoUnit * quantidade
+                    quantidade: qtd,
+                    subtotal: item.precoUnit * qtd
                 };
             }
             return item;
@@ -1671,58 +2112,351 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         }));
     };
 
-    // Atualizar BDI e recalcular preços (apenas para itens não editados manualmente)
-    const handleBdiChange = (newBdi: number) => {
-        setFormState(prev => ({ ...prev, bdi: newBdi }));
+    // Atualizar preços de materiais, cotações e serviços com valores mais recentes do backend
+    const handleAtualizarPrecos = async () => {
+        if (items.length === 0) {
+            toast.error('Nenhum item no orçamento', {
+                description: 'Adicione itens ao orçamento antes de atualizar preços'
+            });
+            return;
+        }
 
-        setItems(prev => prev.map(item => {
-            // Se o preço foi editado manualmente, não recalcular com BDI
-            if (item.precoEditadoManual) {
-                return item;
+        try {
+            setAtualizandoPrecos(true);
+
+            // Buscar dados atualizados do backend
+            const [materiaisRes, cotacoesRes, servicosRes] = await Promise.all([
+                axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
+                axiosApiService.get('/api/cotacoes'),
+                servicosService.listar({ ativo: true })
+            ]);
+
+            // Criar mapas para busca rápida
+            const materiaisMap = new Map<string, Material>();
+            if (materiaisRes.success && materiaisRes.data && Array.isArray(materiaisRes.data)) {
+                materiaisRes.data.forEach((m: Material) => {
+                    if (m.id) materiaisMap.set(m.id, m);
+                });
             }
-            
-            // Se for kit, recalcular precoBase dinamicamente
-            if (item.tipo === 'KIT' && item.kitId) {
-                const kitCompleto = kits.find((k: any) => k.id === item.kitId);
-                if (kitCompleto && kitCompleto.items) {
-                    // Recalcular preço de venda total do kit baseado nos materiais do estoque
-                    let precoVendaTotalKit = kitCompleto.items.reduce((sum: number, kitItem: any) => {
-                        const precoVenda = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
-                        return sum + (precoVenda * kitItem.quantidade);
-                    }, 0);
-                    
-                    // ⚠️ IMPORTANTE: Incluir itens do banco frio E serviços no cálculo do preço de venda
-                    if (kitCompleto.itensFaltantes && Array.isArray(kitCompleto.itensFaltantes) && kitCompleto.itensFaltantes.length > 0) {
-                        const precoVendaExtras = kitCompleto.itensFaltantes.reduce((sum: number, itemKit: any) => {
-                            // Incluir tanto cotações quanto serviços
-                            const precoUnit = itemKit.precoUnit || itemKit.preco || itemKit.valorUnitario || 0;
-                            const quantidade = itemKit.quantidade || 0;
-                            return sum + (precoUnit * quantidade);
-                        }, 0);
-                        precoVendaTotalKit += precoVendaExtras;
+
+            const cotacoesMap = new Map<string, any>();
+            if (cotacoesRes.success && cotacoesRes.data && Array.isArray(cotacoesRes.data)) {
+                cotacoesRes.data.forEach((c: any) => {
+                    if (c.id) cotacoesMap.set(c.id, c);
+                });
+            }
+
+            const servicosMap = new Map<string, Servico>();
+            if (servicosRes.success && servicosRes.data && Array.isArray(servicosRes.data)) {
+                servicosRes.data.forEach((s: Servico) => {
+                    if (s.id) servicosMap.set(s.id, s);
+                });
+            }
+
+            // Atualizar listas de dados disponíveis no componente
+            if (materiaisRes.success && materiaisRes.data) {
+                setMateriais(materiaisRes.data as Material[]);
+            }
+            if (cotacoesRes.success && cotacoesRes.data) {
+                setCotacoes(cotacoesRes.data as any[]);
+            }
+            if (servicosRes.success && servicosRes.data) {
+                setServicos(servicosRes.data as Servico[]);
+            }
+
+            // Atualizar itens do orçamento
+            let itensAtualizados = 0;
+            const novosItems = items.map(item => {
+                // Se o preço foi editado manualmente, não atualizar
+                if (item.precoEditadoManual) {
+                    return item;
+                }
+
+                let novoPrecoBase: number | undefined = undefined;
+                let novoCustoUnit: number | undefined = undefined;
+
+                // Atualizar preço baseado no tipo do item
+                if (item.tipo === 'MATERIAL' && item.materialId) {
+                    const materialAtualizado = materiaisMap.get(item.materialId);
+                    if (materialAtualizado) {
+                        novoPrecoBase = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                        novoCustoUnit = materialAtualizado.preco || 0;
+                        itensAtualizados++;
                     }
-                    
-                    const precoBase = precoVendaTotalKit;
-                    const precoUnit = precoBase * (1 + newBdi / 100);
-                    
+                } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+                    const cotacaoAtualizada = cotacoesMap.get(item.cotacaoId);
+                    if (cotacaoAtualizada) {
+                        novoPrecoBase = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                        novoCustoUnit = cotacaoAtualizada.valorUnitario || 0;
+                        itensAtualizados++;
+                    }
+                } else if (item.tipo === 'SERVICO' && item.servicoNome) {
+                    const servicoAtualizado = Array.from(servicosMap.values()).find(
+                        s => s.nome === item.servicoNome
+                    );
+                    if (servicoAtualizado) {
+                        novoPrecoBase = servicoAtualizado.preco || 0;
+                        novoCustoUnit = servicoAtualizado.preco || 0;
+                        itensAtualizados++;
+                    }
+                }
+
+                // Se encontrou preço atualizado, aplicar
+                if (novoPrecoBase !== undefined) {
                     return {
                         ...item,
-                        precoBase,
-                        precoUnit,
-                        subtotal: precoUnit * item.quantidade
+                        precoBase: novoPrecoBase,
+                        precoUnit: novoPrecoBase,
+                        custoUnit: novoCustoUnit !== undefined ? novoCustoUnit : item.custoUnit,
+                        subtotal: novoPrecoBase * item.quantidade
                     };
                 }
+
+                return item;
+            });
+
+            setItems(novosItems);
+
+            // Atualizar também os itens dentro dos kits (valor de venda, custo, subtotal e lucro nos modais)
+            const empresaPreco = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+            const aliquotaKit = empresaPreco?.aliquotaMaterial ?? 8;
+            const novosItemsComKits = novosItems.map(item => {
+                if (item.tipo === 'KIT' && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                    const itensDoKitAtualizados = (item as any).itensDoKit.map((kitItem: any) => {
+                        let novoValorVenda = kitItem.valorVenda;
+                        let novoCustoUnit = kitItem.custoUnit;
+
+                        if (kitItem.materialId) {
+                            const materialAtualizado = materiaisMap.get(kitItem.materialId);
+                            if (materialAtualizado) {
+                                novoValorVenda = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                                novoCustoUnit = materialAtualizado.preco || 0;
+                            }
+                        } else if (kitItem.cotacaoId) {
+                            const cotacaoAtualizada = cotacoesMap.get(kitItem.cotacaoId);
+                            if (cotacaoAtualizada) {
+                                novoValorVenda = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                                novoCustoUnit = cotacaoAtualizada.valorUnitario || 0;
+                            }
+                        } else if (kitItem.servicoId) {
+                            const servicoAtualizado = servicosMap.get(kitItem.servicoId);
+                            if (servicoAtualizado) {
+                                novoValorVenda = servicoAtualizado.preco || 0;
+                                novoCustoUnit = servicoAtualizado.preco || 0;
+                            }
+                        } else if (kitItem.tipo === 'SERVICO' && kitItem.nome) {
+                            const servicoPorNome = Array.from(servicosMap.values()).find(s => s.nome === kitItem.nome);
+                            if (servicoPorNome) {
+                                novoValorVenda = servicoPorNome.preco || 0;
+                                novoCustoUnit = servicoPorNome.preco || 0;
+                            }
+                        }
+
+                        const custoAgregadoUnit = novoCustoUnit + (novoValorVenda * aliquotaKit / 100);
+                        const subtotalItem = novoValorVenda * (kitItem.quantidade || 1);
+                        return {
+                            ...kitItem,
+                            valorVenda: novoValorVenda,
+                            custoUnit: novoCustoUnit,
+                            custoAgregadoUnit: custoAgregadoUnit,
+                            subtotal: subtotalItem
+                        };
+                    });
+
+                    // Recalcular total do kit
+                    const novoPrecoUnit = itensDoKitAtualizados.reduce((sum: number, it: any) => {
+                        return sum + ((it.valorVenda || 0) * (it.quantidade || 1));
+                    }, 0);
+                    const novoCustoTotalKit = itensDoKitAtualizados.reduce((sum: number, it: any) => {
+                        return sum + ((it.custoUnit ?? 0) * (it.quantidade || 1));
+                    }, 0);
+
+                    return {
+                        ...item,
+                        itensDoKit: itensDoKitAtualizados,
+                        precoBase: novoPrecoUnit,
+                        precoUnit: novoPrecoUnit,
+                        custoUnit: novoCustoTotalKit,
+                        subtotal: novoPrecoUnit * item.quantidade
+                    };
+                }
+                return item;
+            });
+
+            setItems(novosItemsComKits);
+
+            toast.success('Preços atualizados!', {
+                description: `${itensAtualizados} item(ns) tiveram seus preços atualizados com os valores mais recentes do estoque e banco frio`
+            });
+        } catch (error: any) {
+            console.error('Erro ao atualizar preços:', error);
+            toast.error('Erro ao atualizar preços', {
+                description: error.message || 'Não foi possível atualizar os preços. Tente novamente.'
+            });
+        } finally {
+            setAtualizandoPrecos(false);
+        }
+    };
+
+    // Sincronizar com servidor: busca dados mais recentes do catálogo e do orçamento se aplicável,
+    // atualiza preços dos itens (sem sobrescrever itens com precoEditadoManual) e marca itens removidos no servidor.
+    const handleSincronizar = async () => {
+        if (items.length === 0) {
+            toast.error('Nenhum item no orçamento', {
+                description: 'Adicione itens ao orçamento antes de sincronizar'
+            });
+            return;
+        }
+
+        try {
+            setSincronizando(true);
+
+            // Buscar dados atualizados do backend
+            const [materiaisRes, cotacoesRes, servicosRes] = await Promise.all([
+                axiosApiService.get<Material[]>(ENDPOINTS.MATERIAIS),
+                axiosApiService.get('/api/cotacoes'),
+                servicosService.listar({ ativo: true })
+            ]);
+
+            // Criar mapas para busca rápida
+            const materiaisMap = new Map<string, Material>();
+            if (materiaisRes.success && materiaisRes.data && Array.isArray(materiaisRes.data)) {
+                materiaisRes.data.forEach((m: Material) => {
+                    if (m.id) materiaisMap.set(m.id, m);
+                });
+                setMateriais(materiaisRes.data as Material[]);
             }
-            
-            // Para outros itens, usar precoBase se disponível (valorVenda || preco), senão usar custoUnit como fallback
-            const basePreco = item.precoBase !== undefined ? item.precoBase : item.custoUnit;
-            const precoUnit = basePreco * (1 + newBdi / 100);
-            return {
-                ...item,
-                precoUnit,
-                subtotal: precoUnit * item.quantidade
-            };
-        }));
+
+            const cotacoesMap = new Map<string, any>();
+            if (cotacoesRes.success && cotacoesRes.data && Array.isArray(cotacoesRes.data)) {
+                cotacoesRes.data.forEach((c: any) => {
+                    if (c.id) cotacoesMap.set(c.id, c);
+                });
+                setCotacoes(cotacoesRes.data as any[]);
+            }
+
+            const servicosMap = new Map<string, Servico>();
+            if (servicosRes.success && servicosRes.data && Array.isArray(servicosRes.data)) {
+                servicosRes.data.forEach((s: Servico) => {
+                    if (s.id) servicosMap.set(s.id, s);
+                });
+                setServicos(servicosRes.data as Servico[]);
+            }
+
+            // Atualizar itens do orçamento: atualizar preços quando possível, marcar removidos quando não encontrados
+            let itensAtualizados = 0;
+            const novosItems = items.map(item => {
+                // Se o preço foi editado manualmente, não atualizar
+                if (item.precoEditadoManual) {
+                    return item;
+                }
+
+                let novoPrecoBase: number | undefined = undefined;
+                let novoCustoUnit: number | undefined = undefined;
+
+                // Atualizar preço baseado no tipo do item
+                if (item.tipo === 'MATERIAL' && item.materialId) {
+                    const materialAtualizado = materiaisMap.get(item.materialId);
+                    if (materialAtualizado) {
+                        novoPrecoBase = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                        novoCustoUnit = materialAtualizado.preco || 0;
+                        itensAtualizados++;
+                    }
+                } else if (item.tipo === 'COTACAO' && item.cotacaoId) {
+                    const cotacaoAtualizada = cotacoesMap.get(item.cotacaoId);
+                    if (cotacaoAtualizada) {
+                        novoPrecoBase = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                        novoCustoUnit = cotacaoAtualizada.valorUnitario || 0;
+                        itensAtualizados++;
+                    }
+                } else if (item.tipo === 'SERVICO' && item.servicoNome) {
+                    const servicoAtualizado = Array.from(servicosMap.values()).find(
+                        s => s.nome === item.servicoNome
+                    );
+                    if (servicoAtualizado) {
+                        novoPrecoBase = servicoAtualizado.preco || 0;
+                        novoCustoUnit = servicoAtualizado.preco || 0;
+                        itensAtualizados++;
+                    }
+                }
+
+                // Se encontrou preço atualizado, aplicar; senão marcar como possivelmente removido no servidor
+                if (novoPrecoBase !== undefined) {
+                    return {
+                        ...item,
+                        precoBase: novoPrecoBase,
+                        precoUnit: novoPrecoBase,
+                        custoUnit: novoCustoUnit !== undefined ? novoCustoUnit : item.custoUnit,
+                        subtotal: novoPrecoBase * item.quantidade,
+                        servidorRemovido: false
+                    };
+                }
+
+                return {
+                    ...item,
+                    servidorRemovido: true // indica que não foi encontrado no catálogo atual
+                };
+            });
+
+            setItems(novosItems);
+
+            // Atualizar também os itens dentro dos kits
+            const novosItemsComKits = novosItems.map(item => {
+                if (item.tipo === 'KIT' && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                    const itensDoKitAtualizados = (item as any).itensDoKit.map((kitItem: any) => {
+                        let novoValorVenda = kitItem.valorVenda;
+
+                        if (kitItem.materialId) {
+                            const materialAtualizado = materiaisMap.get(kitItem.materialId);
+                            if (materialAtualizado) {
+                                novoValorVenda = materialAtualizado.valorVenda || materialAtualizado.preco || 0;
+                            } else {
+                                kitItem.servidorRemovido = true;
+                            }
+                        } else if (kitItem.cotacaoId) {
+                            const cotacaoAtualizada = cotacoesMap.get(kitItem.cotacaoId);
+                            if (cotacaoAtualizada) {
+                                novoValorVenda = cotacaoAtualizada.valorVenda || cotacaoAtualizada.valorUnitario || 0;
+                            } else {
+                                kitItem.servidorRemovido = true;
+                            }
+                        }
+
+                        return {
+                            ...kitItem,
+                            valorVenda: novoValorVenda
+                        };
+                    });
+
+                    // Recalcular total do kit
+                    const novoPrecoUnit = itensDoKitAtualizados.reduce((sum: number, it: any) => {
+                        return sum + ((it.valorVenda || 0) * (it.quantidade || 1));
+                    }, 0);
+
+                    return {
+                        ...item,
+                        itensDoKit: itensDoKitAtualizados,
+                        precoBase: novoPrecoUnit,
+                        precoUnit: novoPrecoUnit,
+                        subtotal: novoPrecoUnit * item.quantidade
+                    };
+                }
+                return item;
+            });
+
+            setItems(novosItemsComKits);
+
+            toast.success('Sincronização concluída', {
+                description: `${itensAtualizados} item(ns) atualizados; itens não encontrados foram marcados como possivelmente removidos no servidor.`
+            });
+        } catch (error: any) {
+            console.error('Erro ao sincronizar:', error);
+            toast.error('Erro ao sincronizar', {
+                description: error.message || 'Não foi possível sincronizar. Tente novamente.'
+            });
+        } finally {
+            setSincronizando(false);
+        }
     };
 
     // Selecionar endereço do cliente
@@ -1748,12 +2482,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             return;
         }
 
-        // Preencher campos com dados do cliente
+        // Preencher campos com dados do cliente (logradouro, número, bairro)
         setFormState(prev => ({
             ...prev,
             enderecoObra: clienteSelecionado.endereco || '',
+            numeroObra: (clienteSelecionado as any).numero || '',
             cidade: clienteSelecionado.cidade || '',
-            bairro: '', // Cliente não tem bairro separado, mas pode ter no endereço
+            bairro: (clienteSelecionado as any).bairro || '',
             cep: clienteSelecionado.cep || ''
         }));
 
@@ -1765,10 +2500,70 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     };
 
     // Limpar e permitir endereço diferente
+    // Buscar CEP via Brasil API e preencher campos (debounced + abortable)
+    const buscarCep = async (cepRaw: string) => {
+        const cepDigits = (cepRaw || '').replace(/\D/g, '');
+        if (cepDigits.length !== 8) return;
+
+        // abort previous request if any
+        try {
+            if (cepAbortRef.current) {
+                cepAbortRef.current.abort();
+            }
+        } catch (_) { /* ignore */ }
+
+        const controller = new AbortController();
+        cepAbortRef.current = controller;
+        setCepLoading(true);
+
+        try {
+            const res = await fetch(`https://brasilapi.com.br/api/cep/v1/${cepDigits}`, { signal: controller.signal });
+            if (!res.ok) {
+                let errMsg = 'Não foi possível localizar o CEP';
+                try {
+                    const errBody = await res.json();
+                    if (errBody && errBody.message) errMsg = errBody.message;
+                } catch (_) { /* ignore */ }
+                toast.error('CEP não encontrado', {
+                    description: errMsg
+                });
+                return;
+            }
+
+            const data = await res.json();
+
+            // Preencher campos com os dados retornados
+            setFormState(prev => ({
+                ...prev,
+                enderecoObra: data.street || prev.enderecoObra,
+                bairro: data.neighborhood || prev.bairro,
+                cidade: data.city || prev.cidade,
+                cep: data.cep || prev.cep
+            }));
+
+            toast.success('Endereço via CEP aplicado', {
+                description: 'Os campos foram preenchidos com os dados retornados pelo serviço de CEP'
+            });
+        } catch (error: any) {
+            if (error && error.name === 'AbortError') {
+                // solicitado abort, silencioso
+                return;
+            }
+            console.error('Erro ao buscar CEP:', error);
+            toast.error('Erro ao buscar CEP', {
+                description: 'Não foi possível consultar o serviço de CEP'
+            });
+        } finally {
+            setCepLoading(false);
+            cepAbortRef.current = null;
+        }
+    };
+
     const usarEnderecoDiferente = () => {
         setFormState(prev => ({
             ...prev,
             enderecoObra: '',
+            numeroObra: '',
             cidade: '',
             bairro: '',
             cep: ''
@@ -1824,13 +2619,25 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
         // Se Enter for pressionado e não for em um textarea ou botão de submit
         if (e.key === 'Enter' && e.target instanceof HTMLElement) {
             const isTextarea = e.target.tagName === 'TEXTAREA';
-            const isSubmitButton = e.target.type === 'submit' || (e.target as HTMLElement).closest('button[type="submit"]');
+            const isSubmitButton = (e.target as HTMLElement & { type?: string }).type === 'submit' || (e.target as HTMLElement).closest('button[type="submit"]');
             
             if (!isTextarea && !isSubmitButton) {
                 e.preventDefault();
             }
         }
     };
+
+    // limpar timeouts / aborts ao desmontar
+    useEffect(() => {
+        return () => {
+            if (cepTimeoutRef.current) {
+                clearTimeout(cepTimeoutRef.current);
+            }
+            try {
+                if (cepAbortRef.current) cepAbortRef.current.abort();
+            } catch (_) { /* ignore */ }
+        };
+    }, []);
 
     // Salvar orçamento
     const handleSubmit = async (e: React.FormEvent) => {
@@ -1857,6 +2664,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
             const orcamentoData: any = {
                 clienteId: formState.clienteId,
+                ...(contatoLeadIdParaVincularRef.current
+                    ? { contatoLeadId: contatoLeadIdParaVincularRef.current }
+                    : {}),
                 titulo: formState.titulo,
                 descricao: formState.descricao,
                 descricaoProjeto: formState.descricaoProjeto,
@@ -1865,6 +2675,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 observacoes: formState.observacoes,
                 empresaCNPJ: formState.empresaCNPJ,
                 enderecoObra: formState.enderecoObra,
+                numeroObra: formState.numeroObra,
                 cidade: formState.cidade,
                 bairro: formState.bairro,
                 cep: formState.cep,
@@ -1890,8 +2701,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                     subtotal: item.subtotal,
                     unidadeVenda: item.unidadeVenda,
                     tipoMaterial: item.tipoMaterial,
-                    // ✅ Campo para armazenar itens de kits customizados
-                    itensDoKit: (item as any).itensDoKit || null
+                    itensDoKit: (item as any).itensDoKit || null,
+                    vendaDiretaFornecedor: Boolean((item as any).vendaDiretaFornecedor)
                 }))
             };
 
@@ -1901,6 +2712,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 loading: 'Criando orçamento...',
                 success: (response) => {
                     if (response.success) {
+                        contatoLeadIdParaVincularRef.current = null;
                         // Verificar se há kits no orçamento
                         const temKit = items.some(item => item.tipo === 'KIT');
                         
@@ -2091,6 +2903,16 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         </option>
                                     ))}
                             </select>
+                            {formState.empresaCNPJ && (() => {
+                                const emp = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+                                const alqMat = emp?.aliquotaMaterial ?? 8;
+                                const alqServ = emp?.aliquotaServico ?? 8;
+                                return (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1" title="Alíquotas usadas no cálculo do custo agregado e lucro líquido dos itens">
+                                        Alíquota aplicada: {alqMat}% (Materiais) / {alqServ}% (Serviços)
+                                    </p>
+                                );
+                            })()}
                         </div>
 
                         <div>
@@ -2137,56 +2959,88 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             />
                         </div>
 
-
-                        <div className="md:col-span-2">
+                        <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                Endereço da Obra (Rua e Número)
+                                Orçamentista
                             </label>
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={formState.enderecoObra}
-                                    onChange={(e) => {
-                                        setFormState(prev => ({ ...prev, enderecoObra: e.target.value }));
-                                        setUsandoEnderecoCliente(false);
-                                    }}
-                                    className="input-field flex-1"
-                                    placeholder="Ex: Rua das Flores, 123"
-                                    disabled={usandoEnderecoCliente}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={selecionarEnderecoCliente}
-                                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
-                                    title="Usar endereço cadastrado do cliente"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-                                    </svg>
-                                    Selecionar do Cliente
-                                </button>
-                                {usandoEnderecoCliente && (
+                            <input
+                                type="text"
+                                readOnly
+                                value={authContext?.user?.name ?? ''}
+                                className="input-field bg-gray-50 dark:bg-gray-800/50 cursor-default"
+                                placeholder="Usuário logado será gravado como orçamentista"
+                                title="Este orçamento será registrado em seu nome ao clicar em Criar Orçamento."
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Será gravado como responsável por este orçamento e no pedido de venda.
+                            </p>
+                        </div>
+
+                        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-[minmax(0,2.6fr)_minmax(120px,0.7fr)] gap-6">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                    Logradouro (Rua/Av.)
+                                </label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={formState.enderecoObra}
+                                        onChange={(e) => {
+                                            setFormState(prev => ({ ...prev, enderecoObra: e.target.value }));
+                                            setUsandoEnderecoCliente(false);
+                                        }}
+                                        className="input-field flex-1"
+                                        placeholder="Ex: Rua das Flores"
+                                        disabled={usandoEnderecoCliente}
+                                    />
                                     <button
                                         type="button"
-                                        onClick={usarEnderecoDiferente}
-                                        className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
-                                        title="Usar endereço diferente"
+                                        onClick={selecionarEnderecoCliente}
+                                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                                        title="Usar endereço cadastrado do cliente"
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                                         </svg>
-                                        Endereço Diferente
+                                        Selecionar do Cliente
                                     </button>
+                                    {usandoEnderecoCliente && (
+                                        <button
+                                            type="button"
+                                            onClick={usarEnderecoDiferente}
+                                            className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-2"
+                                            title="Usar endereço diferente"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                            </svg>
+                                            Endereço Diferente
+                                        </button>
+                                    )}
+                                </div>
+                                {usandoEnderecoCliente && (
+                                    <p className="mt-1 text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        Usando endereço cadastrado do cliente
+                                    </p>
                                 )}
                             </div>
-                            {usandoEnderecoCliente && (
-                                <p className="mt-1 text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    Usando endereço cadastrado do cliente
-                                </p>
-                            )}
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                    Número
+                                </label>
+                                <input
+                                    type="text"
+                                    value={formState.numeroObra || ''}
+                                    onChange={(e) => setFormState(prev => ({ ...prev, numeroObra: e.target.value }))}
+                                    className="input-field"
+                                    placeholder="Nº"
+                                    disabled={usandoEnderecoCliente}
+                                />
+                            </div>
                         </div>
 
                         <div>
@@ -2217,14 +3071,36 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                 CEP
                             </label>
-                            <input
-                                type="text"
-                                value={formState.cep}
-                                onChange={(e) => setFormState(prev => ({ ...prev, cep: e.target.value }))}
-                                className="input-field"
-                                placeholder="00000-000"
-                                maxLength={9}
-                            />
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={formState.cep}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setFormState(prev => ({ ...prev, cep: val }));
+
+                                        // debounce
+                                        if (cepTimeoutRef.current) {
+                                            clearTimeout(cepTimeoutRef.current);
+                                        }
+                                        // @ts-ignore - window.setTimeout returns number in browsers
+                                        cepTimeoutRef.current = window.setTimeout(() => {
+                                            buscarCep(val);
+                                        }, 700);
+                                    }}
+                                    className="input-field pr-10"
+                                    placeholder="00000-000"
+                                    maxLength={9}
+                                />
+                                {cepLoading && (
+                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                                        <svg className="w-5 h-5 animate-spin text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                                        </svg>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div>
@@ -2237,21 +3113,6 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 onChange={(e) => setFormState(prev => ({ ...prev, responsavelObra: e.target.value }))}
                                 className="input-field"
                                 placeholder="Nome do responsável técnico"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                BDI - Margem (%)
-                            </label>
-                            <input
-                                type="number"
-                                value={formState.bdi}
-                                onChange={(e) => handleBdiChange(Number(e.target.value))}
-                                min="0"
-                                max="100"
-                                className="input-field"
-                                placeholder="20"
                             />
                         </div>
 
@@ -2305,17 +3166,255 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
 
                 {/* SEÇÃO 3: Itens do Orçamento */}
                 <div className="card-primary">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text">Itens do Orçamento</h3>
-                        <button
-                            type="button"
-                            onClick={() => setShowItemModal(true)}
-                            className="btn-info flex items-center gap-2"
-                        >
-                            <PlusIcon className="w-4 h-4" />
-                            Adicionar Item
-                        </button>
+                    <div className="flex justify-between items-center mb-4">
+                        <div>
+                            <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text">Itens do Orçamento</h3>
+                            {items.length > 0 && (
+                                <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
+                                    {itemListSearch.trim()
+                                        ? `${itensFiltradosCount} de ${items.length} ${items.length === 1 ? 'item' : 'itens'} correspondem ao filtro`
+                                        : `${items.length} ${items.length === 1 ? 'item adicionado' : 'itens adicionados'}`}
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={handleAtualizarPrecos}
+                                disabled={atualizandoPrecos || items.length === 0}
+                                className="px-4 py-2 text-sm font-semibold text-white bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
+                                title="Atualizar preços de materiais, cotações e serviços com os valores mais recentes"
+                            >
+                                {atualizandoPrecos ? (
+                                    <>
+                                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Atualizando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Atualizar Preços
+                                    </>
+                                )}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleSincronizar}
+                                disabled={sincronizando || items.length === 0}
+                                className="px-3 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2"
+                                title="Sincronizar orçamento com servidor (preserva alterações locais)"
+                            >
+                                {sincronizando ? (
+                                    <>
+                                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Sincronizando...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        Sincronizar
+                                    </>
+                                )}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setShowItemModal(true)}
+                                className="btn-info flex items-center gap-2"
+                            >
+                                <PlusIcon className="w-4 h-4" />
+                                Adicionar Item
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Busca direta do catálogo na página (CÓDIGO - DESCRIÇÃO + Incluir no pedido) */}
+                    <div className="mb-4 p-4 bg-gray-50 dark:bg-slate-800/50 rounded-xl border border-gray-200 dark:border-dark-border">
+                        <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
+                            <div className="flex-1 min-w-[200px] relative">
+                                <input
+                                    type="text"
+                                    value={buscaCatalogoPagina}
+                                    onChange={(e) => {
+                                        setBuscaCatalogoPagina(e.target.value);
+                                        setDropdownCatalogoAberto(true);
+                                        setDropdownHighlightIndex(0);
+                                        if (!e.target.value) setItemSelecionadoCatalogo(null);
+                                    }}
+                                    onFocus={() => {
+                                        if (buscaCatalogoPagina.trim()) {
+                                            setDropdownCatalogoAberto(true);
+                                            setDropdownHighlightIndex(resultadosBuscaCatalogoPagina.length > 0 ? 0 : -1);
+                                        }
+                                    }}
+                                    onBlur={() => setTimeout(() => { setDropdownCatalogoAberto(false); setDropdownHighlightIndex(-1); }, 200)}
+                                    onKeyDown={(e) => {
+                                        const list = resultadosBuscaCatalogoPagina;
+                                        if (!buscaCatalogoPagina.trim() || !dropdownCatalogoAberto) return;
+                                        if (e.key === 'ArrowDown') {
+                                            e.preventDefault();
+                                            setDropdownCatalogoAberto(true);
+                                            setDropdownHighlightIndex((prev) => (list.length ? Math.min(prev + 1, list.length - 1) : -1));
+                                            return;
+                                        }
+                                        if (e.key === 'ArrowUp') {
+                                            e.preventDefault();
+                                            setDropdownHighlightIndex((prev) => (list.length ? Math.max(prev - 1, 0) : -1));
+                                            return;
+                                        }
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            const idx = list.length ? Math.min(Math.max(0, dropdownHighlightIndex), list.length - 1) : -1;
+                                            if (idx >= 0) {
+                                                const linha = list[idx];
+                                                setItemSelecionadoCatalogo(linha);
+                                                setQuantidadeCatalogoPagina(1);
+                                                setDropdownCatalogoAberto(false);
+                                                setDropdownHighlightIndex(-1);
+                                            }
+                                            return;
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setDropdownCatalogoAberto(false);
+                                            setDropdownHighlightIndex(-1);
+                                        }
+                                    }}
+                                    className="w-full pl-3 pr-10 py-2.5 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-slate-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Buscar por nome ou código (materiais, serviços, kits, quadros, cotações)..."
+                                />
+                                {buscaCatalogoPagina.trim() && dropdownCatalogoAberto && resultadosBuscaCatalogoPagina.length > 0 && (() => {
+                                    const list = resultadosBuscaCatalogoPagina;
+                                    const safeHighlight = list.length ? Math.min(Math.max(0, dropdownHighlightIndex), list.length - 1) : -1;
+                                    const origemLabel = (tipo: ItemCatalogoLinha['tipo']) => {
+                                        switch (tipo) {
+                                            case 'MATERIAL': return 'Estoque';
+                                            case 'COTACAO': return 'Banco Frio';
+                                            case 'KIT': return 'Kit';
+                                            case 'SERVICO': return 'Serviço';
+                                            case 'QUADRO_PRONTO': return 'Quadro';
+                                            default: return '';
+                                        }
+                                    };
+                                    return (
+                                    <ul className="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-white dark:bg-slate-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-lg py-1">
+                                        {list.map((linha, index) => {
+                                            const jaNoOrcamento = orcamentoInsercaoModo === 'check' && itemJaNoOrcamento(items, linha.tipo, linha.id);
+                                            const isHighlighted = index === safeHighlight;
+                                            return (
+                                                <li
+                                                    key={`${linha.tipo}-${linha.id}`}
+                                                    ref={isHighlighted ? dropdownHighlightRef : undefined}
+                                                    className={`flex items-center justify-between gap-2 px-3 py-2 cursor-pointer text-sm ${isHighlighted ? 'bg-blue-100 dark:bg-blue-900/40' : 'hover:bg-gray-100 dark:hover:bg-slate-700'}`}
+                                                    onMouseDown={(e) => { e.preventDefault(); setItemSelecionadoCatalogo(linha); setQuantidadeCatalogoPagina(1); setDropdownCatalogoAberto(false); setDropdownHighlightIndex(-1); }}
+                                                >
+                                                    <span className="truncate flex-1">
+                                                        {linha.codigo ? `${linha.codigo} - ` : ''}{linha.descricao}
+                                                    </span>
+                                                    <span className="flex-shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-slate-600 px-2 py-0.5 rounded" title={`Origem: ${origemLabel(linha.tipo)}`}>
+                                                        ({origemLabel(linha.tipo)})
+                                                    </span>
+                                                    {jaNoOrcamento && (
+                                                        <span className="flex-shrink-0 text-green-600 dark:text-green-400" title="Já adicionado ao orçamento">
+                                                            <CheckIcon className="w-5 h-5" />
+                                                        </span>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                    );
+                                })()}
+                                {buscaCatalogoPagina.trim() && dropdownCatalogoAberto && resultadosBuscaCatalogoPagina.length === 0 && (
+                                    <div className="absolute z-20 left-0 right-0 mt-1 px-3 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-gray-700 rounded-lg shadow-lg text-sm text-gray-500 dark:text-dark-text-secondary">
+                                        Nenhum item encontrado
+                                    </div>
+                                )}
+                            </div>
+                            {itemSelecionadoCatalogo && (
+                                <>
+                                    <div className="w-full sm:w-auto flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-sm">
+                                        <span className="font-medium text-gray-700 dark:text-dark-text whitespace-nowrap">Item selecionado:</span>
+                                        <span className="truncate text-gray-900 dark:text-white" title={itemSelecionadoCatalogo.codigo ? `${itemSelecionadoCatalogo.codigo} - ${itemSelecionadoCatalogo.descricao}` : itemSelecionadoCatalogo.descricao}>
+                                            {itemSelecionadoCatalogo.codigo ? `${itemSelecionadoCatalogo.codigo} - ` : ''}{itemSelecionadoCatalogo.descricao}
+                                        </span>
+                                    </div>
+                                    {itemSelecionadoCatalogo.tipo === 'COTACAO' && podeVenderEmMetroOuCm((itemSelecionadoCatalogo.raw as any).unidadeMedida) && (
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-medium text-gray-700 dark:text-dark-text whitespace-nowrap">Unidade:</label>
+                                            <select
+                                                value={unidadeVendaCatalogoPagina}
+                                                onChange={(e) => setUnidadeVendaCatalogoPagina(e.target.value as 'm' | 'cm')}
+                                                className="px-2 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-700 text-sm text-gray-900 dark:text-white"
+                                            >
+                                                <option value="m">Metros (M)</option>
+                                                <option value="cm">Centímetros (CM)</option>
+                                            </select>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm font-medium text-gray-700 dark:text-dark-text whitespace-nowrap">Qtd.</label>
+                                        <input
+                                            type="number"
+                                            min={0.01}
+                                            step={0.01}
+                                            value={quantidadeCatalogoPagina}
+                                            onChange={(e) => setQuantidadeCatalogoPagina(Math.max(0.01, parseFloat(e.target.value) || 1))}
+                                            className="w-20 px-2 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-slate-800 text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-text-secondary">
+                                        <span>Unit.: R$ {precoUnitarioCatalogoPagina.toFixed(2).replace('.', ',')}</span>
+                                        <span>Total: R$ {totalCatalogoPagina.toFixed(2).replace('.', ',')}</span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleIncluirCatalogoPagina}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleIncluirCatalogoPagina(); } }}
+                                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                    >
+                                        Incluir no pedido
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Busca rápida nos itens já adicionados */}
+                    {items.length > 0 && (
+                        <div className="mb-4 flex items-center gap-3">
+                            <div className="flex-1 relative">
+                                <input
+                                    type="text"
+                                    value={itemListSearch}
+                                    onChange={(e) => setItemListSearch(e.target.value)}
+                                    className="w-full pl-3 pr-10 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-slate-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Buscar itens do orçamento por nome, NCM ou tipo (Material, Serviço, Kit, Banco Frio)..."
+                                />
+                                {itemListSearch.trim() && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setItemListSearch('')}
+                                        className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                                        title="Limpar busca"
+                                    >
+                                        ×
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {items.length === 0 ? (
                         <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
@@ -2327,6 +3426,15 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         </div>
                     ) : (
                         <div className="space-y-4">
+                            {/* Quando o filtro não encontrar nada, mostrar mensagem amigável */}
+                            {itemListSearch.trim() && itensFiltradosCount === 0 && (
+                                <div className="text-center py-6 bg-gray-50 dark:bg-slate-800 rounded-xl border border-dashed border-gray-200 dark:border-dark-border">
+                                    <p className="text-gray-500 dark:text-dark-text-secondary">
+                                        Nenhum item encontrado para "{itemListSearch}" na lista do orçamento.
+                                    </p>
+                                </div>
+                            )}
+
                             {/* Botões de seleção e criar kit */}
                             {items.length > 0 && (
                                 <div className="flex items-center justify-between p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg">
@@ -2353,21 +3461,68 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                             </>
                                         )}
                                     </div>
-                                    {itensSelecionados.size > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowCriarKitModal(true)}
-                                            className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                            </svg>
-                                            Criar Kit
-                                        </button>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        {selecaoKitMaisUmItem && (
+                                            <button
+                                                type="button"
+                                                onClick={handleInserirItemAoKit}
+                                                className="px-4 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-lg transition-colors flex items-center gap-2"
+                                                title="Mover o item selecionado para dentro do kit unificado"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                                </svg>
+                                                Inserir item ao kit unificado
+                                            </button>
+                                        )}
+                                        {itensSelecionados.size > 0 && (
+                                            <>
+                                                {(() => {
+                                                    const selecionadosTodosVendaDireta = [...itensSelecionados].every(i => (items[i] as any).vendaDiretaFornecedor);
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setItems(prev => prev.map((it, i) => itensSelecionados.has(i) ? { ...it, vendaDiretaFornecedor: !selecionadosTodosVendaDireta } : it))}
+                                                            className={selecionadosTodosVendaDireta
+                                                                ? 'px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors flex items-center gap-2'
+                                                                : 'px-4 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/30 hover:bg-amber-200 dark:hover:bg-amber-900/50 rounded-lg transition-colors flex items-center gap-2'}
+                                                            title={selecionadosTodosVendaDireta ? 'Remover marcação de venda direta dos itens selecionados' : 'Itens marcados não entram em contas a receber, estoque nem NF-e'}
+                                                        >
+                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                            </svg>
+                                                            {selecionadosTodosVendaDireta ? 'Desmarcar venda direta' : 'Marcar como venda direta'}
+                                                        </button>
+                                                    );
+                                                })()}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowCriarKitModal(true)}
+                                                    className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                    </svg>
+                                                    Criar Kit
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                             {items.map((item, index) => {
+                                // Aplicar filtro de busca nos itens já adicionados
+                                if (itemListSearch.trim()) {
+                                    const termo = itemListSearch.toLowerCase();
+                                    const corresponde =
+                                        matchCrossSearch(itemListSearch, item.nome || '') ||
+                                        (item.ncm || '').toLowerCase().includes(termo) ||
+                                        (item.tipo || '').toLowerCase().includes(termo);
+                                    if (!corresponde) {
+                                        return null;
+                                    }
+                                }
+
                                 // Buscar foto do material se for do tipo MATERIAL
                                 const materialComFoto = item.tipo === 'MATERIAL' && item.materialId 
                                     ? materiais.find(m => m.id === item.materialId)
@@ -2453,6 +3608,12 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                             })()}
                                                         </span>
                                                     )}
+                                                    {/* Badge Venda direta fornecedor */}
+                                                    {(item as any).vendaDiretaFornecedor && (
+                                                        <span className="inline-flex items-center px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 rounded text-xs font-medium" title="Não entra em contas a receber, estoque nem NF-e">
+                                                            Venda direta fornecedor
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -2462,9 +3623,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 <input
                                                     type="number"
                                                     value={item.quantidade}
-                                                    onChange={(e) => handleUpdateItemQuantity(index, Number(e.target.value))}
-                                                    min="1"
-                                                    step="0.01"
+                                                    onChange={(e) => handleUpdateItemQuantity(index, parseFloat(e.target.value) || 0)}
+                                                    min={0.01}
+                                                    step={0.01}
                                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white text-sm"
                                                 />
                                             </div>
@@ -2515,12 +3676,18 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     R$ {item.subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </p>
                                                 {(() => {
-                                                    const custoTotal = item.custoUnit * item.quantidade;
-                                                    const lucro = item.subtotal - custoTotal;
-                                                    const percentualLucro = custoTotal > 0 ? ((lucro / custoTotal) * 100) : 0;
+                                                    const empresaSelecionada = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+                                                    const aliquotaMaterial = empresaSelecionada?.aliquotaMaterial ?? 8;
+                                                    const aliquotaServico = empresaSelecionada?.aliquotaServico ?? 8;
+                                                    const aliquotaItem = item.tipo === 'SERVICO' ? aliquotaServico : aliquotaMaterial;
+                                                    const valorVendaSemBDI = item.precoBase ?? (item.precoUnit / (1 + (formState.bdi ?? 0) / 100));
+                                                    const custoAgregadoUnit = item.custoAgregadoUnit ?? (item.custoUnit + (valorVendaSemBDI * aliquotaItem / 100));
+                                                    const custoTotal = custoAgregadoUnit * item.quantidade;
+                                                    const lucroLiquido = item.subtotal - custoTotal;
+                                                    const percentualSobreVenda = item.subtotal > 0 ? (lucroLiquido / item.subtotal) * 100 : 0;
                                                     return (
-                                                        <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium" title={`Margem: ${percentualLucro.toFixed(1)}%`}>
-                                                            💰 Lucro: R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-medium" title={`Lucro Líquido: R$ ${lucroLiquido.toFixed(2)} (${percentualSobreVenda.toFixed(1)}%)`}>
+                                                            Lucro Líquido: R$ {lucroLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({percentualSobreVenda.toFixed(1)}%)
                                                         </p>
                                                     );
                                                 })()}
@@ -2532,13 +3699,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     <button
                                                         type="button"
                                                         onClick={async () => {
-                                                            // Se for kit customizado (sem kitId), usar itensDoKit
-                                                            if (!item.kitId && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit)) {
+                                                            // ✅ Prioridade: se o item já tem itensDoKit materializado (kit unificado OU kit do catálogo), usar diretamente
+                                                            if ((item as any).itensDoKit && Array.isArray((item as any).itensDoKit) && (item as any).itensDoKit.length > 0) {
                                                                 setItensKitParaVisualizar((item as any).itensDoKit);
                                                                 setNomeKitParaVisualizar(item.nome);
                                                                 setShowModalItensKit(true);
-                                                            } 
-                                                            // Se for kit do catálogo (com kitId), buscar itens do kit completo
+                                                            }
+                                                            // Fallback (compat): kit do catálogo antigo sem itensDoKit → buscar no catálogo
                                                             else if (item.kitId) {
                                                                 const kitCompleto = kits.find((k: any) => k.id === item.kitId);
                                                                 if (kitCompleto) {
@@ -2549,13 +3716,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                         custoUnit: kitItem.material?.preco || 0, // Custo de compra do material
                                                                         valorVenda: kitItem.material?.valorVenda || kitItem.material?.preco || 0,
                                                                         quantidade: kitItem.quantidade,
-                                                                        unidadeMedida: kitItem.material?.unidadeMedida || 'un',
+                                                                        unidadeMedida: normalizarUnidadeMedidaOrcamento(kitItem.material?.unidadeMedida) || 'un',
                                                                         tipo: 'MATERIAL',
                                                                         subtotal: (kitItem.quantidade || 0) * (kitItem.material?.valorVenda || kitItem.material?.preco || 0)
                                                                     }));
                                                                     
                                                                     // Adicionar itens do banco frio e serviços
-                                                                    const itensBancoFrio = (kitCompleto.itensFaltantes || []).map((item: any) => {
+                                                                    const itensBancoFrio = ((kitCompleto as any).itensFaltantes || []).map((item: any) => {
                                                                         if (item.tipo === 'SERVICO' && item.servicoId) {
                                                                             // Buscar dados completos do serviço
                                                                             const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
@@ -2566,7 +3733,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                                     custoUnit: servicoCompleto.custo || 0,
                                                                                     valorVenda: servicoCompleto.preco || 0,
                                                                                     quantidade: item.quantidade || 0,
-                                                                                    unidadeMedida: servicoCompleto.unidade || 'un',
+                                                                                    unidadeMedida: normalizarUnidadeMedidaOrcamento(servicoCompleto.unidade) || 'un',
                                                                                     tipo: 'SERVICO',
                                                                                     subtotal: (item.quantidade || 0) * (servicoCompleto.preco || 0)
                                                                                 };
@@ -2581,7 +3748,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                                     custoUnit: cotacaoCompleta.valorUnitario || 0,
                                                                                     valorVenda: cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0,
                                                                                     quantidade: item.quantidade || 0,
-                                                                                    unidadeMedida: cotacaoCompleta.unidadeMedida || 'un',
+                                                                                    unidadeMedida: normalizarUnidadeMedidaOrcamento(cotacaoCompleta.unidadeMedida) || 'un',
                                                                                     tipo: 'COTACAO',
                                                                                     subtotal: (item.quantidade || 0) * (cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0),
                                                                                     dataUltimaCotacao: cotacaoCompleta.dataAtualizacao
@@ -2596,7 +3763,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                             custoUnit: item.valorUnitario || item.custo || 0,
                                                                             valorVenda: item.precoUnit || item.preco || item.valorUnitario || 0,
                                                                             quantidade: item.quantidade || 0,
-                                                                            unidadeMedida: item.unidadeMedida || item.unidade || 'un',
+                                                                            unidadeMedida: normalizarUnidadeMedidaOrcamento(item.unidadeMedida || item.unidade) || 'un',
                                                                             tipo: item.tipo || 'COTACAO',
                                                                             subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || item.valorUnitario || 0),
                                                                             dataUltimaCotacao: item.dataUltimaCotacao || item.dataAtualizacao
@@ -2632,6 +3799,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                         <button
                                                             type="button"
                                                             onClick={() => {
+                                                                setSnapshotItemsAntesKitEdicao(JSON.stringify(items));
+                                                                setSnapshotItensDoKitInicial(JSON.stringify((item as any).itensDoKit || []));
+                                                                setPendentesBaixarDoKit([]);
+                                                                setBuscaKitEdicao('');
                                                                 setKitEmEdicao({ index, item: item as any });
                                                                 setItensKitEdicao([...(item as any).itensDoKit]);
                                                                 setShowModalEditarKit(true);
@@ -2676,7 +3847,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         {/* Subtotal */}
                         <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
                             <div className="flex justify-between items-center">
-                                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal (com BDI {formState.bdi}%)</span>
+                                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">Subtotal dos Itens</span>
                                 <span className="text-xl font-bold text-blue-900 dark:text-blue-200">
                                     R$ {calculosOrcamento.subtotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
@@ -2730,6 +3901,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                     <option>60 dias</option>
                                     <option>90 dias</option>
                                     <option>Parcelado</option>
+                                    <option>Pagamento conforme condições a serem acordadas.</option>
                                 </select>
                             </div>
                         </div>
@@ -2763,13 +3935,14 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                         </p>
                     </div>
 
-                    {/* Editor Jodit WYSIWYG */}
+                    {/* Editor TipTap WYSIWYG */}
                     <div className="mb-6">
-                        <JoditEditorComponent
+                        <TechnicalEditor
                             value={formState.descricaoProjeto}
                             onChange={(content) => setFormState(prev => ({ ...prev, descricaoProjeto: content }))}
                             placeholder="Digite a descrição técnica completa do projeto... Você pode formatar o texto, inserir imagens, criar tabelas e listas."
-                            height={500}
+                            height={1000}
+                            showPagePreview={false}
                         />
                     </div>
 
@@ -2841,11 +4014,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className={`bg-white dark:bg-dark-card rounded-2xl shadow-2xl ${modalExpandido ? 'max-w-[95vw] w-full' : 'max-w-4xl w-full'} max-h-[95vh] overflow-hidden flex flex-col transition-all duration-300`}>
                         {/* Header com Abas */}
-                        <div className="p-6 border-b border-gray-200 dark:border-dark-border" style={{ backgroundColor: '#0a1a2f' }}>
-                            <div className="flex justify-between items-center mb-4">
+                        <div className="p-4 border-b border-gray-200 dark:border-dark-border" style={{ backgroundColor: '#0a1a2f' }}>
+                            <div className="flex justify-between items-center mb-2">
                                 <div className="flex-1">
-                                    <h3 className="text-xl font-bold text-white">Adicionar Item ao Orçamento</h3>
-                                    <p className="text-sm text-white/80 mt-1">Escolha como deseja adicionar o item</p>
+                                    <h3 className="text-lg font-bold text-white">Adicionar Item ao Orçamento</h3>
                                 </div>
                                 <button
                                     type="button"
@@ -2860,6 +4032,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         setCotacoesSelecionadasComparacao(new Set());
                                         setItensSelecionadosModal(new Set());
                                         setUnidadeVendaSelecionada({});
+                                        setQuantidadesPorItem({});
                                         setSearchEstoque('');
                                         setSearchCotacoes('');
                                         setSearchGlobalComparacao('');
@@ -2874,24 +4047,24 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             </div>
 
                             {/* Campo de Busca Universal no Header */}
-                            <div className="mb-4">
+                            <div className="mb-2">
                                 <div className="relative">
-                                    <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                     </svg>
                                     <input
                                         type="text"
                                         value={buscaGlobal}
                                         onChange={(e) => setBuscaGlobal(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
+                                        className="w-full pl-9 pr-3 py-2 text-sm bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
                                         placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
                                         style={{ color: 'white' }}
                                     />
                                 </div>
                             </div>
 
-                            {/* Abas */}
-                            <div className="flex gap-2 flex-wrap items-center">
+                            {/* Abas - uma linha, botões compactos */}
+                            <div className="flex gap-1.5 flex-nowrap items-center overflow-x-auto">
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -2905,7 +4078,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                             setModoAdicao('comparacao');
                                         }
                                     }}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 ${
+                                    className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1 shrink-0 ${
                                         modalExpandido
                                             ? 'bg-green-500 text-white hover:bg-green-600'
                                             : 'bg-white/20 text-white hover:bg-white/30'
@@ -2914,94 +4087,26 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 >
                                     {modalExpandido ? (
                                         <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
-                                            </svg>
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" /></svg>
                                             Comparação Ativa
                                         </>
                                     ) : (
                                         <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                                            </svg>
-                                            Comparar Estoque vs Banco Frio
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                                            Comparar
                                         </>
                                     )}
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setModoAdicao('materiais');
-                                        setModalExpandido(false);
-                                    }}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'materiais' && !modalExpandido
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    📦 Materiais
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('servicos')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'servicos'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    🔧 Serviços
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('kits')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'kits'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    📦 Kits
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('quadros')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'quadros'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    ⚡ Quadros
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('cotacoes')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'cotacoes'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    🏷️ Cotações
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('manual')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                                        modoAdicao === 'manual'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                    }`}
-                                >
-                                    ✏️ Manual
-                                </button>
+                                <button type="button" onClick={() => { setModoAdicao('materiais'); setModalExpandido(false); }} className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all shrink-0 ${modoAdicao === 'materiais' && !modalExpandido && !buscaGlobal.trim() ? 'bg-white text-indigo-700' : 'bg-white/20 text-white hover:bg-white/30'}`}>📦 Materiais</button>
+                                <button type="button" onClick={() => setModoAdicao('servicos')} className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all shrink-0 ${modoAdicao === 'servicos' ? 'bg-white text-indigo-700' : 'bg-white/20 text-white hover:bg-white/30'}`}>🔧 Serviços</button>
+                                <button type="button" onClick={() => setModoAdicao('kits')} className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all shrink-0 ${modoAdicao === 'kits' ? 'bg-white text-indigo-700' : 'bg-white/20 text-white hover:bg-white/30'}`}>📦 Kits</button>
+                                <button type="button" onClick={() => setModoAdicao('quadros')} className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all shrink-0 ${modoAdicao === 'quadros' ? 'bg-white text-indigo-700' : 'bg-white/20 text-white hover:bg-white/30'}`}>⚡ Quadros</button>
+                                <button type="button" onClick={() => setModoAdicao('cotacoes')} className={`px-2 py-1.5 rounded-md text-sm font-medium transition-all shrink-0 ${modoAdicao === 'cotacoes' ? 'bg-white text-indigo-700' : 'bg-white/20 text-white hover:bg-white/30'}`}>🏷️ Cotações</button>
                             </div>
                         </div>
 
                         {/* Conteúdo do Modal */}
-                        <div className="flex-1 overflow-y-auto p-6">
+                        <div className="flex-1 overflow-y-auto p-4">
                             {/* Resultados da Busca Global */}
                             {/* Resultados da Busca Global - Layout lado a lado quando expandido */}
                             {buscaGlobal.trim() && (
@@ -3054,7 +4159,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                     <div className="flex-1">
                                                                         <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
                                                                         <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
-                                                                            Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
+                                                                            Código: {servico.codigo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}{'/'}{servico.unidade || 'un'}
                                                                         </p>
                                                                     </div>
                                                                     <button
@@ -3132,7 +4237,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                             
                                                             // Calcular valores para exibição
                                                             const custoUnitario = cotacao.valorUnitario || 0;
-                                                            const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+                                                            const valorVendaBase = cotacao.valorVenda || custoUnitario;
                                                             const porcentagemLucro = custoUnitario > 0 
                                                                 ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
                                                                 : 0;
@@ -3154,9 +4259,9 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                             <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
                                                                                 NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
                                                                                 <br />
-                                                                                Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
+                                                                                Custo: R$ {custoUnitario.toFixed(2)}{'/'}{unidadeMedida}
                                                                                 {valorVendaBase > 0 && (
-                                                                                    <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
+                                                                                    <> • Venda: R$ {valorVendaBase.toFixed(2)}{'/'}{unidadeMedida}
                                                                                     {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
                                                                                     </>
                                                                                 )}
@@ -3217,7 +4322,6 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             {/* Modo: Comparação Estoque vs Banco Frio (Modal Expandido) */}
                             {modalExpandido && modoAdicao === 'comparacao' && (
                                 <div className="space-y-4">
-                                    {/* Busca Global para Comparação */}
                                     <div className="mb-4">
                                         <div className="relative">
                                             <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3232,35 +4336,13 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     setSearchCotacoes(e.target.value);
                                                 }}
                                                 className="input-field w-full pl-10"
-                                                placeholder="🔍 Buscar em ambos os painéis (Materiais e Cotações)..."
+                                                placeholder="🔍 Buscar em ambos os painéis (use * ou % para juntar termos)..."
                                             />
                                         </div>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                                            💡 A busca filtra simultaneamente os materiais com estoque e as cotações do banco frio
+                                            💡 Filtra materiais e cotações do banco frio ao mesmo tempo. Ex.: <code className="text-[11px]">cabo * 70 * ver</code> ou <code className="text-[11px]">fornecedor % anilha</code>
                                         </p>
                                     </div>
-
-                                    {/* Indicador de seleção múltipla */}
-                                    {(materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
-                                        <div className="mb-4 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                                            <p className="text-sm font-semibold text-purple-900 dark:text-purple-300 flex items-center gap-2">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                </svg>
-                                                {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} item(ns) selecionado(s)
-                                                {materiaisSelecionadosComparacao.size > 0 && (
-                                                    <span className="ml-2 text-purple-700 dark:text-purple-400 font-normal">
-                                                        ({materiaisSelecionadosComparacao.size} material(is))
-                                                    </span>
-                                                )}
-                                                {cotacoesSelecionadasComparacao.size > 0 && (
-                                                    <span className="ml-2 text-purple-700 dark:text-purple-400 font-normal">
-                                                        ({cotacoesSelecionadasComparacao.size} cotação(ões))
-                                                    </span>
-                                                )}
-                                            </p>
-                                        </div>
-                                    )}
 
                                     <div className="grid grid-cols-2 gap-6">
                                         {/* Painel Esquerdo: Materiais com Estoque Real */}
@@ -3285,369 +4367,147 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     />
                                                 )}
                                             </div>
-                                        
-                                        <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
-                                            {filteredMateriaisEstoque.length === 0 ? (
-                                                <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                                    <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum material com estoque encontrado</p>
-                                                </div>
-                                            ) : (
-                                                filteredMateriaisEstoque.map(material => {
-                                                    const estaSelecionado = materialSelecionadoComparacao?.id === material.id;
-                                                    const estaSelecionadoMultiplo = materiaisSelecionadosComparacao.has(material.id);
-                                                    
-                                                    return (
-                                                        <div
-                                                            key={material.id}
-                                                            className={`p-4 border-2 rounded-lg transition-all ${
-                                                                estaSelecionado || estaSelecionadoMultiplo
-                                                                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
-                                                                    : 'border-gray-200 dark:border-dark-border hover:border-indigo-300 dark:hover:border-indigo-700'
-                                                            }`}
-                                                        >
-                                                            <div className="flex items-start gap-3">
-                                                                {/* Checkbox */}
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={estaSelecionadoMultiplo}
-                                                                    onChange={(e) => {
-                                                                        e.stopPropagation();
-                                                                        toggleMaterialSelecionado(material.id);
-                                                                    }}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-                                                                />
-                                                                
-                                                                <div 
-                                                                    className="flex-1 cursor-pointer"
-                                                                    onClick={(e) => {
-                                                                        // Não fazer nada se clicou no checkbox ou no botão
-                                                                        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') {
-                                                                            return;
-                                                                        }
-                                                                        setMaterialSelecionadoComparacao(material);
-                                                                        // Buscar cotação correspondente se houver
-                                                                        const cotacaoCorrespondente = filteredCotacoesComparacao.find(c => 
-                                                                            c.nome?.toLowerCase().includes(material.nome.toLowerCase()) ||
-                                                                            c.ncm === material.sku
-                                                                        );
-                                                                        if (cotacaoCorrespondente) {
-                                                                            setCotacaoSelecionadaComparacao(cotacaoCorrespondente);
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                        SKU: {material.sku}
-                                                                    </p>
 
-                                                                    <div className="mt-2 flex flex-col gap-2">
-                                                                        <div className="flex items-center gap-4 text-xs">
-                                                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded font-semibold">
-                                                                                Estoque: {material.estoque} {material.unidadeMedida}
-                                                                            </span>
-                                                                            <span className="text-gray-600 dark:text-gray-400">
-                                                                                Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                                            </span>
-                                                                        </div>
-                                                                        {material.valorVenda && (
-                                                                            <div className="flex items-center gap-4 text-xs">
-                                                                                <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded font-semibold">
-                                                                                    Venda: R$ {(material.valorVenda ?? 0).toFixed(2)}
-                                                                                </span>
-                                                                                {material.porcentagemLucro && (
-                                                                                    <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded font-semibold">
-                                                                                        {(material.porcentagemLucro ?? 0).toFixed(2)}% lucro
-                                                                                    </span>
-                                                                                )}
-                                                                            </div>
-                                                                        )}
+                                            <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
+                                                {filteredMateriaisEstoque.length === 0 ? (
+                                                    <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
+                                                        <p className="text-gray-500 dark:text-dark-text-secondary">Nenhum material encontrado</p>
+                                                    </div>
+                                                ) : (
+                                                    filteredMateriaisEstoque.map(material => {
+                                                        const estaSelecionadoMultiplo = materiaisSelecionadosComparacao.has(material.id);
+                                                        return (
+                                                            <div
+                                                                key={material.id}
+                                                                className={`p-3 border rounded-lg transition-all ${
+                                                                    estaSelecionadoMultiplo
+                                                                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
+                                                                        : 'border-gray-200 dark:border-dark-border hover:border-indigo-300 dark:hover:border-indigo-700'
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-start gap-3">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionadoMultiplo}
+                                                                        onChange={(e) => {
+                                                                            e.stopPropagation();
+                                                                            toggleMaterialSelecionado(material.id);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                                                                    />
+                                                                    {estaSelecionadoMultiplo && (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            value={quantidadesPorItem[material.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setQuantidadesPorItem(prev => ({ ...prev, [material.id]: valor }));
+                                                                            }}
+                                                                            className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            title="Quantidade"
+                                                                        />
+                                                                    )}
+                                                                    <div className="flex-1">
+                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
+                                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                            SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida} • Custo: R$ {(material.preco ?? 0).toFixed(2)}
+                                                                        </p>
                                                                     </div>
                                                                 </div>
-                                                                
-                                                                {estaSelecionado && (
-                                                                    <div className="ml-2">
-                                                                        <CheckIcon className="w-5 h-5 text-indigo-600" />
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {/* Botão Inserir quando selecionado individualmente */}
-                                                                {estaSelecionado && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleAddItemComValidacao(material, undefined, 1);
-                                                                        }}
-                                                                        className="ml-2 px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors font-semibold whitespace-nowrap"
-                                                                    >
-                                                                        Inserir
-                                                                    </button>
-                                                                )}
                                                             </div>
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Painel Direito: Cotações (Banco Frio) */}
-                                    <div className="pl-6">
-                                        <div className="mb-4">
-                                            <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2 flex items-center gap-2">
-                                                <span className="text-2xl">🏷️</span>
-                                                Cotações (Banco Frio)
-                                                {searchGlobalComparacao && (
-                                                    <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                                                        ({filteredCotacoesComparacao.length} encontradas)
-                                                    </span>
-                                                )}
-                                            </h4>
-                                            {!searchGlobalComparacao && (
-                                                <input
-                                                    type="text"
-                                                    value={searchCotacoes}
-                                                    onChange={(e) => setSearchCotacoes(e.target.value)}
-                                                    className="input-field w-full"
-                                                    placeholder="🔍 Buscar cotação por nome, NCM ou fornecedor..."
-                                                />
-                                            )}
-                                        </div>
-                                        
-                                        <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
-                                            {filteredCotacoesComparacao.length === 0 ? (
-                                                <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                                                    <p className="text-gray-500 dark:text-dark-text-secondary">Nenhuma cotação encontrada</p>
-                                                </div>
-                                            ) : (
-                                                filteredCotacoesComparacao.map(cotacao => {
-                                                    const estaSelecionada = cotacaoSelecionadaComparacao?.id === cotacao.id;
-                                                    const estaSelecionadaMultiplo = cotacoesSelecionadasComparacao.has(cotacao.id);
-                                                    
-                                                    return (
-                                                        <div
-                                                            key={cotacao.id}
-                                                            className={`p-4 border-2 rounded-lg transition-all ${
-                                                                estaSelecionada || estaSelecionadaMultiplo
-                                                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
-                                                                    : 'border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-700'
-                                                            }`}
-                                                        >
-                                                            <div className="flex items-start gap-3">
-                                                                {/* Checkbox */}
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={estaSelecionadaMultiplo}
-                                                                    onChange={(e) => {
-                                                                        e.stopPropagation();
-                                                                        toggleCotacaoSelecionada(cotacao.id);
-                                                                    }}
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
-                                                                />
-                                                                
-                                                                <div 
-                                                                    className="flex-1 cursor-pointer"
-                                                                    onClick={(e) => {
-                                                                        // Não fazer nada se clicou no checkbox ou no botão
-                                                                        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') {
-                                                                            return;
-                                                                        }
-                                                                        setCotacaoSelecionadaComparacao(cotacao);
-                                                                        // Buscar material correspondente se houver
-                                                                        const materialCorrespondente = filteredMateriaisEstoque.find(m => 
-                                                                            m.nome.toLowerCase().includes(cotacao.nome?.toLowerCase() || '') ||
-                                                                            m.sku === cotacao.ncm
-                                                                        );
-                                                                        if (materialCorrespondente) {
-                                                                            setMaterialSelecionadoComparacao(materialCorrespondente);
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <div className="flex items-center gap-2 mb-1">
-                                                                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                            Banco Frio
-                                                                        </span>
-                                                                    </div>
-                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                        NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                    </p>
-                                                                    <div className="mt-2 flex items-center gap-4 text-xs">
-                                                                        <span className="text-gray-600 dark:text-gray-400">
-                                                                            Valor: R$ {cotacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                                        </span>
-                                                                        {cotacao.dataAtualizacao && (
-                                                                            <span className="text-gray-500 dark:text-gray-500">
-                                                                                Atualizado: {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                                
-                                                                {estaSelecionada && (
-                                                                    <div className="ml-2">
-                                                                        <CheckIcon className="w-5 h-5 text-blue-600" />
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {/* Botão Inserir quando selecionada individualmente */}
-                                                                {estaSelecionada && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleAddItemComValidacao(undefined, cotacao, 1);
-                                                                        }}
-                                                                        className="ml-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors font-semibold whitespace-nowrap"
-                                                                    >
-                                                                        Inserir
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
-                                    </div>
-
-                                    {/* Painel de Comparação e Validação */}
-                                    {modalExpandido && (materialSelecionadoComparacao || cotacaoSelecionadaComparacao) && (
-                                        <div className="mt-6 p-4 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/30 dark:to-blue-900/30 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl">
-                                            <h5 className="font-bold text-gray-900 dark:text-dark-text mb-3 flex items-center gap-2">
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                </svg>
-                                                Comparação e Validação
-                                            </h5>
-                                            
-                                            <div className="grid grid-cols-2 gap-4 mb-4">
-                                                {/* Material Selecionado */}
-                                                {materialSelecionadoComparacao && (
-                                                    <div className="bg-white dark:bg-dark-card p-4 rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">📦 Material (Estoque Real)</p>
-                                                        <p className="font-bold text-gray-900 dark:text-dark-text">{materialSelecionadoComparacao.nome}</p>
-                                                        <div className="mt-2 space-y-1 text-xs">
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Estoque:</strong> {materialSelecionadoComparacao.estoque} {materialSelecionadoComparacao.unidadeMedida}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-
-                                                                <strong>Custo:</strong> R$ {(materialSelecionadoComparacao.preco ?? 0).toFixed(2)}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>SKU:</strong> {materialSelecionadoComparacao.sku}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                
-                                                {/* Cotação Selecionada */}
-                                                {cotacaoSelecionadaComparacao && (
-                                                    <div className="bg-white dark:bg-dark-card p-4 rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">🏷️ Cotação (Banco Frio)</p>
-                                                        <p className="font-bold text-gray-900 dark:text-dark-text">{cotacaoSelecionadaComparacao.nome}</p>
-                                                        <div className="mt-2 space-y-1 text-xs">
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Fornecedor:</strong> {cotacaoSelecionadaComparacao.fornecedorNome || 'N/A'}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>Valor:</strong> R$ {cotacaoSelecionadaComparacao.valorUnitario?.toFixed(2) || '0.00'}
-                                                            </p>
-                                                            <p className="text-gray-600 dark:text-gray-400">
-                                                                <strong>NCM:</strong> {cotacaoSelecionadaComparacao.ncm || 'N/A'}
-                                                            </p>
-                                                        </div>
-                                                    </div>
+                                                        );
+                                                    })
                                                 )}
                                             </div>
-                                            
-                                            {/* Validação e Comparação */}
-                                            {materialSelecionadoComparacao && (
-                                                <div className="mb-4">
-                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                        Quantidade Desejada
-                                                    </label>
+                                        </div>
+
+                                        {/* Painel Direito: Cotações (Banco Frio) */}
+                                        <div className="pl-6">
+                                            <div className="mb-4">
+                                                <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2 flex items-center gap-2">
+                                                    <span className="text-2xl">🏷️</span>
+                                                    Cotações (Banco Frio)
+                                                    {searchGlobalComparacao && (
+                                                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                                                            ({filteredCotacoesComparacao.length} encontradas)
+                                                        </span>
+                                                    )}
+                                                </h4>
+                                                {!searchGlobalComparacao && (
                                                     <input
-                                                        type="number"
-                                                        min="0.01"
-                                                        step="0.01"
-                                                        defaultValue="1"
-                                                        id="quantidadeComparacao"
+                                                        type="text"
+                                                        value={searchCotacoes}
+                                                        onChange={(e) => setSearchCotacoes(e.target.value)}
                                                         className="input-field w-full"
-                                                        placeholder="Digite a quantidade"
+                                                        placeholder="🔍 Buscar cotação por nome, NCM ou fornecedor..."
                                                     />
-                                                    <div className="mt-2 p-3 bg-white dark:bg-dark-card rounded-lg border border-gray-200 dark:border-dark-border">
-                                                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                                                            <strong>Validação:</strong> {materialSelecionadoComparacao.estoque > 0 
-                                                                ? `✅ Estoque disponível: ${materialSelecionadoComparacao.estoque} ${materialSelecionadoComparacao.unidadeMedida}`
-                                                                : '❌ Sem estoque disponível'}
-                                                        </p>
-                                                        {cotacaoSelecionadaComparacao && (
-                                                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                )}
+                                            </div>
 
-                                                                <strong>Comparação:</strong> {(materialSelecionadoComparacao.preco ?? 0) < (cotacaoSelecionadaComparacao.valorUnitario ?? 0)
-                                                                    ? `💰 Estoque é mais barato (R$ ${((cotacaoSelecionadaComparacao.valorUnitario ?? 0) - (materialSelecionadoComparacao.preco ?? 0)).toFixed(2)} de diferença)`
-                                                                    : `💰 Cotação é mais barata (R$ ${((materialSelecionadoComparacao.preco ?? 0) - (cotacaoSelecionadaComparacao.valorUnitario ?? 0)).toFixed(2)} de diferença)`}
-                                                            </p>
-                                                        )}
+                                            <div className="space-y-2 max-h-[calc(95vh-250px)] overflow-y-auto">
+                                                {filteredCotacoesComparacao.length === 0 ? (
+                                                    <div className="text-center py-12 bg-gray-50 dark:bg-slate-800 rounded-xl">
+                                                        <p className="text-gray-500 dark:text-dark-text-secondary">Nenhuma cotação encontrada</p>
                                                     </div>
-                                                </div>
-                                            )}
-                                            
-                                            {/* Botões de Ação */}
-                                            <div className="flex gap-3 flex-wrap">
-                                                {materialSelecionadoComparacao && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const qtdInput = document.getElementById('quantidadeComparacao') as HTMLInputElement;
-                                                            const qtd = parseFloat(qtdInput?.value || '1');
-                                                            handleAddItemComValidacao(materialSelecionadoComparacao, undefined, qtd);
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold"
-                                                    >
-                                                        Adicionar do Estoque
-                                                    </button>
-                                                )}
-                                                {cotacaoSelecionadaComparacao && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const qtdInput = document.getElementById('quantidadeComparacao') as HTMLInputElement;
-                                                            const qtd = parseFloat(qtdInput?.value || '1');
-                                                            handleAddItemComValidacao(undefined, cotacaoSelecionadaComparacao, qtd);
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold"
-                                                    >
-                                                        Adicionar do Banco Frio
-                                                    </button>
-                                                )}
-                                                
-                                                {/* Botão para inserção múltipla */}
-                                                {(materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleInserirSelecionados}
-                                                        className="w-full px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-lg hover:from-purple-700 hover:to-purple-600 transition-colors font-semibold flex items-center justify-center gap-2"
-                                                    >
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                        </svg>
-                                                        Inserir {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} Item(ns) Selecionado(s)
-                                                    </button>
+                                                ) : (
+                                                    filteredCotacoesComparacao.map(cotacao => {
+                                                        const estaSelecionadaMultiplo = cotacoesSelecionadasComparacao.has(cotacao.id);
+                                                        return (
+                                                            <div
+                                                                key={cotacao.id}
+                                                                className={`p-3 border rounded-lg transition-all ${
+                                                                    estaSelecionadaMultiplo
+                                                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30'
+                                                                        : 'border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-700'
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-start gap-3">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={estaSelecionadaMultiplo}
+                                                                        onChange={(e) => {
+                                                                            e.stopPropagation();
+                                                                            toggleCotacaoSelecionada(cotacao.id);
+                                                                        }}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                                                                    />
+                                                                    {estaSelecionadaMultiplo && (
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            value={quantidadesPorItem[cotacao.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setQuantidadesPorItem(prev => ({ ...prev, [cotacao.id]: valor }));
+                                                                            }}
+                                                                            className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            title="Quantidade"
+                                                                        />
+                                                                    )}
+                                                                    <div className="flex-1">
+                                                                        <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
+                                                                        <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                                                                            NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'} • Custo: R$ {(cotacao.valorUnitario ?? 0).toFixed(2)}{'/'}{cotacao.unidadeMedida || 'UN'}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
                                                 )}
                                             </div>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                             )}
 
                             {/* Modo: Materiais */}
-                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'materiais' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'materiais' && (
                                 <div>
                                     <div className="mb-4 flex items-center gap-3">
                                         <input
@@ -3697,54 +4557,58 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 return (
                                                     <div
                                                         key={material.id}
-                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                        className={`w-full text-left p-2.5 py-2 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
                                                             estaSelecionado 
                                                                 ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
                                                                 : 'border-gray-200 dark:border-dark-border hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:border-indigo-300 dark:hover:border-indigo-700'
                                                         }`}
                                                     >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex items-start gap-3 flex-1">
-                                                                {modalExpandido && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={estaSelecionado}
-                                                                        onChange={() => handleToggleSelecaoItem(material.id)}
-                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                                                    />
-                                                                )}
-                                                                <div className="flex-1">
-                                                                <p className="font-semibold text-gray-900 dark:text-dark-text">{material.nome}</p>
-                                                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                    SKU: {material.sku} • Estoque: {material.estoque} {material.unidadeMedida}
-                                                                    <br />
-                                                                    Custo: R$ {(material.preco ?? 0).toFixed(2)}
-                                                                    {material.valorVenda && (
-                                                                        <> • Venda: R$ {(material.valorVenda ?? 0).toFixed(2)} 
-                                                                        {material.porcentagemLucro && ` (${(material.porcentagemLucro ?? 0).toFixed(2)}% lucro)`}
-                                                                        </>
-                                                                    )}
-                                                                </p>
-                                                                {temSelecaoUnidade && (
-                                                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                                                        💡 Este material pode ser vendido em metros ou centímetros
-                                                                    </p>
-                                                                )}
-                                                                </div>
+                                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                            {modalExpandido && (
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={estaSelecionado}
+                                                                    onChange={() => handleToggleSelecaoItem(material.id)}
+                                                                    className="w-4 h-4 shrink-0 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                                                />
+                                                            )}
+                                                            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-dark-text truncate">{material.nome}</span>
+                                                                <span className="text-xs text-gray-600 dark:text-dark-text-secondary shrink-0">SKU: {material.sku} • Est.: {material.estoque} {material.unidadeMedida} • R$ {(material.preco ?? 0).toFixed(2)}{material.valorVenda ? ` • Venda: R$ ${(material.valorVenda ?? 0).toFixed(2)}` : ''}</span>
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 {modalExpandido ? (
-                                                                    temSelecaoUnidade ? (
-                                                                        <select
-                                                                            value={unidadeVendaSelecionada[material.id] || 'm'}
-                                                                            onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [material.id]: e.target.value }))}
-                                                                            className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                                                            onClick={(e) => e.stopPropagation()}
-                                                                        >
-                                                                            <option value="m">Metros</option>
-                                                                            <option value="cm">Centímetros</option>
-                                                                        </select>
-                                                                    ) : null
+                                                                    <>
+                                                                        {estaSelecionado && (
+                                                                            <div className="flex items-center gap-2">
+                                                                                <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                                                                                    Qtd:
+                                                                                </label>
+                                                                                <input
+                                                                                    type="number"
+                                                                                    min="1"
+                                                                                    value={quantidadesPorItem[material.id] || 1}
+                                                                                    onChange={(e) => {
+                                                                                        const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                        setQuantidadesPorItem(prev => ({ ...prev, [material.id]: valor }));
+                                                                                    }}
+                                                                                    className="w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                                    onClick={(e) => e.stopPropagation()}
+                                                                                />
+                                                                            </div>
+                                                                        )}
+                                                                        {temSelecaoUnidade && (
+                                                                            <select
+                                                                                value={unidadeVendaSelecionada[material.id] || 'm'}
+                                                                                onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [material.id]: e.target.value }))}
+                                                                                className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                                onClick={(e) => e.stopPropagation()}
+                                                                            >
+                                                                                <option value="m">Metros</option>
+                                                                                <option value="cm">Centímetros</option>
+                                                                            </select>
+                                                                        )}
+                                                                    </>
                                                                 ) : (
                                                                     temSelecaoUnidade ? (
                                                                         <>
@@ -3786,7 +4650,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             )}
 
                             {/* Modo: Serviços */}
-                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'servicos' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'servicos' && (
                                 <div>
                                     <div className="mb-4 flex items-center gap-3">
                                         <input
@@ -3834,33 +4698,39 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 return (
                                                     <div
                                                         key={servico.id}
-                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                        className={`w-full text-left p-2.5 py-2 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
                                                             estaSelecionado 
                                                                 ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
                                                                 : 'border-gray-200 dark:border-dark-border hover:bg-purple-50 dark:hover:bg-purple-900/30 hover:border-purple-300 dark:hover:border-purple-700'
                                                         }`}
                                                     >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex items-start gap-3 flex-1">
-                                                                {modalExpandido && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={estaSelecionado}
-                                                                        onChange={() => handleToggleSelecaoItem(servico.id)}
-                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                                                    />
-                                                                )}
-                                                                <div className="flex-1">
-                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{servico.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                        Código: {servico.codigo || 'N/A'} • Tipo: {servico.tipo || 'N/A'} • Preço: R$ {(servico.preco ?? 0).toFixed(2)}/{servico.unidade || 'un'}
-                                                                    </p>
-                                                                    {servico.descricao && (
-                                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{servico.descricao}</p>
-                                                                    )}
-                                                                </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {modalExpandido && (
+                                                                <input type="checkbox" checked={estaSelecionado} onChange={() => handleToggleSelecaoItem(servico.id)} className="w-4 h-4 shrink-0 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
+                                                            )}
+                                                            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-dark-text truncate">{servico.nome}</span>
+                                                                <span className="text-xs text-gray-600 dark:text-dark-text-secondary shrink-0">{`${servico.codigo || 'N/A'} • R$ ${(servico.preco ?? 0).toFixed(2)}/${servico.unidade || 'un'}`}</span>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                {modalExpandido && estaSelecionado && (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                                                                            Qtd:
+                                                                        </label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            value={quantidadesPorItem[servico.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setQuantidadesPorItem(prev => ({ ...prev, [servico.id]: valor }));
+                                                                            }}
+                                                                            className="w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 {!modalExpandido && (
                                                                     <button
                                                                         type="button"
@@ -3881,7 +4751,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             )}
 
                             {/* Modo: Kits */}
-                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'kits' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'kits' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -3911,33 +4781,39 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 return (
                                                     <div
                                                         key={kit.id}
-                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                        className={`w-full text-left p-2.5 py-2 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
                                                             estaSelecionado 
                                                                 ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
                                                                 : 'border-gray-200 dark:border-dark-border hover:bg-green-50 dark:hover:bg-green-900/30 hover:border-green-300 dark:hover:border-green-700'
                                                         }`}
                                                     >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex items-start gap-3 flex-1">
-                                                                {modalExpandido && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={estaSelecionado}
-                                                                        onChange={() => handleToggleSelecaoItem(kit.id)}
-                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                                                    />
-                                                                )}
-                                                                <div className="flex-1">
-                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{kit.nome}</p>
-                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                {(kit.items?.length || 0) + (kit.itensFaltantes?.length || 0)} itens • Custo Total: R$ {getKitCustoTotal(kit).toFixed(2)} • Preço: R$ {getKitPrecoVendaTotal(kit).toFixed(2)}
-                                                            </p>
-                                                            {kit.descricao && (
-                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{kit.descricao}</p>
+                                                        <div className="flex items-center gap-2">
+                                                            {modalExpandido && (
+                                                                <input type="checkbox" checked={estaSelecionado} onChange={() => handleToggleSelecaoItem(kit.id)} className="w-4 h-4 shrink-0 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
                                                             )}
-                                                                </div>
+                                                            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-dark-text truncate">{kit.nome}</span>
+                                                                <span className="text-xs text-gray-600 dark:text-dark-text-secondary shrink-0">{(kit.items?.length || 0) + ((kit as any).itensFaltantes?.length || 0)} itens • R$ {getKitPrecoVendaTotal(kit).toFixed(2)}</span>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                {modalExpandido && estaSelecionado && (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                                                                            Qtd:
+                                                                        </label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            value={quantidadesPorItem[kit.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setQuantidadesPorItem(prev => ({ ...prev, [kit.id]: valor }));
+                                                                            }}
+                                                                            className="w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 {!modalExpandido && (
                                                                     <button
                                                                         type="button"
@@ -3958,7 +4834,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             )}
 
                             {/* Modo: Quadros */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'quadros' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'quadros' && (
                                 <div>
                                     <div className="mb-4">
                                         <input
@@ -3988,33 +4864,39 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 return (
                                                     <div
                                                         key={quadro.id}
-                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
+                                                        className={`w-full text-left p-2.5 py-2 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
                                                             estaSelecionado 
                                                                 ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
                                                                 : 'border-gray-200 dark:border-dark-border hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-300 dark:hover:border-amber-700'
                                                         }`}
                                                     >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex items-start gap-3 flex-1">
-                                                                {modalExpandido && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={estaSelecionado}
-                                                                        onChange={() => handleToggleSelecaoItem(quadro.id)}
-                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                                                    />
-                                                                )}
-                                                                <div className="flex-1">
-                                                            <p className="font-semibold text-gray-900 dark:text-dark-text">{quadro.nome}</p>
-                                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                Custo: R$ {quadro.custoTotal.toFixed(2)} • Preço: R$ {(quadro.precoSugerido || quadro.custoTotal).toFixed(2)}
-                                                            </p>
-                                                            {quadro.descricao && (
-                                                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{quadro.descricao}</p>
+                                                        <div className="flex items-center gap-2">
+                                                            {modalExpandido && (
+                                                                <input type="checkbox" checked={estaSelecionado} onChange={() => handleToggleSelecaoItem(quadro.id)} className="w-4 h-4 shrink-0 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
                                                             )}
-                                                                </div>
+                                                            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-dark-text truncate">{quadro.nome}</span>
+                                                                <span className="text-xs text-gray-600 dark:text-dark-text-secondary shrink-0">R$ {quadro.custoTotal.toFixed(2)} • Preço: R$ {(quadro.precoSugerido || quadro.custoTotal).toFixed(2)}</span>
                                                             </div>
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                {modalExpandido && estaSelecionado && (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                                                                            Qtd:
+                                                                        </label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="1"
+                                                                            value={quantidadesPorItem[quadro.id] || 1}
+                                                                            onChange={(e) => {
+                                                                                const valor = Math.max(1, parseInt(e.target.value) || 1);
+                                                                                setQuantidadesPorItem(prev => ({ ...prev, [quadro.id]: valor }));
+                                                                            }}
+                                                                            className="w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 {!modalExpandido && (
                                                                     <button
                                                                         type="button"
@@ -4035,7 +4917,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             )}
 
                             {/* Modo: Cotações (Banco Frio) */}
-                            {!buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'cotacoes' && (
+                            {!buscaGlobal.trim() && modoAdicao === 'cotacoes' && (
                                 <div>
                                     <div className="mb-4 flex items-center gap-3">
                                         <input
@@ -4090,7 +4972,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 
                                                 // Calcular valores para exibição
                                                 const custoUnitario = cotacao.valorUnitario || 0;
-                                                const valorVendaBase = cotacao.valorVenda || (custoUnitario * (1 + formState.bdi / 100));
+                                                const valorVendaBase = cotacao.valorVenda || custoUnitario;
                                                 const porcentagemLucro = custoUnitario > 0 
                                                     ? ((valorVendaBase - custoUnitario) / custoUnitario) * 100 
                                                     : 0;
@@ -4098,66 +4980,56 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 
                                                 const estaSelecionado = itensSelecionadosModal.has(cotacao.id);
                                                 
+                                                const classeCardCotacao = estaSelecionado
+                                                    ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30'
+                                                    : 'border-gray-200 dark:border-dark-border hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700';
                                                 return (
                                                     <div
                                                         key={cotacao.id}
-                                                        className={`w-full text-left p-4 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ${
-                                                            estaSelecionado 
-                                                                ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' 
-                                                                : 'border-gray-200 dark:border-dark-border hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700'
-                                                        }`}
+                                                        className={'w-full text-left p-2.5 py-2 bg-gray-50 dark:bg-slate-800 border rounded-lg transition-all ' + classeCardCotacao}
                                                     >
-                                                        <div className="flex justify-between items-start gap-4">
-                                                            <div className="flex items-start gap-3 flex-1">
-                                                                {modalExpandido && (
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={estaSelecionado}
-                                                                        onChange={() => handleToggleSelecaoItem(cotacao.id)}
-                                                                        className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                                                                    />
-                                                                )}
-                                                                <div className="flex-1">
-                                                                    <p className="font-semibold text-gray-900 dark:text-dark-text">{cotacao.nome}</p>
-                                                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-                                                                        NCM: {cotacao.ncm || 'N/A'} • Fornecedor: {cotacao.fornecedorNome || 'N/A'}
-                                                                        <br />
-                                                                        Custo: R$ {custoUnitario.toFixed(2)}/{unidadeMedida}
-                                                                        {valorVendaBase > 0 && (
-                                                                            <> • Venda: R$ {valorVendaBase.toFixed(2)}/{unidadeMedida}
-                                                                            {porcentagemLucro > 0 && ` (${porcentagemLucro.toFixed(2)}% lucro)`}
-                                                                            </>
-                                                                        )}
-                                                                    </p>
-                                                                    {cotacao.observacoes && (
-                                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">{cotacao.observacoes}</p>
-                                                                    )}
-                                                                    {temSelecaoUnidade && (
-                                                                        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                                                                            💡 Este material pode ser vendido em metros ou centímetros
-                                                                        </p>
-                                                                    )}
-                                                                </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {modalExpandido && (
+                                                                <input type="checkbox" checked={estaSelecionado} onChange={() => handleToggleSelecaoItem(cotacao.id)} className="w-4 h-4 shrink-0 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" />
+                                                            )}
+                                                            <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                                                                <span className="font-semibold text-gray-900 dark:text-dark-text truncate">{cotacao.nome}</span>
+                                                                <span className="text-xs text-gray-600 dark:text-dark-text-secondary shrink-0">NCM: {cotacao.ncm || 'N/A'} • R$ {custoUnitario.toFixed(2)}{'/'}{unidadeMedida}{valorVendaBase > 0 ? ' • Venda: R$ ' + valorVendaBase.toFixed(2) : ''}</span>
                                                             </div>
-                                                            <div className="flex flex-col items-end gap-2">
-                                                                <div className="text-right">
-                                                                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary">
-                                                                        Atualizado em {new Date(cotacao.dataAtualizacao).toLocaleDateString('pt-BR')}
-                                                                    </p>
-                                                                </div>
-                                                                <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 shrink-0">
                                                                     {modalExpandido ? (
-                                                                        temSelecaoUnidade ? (
-                                                                            <select
-                                                                                value={unidadeVendaSelecionada[cotacao.id] || 'm'}
-                                                                                onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [cotacao.id]: e.target.value }))}
-                                                                                className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                                                                onClick={(e) => e.stopPropagation()}
-                                                                            >
-                                                                                <option value="m">Metros</option>
-                                                                                <option value="cm">Centímetros</option>
-                                                                            </select>
-                                                                        ) : null
+                                                                        <>
+                                                                            {estaSelecionado && (
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <label className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                                                                                        Qtd:
+                                                                                    </label>
+                                                                                    <input
+                                                                                        type="number"
+                                                                                        min={0.01}
+                                                                                        step={0.01}
+                                                                                        value={quantidadesPorItem[cotacao.id] ?? 1}
+                                                                                        onChange={(e) => {
+                                                                                            const valor = Math.max(0.01, parseFloat(e.target.value) || 1);
+                                                                                            setQuantidadesPorItem(prev => ({ ...prev, [cotacao.id]: valor }));
+                                                                                        }}
+                                                                                        className="w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center"
+                                                                                        onClick={(e) => e.stopPropagation()}
+                                                                                    />
+                                                                                </div>
+                                                                            )}
+                                                                            {temSelecaoUnidade && (
+                                                                                <select
+                                                                                    value={unidadeVendaSelecionada[cotacao.id] || 'm'}
+                                                                                    onChange={(e) => setUnidadeVendaSelecionada(prev => ({ ...prev, [cotacao.id]: e.target.value }))}
+                                                                                    className="px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                                                    onClick={(e) => e.stopPropagation()}
+                                                                                >
+                                                                                    <option value="m">Metros</option>
+                                                                                    <option value="cm">Centímetros</option>
+                                                                                </select>
+                                                                            )}
+                                                                        </>
                                                                     ) : (
                                                                         temSelecaoUnidade ? (
                                                                             <>
@@ -4191,7 +5063,6 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
                                                 );
                                             })}
                                         </div>
@@ -4199,150 +5070,26 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 </div>
                             )}
 
-                            {/* Modo: Criar Manualmente */}
-                            {!modalExpandido && !buscaGlobal.trim() && modoAdicao !== 'comparacao' && modoAdicao === 'manual' && (
-                                <div className="space-y-6">
-                                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-4 rounded-lg mb-6">
-                                        <p className="text-sm text-blue-800 dark:text-blue-300">
-                                            💡 <strong>Dica:</strong> Use esta opção para adicionar materiais/serviços que ainda não foram comprados.
-                                            Ideal para orçamentos baseados em cotações de fornecedores.
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Tipo de Item
-                                            </label>
-                                            <select
-                                                value={novoItemManual.tipo}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, tipo: e.target.value as any }))}
-                                                className="select-field"
-                                            >
-                                                <option value="MATERIAL">Material</option>
-                                                <option value="SERVICO">Serviço</option>
-                                                <option value="KIT">Kit</option>
-                                                <option value="CUSTO_EXTRA">Custo Extra</option>
-                                            </select>
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Nome/Descrição do Item
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={novoItemManual.nome}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, nome: e.target.value }))}
-                                                className="input-field"
-                                                placeholder="Ex: Disjuntor 32A Tripolar, Instalação de Quadro, etc."
-                                            />
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Descrição Técnica (Opcional)
-                                            </label>
-                                            <textarea
-                                                value={novoItemManual.descricao}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, descricao: e.target.value }))}
-                                                rows={2}
-                                                className="textarea-field"
-                                                placeholder="Detalhes técnicos, especificações, normas..."
-                                            />
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Unidade de Medida
-                                            </label>
-                                            <select
-                                                value={novoItemManual.unidadeMedida}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, unidadeMedida: e.target.value }))}
-                                                className="select-field"
-                                            >
-                                                <option value="UN">Unidade (UN)</option>
-                                                <option value="M">Metro (M)</option>
-                                                <option value="M²">Metro Quadrado (M²)</option>
-                                                <option value="M³">Metro Cúbico (M³)</option>
-                                                <option value="KG">Quilograma (KG)</option>
-                                                <option value="L">Litro (L)</option>
-                                                <option value="CX">Caixa (CX)</option>
-                                                <option value="PC">Peça (PC)</option>
-                                                <option value="SERV">Serviço (SERV)</option>
-                                                <option value="HR">Hora (HR)</option>
-                                                <option value="VERBA">Verba (VERBA)</option>
-                                            </select>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Quantidade
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={novoItemManual.quantidade}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, quantidade: parseFloat(e.target.value) || 0 }))}
-                                                min="0.01"
-                                                step="0.01"
-                                                className="input-field"
-                                                placeholder="0"
-                                            />
-                                        </div>
-
-                                        <div className="md:col-span-2">
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                                Custo Unitário (R$)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                value={novoItemManual.custoUnit}
-                                                onChange={(e) => setNovoItemManual(prev => ({ ...prev, custoUnit: parseFloat(e.target.value) || 0 }))}
-                                                min="0"
-                                                step="0.01"
-                                                className="input-field"
-                                                placeholder="0,00"
-                                            />
-                                            <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-2">
-                                                💡 Digite o custo real do material/serviço (sem BDI). O preço de venda será calculado automaticamente com a margem de {formState.bdi}%.
-                                            </p>
-                                        </div>
-
-                                        {/* Preview do Cálculo */}
-                                        {novoItemManual.custoUnit > 0 && novoItemManual.quantidade > 0 && (
-                                            <div className="md:col-span-2 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/30 dark:to-emerald-900/30 border border-green-200 dark:border-green-800 p-4 rounded-lg">
-                                                <div className="grid grid-cols-3 gap-4 text-sm">
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Custo Total</p>
-                                                        <p className="text-lg font-bold text-gray-900 dark:text-dark-text">
-                                                            R$ {(novoItemManual.custoUnit * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Unit. (com BDI)</p>
-                                                        <p className="text-lg font-bold text-indigo-700 dark:text-indigo-300">
-                                                            R$ {(novoItemManual.custoUnit * (1 + formState.bdi / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-gray-600 dark:text-dark-text-secondary mb-1">Preço Total</p>
-                                                        <p className="text-lg font-bold text-green-700 dark:text-green-300">
-                                                            R$ {(novoItemManual.custoUnit * (1 + formState.bdi / 100) * novoItemManual.quantidade).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
                         </div>
 
                         {/* Footer */}
                         
                         <div className="p-6 bg-gray-50 dark:bg-slate-800 border-t border-gray-200 dark:border-dark-border flex justify-between items-center gap-3">
                             <div className="flex-1">
-                                {/* Botão para inserção múltipla quando há itens selecionados via checkbox */}
+                                {/* Botão para adicionar múltiplos itens selecionados quando modal estiver expandido (busca preenchida) */}
+                                {buscaGlobal.trim() && itensSelecionadosModal.size > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={handleAdicionarSelecionados}
+                                        className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-lg hover:from-indigo-700 hover:to-indigo-600 transition-colors font-semibold flex items-center gap-2"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                        </svg>
+                                        Adicionar {itensSelecionadosModal.size} Item(ns) Selecionado(s)
+                                    </button>
+                                )}
+                                {/* Botão para inserção múltipla na comparação */}
                                 {modoAdicao === 'comparacao' && (materiaisSelecionadosComparacao.size > 0 || cotacoesSelecionadasComparacao.size > 0) && (
                                     <button
                                         type="button"
@@ -4353,19 +5100,6 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                                         </svg>
                                         Inserir {materiaisSelecionadosComparacao.size + cotacoesSelecionadasComparacao.size} Item(ns) Selecionado(s)
-                                    </button>
-                                )}
-                                {/* Botão para adicionar múltiplos itens selecionados quando modal estiver expandido */}
-                                {modalExpandido && itensSelecionadosModal.size > 0 && modoAdicao !== 'comparacao' && modoAdicao !== 'manual' && (
-                                    <button
-                                        type="button"
-                                        onClick={handleAdicionarSelecionados}
-                                        className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white rounded-lg hover:from-indigo-700 hover:to-indigo-600 transition-colors font-semibold flex items-center gap-2"
-                                    >
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                        </svg>
-                                        Adicionar {itensSelecionadosModal.size} Item(ns) Selecionado(s)
                                     </button>
                                 )}
                             </div>
@@ -4381,29 +5115,17 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                         setCotacaoSelecionadaComparacao(null);
                                         setMateriaisSelecionadosComparacao(new Set());
                                         setCotacoesSelecionadasComparacao(new Set());
-                                        setNovoItemManual({
-                                            nome: '',
-                                            descricao: '',
-                                            unidadeMedida: 'UN',
-                                            quantidade: 1,
-                                            custoUnit: 0,
-                                            tipo: 'MATERIAL'
-                                        });
+                                        setItensSelecionadosModal(new Set());
+                                        setUnidadeVendaSelecionada({});
+                                        setQuantidadesPorItem({});
+                                        setSearchEstoque('');
+                                        setSearchCotacoes('');
+                                        setSearchGlobalComparacao('');
                                     }}
                                     className="btn-secondary"
                                 >
                                     Cancelar
                                 </button>
-                                {modoAdicao === 'manual' && (
-                                    <button
-                                        type="button"
-                                        onClick={handleAddItemManual}
-                                        className="btn-primary flex items-center gap-2"
-                                    >
-                                        <PlusIcon className="w-5 h-5" />
-                                        Adicionar Item
-                                    </button>
-                                )}
                             </div>
                         </div>
                     </div>
@@ -4449,6 +5171,20 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             autoFocus
                         />
                     </div>
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                            NCM (Nomenclatura Comum do Mercosul)
+                        </label>
+                        <input
+                            type="text"
+                            value={ncmKit}
+                            onChange={(e) => setNcmKit(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                            className="input-field"
+                            placeholder="Ex: 85389090 (8 dígitos, para NF-e)"
+                            maxLength={8}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Opcional. Recomendado preencher para emissão de NF-e.</p>
+                    </div>
                     <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
                         <p className="text-sm text-blue-800 dark:text-blue-300 font-semibold mb-2">
                             Itens que serão agrupados:
@@ -4477,15 +5213,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             </span>
                         </div>
                     </div>
-                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
-                        <p className="text-xs text-yellow-800 dark:text-yellow-300">
-                            ⚠️ <strong>Atenção:</strong> O NCM do kit deverá ser informado no momento da emissão da nota fiscal.
-                        </p>
-                    </div>
                 </div>
                 <AlertDialogFooter>
                     <AlertDialogCancel onClick={() => {
                         setNomeKit('');
+                        setNcmKit('');
                         setShowCriarKitModal(false);
                     }}>
                         Cancelar
@@ -4501,293 +5233,109 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             </AlertDialogContent>
         </AlertDialog>
 
-        {/* Modal de Visualização de Itens do Kit */}
-        {showModalItensKit && (
-            <div
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-                onClick={(e) => {
-                    // Fechar modal ao clicar no backdrop
-                    if (e.target === e.currentTarget) {
-                        setShowModalItensKit(false);
-                        setItensKitParaVisualizar([]);
-                        setNomeKitParaVisualizar('');
+        <ModalItensKit
+            open={showModalItensKit}
+            onClose={() => {
+                setShowModalItensKit(false);
+                setItensKitParaVisualizar([]);
+                setNomeKitParaVisualizar('');
+            }}
+            itens={itensKitParaVisualizar}
+            nomeKit={nomeKitParaVisualizar}
+            empresas={empresas}
+            empresaCNPJ={formState.empresaCNPJ}
+            numeroOrcamento={proximoNumero ?? undefined}
+            usuarioGerador={authContext?.user?.name || undefined}
+            onVerDetalhesSubKit={(itemKit: any) => {
+                const tipoItem = itemKit.tipo || 'MATERIAL';
+                const ehKit = tipoItem === 'KIT' || itemKit.kitId || (itemKit.itensDoKit && Array.isArray(itemKit.itensDoKit));
+                const ehKitUnificado = ehKit && !itemKit.kitId && itemKit.itensDoKit;
+                const ehKitCatalogo = ehKit && itemKit.kitId;
+                if (ehKitUnificado && itemKit.itensDoKit) {
+                    setItensSubKitParaVisualizar(itemKit.itensDoKit);
+                    setNomeSubKitParaVisualizar(itemKit.nome || '');
+                    setShowModalDetalhesSubKit(true);
+                } else if (ehKitCatalogo && itemKit.kitId) {
+                    const kitCompleto = kits.find((k: any) => k.id === itemKit.kitId);
+                    if (kitCompleto) {
+                        const itensEstoque = (kitCompleto.items || []).map((kitItem: any) => ({
+                            nome: kitItem.material?.nome || 'Material',
+                            codigo: kitItem.material?.sku || '',
+                            custoUnit: kitItem.material?.preco || 0,
+                            valorVenda: kitItem.material?.valorVenda || kitItem.material?.preco || 0,
+                            quantidade: kitItem.quantidade,
+                            unidadeMedida: kitItem.material?.unidadeMedida || 'un',
+                            tipo: 'MATERIAL',
+                            subtotal: (kitItem.quantidade || 0) * (kitItem.material?.valorVenda || kitItem.material?.preco || 0)
+                        }));
+                        const itensBancoFrio = ((kitCompleto as any).itensFaltantes || []).map((item: any) => {
+                            if (item.tipo === 'SERVICO') {
+                                const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
+                                if (servicoCompleto) {
+                                    return {
+                                        nome: servicoCompleto.nome,
+                                        codigo: servicoCompleto.codigo,
+                                        custoUnit: servicoCompleto.custo || 0,
+                                        valorVenda: servicoCompleto.preco || 0,
+                                        quantidade: item.quantidade || 0,
+                                        unidadeMedida: servicoCompleto.unidade || 'un',
+                                        tipo: 'SERVICO',
+                                        subtotal: (item.quantidade || 0) * (servicoCompleto.preco || 0)
+                                    };
+                                }
+                            } else if (item.tipo === 'COTACAO') {
+                                const cotacaoCompleta = cotacoes.find((c: any) => c.id === item.cotacaoId);
+                                if (cotacaoCompleta) {
+                                    return {
+                                        nome: cotacaoCompleta.nome,
+                                        codigo: cotacaoCompleta.fornecedorNome || cotacaoCompleta.sku || '',
+                                        custoUnit: cotacaoCompleta.valorUnitario || 0,
+                                        valorVenda: cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0,
+                                        quantidade: item.quantidade || 0,
+                                        unidadeMedida: cotacaoCompleta.unidadeMedida || 'un',
+                                        tipo: 'COTACAO',
+                                        subtotal: (item.quantidade || 0) * (cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0),
+                                        dataUltimaCotacao: cotacaoCompleta.dataAtualizacao
+                                    };
+                                }
+                            }
+                            return {
+                                nome: item.nome || 'Item',
+                                codigo: item.codigo || '',
+                                custoUnit: item.valorUnitario || item.custo || 0,
+                                valorVenda: item.precoUnit || item.preco || 0,
+                                quantidade: item.quantidade || 0,
+                                unidadeMedida: item.unidadeMedida || 'un',
+                                tipo: item.tipo || 'COTACAO',
+                                subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
+                                dataUltimaCotacao: item.dataUltimaCotacao
+                            };
+                        }).filter(Boolean);
+                        const todosItens = [...itensEstoque, ...itensBancoFrio];
+                        setItensSubKitParaVisualizar(todosItens);
+                        setNomeSubKitParaVisualizar(kitCompleto.nome);
+                        setShowModalDetalhesSubKit(true);
+                    } else {
+                        toast.error('Kit não encontrado', { description: 'Não foi possível carregar os detalhes do kit' });
                     }
-                }}
-            >
-                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
-                    {/* Header Fixo */}
-                    <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-700 rounded-t-2xl">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-md">
-                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                                        Itens do Kit
-                                    </h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-                                        {nomeKitParaVisualizar}
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => {
-                                    setShowModalItensKit(false);
-                                    setItensKitParaVisualizar([]);
-                                    setNomeKitParaVisualizar('');
-                                }}
-                                className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
+                }
+            }}
+        />
 
-                    {/* Body */}
-                    <div className="flex-1 overflow-y-auto p-6">
-                        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-900">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
-                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
-                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
-                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
-                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
-                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Ações</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
-                                    {itensKitParaVisualizar.map((itemKit: any, index: number) => {
-                                        const valorVenda = itemKit.valorVenda || 0;
-                                        const quantidade = itemKit.quantidade || 1;
-                                        const subtotal = valorVenda * quantidade;
-                                        const tipoItem = itemKit.tipo || 'MATERIAL';
-                                        
-                                        // Detectar se é um kit (unificado ou catálogo)
-                                        const ehKit = tipoItem === 'KIT' || itemKit.kitId || (itemKit.itensDoKit && Array.isArray(itemKit.itensDoKit));
-                                        const ehKitUnificado = ehKit && !itemKit.kitId && itemKit.itensDoKit;
-                                        const ehKitCatalogo = ehKit && itemKit.kitId;
-                                        
-                                        // Cores por tipo
-                                        const corTipo = {
-                                            'MATERIAL': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-                                            'COTACAO': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                                            'SERVICO': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
-                                            'KIT': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                        }[tipoItem] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
-                                        
-                                        return (
-                                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                                                    <div className="font-medium">{itemKit.nome}</div>
-                                                    {itemKit.dataUltimaCotacao && (
-                                                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                                            📅 Cotação: {(() => {
-                                                                try {
-                                                                    const data = new Date(itemKit.dataUltimaCotacao);
-                                                                    return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
-                                                                } catch {
-                                                                    return 'Sem data';
-                                                                }
-                                                            })()}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                                                    {itemKit.codigo || '-'}
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${corTipo}`}>
-                                                        {tipoItem === 'MATERIAL' && '📦 Estoque'}
-                                                        {tipoItem === 'COTACAO' && '❄️ Banco Frio'}
-                                                        {tipoItem === 'SERVICO' && '⚙️ Serviço'}
-                                                        {ehKitUnificado && '🎁 Kit Unificado'}
-                                                        {ehKitCatalogo && '📚 Kit Catálogo'}
-                                                        {ehKit && !ehKitUnificado && !ehKitCatalogo && '🎁 Kit'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white">
-                                                    {quantidade} {itemKit.unidadeMedida}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-white">
-                                                    R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-sm font-bold text-teal-700 dark:text-teal-400">
-                                                    R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    {ehKit && (
-                                                        <button
-                                                            onClick={async () => {
-                                                                // Se for kit unificado, mostrar seus itens
-                                                                if (ehKitUnificado && itemKit.itensDoKit) {
-                                                                    setItensSubKitParaVisualizar(itemKit.itensDoKit);
-                                                                    setNomeSubKitParaVisualizar(itemKit.nome);
-                                                                    setShowModalDetalhesSubKit(true);
-                                                                }
-                                                                // Se for kit do catálogo, buscar os itens do kit
-                                                                else if (ehKitCatalogo && itemKit.kitId) {
-                                                                    const kitCompleto = kits.find((k: any) => k.id === itemKit.kitId);
-                                                                    if (kitCompleto) {
-                                                                        // Preparar itens do kit do catálogo
-                                                                        const itensEstoque = (kitCompleto.items || []).map((kitItem: any) => ({
-                                                                            nome: kitItem.material?.nome || 'Material',
-                                                                            codigo: kitItem.material?.sku || '',
-                                                                            custoUnit: kitItem.material?.preco || 0,
-                                                                            valorVenda: kitItem.material?.valorVenda || kitItem.material?.preco || 0,
-                                                                            quantidade: kitItem.quantidade,
-                                                                            unidadeMedida: kitItem.material?.unidadeMedida || 'un',
-                                                                            tipo: 'MATERIAL',
-                                                                            subtotal: (kitItem.quantidade || 0) * (kitItem.material?.valorVenda || kitItem.material?.preco || 0)
-                                                                        }));
-                                                                        
-                                                                        // Adicionar itens do banco frio e serviços
-                                                                        const itensBancoFrio = (kitCompleto.itensFaltantes || []).map((item: any) => {
-                                                                            if (item.tipo === 'SERVICO') {
-                                                                                const servicoCompleto = servicos.find((s: any) => s.id === item.servicoId);
-                                                                                if (servicoCompleto) {
-                                                                                    return {
-                                                                                        nome: servicoCompleto.nome,
-                                                                                        codigo: servicoCompleto.codigo,
-                                                                                        custoUnit: servicoCompleto.custo || 0,
-                                                                                        valorVenda: servicoCompleto.preco || 0,
-                                                                                        quantidade: item.quantidade || 0,
-                                                                                        unidadeMedida: servicoCompleto.unidade || 'un',
-                                                                                        tipo: 'SERVICO',
-                                                                                        subtotal: (item.quantidade || 0) * (servicoCompleto.preco || 0)
-                                                                                    };
-                                                                                }
-                                                                            } else if (item.tipo === 'COTACAO') {
-                                                                                const cotacaoCompleta = cotacoes.find((c: any) => c.id === item.cotacaoId);
-                                                                                if (cotacaoCompleta) {
-                                                                                    return {
-                                                                                        nome: cotacaoCompleta.nome,
-                                                                                        codigo: cotacaoCompleta.fornecedorNome || cotacaoCompleta.sku || '',
-                                                                                        custoUnit: cotacaoCompleta.valorUnitario || 0,
-                                                                                        valorVenda: cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0,
-                                                                                        quantidade: item.quantidade || 0,
-                                                                                        unidadeMedida: cotacaoCompleta.unidadeMedida || 'un',
-                                                                                        tipo: 'COTACAO',
-                                                                                        subtotal: (item.quantidade || 0) * (cotacaoCompleta.valorVenda || cotacaoCompleta.valorUnitario * 1.4 || 0),
-                                                                                        dataUltimaCotacao: cotacaoCompleta.dataAtualizacao
-                                                                                    };
-                                                                                }
-                                                                            }
-                                                                            
-                                                                            return {
-                                                                                nome: item.nome || 'Item',
-                                                                                codigo: item.codigo || '',
-                                                                                custoUnit: item.valorUnitario || item.custo || 0,
-                                                                                valorVenda: item.precoUnit || item.preco || 0,
-                                                                                quantidade: item.quantidade || 0,
-                                                                                unidadeMedida: item.unidadeMedida || 'un',
-                                                                                tipo: item.tipo || 'COTACAO',
-                                                                                subtotal: (item.quantidade || 0) * (item.precoUnit || item.preco || 0),
-                                                                                dataUltimaCotacao: item.dataUltimaCotacao
-                                                                            };
-                                                                        }).filter(Boolean);
-                                                                        
-                                                                        const todosItens = [...itensEstoque, ...itensBancoFrio];
-                                                                        setItensSubKitParaVisualizar(todosItens);
-                                                                        setNomeSubKitParaVisualizar(kitCompleto.nome);
-                                                                        setShowModalDetalhesSubKit(true);
-                                                                    } else {
-                                                                        toast.error('Kit não encontrado', {
-                                                                            description: 'Não foi possível carregar os detalhes do kit'
-                                                                        });
-                                                                    }
-                                                                }
-                                                            }}
-                                                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 rounded-lg transition-colors"
-                                                            title="Ver detalhes do kit"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                            </svg>
-                                                            Ver Detalhes
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                                <tfoot className="bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-700">
-                                    {(() => {
-                                        const valorTotal = itensKitParaVisualizar.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
-                                        const custoTotal = itensKitParaVisualizar.reduce((sum, item) => {
-                                            // Para materiais: usar preco (custo de compra)
-                                            // Para cotações: usar valorUnitario (custo da cotação) 
-                                            // Para serviços: usar custoUnit se definido, senão 0
-                                            const custoUnit = item.custoUnit || item.valorUnitario || item.preco || 0;
-                                            return sum + (custoUnit * (item.quantidade || 1));
-                                        }, 0);
-                                        const lucroTotal = valorTotal - custoTotal;
-                                        const margemLucro = custoTotal > 0 ? ((lucroTotal / custoTotal) * 100) : 0;
-                                        
-                                        return (
-                                            <>
-                                                <tr>
-                                                    <td colSpan={6} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
-                                                        Custo Total do Kit:
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right text-base font-bold text-red-600 dark:text-red-400">
-                                                        R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td colSpan={6} className="px-4 py-3 text-right text-sm font-bold text-gray-900 dark:text-white">
-                                                        Valor de Venda Total:
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right text-lg font-bold text-teal-700 dark:text-teal-400">
-                                                        R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </td>
-                                                </tr>
-                                                <tr className="border-t-2 border-gray-300 dark:border-gray-600">
-                                                    <td colSpan={6} className="px-4 py-4 text-right text-sm font-bold text-gray-900 dark:text-white">
-                                                        💰 Lucro do Kit:
-                                                    </td>
-                                                    <td className="px-4 py-4 text-right text-lg font-bold text-green-600 dark:text-green-400">
-                                                        R$ {lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                            Margem: {margemLucro.toFixed(1)}%
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            </>
-                                        );
-                                    })()}
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* Footer Fixo */}
-                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => {
-                                    setShowModalItensKit(false);
-                                    setItensKitParaVisualizar([]);
-                                    setNomeKitParaVisualizar('');
-                                }}
-                                className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-                            >
-                                Fechar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
+        <ModalItensKit
+            open={showModalDetalhesSubKit}
+            onClose={() => {
+                setShowModalDetalhesSubKit(false);
+                setItensSubKitParaVisualizar([]);
+                setNomeSubKitParaVisualizar('');
+            }}
+            itens={itensSubKitParaVisualizar}
+            nomeKit={nomeSubKitParaVisualizar}
+            empresas={empresas}
+            empresaCNPJ={formState.empresaCNPJ}
+            numeroOrcamento={proximoNumero ?? undefined}
+            usuarioGerador={authContext?.user?.name || undefined}
+        />
 
         {/* Modal de Edição de Kit Unificado */}
         {showModalEditarKit && kitEmEdicao && (
@@ -4795,9 +5343,7 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
                 onClick={(e) => {
                     if (e.target === e.currentTarget) {
-                        setShowModalEditarKit(false);
-                        setKitEmEdicao(null);
-                        setItensKitEdicao([]);
+                        solicitarFecharModalKitEdicao();
                     }
                 }}
             >
@@ -4821,11 +5367,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 </div>
                             </div>
                             <button
-                                onClick={() => {
-                                    setShowModalEditarKit(false);
-                                    setKitEmEdicao(null);
-                                    setItensKitEdicao([]);
-                                }}
+                                type="button"
+                                onClick={solicitarFecharModalKitEdicao}
                                 className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4836,15 +5379,31 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                     </div>
 
                     {/* Body */}
-                    <div className="flex-1 overflow-y-auto p-6">
+                    <div className="flex-1 overflow-y-auto p-4">
+                        <div className="mb-4">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                Buscar na composição (use * ou % como coringa)
+                            </label>
+                            <input
+                                type="text"
+                                value={buscaKitEdicao}
+                                onChange={(e) => setBuscaKitEdicao(e.target.value)}
+                                placeholder="Ex: cabo * 70 * ver ou código parcial..."
+                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                            />
+                        </div>
                         <div className="space-y-3">
                             {itensKitEdicao.map((itemKit: any, index: number) => {
+                                if (!itemKitPassaBuscaEdicao(itemKit)) return null;
                                 const valorVenda = itemKit.valorVenda || 0;
                                 const quantidade = itemKit.quantidade || 1;
                                 const subtotal = valorVenda * quantidade;
-                                const custoUnit = itemKit.custoUnit || 0;
-                                const custoTotal = custoUnit * quantidade;
-                                const lucro = subtotal - custoTotal;
+                                const empresaKit = empresas.find(e => e.cnpj === formState.empresaCNPJ);
+                                const aliquotaMaterialKit = empresaKit?.aliquotaMaterial ?? 8;
+                                const custoAgregadoUnit = itemKit.custoAgregadoUnit ?? (itemKit.custoUnit ?? 0) + (valorVenda * aliquotaMaterialKit / 100);
+                                const custoTotal = custoAgregadoUnit * quantidade;
+                                const lucroLiquido = subtotal - custoTotal;
+                                const percentualSobreVenda = subtotal > 0 ? (lucroLiquido / subtotal) * 100 : 0;
                                 const tipoItem = itemKit.tipo || 'MATERIAL';
                                 
                                 return (
@@ -4881,7 +5440,17 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                     </div>
                                                     <div>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400">Quantidade</p>
-                                                        <p className="font-medium text-gray-700 dark:text-gray-300">{quantidade} {itemKit.unidadeMedida}</p>
+                                                        <div className="flex items-center gap-1 flex-wrap">
+                                                            <input
+                                                                type="number"
+                                                                min={0.001}
+                                                                step="any"
+                                                                value={quantidade}
+                                                                onChange={(e) => handleQuantidadeKitItemChange(index, e.target.value)}
+                                                                className="w-24 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+                                                            />
+                                                            <span className="text-xs text-gray-600 dark:text-gray-400">{formatarUnidadeOrcamento(itemKit.unidadeMedida)}</span>
+                                                        </div>
                                                     </div>
                                                     <div>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400">Valor Unit.</p>
@@ -4899,10 +5468,10 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                                 
                                                 <div className="mt-2 flex items-center gap-4 text-xs">
                                                     <span className="text-red-600 dark:text-red-400">
-                                                        💵 Custo: R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        💵 Custo agregado: R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                     </span>
                                                     <span className="text-green-600 dark:text-green-400 font-medium">
-                                                        💰 Lucro: R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                        Lucro líquido: R$ {lucroLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • {percentualSobreVenda.toFixed(1)}% sobre venda
                                                     </span>
                                                 </div>
                                             </div>
@@ -4935,6 +5504,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                     </div>
                                 );
                             })}
+                            {buscaKitEdicao.trim() && itensKitEdicao.length > 0 && !itensKitEdicao.some((ik) => itemKitPassaBuscaEdicao(ik)) && (
+                                <div className="text-center py-8 text-sm text-gray-500 dark:text-gray-400 border border-dashed border-gray-200 dark:border-gray-600 rounded-xl">
+                                    Nenhum item encontrado para &quot;{buscaKitEdicao}&quot;. Ajuste os coringas (* ou %) ou limpe a busca.
+                                </div>
+                            )}
                         </div>
 
                         {/* Resumo Financeiro */}
@@ -4942,25 +5516,21 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             <div className="mt-6 p-4 bg-gradient-to-r from-teal-50 to-blue-50 dark:from-gray-700 dark:to-gray-800 rounded-xl border border-teal-200 dark:border-gray-600">
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
-                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Custo Total</p>
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Custo Total (agregado)</p>
                                         <p className="text-lg font-bold text-red-600 dark:text-red-400">
-                                            R$ {itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {totaisResumoKitEdicao.custoAgTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
                                     <div>
                                         <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Valor de Venda Total</p>
                                         <p className="text-lg font-bold text-teal-700 dark:text-teal-400">
-                                            R$ {itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            R$ {totaisResumoKitEdicao.vendaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
                                     <div>
                                         <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">Lucro do Kit</p>
                                         <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                                            💰 R$ {(() => {
-                                                const custo = itensKitEdicao.reduce((sum, item) => sum + ((item.custoUnit || 0) * (item.quantidade || 1)), 0);
-                                                const venda = itensKitEdicao.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
-                                                return (venda - custo).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                                            })()}
+                                            💰 R$ {totaisResumoKitEdicao.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
                                 </div>
@@ -4980,11 +5550,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             
                             <div className="flex gap-3">
                                 <button
-                                    onClick={() => {
-                                        setShowModalEditarKit(false);
-                                        setKitEmEdicao(null);
-                                        setItensKitEdicao([]);
-                                    }}
+                                    type="button"
+                                    onClick={solicitarFecharModalKitEdicao}
                                     className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                                 >
                                     Cancelar
@@ -5002,188 +5569,28 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             </div>
         )}
 
-        {/* Modal de Detalhes de Sub-Kit (Kit dentro de Kit) */}
-        {showModalDetalhesSubKit && (
-            <div
-                className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-60"
-                onClick={(e) => {
-                    if (e.target === e.currentTarget) {
-                        setShowModalDetalhesSubKit(false);
-                        setItensSubKitParaVisualizar([]);
-                        setNomeSubKitParaVisualizar('');
-                    }
-                }}
-            >
-                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col">
-                    {/* Header */}
-                    <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-gray-700 dark:to-gray-700 rounded-t-2xl">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700 flex items-center justify-center shadow-md">
-                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                                        Detalhes do Kit
-                                    </h3>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-                                        {nomeSubKitParaVisualizar} - {itensSubKitParaVisualizar.length} {itensSubKitParaVisualizar.length === 1 ? 'item' : 'itens'}
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => {
-                                    setShowModalDetalhesSubKit(false);
-                                    setItensSubKitParaVisualizar([]);
-                                    setNomeSubKitParaVisualizar('');
-                                }}
-                                className="p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Body */}
-                    <div className="flex-1 overflow-y-auto p-6">
-                        <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                <thead className="bg-gray-50 dark:bg-gray-900">
-                                    <tr>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Nome</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Código</th>
-                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Tipo</th>
-                                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Quantidade</th>
-                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Valor de Venda</th>
-                                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-100 dark:divide-gray-700">
-                                    {itensSubKitParaVisualizar.map((itemKit: any, index: number) => {
-                                        const valorVenda = itemKit.valorVenda || 0;
-                                        const quantidade = itemKit.quantidade || 1;
-                                        const subtotal = valorVenda * quantidade;
-                                        const tipoItem = itemKit.tipo || 'MATERIAL';
-                                        
-                                        const corTipo = {
-                                            'MATERIAL': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-                                            'COTACAO': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-                                            'SERVICO': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
-                                        }[tipoItem] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
-                                        
-                                        return (
-                                            <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">
-                                                    <div className="font-medium">{itemKit.nome}</div>
-                                                    {itemKit.dataUltimaCotacao && (
-                                                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                                            📅 Cotação: {(() => {
-                                                                try {
-                                                                    const data = new Date(itemKit.dataUltimaCotacao);
-                                                                    return !isNaN(data.getTime()) ? data.toLocaleDateString('pt-BR') : 'Sem data';
-                                                                } catch {
-                                                                    return 'Sem data';
-                                                                }
-                                                            })()}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-                                                    {itemKit.codigo || '-'}
-                                                </td>
-                                                <td className="px-4 py-3 text-center">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${corTipo}`}>
-                                                        {tipoItem === 'MATERIAL' && '📦 Estoque'}
-                                                        {tipoItem === 'COTACAO' && '❄️ Banco Frio'}
-                                                        {tipoItem === 'SERVICO' && '⚙️ Serviço'}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3 text-center text-sm text-gray-900 dark:text-white">
-                                                    {quantidade} {itemKit.unidadeMedida}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900 dark:text-white">
-                                                    R$ {valorVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </td>
-                                                <td className="px-4 py-3 text-right text-sm font-bold text-teal-700 dark:text-teal-400">
-                                                    R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                                <tfoot className="bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-gray-700 dark:to-gray-700">
-                                    {(() => {
-                                        const valorTotal = itensSubKitParaVisualizar.reduce((sum, item) => sum + ((item.valorVenda || 0) * (item.quantidade || 1)), 0);
-                                        const custoTotal = itensSubKitParaVisualizar.reduce((sum, item) => {
-                                            const custoUnit = item.custoUnit || item.valorUnitario || item.preco || 0;
-                                            return sum + (custoUnit * (item.quantidade || 1));
-                                        }, 0);
-                                        const lucroTotal = valorTotal - custoTotal;
-                                        const margemLucro = custoTotal > 0 ? ((lucroTotal / custoTotal) * 100) : 0;
-                                        
-                                        return (
-                                            <>
-                                                <tr>
-                                                    <td colSpan={5} className="px-4 py-3 text-right text-sm font-semibold text-gray-700 dark:text-gray-300">
-                                                        Custo Total:
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right text-base font-bold text-red-600 dark:text-red-400">
-                                                        R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </td>
-                                                </tr>
-                                                <tr>
-                                                    <td colSpan={5} className="px-4 py-3 text-right text-sm font-bold text-gray-900 dark:text-white">
-                                                        Valor de Venda Total:
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right text-lg font-bold text-teal-700 dark:text-teal-400">
-                                                        R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                    </td>
-                                                </tr>
-                                                <tr className="border-t-2 border-gray-300 dark:border-gray-600">
-                                                    <td colSpan={5} className="px-4 py-4 text-right text-sm font-bold text-gray-900 dark:text-white">
-                                                        💰 Lucro:
-                                                    </td>
-                                                    <td className="px-4 py-4 text-right text-lg font-bold text-green-600 dark:text-green-400">
-                                                        R$ {lucroTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                            Margem: {margemLucro.toFixed(1)}%
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            </>
-                                        );
-                                    })()}
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* Footer */}
-                    <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => {
-                                    setShowModalDetalhesSubKit(false);
-                                    setItensSubKitParaVisualizar([]);
-                                    setNomeSubKitParaVisualizar('');
-                                }}
-                                className="px-6 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-                            >
-                                Fechar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
-
+        <AlertDialog open={showConfirmarCancelarEdicaoKit} onOpenChange={setShowConfirmarCancelarEdicaoKit}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Descartar alterações?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        Se você cancelar vai perder suas mudanças, deseja sair?
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel type="button">Voltar</AlertDialogCancel>
+                    <AlertDialogAction
+                        type="button"
+                        className="bg-red-600 hover:bg-red-700"
+                        onClick={confirmarCancelarEdicaoKit}
+                    >
+                        Sim, sair
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
         </>
     );
 };
 
 export default NovoOrcamentoPage;
-

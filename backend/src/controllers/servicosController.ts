@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Normaliza o tipoServico para o formato do enum
@@ -153,7 +151,7 @@ export class ServicosController {
           preco,
           custo: custo !== undefined && custo !== null && custo !== '' ? parseFloat(custo) : null, // ✅ NOVO: Custo (aceita vazio, 0 ou valor)
           unidade: unidade || 'un'
-        }
+        } as any
       });
 
       res.status(201).json({ success: true, data: novoServico });
@@ -200,12 +198,12 @@ export class ServicosController {
           codigo,
           descricao,
           tipo,
-          tipoServico: tipoServico !== undefined ? tipoServico : servicoExistente.tipoServico, // ✅ NOVO: Tipo de serviço
+          tipoServico: tipoServico !== undefined ? tipoServico : (servicoExistente as any).tipoServico, // ✅ NOVO: Tipo de serviço
           preco,
-          custo: custo !== undefined ? (custo !== null && custo !== '' ? parseFloat(custo) : null) : servicoExistente.custo, // ✅ NOVO: Custo
+          custo: custo !== undefined ? (custo !== null && custo !== '' ? parseFloat(custo) : null) : (servicoExistente as any).custo, // ✅ NOVO: Custo
           unidade,
           ativo
-        }
+        } as any
       });
 
       res.status(200).json({ success: true, data: servicoAtualizado });
@@ -359,7 +357,7 @@ export class ServicosController {
                 custo: custoValue,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
-              }
+              } as any
             });
 
             resultados.sucesso++;
@@ -383,7 +381,7 @@ export class ServicosController {
                 custo: custoValue,
                 unidade: servico.unidade || 'un',
                 ativo: servico.ativo !== false
-              }
+              } as any
             });
 
             resultados.sucesso++;
@@ -447,9 +445,9 @@ export class ServicosController {
           nome: s.nome,
           descricao: s.descricao || '',
           tipo: s.tipo,
-          tipoServico: s.tipoServico, // ✅ NOVO: Tipo de serviço
+          tipoServico: (s as any).tipoServico, // ✅ NOVO: Tipo de serviço
           preco: s.preco,
-          custo: s.custo !== null && s.custo !== undefined ? s.custo : null, // ✅ NOVO: Custo
+          custo: (s as any).custo !== null && (s as any).custo !== undefined ? (s as any).custo : null, // ✅ NOVO: Custo
           unidade: s.unidade,
           ativo: s.ativo
         }))

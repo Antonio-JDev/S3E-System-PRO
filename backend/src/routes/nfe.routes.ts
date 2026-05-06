@@ -15,6 +15,13 @@ router.use(authenticate);
 router.post('/emitir', authorize('admin', 'gerente'), NFeController.emitirNFe);
 
 /**
+ * @route POST /api/nfe/emitir-fracionado
+ * @desc Faturamento fracionado: N NF-es para N clientes a partir de um pedido
+ * @access Admin/Gerente
+ */
+router.post('/emitir-fracionado', authorize('admin', 'gerente'), NFeController.emitirFracionado);
+
+/**
  * @route GET /api/nfe/notas
  * @desc Listar notas fiscais emitidas
  * @access Admin/Gerente
@@ -27,6 +34,23 @@ router.get('/notas', authorize('admin', 'gerente'), NFeController.listarNotasFis
  * @access Admin/Gerente
  */
 router.get('/notas/:id', authorize('admin', 'gerente'), NFeController.buscarNotaFiscal);
+/**
+ * @route GET /api/nfe/notas/:id/eventos
+ * @desc Listar eventos (logs) de uma nota fiscal
+ * @access Admin/Gerente
+ */
+router.get('/notas/:id/eventos', authorize('admin', 'gerente'), NFeController.listarEventosNota);
+
+/**
+ * @route POST /api/nfe/notas/:id/reprocessar
+ * @desc Enfileirar e tentar reprocessar agora uma nota em contingência
+ * @access Admin/Gerente
+ */
+router.post('/notas/:id/reprocessar', authorize('admin', 'gerente'), NFeController.reprocessarNota);
+
+// Alternative explicit endpoints to avoid nested-routing conflicts
+router.get('/eventos/:notaId', authorize('admin', 'gerente'), NFeController.listarEventosNota);
+router.post('/reprocessar/:notaId', authorize('admin', 'gerente'), NFeController.reprocessarNota);
 
 /**
  * @route POST /api/nfe/preview-xml
@@ -75,7 +99,37 @@ router.post('/danfe-preview', authorize('admin', 'gerente'), NFeController.gerar
  * @desc Gerar DANFE em PDF a partir da nota fiscal salva
  * @access Admin/Gerente
  */
-router.get('/notas/:id/danfe', authorize('admin', 'gerente'), NFeController.gerarDanfePorNota);
+router.get('/notas/:id/danfe', authorize('admin', 'gerente', 'financeiro'), NFeController.gerarDanfePorNota);
+
+/**
+ * Compatibilidade: rotas antigas/usadas por clientes externos
+ * @route GET /api/nfe/:id/danfe
+ */
+router.get('/:id/danfe', authorize('admin', 'gerente', 'financeiro'), NFeController.gerarDanfePorNota);
+
+/**
+ * Compatibilidade: download XML por /api/nfe/:id/xml
+ */
+router.get('/:id/xml', authorize('admin', 'gerente', 'financeiro'), NFeController.getXmlNota);
+
+/**
+ * Compatibilidade: envio por email por /api/nfe/:id/enviar-email
+ */
+router.post('/:id/enviar-email', authorize('admin', 'gerente', 'financeiro'), NFeController.enviarEmailNota);
+
+/**
+ * @route GET /api/nfe/notas/:id/xml
+ * @desc Download XML da NF-e
+ * @access Admin/Gerente
+ */
+router.get('/notas/:id/xml', authorize('admin', 'gerente', 'financeiro'), NFeController.getXmlNota);
+
+/**
+ * @route POST /api/nfe/notas/:id/enviar-email
+ * @desc Enviar NF-e (DANFE + XML) por email
+ * @access Admin/Gerente
+ */
+router.post('/notas/:id/enviar-email', authorize('admin', 'gerente', 'financeiro'), NFeController.enviarEmailNota);
 
 /**
  * @route POST /api/nfe/config

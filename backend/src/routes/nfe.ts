@@ -78,6 +78,12 @@ router.post('/validar', NFeController.validarNotaFiscal);
 router.post('/emitir', authorize('admin', 'gerente'), NFeController.emitirNFe);
 
 /**
+ * @route POST /api/nfe/emitir-fracionado
+ * @desc Faturamento fracionado: N NF-es para N clientes a partir de um pedido
+ */
+router.post('/emitir-fracionado', authorize('admin', 'gerente'), NFeController.emitirFracionado);
+
+/**
  * @route POST /api/nfe/preview-xml
  * @desc Gerar XML da NF-e para pré-visualização (sem envio à SEFAZ)
  * @access Admin/Gerente
@@ -125,5 +131,13 @@ router.post('/danfe-preview', authorize('admin', 'gerente'), NFeController.gerar
  * @access Admin only
  */
 router.post('/config', authorize('admin'), NFeController.salvarConfig);
+
+/**
+ * Rotas adicionais (eventos / reprocessar / email / xml por nota) — mantidas para compatibilidade
+ */
+router.get('/notas/:id/eventos', authorize('admin', 'gerente'), NFeController.listarEventosNota);
+router.post('/notas/:id/reprocessar', authorize('admin', 'gerente'), NFeController.reprocessarNota);
+router.post('/notas/:id/enviar-email', authorize('admin', 'gerente', 'financeiro'), NFeController.enviarEmailNota);
+router.get('/notas/:id/xml', authorize('admin', 'gerente', 'financeiro'), NFeController.getXmlNota);
 
 export default router;

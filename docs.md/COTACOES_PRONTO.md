@@ -7,6 +7,7 @@
 ## ✅ **O QUE FOI CRIADO:**
 
 ### **1. Database**
+
 ```prisma
 model Cotacao {
   id                String    @id
@@ -18,7 +19,7 @@ model Cotacao {
   dataAtualizacao   DateTime
   observacoes       String?
   ativo             Boolean
-  
+
   fornecedor        Fornecedor?
   itensOrcamento    OrcamentoItem[]
 }
@@ -42,6 +43,7 @@ model Cotacao {
 ```
 
 **Arquivos:**
+
 - ✅ `backend/src/controllers/cotacoesController.ts`
 - ✅ `backend/src/routes/cotacoes.routes.ts`
 - ✅ `backend/src/app.ts` (registrado)
@@ -53,6 +55,7 @@ model Cotacao {
 **Arquivo:** `frontend/src/components/Cotacoes.tsx`
 
 **Funcionalidades:**
+
 - ✅ **Listagem em tabela** com 6 colunas:
   - Material
   - NCM
@@ -107,16 +110,19 @@ model Cotacao {
 ## 🚀 **COMO USAR:**
 
 ### **1. Acessar:**
+
 ```
 Menu → Seção COMERCIAL → Cotações
 ```
 
 ### **2. Download Template:**
+
 ```
 Botão "Template" → template-cotacoes-*.json
 ```
 
 ### **3. Preencher Template:**
+
 ```json
 {
   "versao": "1.0",
@@ -124,14 +130,14 @@ Botão "Template" → template-cotacoes-*.json
     {
       "nome": "Cabo de Cobre 2,5mm - Rolo 100m",
       "ncm": "85444200",
-      "valorUnitario": 450.00,
+      "valorUnitario": 450.0,
       "fornecedorNome": "Eletromar Distribuidora",
       "observacoes": "Cotação válida por 30 dias"
     },
     {
       "nome": "Disjuntor Tripolar 32A",
       "ncm": "85362000",
-      "valorUnitario": 85.50,
+      "valorUnitario": 85.5,
       "fornecedorNome": "WEG Automação",
       "observacoes": "Prazo de entrega: 7 dias"
     }
@@ -140,12 +146,14 @@ Botão "Template" → template-cotacoes-*.json
 ```
 
 ### **4. Importar:**
+
 ```
 Botão "Importar JSON" → Selecionar arquivo → Importar
 Toast: "✅ 2 criados, 0 atualizados, 0 erros"
 ```
 
 ### **5. Gerenciar:**
+
 ```
 👁️ Visualizar: Ver detalhes da cotação
 ✏️ Editar: Atualizar valores/fornecedor
@@ -189,6 +197,7 @@ Toast: "✅ 2 criados, 0 atualizados, 0 erros"
 ## 🧪 **TESTE AGORA:**
 
 ### **Passo 1: Reiniciar Backend**
+
 ```bash
 # Se necessário
 cd backend
@@ -196,24 +205,27 @@ npm run dev
 ```
 
 ### **Passo 2: Acessar Frontend**
+
 ```
 Menu Lateral → COMERCIAL → Cotações
 ```
 
 ### **Passo 3: Baixar Template**
+
 ```
 Clique: "Template"
 Arquivo baixado: template-cotacoes-2025-11-12.json
 ```
 
 ### **Passo 4: Editar Template**
+
 ```json
 {
   "cotacoes": [
     {
       "nome": "Cabo Teste",
       "ncm": "85444200",
-      "valorUnitario": 100.00,
+      "valorUnitario": 100.0,
       "fornecedorNome": "Fornecedor Teste"
     }
   ]
@@ -221,6 +233,7 @@ Arquivo baixado: template-cotacoes-2025-11-12.json
 ```
 
 ### **Passo 5: Importar**
+
 ```
 Importar JSON → Selecionar → Importar
 Toast: "✅ 1 criados..."
@@ -228,6 +241,7 @@ Tabela atualiza automaticamente
 ```
 
 ### **Passo 6: Gerenciar**
+
 ```
 👁️ Ver detalhes
 ✏️ Editar valor → Salvar → Toast sucesso
@@ -241,6 +255,7 @@ Tabela atualiza automaticamente
 ### **Integração com Orçamentos:**
 
 Quando criar orçamento, adicionar:
+
 1. Toggle "Usar Banco de Cotações"
 2. Se ON: Busca de `/api/cotacoes`
 3. Se OFF: Busca de `/api/materiais` (atual)
@@ -281,6 +296,7 @@ Quando criar orçamento, adicionar:
 ---
 
 **📚 DOCUMENTAÇÃO COMPLETA:**
+
 - `SISTEMA_COTACOES_IMPLEMENTACAO.md` - Doc técnica
 - `SISTEMA_COTACOES_FINALIZADO.md` - Resumo completo
 - `COTACOES_PRONTO.md` - Guia de uso (este arquivo)
@@ -289,4 +305,3 @@ Quando criar orçamento, adicionar:
 
 **Data:** 12/11/2025  
 **Status:** ✅ COMPLETO E FUNCIONAL
-

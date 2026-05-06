@@ -6,7 +6,9 @@
 
 **SIM, está seguindo o padrão 4.0!**
 
-O XML é gerado diretamente como **string em JavaScript/TypeScript**, não há conversão de objeto JS para XML. O código monta o XML manualmente usando template strings:
+O XML é gerado diretamente como **string em JavaScript/TypeScript**, não há
+conversão de objeto JS para XML. O código monta o XML manualmente usando
+template strings:
 
 ```typescript
 // backend/src/services/nfe.service.ts - linha 160
@@ -27,6 +29,7 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 ✅ **Namespace correto:** `http://www.portalfiscal.inf.br/nfe`  
 ✅ **Versão:** `versao="4.00"`  
 ✅ **Elementos obrigatórios presentes:**
+
 - `<ide>` - Identificação da NF-e
 - `<emit>` - Emitente
 - `<dest>` - Destinatário
@@ -66,7 +69,8 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 
 ### ⚠️ **RESPOSTA É ASSÍNCRONA (em duas etapas)**
 
-A SEFAZ **NÃO** retorna a aprovação/reprovação imediatamente. O processo funciona assim:
+A SEFAZ **NÃO** retorna a aprovação/reprovação imediatamente. O processo
+funciona assim:
 
 ### **Etapa 1: Envio (Síncrono - Resposta Imediata)**
 
@@ -77,15 +81,22 @@ Frontend → Backend → SEFAZ (Autorização)
 ```
 
 **O que acontece:**
+
 1. Backend envia XML assinado para SEFAZ
 2. SEFAZ valida estrutura básica e assinatura
 3. SEFAZ retorna um **NÚMERO DE RECIBO** (ex: `123456789012345`)
 4. **Status:** "Lote recebido para processamento"
 
 **Código:**
+
 ```typescript
 // backend/src/services/nfe-soap.service.ts
-const resultado = await NFeSoapService.autorizarNFe(xmlAssinado, ambiente, cert, key);
+const resultado = await NFeSoapService.autorizarNFe(
+  xmlAssinado,
+  ambiente,
+  cert,
+  key
+);
 // Retorna: { sucesso: true, recibo: "123456789012345" }
 ```
 
@@ -102,6 +113,7 @@ Backend → SEFAZ (Consulta Recibo)
 ```
 
 **O que acontece:**
+
 1. Backend aguarda alguns segundos (3-5s)
 2. Consulta o recibo na SEFAZ
 3. SEFAZ retorna:
@@ -109,10 +121,11 @@ Backend → SEFAZ (Consulta Recibo)
    - ❌ **Outros status:** Erro na validação → Mensagem de erro
 
 **Código:**
+
 ```typescript
 // backend/src/services/nfe.service.ts - linha ~380
 // Aguardar processamento
-await new Promise(resolve => setTimeout(resolve, 3000));
+await new Promise((resolve) => setTimeout(resolve, 3000));
 
 // Consultar recibo
 const consultaRecibo = await NFeSoapService.consultarRecibo(
@@ -123,7 +136,7 @@ const consultaRecibo = await NFeSoapService.consultarRecibo(
 );
 
 // Status 104 = Aprovado
-if (consultaRecibo.codigoStatus === '104') {
+if (consultaRecibo.codigoStatus === "104") {
   // ✅ NF-e AUTORIZADA
 } else {
   // ❌ NF-e REJEITADA
@@ -136,19 +149,20 @@ if (consultaRecibo.codigoStatus === '104') {
 
 ### Códigos de Status (cStat)
 
-| Código | Significado | Ação |
-|--------|-------------|------|
-| **104** | Lote processado | ✅ **APROVADA** - Gerar procNFe |
-| **100** | Autorizado o uso da NF-e | ✅ **APROVADA** (resposta direta) |
-| **101** | Cancelamento de NF-e homologado | ✅ Cancelamento OK |
-| **135** | Evento registrado | ✅ Evento (CC-e) OK |
-| **217** | Rejeição: Falha na validação | ❌ **REJEITADA** |
-| **218** | Rejeição: CNPJ do emitente inválido | ❌ **REJEITADA** |
-| **...** | Outros códigos de erro | ❌ **REJEITADA** |
+| Código  | Significado                         | Ação                              |
+| ------- | ----------------------------------- | --------------------------------- |
+| **104** | Lote processado                     | ✅ **APROVADA** - Gerar procNFe   |
+| **100** | Autorizado o uso da NF-e            | ✅ **APROVADA** (resposta direta) |
+| **101** | Cancelamento de NF-e homologado     | ✅ Cancelamento OK                |
+| **135** | Evento registrado                   | ✅ Evento (CC-e) OK               |
+| **217** | Rejeição: Falha na validação        | ❌ **REJEITADA**                  |
+| **218** | Rejeição: CNPJ do emitente inválido | ❌ **REJEITADA**                  |
+| **...** | Outros códigos de erro              | ❌ **REJEITADA**                  |
 
 ### Estrutura da Resposta da SEFAZ
 
 **Quando APROVADA (Status 104):**
+
 ```xml
 <retConsReciNFe>
   <tpAmb>2</tpAmb>
@@ -172,6 +186,7 @@ if (consultaRecibo.codigoStatus === '104') {
 ```
 
 **Quando REJEITADA:**
+
 ```xml
 <retConsReciNFe>
   <tpAmb>2</tpAmb>
@@ -186,22 +201,22 @@ if (consultaRecibo.codigoStatus === '104') {
 
 ```typescript
 // backend/src/services/nfe-soap.service.ts - linha ~172
-if (codigoStatus === '104') {
+if (codigoStatus === "104") {
   // ✅ APROVADA
   return {
     sucesso: true,
-    protocolo: resposta._xml,        // XML completo do protocolo
-    chaveAcesso: chaveAcesso,        // Chave de acesso da NF-e
-    codigoStatus: '104',
-    mensagem: 'Lote processado com sucesso'
+    protocolo: resposta._xml, // XML completo do protocolo
+    chaveAcesso: chaveAcesso, // Chave de acesso da NF-e
+    codigoStatus: "104",
+    mensagem: "Lote processado com sucesso",
   };
 } else {
   // ❌ REJEITADA
   return {
     sucesso: false,
-    codigoStatus: codigoStatus,      // Ex: 217, 218, etc.
-    mensagem: mensagem,              // Motivo da rejeição
-    erro: `Status ${codigoStatus}: ${mensagem}`
+    codigoStatus: codigoStatus, // Ex: 217, 218, etc.
+    mensagem: mensagem, // Motivo da rejeição
+    erro: `Status ${codigoStatus}: ${mensagem}`,
   };
 }
 ```
@@ -272,6 +287,7 @@ if (codigoStatus === '104') {
 ## 5. ⚠️ Pontos de Atenção
 
 ### ✅ O que está funcionando:
+
 - ✅ XML gerado no padrão 4.0
 - ✅ Assinatura digital XML-DSig
 - ✅ Comunicação SOAP com SEFAZ
@@ -279,6 +295,7 @@ if (codigoStatus === '104') {
 - ✅ Tratamento de aprovação/rejeição
 
 ### ✅ Melhorias Implementadas:
+
 1. **Geração de Chave de Acesso:** ✅ **IMPLEMENTADO**
    - Usa algoritmo correto do Módulo 11
    - Calcula dígito verificador automaticamente
@@ -295,6 +312,7 @@ if (codigoStatus === '104') {
    - Implementado em `nfe.service.ts`
 
 ### ⚠️ O que ainda pode ser melhorado:
+
 1. **Validação contra XSD:**
    - XML é gerado, mas não é validado contra os XSDs
    - Recomendado: validar antes de enviar usando `libxmljs`
@@ -304,6 +322,7 @@ if (codigoStatus === '104') {
 ## 6. 📝 Exemplo de Resposta para o Frontend
 
 **Quando APROVADA:**
+
 ```json
 {
   "success": true,
@@ -316,6 +335,7 @@ if (codigoStatus === '104') {
 ```
 
 **Quando REJEITADA:**
+
 ```json
 {
   "success": false,
@@ -330,12 +350,14 @@ if (codigoStatus === '104') {
 ## 7. 🔍 Validação do Leiaute 4.0
 
 O XML gerado está compatível com:
+
 - ✅ **NT 2025.002 v1.30** (PL_010b)
 - ✅ **Leiaute 4.00** (versao="4.00")
 - ✅ **Namespace correto:** `http://www.portalfiscal.inf.br/nfe`
 - ✅ **Estrutura básica:** Todos os elementos obrigatórios presentes
 
 **Arquivos XSD disponíveis para validação:**
+
 - `PL_010b_NT2025_002_v1.30/nfe_v4.00.xsd`
 - `PL_010b_NT2025_002_v1.30/leiauteNFe_v4.00.xsd`
 - `PL_010b_NT2025_002_v1.30/tiposBasico_v4.00.xsd`
@@ -346,4 +368,3 @@ O XML gerado está compatível com:
 
 - [Manual de Integração do Contribuinte - NFe 4.0](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=/fNq6q1J0zE=)
 - [Nota Técnica 2025.002 v1.30](https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w%3D)
-

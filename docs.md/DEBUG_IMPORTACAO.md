@@ -23,6 +23,7 @@ http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json
 ```
 
 **✅ Deve retornar:**
+
 ```json
 {
   "versao": "1.0",
@@ -40,6 +41,7 @@ http://localhost:3000/api/materiais/template-importacao?tipo=todos&formato=json
 ```
 
 **❌ Se retornar erro ou vazio:**
+
 - Backend não está gerando JSON corretamente
 - Verifique se backend está rodando
 
@@ -55,6 +57,7 @@ No terminal do backend, você deve ver:
 ```
 
 **Se NÃO vê isso:**
+
 ```bash
 # Pare o backend (Ctrl+C)
 # Recompile
@@ -106,12 +109,12 @@ Salve como `teste-manual.json`:
       "unidadeMedida": "UN",
       "estoque": 10,
       "estoqueMinimo": 5,
-      "precoAtual": 10.00,
-      "precoNovo": 12.00,
+      "precoAtual": 10.0,
+      "precoNovo": 12.0,
       "ultimaAtualizacao": "2024-11-12T12:37:06.000Z",
       "fornecedor": "Teste",
       "localizacao": "",
-      "preco": 10.00
+      "preco": 10.0
     }
   ]
 }
@@ -160,6 +163,7 @@ Após minhas correções, o backend agora loga TUDO. Veja o console:
 ## 🎯 **PASSO A PASSO DO DEBUG:**
 
 ### **1. Força refresh no navegador:**
+
 ```
 Ctrl + Shift + R
 ou
@@ -167,11 +171,13 @@ Ctrl + F5
 ```
 
 ### **2. Limpe cache:**
+
 ```
 F12 → Network → Disable cache (marcar checkbox)
 ```
 
 ### **3. Baixe JSON novamente:**
+
 ```
 📄 JSON → Veja console do navegador
 
@@ -180,6 +186,7 @@ Deve mostrar:
 ```
 
 ### **4. Abra arquivo baixado:**
+
 ```
 Bloco de Notas → Abrir → template-precos-*.json
 
@@ -189,6 +196,7 @@ Bloco de Notas → Abrir → template-precos-*.json
 ```
 
 ### **5. Importe arquivo SEM editar:**
+
 ```
 Importar → Selecionar → Processar
 
@@ -197,6 +205,7 @@ Importar → Selecionar → Processar
 ```
 
 ### **6. Edite 1 material e importe:**
+
 ```
 Altere um "precoNovo"
 Salve
@@ -291,6 +300,7 @@ Se não funcionar: **Me mostre os logs do console do backend**
 ---
 
 **Logs que preciso ver do backend:**
+
 ```
 📥 Preview - Recebendo arquivo...
 📄 File: { ... }
@@ -300,4 +310,3 @@ Se não funcionar: **Me mostre os logs do console do backend**
 ```
 
 **Com estes logs, posso identificar EXATAMENTE onde está o problema!**
-

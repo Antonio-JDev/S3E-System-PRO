@@ -1,9 +1,9 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import { roundMoney } from '../utils/currency';
 
 export interface KitItemInput {
-    materialId: string;
+    materialId?: string;
+    kitFilhoId?: string;
     quantidade: number;
 }
 
@@ -47,30 +47,49 @@ export interface KitUpdateInput {
 }
 
 export class KitsService {
+    private static kitIncludeBase = {
+        items: {
+            include: {
+                material: {
+                    select: {
+                        id: true,
+                        nome: true,
+                        sku: true,
+                        descricao: true,
+                        unidadeMedida: true,
+                        preco: true,
+                        valorVenda: true,
+                        estoque: true,
+                        tipo: true,
+                        categoria: true,
+                        imagemUrl: true,
+                        ncm: true
+                    }
+                },
+                kitFilho: {
+                    select: {
+                        id: true,
+                        nome: true,
+                        descricao: true,
+                        tipo: true,
+                        preco: true,
+                        temItensCotacao: true,
+                        statusEstoque: true,
+                        itensFaltantes: true,
+                        ativo: true
+                    }
+                }
+            }
+        }
+    } as const;
+
     /**
      * Lista todos os kits
      */
     static async listar() {
         const kits = await prisma.kit.findMany({
             include: {
-                items: {
-                    include: {
-                        material: {
-                            select: {
-                                id: true,
-                                nome: true,
-                                sku: true,
-                                descricao: true,
-                                unidadeMedida: true,
-                                preco: true,
-                                valorVenda: true,
-                                estoque: true,
-                                tipo: true,
-                                categoria: true
-                            }
-                        }
-                    }
-                }
+                ...this.kitIncludeBase
             },
             orderBy: {
                 createdAt: 'desc'
@@ -110,24 +129,7 @@ export class KitsService {
         const kit = await prisma.kit.findUnique({
             where: { id },
             include: {
-                items: {
-                    include: {
-                        material: {
-                            select: {
-                                id: true,
-                                nome: true,
-                                sku: true,
-                                descricao: true,
-                                unidadeMedida: true,
-                                preco: true,
-                                valorVenda: true,
-                                estoque: true,
-                                tipo: true,
-                                categoria: true
-                            }
-                        }
-                    }
-                }
+                ...this.kitIncludeBase
             }
         });
 
@@ -173,6 +175,59 @@ export class KitsService {
     }
 
     /**
+     * Busca um kit e expande a composição (kits aninhados) até um limite.
+     * Retorna uma árvore com proteção contra ciclos.
+     */
+    static async buscarComposicaoPorId(id: string, maxDepth = 4) {
+        const visited = new Set<string>();
+
+        const expand = async (kitId: string, depth: number): Promise<any> => {
+            const kit = await prisma.kit.findUnique({
+                where: { id: kitId },
+                include: {
+                    ...this.kitIncludeBase
+                }
+            });
+
+            if (!kit) return null;
+
+            if (visited.has(kit.id)) {
+                return {
+                    ...kit,
+                    cicloDetectado: true,
+                    items: []
+                };
+            }
+
+            if (depth >= maxDepth) {
+                return {
+                    ...kit,
+                    limiteExpansaoAtingido: true
+                };
+            }
+
+            visited.add(kit.id);
+
+            const itemsExpandidos = await Promise.all(
+                (kit.items || []).map(async (it: any) => {
+                    if (it.kitFilho?.id) {
+                        const child = await expand(it.kitFilho.id, depth + 1);
+                        return { ...it, kitFilho: child };
+                    }
+                    return it;
+                })
+            );
+
+            return {
+                ...kit,
+                items: itemsExpandidos
+            };
+        };
+
+        return expand(id, 0);
+    }
+
+    /**
      * Cria um novo kit
      */
     static async criar(data: KitInput) {
@@ -201,9 +256,11 @@ export class KitsService {
         // statusEstoque 'COMPLETO' por padrão - será revalidado quando necessário
         const statusEstoque = 'COMPLETO';
         
-        // Combinar cotações e serviços no campo itensFaltantes
-        // O campo itensFaltantes armazena tanto cotações quanto serviços
-        const todosItensExtras = itensBancoFrio || [];
+        // Combinar cotações e serviços no campo itensFaltantes (precoUnit sempre 2 decimais)
+        const todosItensExtras = (itensBancoFrio || []).map((i: any) => ({
+            ...i,
+            precoUnit: roundMoney(i.precoUnit ?? 0)
+        }));
         
         console.log(`📦 Salvando kit com ${todosItensExtras.length} itens extras (cotações + serviços)`);
         if (temServicos) {
@@ -216,38 +273,28 @@ export class KitsService {
                 nome,
                 descricao,
                 tipo,
-                preco,
+                preco: roundMoney(preco),
                 temItensCotacao: temItensCotacao || false,
-                // Salvar itens do banco frio E serviços como JSON para referência
-                // Estes itens NÃO são "faltantes" no sentido de erro, são apenas do banco frio/serviços
+                // Salvar itens do banco frio E serviços como JSON para referência (valores com 2 decimais)
                 itensFaltantes: todosItensExtras.length > 0 ? JSON.parse(JSON.stringify(todosItensExtras)) : null,
                 statusEstoque: statusEstoque, // Apenas informativo, não bloqueia criação
                 items: {
-                    create: items.map(item => ({
-                        materialId: item.materialId,
-                        quantidade: item.quantidade
-                    }))
-                }
+                    create: (items || []).map(item => {
+                        const hasMaterial = !!item.materialId;
+                        const hasChildKit = !!item.kitFilhoId;
+                        if (hasMaterial === hasChildKit) {
+                            throw new Error('Cada item do kit deve ter exatamente um: materialId OU kitFilhoId');
+                        }
+                        return {
+                            materialId: item.materialId ?? null,
+                            kitFilhoId: item.kitFilhoId ?? null,
+                            quantidade: item.quantidade
+                        };
+                    })
+                },
             },
             include: {
-                items: {
-                    include: {
-                        material: {
-                            select: {
-                                id: true,
-                                nome: true,
-                                sku: true,
-                                descricao: true,
-                                unidadeMedida: true,
-                                preco: true,
-                                valorVenda: true,
-                                estoque: true,
-                                tipo: true,
-                                categoria: true
-                            }
-                        }
-                    }
-                }
+                ...this.kitIncludeBase
             }
         });
 
@@ -288,13 +335,14 @@ export class KitsService {
                 ...(nome !== undefined && { nome }),
                 ...(descricao !== undefined && { descricao }),
                 ...(tipo !== undefined && { tipo }),
-                ...(preco !== undefined && { preco }),
+                ...(preco !== undefined && { preco: roundMoney(preco) }),
                 ...(ativo !== undefined && { ativo }),
                 ...(temItensCotacao !== undefined && { temItensCotacao }),
                 ...(itensBancoFrio !== undefined && { 
-                    // IMPORTANTE: itensFaltantes aqui armazena itens do banco frio E serviços
-                    // Não são "faltantes" no sentido de erro, são apenas do banco frio/serviços
-                    itensFaltantes: itensBancoFrio.length > 0 ? JSON.parse(JSON.stringify(itensBancoFrio)) : null 
+                    // itensFaltantes com precoUnit sempre 2 decimais
+                    itensFaltantes: itensBancoFrio.length > 0
+                        ? JSON.parse(JSON.stringify(itensBancoFrio.map((i: any) => ({ ...i, precoUnit: roundMoney(i.precoUnit ?? 0) }))))
+                        : null 
                 }),
                 ...((itensBancoFrio !== undefined || items !== undefined) && {
                     // statusEstoque deve ser calculado apenas baseado em itens de estoque real
@@ -305,32 +353,23 @@ export class KitsService {
                 }),
                 ...(items !== undefined && {
                     items: {
-                        create: items.map(item => ({
-                            materialId: item.materialId,
-                            quantidade: item.quantidade
-                        }))
+                        create: items.map(item => {
+                            const hasMaterial = !!item.materialId;
+                            const hasChildKit = !!item.kitFilhoId;
+                            if (hasMaterial === hasChildKit) {
+                                throw new Error('Cada item do kit deve ter exatamente um: materialId OU kitFilhoId');
+                            }
+                            return {
+                                materialId: item.materialId ?? null,
+                                kitFilhoId: item.kitFilhoId ?? null,
+                                quantidade: item.quantidade
+                            };
+                        })
                     }
                 })
             },
             include: {
-                items: {
-                    include: {
-                        material: {
-                            select: {
-                                id: true,
-                                nome: true,
-                                sku: true,
-                                descricao: true,
-                                unidadeMedida: true,
-                                preco: true,
-                                valorVenda: true,
-                                estoque: true,
-                                tipo: true,
-                                categoria: true
-                            }
-                        }
-                    }
-                }
+                ...this.kitIncludeBase
             }
         });
 
@@ -360,24 +399,7 @@ export class KitsService {
         const kits = await prisma.kit.findMany({
             where: { tipo, ativo: true },
             include: {
-                items: {
-                    include: {
-                        material: {
-                            select: {
-                                id: true,
-                                nome: true,
-                                sku: true,
-                                descricao: true,
-                                unidadeMedida: true,
-                                preco: true,
-                                valorVenda: true,
-                                estoque: true,
-                                tipo: true,
-                                categoria: true
-                            }
-                        }
-                    }
-                }
+                ...this.kitIncludeBase
             },
             orderBy: {
                 nome: 'asc'

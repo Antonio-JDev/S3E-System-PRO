@@ -600,26 +600,26 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
     if (loading) {
         return (
-            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+            <div className="min-h-screen p-4 sm:p-8 flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
                 <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-600 mx-auto mb-4"></div>
-                    <p className="text-gray-600">Carregando serviços...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-600 dark:border-cyan-400 mx-auto mb-4"></div>
+                    <p className="text-gray-600 dark:text-dark-text-secondary">Carregando serviços...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8">
+        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
                 <div className="flex items-center gap-4">
-                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 rounded-xl hover:bg-white hover:shadow-md transition-all">
+                    <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-md transition-all">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 tracking-tight">Serviços</h1>
-                        <p className="text-sm sm:text-base text-gray-500 mt-1">Gerencie serviços e especialidades técnicas</p>
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">Serviços</h1>
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie serviços e especialidades técnicas</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
@@ -683,7 +683,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             <WrenchScrewdriverIcon className="w-6 h-6 text-cyan-600" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Total de Serviços</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Total de Serviços</p>
                             <p className="text-2xl font-bold text-cyan-600">{stats.total}</p>
                         </div>
                     </div>
@@ -695,7 +695,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             <span className="text-2xl">✅</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Serviços Ativos</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Serviços Ativos</p>
                             <p className="text-2xl font-bold text-green-600">{stats.ativos}</p>
                         </div>
                     </div>
@@ -719,7 +719,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             <span className="text-2xl">💰</span>
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600">Preço Médio</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-dark-text-secondary">Preço Médio</p>
                             <p className="text-2xl font-bold text-purple-600">
                                 R$ {stats.precoMedio.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
                             </p>
@@ -732,7 +732,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             {viewModeClassificacao === 'separada' && (
                 <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
                     <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-semibold text-gray-900">Classificação de Serviços</h3>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text">Classificação de Serviços</h3>
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setViewModeClassificacao('completa')}
@@ -749,7 +749,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             className={`px-6 py-3 rounded-xl font-semibold transition-all ${
                                 tipoServicoFilter === 'TODOS'
                                     ? 'bg-gradient-to-r from-gray-600 to-gray-500 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                             }`}
                         >
                             Todos
@@ -816,7 +816,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             {/* Filtros e Toggle de Visualização */}
             <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 mb-6">
                 <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Filtros</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text">Filtros</h3>
                     <div className="flex items-center gap-2">
                         {viewModeClassificacao === 'completa' && (
                             <button
@@ -832,7 +832,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
                                 viewMode === 'grid'
                                     ? 'bg-purple-600 text-white shadow-md'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                             }`}
                         >
                             <Squares2X2Icon className="w-5 h-5" />
@@ -843,7 +843,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium ${
                                 viewMode === 'list'
                                     ? 'bg-purple-600 text-white shadow-md'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
                             }`}
                         >
                             <ListBulletIcon className="w-5 h-5" />
@@ -903,8 +903,8 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                         <span className="text-4xl">🛠️</span>
                     </div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Nenhum serviço encontrado</h3>
-                    <p className="text-gray-500 mb-6">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">Nenhum serviço encontrado</h3>
+                    <p className="text-gray-500 dark:text-dark-text-secondary mb-6">
                         {searchTerm || typeFilter !== 'Todos'
                             ? 'Tente ajustar os filtros de busca'
                             : 'Comece cadastrando seus primeiros serviços'}
@@ -920,36 +920,36 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     )}
                 </div>
             ) : viewMode === 'list' ? (
-                <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-200">
+                            <thead className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600 border-b border-gray-200 dark:border-gray-600">
                                 <tr>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">SERVIÇO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">CÓDIGO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">TIPO</th>
-                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">DESCRIÇÃO</th>
-                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">PREÇO</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">UNIDADE</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">STATUS</th>
-                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">AÇÕES</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SERVIÇO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">CÓDIGO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">TIPO</th>
+                                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">DESCRIÇÃO</th>
+                                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">PREÇO</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">UNIDADE</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">STATUS</th>
+                                    <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">AÇÕES</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200">
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                                 {filteredServices.map((service) => (
-                                    <tr key={service.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={service.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-100 to-cyan-200 flex items-center justify-center flex-shrink-0">
-                                                    <WrenchScrewdriverIcon className="w-5 h-5 text-cyan-600" />
+                                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-100 to-cyan-200 dark:from-cyan-900/50 dark:to-cyan-800/50 flex items-center justify-center flex-shrink-0">
+                                                    <WrenchScrewdriverIcon className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
                                                 </div>
                                                 <div>
-                                                    <p className="font-semibold text-gray-900">{service.name}</p>
+                                                    <p className="font-semibold text-gray-900 dark:text-white">{service.name}</p>
                                                 </div>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <span className="text-sm text-gray-600 font-mono">{service.internalCode}</span>
+                                            <span className="text-sm text-gray-600 dark:text-gray-400 font-mono">{service.internalCode}</span>
                                         </td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-bold rounded-lg ${getTypeClass(service.type || service.tipo || ServiceType.Instalacao)}`}>
@@ -957,26 +957,26 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <p className="text-sm text-gray-600 line-clamp-2 max-w-xs">{service.description || service.descricao || 'Sem descrição'}</p>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 max-w-xs">{service.description || service.descricao || 'Sem descrição'}</p>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <p className="text-lg font-bold text-green-600">
+                                            <p className="text-lg font-bold text-green-600 dark:text-green-400">
                                                 R$ {(service.price || service.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </p>
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <span className="text-sm text-gray-600">{service.unidade || 'un'}</span>
+                                            <span className="text-sm text-gray-600 dark:text-gray-400">{service.unidade || 'un'}</span>
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex justify-center">
                                                 {(() => {
                                                     const isAtivo = (service as any).ativo !== false && (service as any).ativo !== undefined;
                                                     return isAtivo ? (
-                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
+                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 ring-1 ring-green-200 dark:ring-green-800">
                                                             ✅ Ativo
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-red-100 text-red-800 ring-1 ring-red-200">
+                                                        <span className="inline-flex items-center px-3 py-1 text-xs font-bold rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 ring-1 ring-red-200 dark:ring-red-800">
                                                             ❌ Inativo
                                                         </span>
                                                     );
@@ -987,14 +987,14 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                             <div className="flex items-center justify-center gap-2">
                                                 <button
                                                     onClick={() => setServiceToView(service)}
-                                                    className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                                                    className="p-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors"
                                                     title="Visualizar"
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
                                                 </button>
                                                 <button
                                                     onClick={() => handleOpenModal(service)}
-                                                    className="p-2 bg-cyan-100 text-cyan-700 rounded-lg hover:bg-cyan-200 transition-colors"
+                                                    className="p-2 bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 rounded-lg hover:bg-cyan-200 dark:hover:bg-cyan-900/70 transition-colors"
                                                     title="Editar"
                                                 >
                                                     <PencilIcon className="w-4 h-4" />
@@ -1004,7 +1004,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                                     return isAtivo ? (
                                                         <button
                                                             onClick={() => handleOpenDeleteModal(service)}
-                                                            className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors"
+                                                            className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors"
                                                             title="Desativar"
                                                         >
                                                             <TrashIcon className="w-4 h-4" />
@@ -1012,7 +1012,7 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                                                     ) : (
                                                         <button
                                                             onClick={() => handleReativarServico(service)}
-                                                            className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                                                            className="p-2 bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/70 transition-colors"
                                                             title="Ativar"
                                                         >
                                                             <ArrowPathIcon className="w-4 h-4" />

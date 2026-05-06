@@ -10,6 +10,7 @@ Status: ✅ **COMPLETO**
 ## 📦 O que foi Implementado
 
 ### 1. Instalação
+
 ```bash
 npx shadcn@latest add sonner --yes
 ```
@@ -17,12 +18,14 @@ npx shadcn@latest add sonner --yes
 ### 2. Arquivos Criados/Modificados
 
 #### Criados:
+
 - ✅ `src/components/ui/sonner.tsx` - Componente Toaster customizado
 - ✅ `GUIA_SONNER_TOAST.md` - Guia completo de uso
 - ✅ `EXEMPLO_IMPLEMENTACAO_SONNER.tsx` - 8 exemplos práticos
 - ✅ `SONNER_IMPLEMENTADO.md` - Este arquivo
 
 #### Modificados:
+
 - ✅ `src/App.tsx` - Adicionado componente `<Toaster />`
 
 ---
@@ -30,14 +33,16 @@ npx shadcn@latest add sonner --yes
 ## 🎯 Configuração Final
 
 ### App.tsx
+
 ```tsx
-import { Toaster } from './components/ui/sonner';
+import { Toaster } from "./components/ui/sonner";
 
 // Dentro do componente App, após AuthProvider
-<Toaster position="top-right" expand={false} richColors closeButton />
+<Toaster position="top-right" expand={false} richColors closeButton />;
 ```
 
 ### Características:
+
 - **Posição**: Top-right (canto superior direito)
 - **Rich Colors**: Ativado (cores automáticas por tipo)
 - **Close Button**: Ativado (botão X para fechar)
@@ -49,56 +54,60 @@ import { Toaster } from './components/ui/sonner';
 ## 📚 Como Usar (Rápido)
 
 ### Import
+
 ```tsx
-import { toast } from 'sonner';
+import { toast } from "sonner";
 ```
 
 ### Uso Básico
+
 ```tsx
 // Sucesso
-toast.success('Orçamento criado com sucesso!');
+toast.success("Orçamento criado com sucesso!");
 
 // Erro
-toast.error('Erro ao salvar orçamento');
+toast.error("Erro ao salvar orçamento");
 
 // Aviso
-toast.warning('BDI muito baixo');
+toast.warning("BDI muito baixo");
 
 // Informação
-toast.info('PDF sendo gerado...');
+toast.info("PDF sendo gerado...");
 
 // Com descrição
-toast.success('Salvo!', {
-  description: 'Orçamento #1234 criado'
+toast.success("Salvo!", {
+  description: "Orçamento #1234 criado",
 });
 ```
 
 ### Uso com Promises (RECOMENDADO)
+
 ```tsx
 const promise = orcamentosService.create(data);
 
 toast.promise(promise, {
-  loading: 'Criando orçamento...',
-  success: 'Orçamento criado!',
-  error: 'Erro ao criar orçamento'
+  loading: "Criando orçamento...",
+  success: "Orçamento criado!",
+  error: "Erro ao criar orçamento",
 });
 ```
 
 ### Confirmação de Exclusão (Substitui window.confirm)
+
 ```tsx
 const handleDelete = (id: string) => {
-  toast('Confirmar exclusão?', {
-    description: 'Esta ação não pode ser desfeita.',
+  toast("Confirmar exclusão?", {
+    description: "Esta ação não pode ser desfeita.",
     action: {
-      label: 'Excluir',
+      label: "Excluir",
       onClick: async () => {
         toast.promise(deleteItem(id), {
-          loading: 'Excluindo...',
-          success: 'Item excluído!',
-          error: 'Erro ao excluir'
+          loading: "Excluindo...",
+          success: "Item excluído!",
+          error: "Erro ao excluir",
         });
-      }
-    }
+      },
+    },
   });
 };
 ```
@@ -108,10 +117,14 @@ const handleDelete = (id: string) => {
 ## 🎨 Integração com Sistema
 
 ### ✅ Suporta Dark Mode
-O Sonner detecta automaticamente o tema (light/dark) via ThemeContext e aplica as cores corretas.
+
+O Sonner detecta automaticamente o tema (light/dark) via ThemeContext e aplica
+as cores corretas.
 
 ### ✅ Cores Personalizadas
+
 As cores seguem o design system do shadcn/ui:
+
 - **Sucesso**: Verde
 - **Erro**: Vermelho
 - **Aviso**: Amarelo
@@ -119,7 +132,9 @@ As cores seguem o design system do shadcn/ui:
 - **Loading**: Cinza (com spinner)
 
 ### ✅ Ícones Lucide React
+
 Usa ícones do Lucide React:
+
 - ✅ `CircleCheck` - Sucesso
 - ❌ `OctagonX` - Erro
 - ⚠️ `TriangleAlert` - Aviso
@@ -131,14 +146,18 @@ Usa ícones do Lucide React:
 ## 📖 Documentação Completa
 
 ### 1. Guia de Uso
+
 📄 `GUIA_SONNER_TOAST.md`
+
 - Tipos de toast
 - Opções avançadas
 - Exemplos práticos específicos do S3E
 - Como substituir prompts antigos
 
 ### 2. Exemplos de Implementação
+
 📄 `EXEMPLO_IMPLEMENTACAO_SONNER.tsx`
+
 - CRUD completo
 - Validação de formulários
 - Adicionar itens (estoque/manual)
@@ -153,55 +172,59 @@ Usa ícones do Lucide React:
 ## 🚀 Exemplos Práticos
 
 ### Exemplo 1: Criar Orçamento
+
 ```tsx
 const handleSubmit = async (data) => {
   const promise = orcamentosService.create(data);
-  
+
   toast.promise(promise, {
-    loading: 'Criando orçamento...',
+    loading: "Criando orçamento...",
     success: (orcamento) => `Orçamento #${orcamento.numero} criado!`,
-    error: 'Erro ao criar orçamento'
+    error: "Erro ao criar orçamento",
   });
 };
 ```
 
 ### Exemplo 2: Gerar PDF
+
 ```tsx
 const handleGeneratePDF = async () => {
-  const toastId = toast.loading('Gerando PDF...', {
-    description: 'Isso pode levar alguns segundos'
+  const toastId = toast.loading("Gerando PDF...", {
+    description: "Isso pode levar alguns segundos",
   });
-  
+
   try {
     const pdf = await pdfService.generate(id);
-    toast.success('PDF gerado!', { 
+    toast.success("PDF gerado!", {
       id: toastId,
-      description: 'Download iniciado automaticamente'
+      description: "Download iniciado automaticamente",
     });
   } catch (error) {
-    toast.error('Erro ao gerar PDF', { id: toastId });
+    toast.error("Erro ao gerar PDF", { id: toastId });
   }
 };
 ```
 
 ### Exemplo 3: Adicionar Item
+
 ```tsx
 const handleAddItem = (item) => {
   addToList(item);
-  
-  toast.success('Item adicionado!', {
+
+  toast.success("Item adicionado!", {
     description: `${item.name} - Qtd: ${item.quantity}`,
-    icon: '📦'
+    icon: "📦",
   });
 };
 ```
 
 ### Exemplo 4: Validação
+
 ```tsx
 const validateForm = () => {
   if (!clienteId) {
-    toast.error('Cliente obrigatório', {
-      description: 'Selecione um cliente para continuar'
+    toast.error("Cliente obrigatório", {
+      description: "Selecione um cliente para continuar",
     });
     return false;
   }
@@ -214,25 +237,27 @@ const validateForm = () => {
 ## 🔄 Migração de Prompts Antigos
 
 ### ❌ REMOVER (Padrão Antigo)
+
 ```tsx
 // NÃO USE MAIS
-window.confirm('Tem certeza?');
-window.alert('Salvo com sucesso!');
-alert('Erro!');
+window.confirm("Tem certeza?");
+window.alert("Salvo com sucesso!");
+alert("Erro!");
 ```
 
 ### ✅ USAR (Padrão Novo)
+
 ```tsx
 // USE ISTO
-toast('Tem certeza?', {
+toast("Tem certeza?", {
   action: {
-    label: 'Confirmar',
-    onClick: () => handleAction()
-  }
+    label: "Confirmar",
+    onClick: () => handleAction(),
+  },
 });
 
-toast.success('Salvo com sucesso!');
-toast.error('Erro!');
+toast.success("Salvo com sucesso!");
+toast.error("Erro!");
 ```
 
 ---
@@ -240,6 +265,7 @@ toast.error('Erro!');
 ## 📋 Checklist de Implementação
 
 ### ✅ Concluído
+
 - [x] Sonner instalado
 - [x] Toaster configurado no App.tsx
 - [x] Integrado com dark mode
@@ -248,6 +274,7 @@ toast.error('Erro!');
 - [x] Guia de migração criado
 
 ### 🚧 Próximos Passos (Sugestões)
+
 - [ ] Substituir `window.confirm` em componentes existentes
 - [ ] Substituir `alert()` por `toast.error()` ou `toast.success()`
 - [ ] Adicionar toasts em operações CRUD
@@ -260,6 +287,7 @@ toast.error('Erro!');
 ## 🎯 Onde Aplicar
 
 ### Componentes Prioritários
+
 1. **Orcamentos.tsx** / **NovoOrcamentoPage.tsx**
    - Criar, editar, excluir orçamentos
    - Adicionar/remover itens
@@ -296,6 +324,7 @@ toast.error('Erro!');
 ## 💡 Melhores Práticas
 
 ### ✅ FAÇA
+
 1. Use `toast.promise` para operações assíncronas
 2. Adicione `description` para contexto
 3. Use `action` para operações reversíveis
@@ -304,6 +333,7 @@ toast.error('Erro!');
 6. Forneça feedback claro
 
 ### ❌ NÃO FAÇA
+
 1. Não use `window.alert()` ou `window.confirm()`
 2. Não mostre muitos toasts ao mesmo tempo
 3. Não use textos genéricos
@@ -315,26 +345,28 @@ toast.error('Erro!');
 ## 🎊 Resultado
 
 ### Antes (Prompts Nativos)
+
 ```tsx
-if (confirm('Excluir?')) {
+if (confirm("Excluir?")) {
   deleteItem();
-  alert('Excluído!');
+  alert("Excluído!");
 }
 ```
 
 ### Depois (Sonner)
+
 ```tsx
-toast('Confirmar exclusão?', {
+toast("Confirmar exclusão?", {
   action: {
-    label: 'Excluir',
+    label: "Excluir",
     onClick: () => {
       toast.promise(deleteItem(), {
-        loading: 'Excluindo...',
-        success: 'Excluído com sucesso!',
-        error: 'Erro ao excluir'
+        loading: "Excluindo...",
+        success: "Excluído com sucesso!",
+        error: "Erro ao excluir",
       });
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -342,8 +374,8 @@ toast('Confirmar exclusão?', {
 
 ## 🔗 Recursos
 
-- **Documentação Oficial**: https://sonner.emilkowal.ski/
-- **Shadcn/ui Docs**: https://ui.shadcn.com/docs/components/sonner
+- **Documentação Oficial**: <https://sonner.emilkowal.ski/>
+- **Shadcn/ui Docs**: <https://ui.shadcn.com/docs/components/sonner>
 - **Guia Completo**: `GUIA_SONNER_TOAST.md`
 - **Exemplos**: `EXEMPLO_IMPLEMENTACAO_SONNER.tsx`
 
@@ -352,18 +384,21 @@ toast('Confirmar exclusão?', {
 ## ✨ Benefícios
 
 ### UX Melhorada
+
 - ✅ Notificações profissionais e modernas
 - ✅ Feedback visual consistente
 - ✅ Animações suaves
 - ✅ Não bloqueia a interface
 
 ### Developer Experience
+
 - ✅ API simples e intuitiva
 - ✅ TypeScript completo
 - ✅ Integração fácil
 - ✅ Exemplos abundantes
 
 ### Sistema S3E
+
 - ✅ Identidade visual mantida
 - ✅ Dark mode nativo
 - ✅ Responsivo
@@ -373,10 +408,13 @@ toast('Confirmar exclusão?', {
 
 ## 🎉 Conclusão
 
-O Sonner foi **implementado com sucesso** e está **pronto para uso** em todo o sistema S3E!
+O Sonner foi **implementado com sucesso** e está **pronto para uso** em todo o
+sistema S3E!
 
 ### Próximo Passo
-Começar a substituir os prompts nativos (`alert`, `confirm`) pelos toasts do Sonner nos componentes existentes.
+
+Começar a substituir os prompts nativos (`alert`, `confirm`) pelos toasts do
+Sonner nos componentes existentes.
 
 **Sistema agora tem notificações de nível profissional!** 🚀
 
@@ -386,4 +424,3 @@ Começar a substituir os prompts nativos (`alert`, `confirm`) pelos toasts do So
 **Data**: 07/11/2024  
 **Status**: ✅ **PRODUCTION READY**  
 **Qualidade**: 🌟🌟🌟🌟🌟
-

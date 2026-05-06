@@ -7,18 +7,21 @@
 ## 🐛 **PROBLEMAS IDENTIFICADOS:**
 
 ### **1. Modal de Detalhes: Sem Nome dos Produtos**
+
 ```
 ANTES: Itens apareciam sem descrição
 DEPOIS: Nomes dos produtos visíveis
 ```
 
 ### **2. Modal de Edição: Flag Sumia ao Recarregar**
+
 ```
 ANTES: Flag só aparecia em itens recém-adicionados
 DEPOIS: Flag aparece SEMPRE em itens de cotação
 ```
 
 ### **3. Backend Não Retornava Dados da Cotação**
+
 ```
 ANTES: items.include não tinha cotacao
 DEPOIS: items.include.cotacao com todos os dados
@@ -31,10 +34,12 @@ DEPOIS: items.include.cotacao com todos os dados
 ### **1. Backend (`orcamentosController.ts`)**
 
 **Funções corrigidas:**
+
 - `getOrcamentos()` (listar todos)
 - `getOrcamentoById()` (buscar por ID)
 
 **ANTES:**
+
 ```typescript
 items: {
   include: {
@@ -46,6 +51,7 @@ items: {
 ```
 
 **DEPOIS:**
+
 ```typescript
 items: {
   include: {
@@ -66,11 +72,13 @@ items: {
 ### **2. Frontend - Modal de Visualização** (`Orcamentos.tsx`)
 
 **ANTES:**
+
 ```tsx
 <p>{item.nome || item.descricao || 'Item'}</p>  ❌ Podia não mostrar nome
 ```
 
 **DEPOIS:**
+
 ```tsx
 <p>{item.nome || 'Item'}</p>  ✅ Sempre mostra nome
 {/* Flag permanente */}
@@ -84,6 +92,7 @@ items: {
 ### **3. Frontend - Modal de Edição** (`Orcamentos.tsx`)
 
 **ANTES:**
+
 ```tsx
 {item.tipo === 'COTACAO' && item.dataAtualizacaoCotacao && (  ❌ Só itens novos
   <div>📦 Banco Frio</div>
@@ -91,6 +100,7 @@ items: {
 ```
 
 **DEPOIS:**
+
 ```tsx
 {(item.tipo === 'COTACAO' || item.cotacao) && (  ✅ Novos E salvos
   <div className="...">
@@ -102,11 +112,13 @@ items: {
 ### **4. Frontend - Adicionar Cotação**
 
 **ANTES:**
+
 ```tsx
 descricao: `NCM: ${ncm} | Fornecedor: ${fornecedor}`  ❌
 ```
 
 **DEPOIS:**
+
 ```tsx
 descricao: cotacao.nome  ✅ Apenas nome do material
 ```
@@ -129,19 +141,19 @@ descricao: cotacao.nome  ✅ Apenas nome do material
 2. Adicionar ao Orçamento:
    Orçamento → Editar → + Adicionar Item
    Aba "🏷️ Cotações" → Selecionar
-   
+
    Item criado: {
      tipo: 'COTACAO',
      cotacaoId: 'uuid',
      nome: 'Cabo de Cobre 2,5mm',
      dataAtualizacaoCotacao: '2025-11-12'  ← Local
    }
-   
+
    Flag aparece: "📦 Banco Frio • 12/11"
 
 3. Salvar Orçamento:
    Backend salva item com cotacaoId
-   
+
 4. Reabrir Modal de Edição:
    Backend retorna: {
      tipo: 'COTACAO',
@@ -152,7 +164,7 @@ descricao: cotacao.nome  ✅ Apenas nome do material
        fornecedorNome: 'Eletromar'
      }
    }
-   
+
    Flag aparece: "📦 Banco Frio • 12/11"  ✅ PERMANENTE!
 
 5. Visualizar Detalhes:
@@ -172,6 +184,7 @@ descricao: cotacao.nome  ✅ Apenas nome do material
 ## 🎨 **VISUAL FINAL:**
 
 ### **Modal de Visualização:**
+
 ```
 ╔═══════════════════════════════════════════════╗
 ║  Detalhes do Orçamento                   [X] ║
@@ -191,6 +204,7 @@ descricao: cotacao.nome  ✅ Apenas nome do material
 ```
 
 ### **Modal de Edição (Com Item Salvo):**
+
 ```
 ╔═══════════════════════════════════════════════╗
 ║  Editar Orçamento                        [X] ║
@@ -220,12 +234,14 @@ descricao: cotacao.nome  ✅ Apenas nome do material
 ## 🧪 **TESTE COMPLETO:**
 
 ### **1. Cadastrar Cotação:**
+
 ```
 Menu → Cotações → Importar
 Adicionar: "Cabo de Cobre - R$ 450"
 ```
 
 ### **2. Criar Orçamento com Cotação:**
+
 ```
 Orçamentos → Novo
 + Adicionar Item → 🏷️ Cotações
@@ -234,6 +250,7 @@ Salvar Orçamento
 ```
 
 ### **3. Visualizar Detalhes:**
+
 ```
 Lista → Ações → Visualizar
 
@@ -245,6 +262,7 @@ Modal mostra:
 ```
 
 ### **4. Editar Orçamento:**
+
 ```
 Fechar modal
 Lista → Ações → Editar
@@ -256,6 +274,7 @@ Modal de edição mostra:
 ```
 
 ### **5. Adicionar Mais Itens:**
+
 ```
 + Adicionar Item
 
@@ -267,6 +286,7 @@ Diferenciação visual clara!
 ```
 
 ### **6. Gerar PDF:**
+
 ```
 Visualizar → Gerar PDF Rápido
 
@@ -284,6 +304,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ## ✅ **VERIFICAÇÕES FINAIS:**
 
 ### **Backend:**
+
 ```
 ✓ GET /api/orcamentos → include cotacao
 ✓ GET /api/orcamentos/:id → include cotacao
@@ -292,6 +313,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ```
 
 ### **Frontend - Modal Visualização:**
+
 ```
 ✓ Mostra: item.nome
 ✓ Flag: item.cotacao detectada
@@ -299,6 +321,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ```
 
 ### **Frontend - Modal Edição:**
+
 ```
 ✓ Flag: Aparece em itens salvos
 ✓ Flag: Aparece em itens novos
@@ -307,6 +330,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ```
 
 ### **PDF:**
+
 ```
 ✓ Nome: item.nome (limpo)
 ✓ Descrição: Filtrada (sem cotação)
@@ -339,11 +363,13 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ## 📂 **ARQUIVOS MODIFICADOS:**
 
 ### **Backend:**
+
 1. ✅ `backend/src/controllers/orcamentosController.ts`
    - `getOrcamentos()`: Include cotacao
    - `getOrcamentoById()`: Include cotacao
 
 ### **Frontend:**
+
 1. ✅ `frontend/src/components/Orcamentos.tsx`
    - Modal visualização: Nome + Flag permanente
    - Modal edição: Flag permanente
@@ -356,6 +382,7 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 ---
 
 **🔥 TESTE AGORA:**
+
 ```
 1. Edite um orçamento com cotação
 2. Veja: Flag "📦 Banco Frio" PERMANENTE
@@ -369,4 +396,3 @@ Cabo de Cobre 2,5mm - Rolo 100m   | 1   | R$ 540
 
 **Data:** 12/11/2025  
 **Status:** ✅ COMPLETO E TESTADO
-

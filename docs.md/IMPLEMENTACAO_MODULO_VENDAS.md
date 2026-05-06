@@ -2,7 +2,10 @@
 
 ## ✅ Resumo Executivo
 
-Implementação completa do módulo de **Vendas** e **Contas a Receber** no sistema S3E, incluindo backend (API e banco de dados) e frontend (interface de usuário). O módulo foi desenvolvido seguindo o padrão visual do sistema e está totalmente integrado com a página de Financeiro.
+Implementação completa do módulo de **Vendas** e **Contas a Receber** no sistema
+S3E, incluindo backend (API e banco de dados) e frontend (interface de usuário).
+O módulo foi desenvolvido seguindo o padrão visual do sistema e está totalmente
+integrado com a página de Financeiro.
 
 ---
 
@@ -16,8 +19,10 @@ Implementação completa do módulo de **Vendas** e **Contas a Receber** no sist
    - Relacionamentos configurados com `Cliente`, `Projeto` e cascata de exclusão
 
 2. **✅ Serviços e Lógica de Negócio**
-   - `VendasService.realizarVenda()`: Cria venda e gera contas a receber automaticamente
-   - `VendasService.getVendasDashboard()`: Fornece dados estatísticos para dashboard
+   - `VendasService.realizarVenda()`: Cria venda e gera contas a receber
+     automaticamente
+   - `VendasService.getVendasDashboard()`: Fornece dados estatísticos para
+     dashboard
    - `VendasService.listarVendas()`: Lista com paginação
    - `VendasService.pagarConta()`: Marca conta como paga
    - `VendasService.cancelarVenda()`: Cancela venda
@@ -58,21 +63,25 @@ Implementação completa do módulo de **Vendas** e **Contas a Receber** no sist
 ### Backend
 
 #### Criados:
+
 - `backend/src/services/vendas.service.ts`
 - `backend/src/controllers/vendasController.ts`
 - `backend/src/routes/vendas.routes.ts`
 - `backend/src/types/index.ts`
 
 #### Modificados:
+
 - `backend/prisma/schema.prisma` - Adicionados modelos Venda e ContaReceber
 - `backend/src/app.ts` - Integradas rotas de vendas
 
 ### Frontend
 
 #### Criados:
+
 - `frontend/src/components/Vendas.tsx`
 
 #### Modificados:
+
 - `frontend/src/App.tsx` - Adicionada rota para Vendas
 - `frontend/src/constants/index.tsx` - Adicionado ícone e link de navegação
 - `frontend/src/data/mockData.ts` - Adicionados dados mockados de vendas
@@ -83,6 +92,7 @@ Implementação completa do módulo de **Vendas** e **Contas a Receber** no sist
 ## 🗄️ Estrutura do Banco de Dados
 
 ### Modelo `Venda`
+
 ```prisma
 model Venda {
   id              String   @id @default(uuid())
@@ -106,6 +116,7 @@ model Venda {
 ```
 
 ### Modelo `ContaReceber`
+
 ```prisma
 model ContaReceber {
   id             String   @id @default(uuid())
@@ -131,20 +142,21 @@ model ContaReceber {
 
 ### Base URL: `/api/vendas`
 
-| Método | Endpoint | Descrição | Autenticação |
-|--------|----------|-----------|--------------|
-| `GET` | `/dashboard` | Dados para dashboard financeiro | ✅ |
-| `GET` | `/` | Lista vendas (paginação) | ✅ |
-| `GET` | `/:id` | Busca venda específica | ✅ |
-| `POST` | `/realizar` | Realiza nova venda | ✅ |
-| `PUT` | `/:id/cancelar` | Cancela venda | ✅ |
-| `PUT` | `/contas/:id/pagar` | Marca conta como paga | ✅ |
+| Método | Endpoint            | Descrição                       | Autenticação |
+| ------ | ------------------- | ------------------------------- | ------------ |
+| `GET`  | `/dashboard`        | Dados para dashboard financeiro | ✅           |
+| `GET`  | `/`                 | Lista vendas (paginação)        | ✅           |
+| `GET`  | `/:id`              | Busca venda específica          | ✅           |
+| `POST` | `/realizar`         | Realiza nova venda              | ✅           |
+| `PUT`  | `/:id/cancelar`     | Cancela venda                   | ✅           |
+| `PUT`  | `/contas/:id/pagar` | Marca conta como paga           | ✅           |
 
 ---
 
 ## 📊 Funcionalidades da Interface
 
 ### 1. Dashboard de Vendas
+
 - **Total de Vendas**: Soma total e quantidade
 - **A Receber**: Valor total de contas pendentes
 - **Em Atraso**: Contas vencidas e não pagas
@@ -152,12 +164,14 @@ model ContaReceber {
 - **Lista de Contas**: Visualização das próximas contas
 
 ### 2. Vendas Realizadas
+
 - Tabela completa de vendas
 - Colunas: Nº Venda, Cliente, Projeto, Data, Valor, Status, Parcelas
 - Status visual com badges coloridos
 - Contador de parcelas pagas
 
 ### 3. Nova Venda
+
 - Seleção de cliente (obrigatório)
 - Projeto relacionado (opcional)
 - Valor total da venda
@@ -173,12 +187,14 @@ model ContaReceber {
 ## 🎨 Padrão Visual
 
 ### Cores do Sistema
+
 - **Azul** (`blue-50` to `blue-700`): Total de vendas, valores principais
 - **Verde** (`green-50` to `green-700`): Contas a receber, valores positivos
 - **Vermelho** (`red-50` to `red-700`): Contas em atraso, alertas
 - **Cinza** (`gray-50` to `gray-700`): Textos, bordas, fundos neutros
 
 ### Componentes Padrão
+
 - Cards com gradiente e bordas arredondadas
 - Tabs com transições suaves
 - Tabelas responsivas com hover
@@ -216,11 +232,13 @@ model ContaReceber {
 ## 📈 Cálculo de Parcelas
 
 ### Exemplo: Venda de R$ 15.000,00
+
 - **Entrada**: R$ 5.000,00
 - **Restante**: R$ 10.000,00
 - **Parcelas**: 3x
 
 **Resultado**:
+
 - Parcela 1: R$ 8.333,33 (venc: 30 dias) - Entrada + 1ª parcela
 - Parcela 2: R$ 3.333,33 (venc: 60 dias)
 - Parcela 3: R$ 3.333,33 (venc: 90 dias)
@@ -231,20 +249,30 @@ model ContaReceber {
 
 ```javascript
 vendasData = [
-    {
-        id: 'VND-001',
-        numeroVenda: 'VND-1698765432',
-        dataVenda: '2024-01-15',
-        valorTotal: 15000.00,
-        status: 'Concluida',
-        cliente: { nome: 'Construtora Alfa' },
-        projeto: { titulo: 'Edifício Residencial' },
-        contasReceber: [
-            { id: 'CR-001', valorParcela: 7500.00, dataVencimento: '2024-02-15', status: 'Pago' },
-            { id: 'CR-002', valorParcela: 7500.00, dataVencimento: '2024-03-15', status: 'Pendente' }
-        ]
-    },
-    // ... mais vendas
+  {
+    id: "VND-001",
+    numeroVenda: "VND-1698765432",
+    dataVenda: "2024-01-15",
+    valorTotal: 15000.0,
+    status: "Concluida",
+    cliente: { nome: "Construtora Alfa" },
+    projeto: { titulo: "Edifício Residencial" },
+    contasReceber: [
+      {
+        id: "CR-001",
+        valorParcela: 7500.0,
+        dataVencimento: "2024-02-15",
+        status: "Pago",
+      },
+      {
+        id: "CR-002",
+        valorParcela: 7500.0,
+        dataVencimento: "2024-03-15",
+        status: "Pendente",
+      },
+    ],
+  },
+  // ... mais vendas
 ];
 ```
 
@@ -253,11 +281,13 @@ vendasData = [
 ## 🚀 Próximos Passos (Sugeridos)
 
 ### Fase 1: Integração Backend Real
+
 - [ ] Conectar frontend aos endpoints reais
 - [ ] Implementar feedback de erro/sucesso
 - [ ] Adicionar loading states
 
 ### Fase 2: Funcionalidades Avançadas
+
 - [ ] Filtros de busca (cliente, período, status)
 - [ ] Exportação de relatórios (PDF/Excel)
 - [ ] Gráficos de evolução de vendas
@@ -265,6 +295,7 @@ vendasData = [
 - [ ] Dashboard com métricas avançadas
 
 ### Fase 3: Gestão de Contas
+
 - [ ] Modal de detalhes de conta a receber
 - [ ] Botão "Marcar como Pago" funcional
 - [ ] Histórico de pagamentos
@@ -272,6 +303,7 @@ vendasData = [
 - [ ] Integração com meios de pagamento
 
 ### Fase 4: Relatórios e Analytics
+
 - [ ] Relatório de vendas por período
 - [ ] Análise de inadimplência
 - [ ] Previsão de recebimentos
@@ -281,7 +313,8 @@ vendasData = [
 
 ## 📝 Notas Técnicas
 
-1. **Transações**: A criação de venda usa `prisma.$transaction` para garantir atomicidade
+1. **Transações**: A criação de venda usa `prisma.$transaction` para garantir
+   atomicidade
 2. **Cascata**: Exclusão de venda remove automaticamente contas a receber
 3. **Validações**: Realizadas tanto no frontend quanto backend
 4. **Autenticação**: Todas as rotas requerem JWT válido
@@ -306,6 +339,7 @@ vendasData = [
 ## 📞 Suporte e Documentação
 
 Para mais informações sobre o sistema S3E:
+
 - 📖 Documentação de API: Ver `EXEMPLOS_API.md`
 - 🔧 Configuração Fiscal: Ver `CONFIGURACAO_FISCAL_NFE.md`
 - 📊 Testes: Ver `GUIA_TESTES_COMPLETO.md`
@@ -313,4 +347,3 @@ Para mais informações sobre o sistema S3E:
 ---
 
 **Desenvolvido para S3E Engenharia Elétrica** 🔌⚡
-

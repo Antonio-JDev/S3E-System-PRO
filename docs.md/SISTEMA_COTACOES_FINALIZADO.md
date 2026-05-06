@@ -7,12 +7,14 @@
 ## ✅ **O QUE FOI CRIADO:**
 
 ### **1. Backend (100% Completo)** ✅
+
 - ✅ Database: Model `Cotacao` + Migration aplicada
 - ✅ Controller: `cotacoesController.ts` (8 endpoints)
 - ✅ Routes: `cotacoes.routes.ts` (multer + upload)
 - ✅ Registrado em `app.ts`
 
 ### **2. Frontend (100% Completo)** ✅
+
 - ✅ **Componente:** `Cotacoes.tsx` (900+ linhas)
   - Lista em formato **tabela** (não grid)
   - Busca/filtros
@@ -22,7 +24,6 @@
   - AlertDialog para exclusão
   - Toast notifications integrado
   - AxiosApi integrado
-  
 - ✅ **Toast:** `ui/toast.tsx` + hook `use-toast.ts`
 - ✅ **Sidebar:** Adicionado "Cotações" na seção Comercial
 - ✅ **App.tsx:** Case route para Cotações
@@ -35,6 +36,7 @@
 ### **Componente Cotacoes.tsx:**
 
 **Interface:**
+
 ```
 ┌─────────────────────────────────────────────────────┐
 │ 🏷️ Cotações de Fornecedores                         │
@@ -53,6 +55,7 @@
 ```
 
 **Features implementadas:**
+
 - ✅ **Listagem:** Tabela responsiva com todas as cotações
 - ✅ **Busca:** Filtra por nome, NCM ou fornecedor
 - ✅ **Template:** Download de JSON de exemplo
@@ -86,12 +89,14 @@
 ## 🎯 **COMO USAR:**
 
 ### **1. Baixar Template:**
+
 ```
 Menu → Cotações → Botão "Template"
 Arquivo baixado: template-cotacoes-2025-11-12.json
 ```
 
 ### **2. Preencher Template:**
+
 ```json
 {
   "versao": "1.0",
@@ -99,7 +104,7 @@ Arquivo baixado: template-cotacoes-2025-11-12.json
     {
       "nome": "Cabo de Cobre 2,5mm",
       "ncm": "85444200",
-      "valorUnitario": 100.50,
+      "valorUnitario": 100.5,
       "fornecedorNome": "Fornecedor XYZ",
       "observacoes": "Cotação válida por 30 dias"
     }
@@ -108,12 +113,14 @@ Arquivo baixado: template-cotacoes-2025-11-12.json
 ```
 
 ### **3. Importar:**
+
 ```
 Botão "Importar JSON" → Selecionar arquivo → Importar
 Toast: "✅ 5 criados, 0 atualizados, 0 erros"
 ```
 
 ### **4. Gerenciar:**
+
 ```
 👁️ Visualizar: Ver detalhes completos
 ✏️ Editar: Atualizar valor/fornecedor
@@ -129,25 +136,27 @@ Toast: "✅ 5 criados, 0 atualizados, 0 erros"
 #### **1. Modificar NovoOrcamentoPage.tsx:**
 
 **Adicionar toggle:**
+
 ```tsx
 const [usarBancoFrio, setUsarBancoFrio] = useState(false);
 
 <label>
-  <input 
-    type="checkbox" 
+  <input
+    type="checkbox"
     checked={usarBancoFrio}
     onChange={(e) => setUsarBancoFrio(e.target.checked)}
   />
   Usar Banco de Cotações
-</label>
+</label>;
 ```
 
 **Buscar cotações ao invés de materiais:**
+
 ```tsx
 const buscarItens = async () => {
   if (usarBancoFrio) {
     // Buscar de /api/cotacoes
-    const response = await axiosApiService.get('/api/cotacoes');
+    const response = await axiosApiService.get("/api/cotacoes");
     // ...
   } else {
     // Buscar de /api/materiais (existente)
@@ -156,18 +165,22 @@ const buscarItens = async () => {
 ```
 
 **Adicionar flag visual:**
+
 ```tsx
-{item.cotacaoId && (
-  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-    📦 Banco Frio - {formatDate(item.dataAtualizacao)}
-  </span>
-)}
+{
+  item.cotacaoId && (
+    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+      📦 Banco Frio - {formatDate(item.dataAtualizacao)}
+    </span>
+  );
+}
 ```
 
 **Salvar com tipo correto:**
+
 ```tsx
 const itemOrcamento = {
-  tipo: usarBancoFrio ? 'COTACAO' : 'MATERIAL',
+  tipo: usarBancoFrio ? "COTACAO" : "MATERIAL",
   cotacaoId: usarBancoFrio ? item.id : null,
   materialId: usarBancoFrio ? null : item.id,
   // ... outros campos
@@ -177,6 +190,7 @@ const itemOrcamento = {
 #### **2. Modificar PDF de Orçamento:**
 
 **Filtrar flags no backend:**
+
 ```typescript
 // Não mostrar "Banco Frio" no PDF do cliente
 // Mostrar apenas:
@@ -263,11 +277,13 @@ Funcionalidades:
 
 ---
 
-**📚 DOCUMENTAÇÃO:** 
+**📚 DOCUMENTAÇÃO:**
+
 - `SISTEMA_COTACOES_IMPLEMENTACAO.md` - Doc técnica completa
 - `SISTEMA_COTACOES_FINALIZADO.md` - Este arquivo
 
 **🔥 TESTE AGORA:**
+
 ```
 1. Menu → Cotações
 2. Baixar Template
@@ -279,4 +295,3 @@ Funcionalidades:
 **Data:** 12/11/2025  
 **Status:** ✅ COMPLETO E FUNCIONAL  
 **Próximo:** Integrar com Orçamentos
-

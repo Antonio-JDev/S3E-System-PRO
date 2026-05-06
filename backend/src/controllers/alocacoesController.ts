@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // Função auxiliar para buscar membros da equipe (usuários pelos IDs)
 async function buscarMembrosEquipe(membrosIds: string[]) {
@@ -142,6 +140,13 @@ export class AlocacoesController {
         orderBy: { dataInicio: 'asc' }
       });
 
+      const obraIds = [...new Set(alocacoes.map((a) => a.obraId))];
+      const obrasNomes = await prisma.obra.findMany({
+        where: { id: { in: obraIds } },
+        select: { id: true, nomeObra: true }
+      });
+      const obraNomePorId = new Map(obrasNomes.map((o) => [o.id, o.nomeObra]));
+
       // Buscar membros para cada equipe
       const response = await Promise.all(
         alocacoes.map(async (alocacao) => {
@@ -150,6 +155,7 @@ export class AlocacoesController {
             id: alocacao.id,
             tarefaId: alocacao.tarefaId,
             obraId: alocacao.obraId,
+            obraNome: obraNomePorId.get(alocacao.obraId) ?? 'Obra',
             equipeId: alocacao.equipeId,
             equipeNome: alocacao.equipe.nome,
             membros: membros,

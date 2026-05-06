@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 
-const prisma = new PrismaClient();
+function inRange(d: Date, b: { start: Date; end: Date }): boolean {
+  const t = new Date(d).getTime();
+  return t >= b.start.getTime() && t <= b.end.getTime();
+}
 
 export class DashboardController {
   static async getEstatisticas(req: Request, res: Response): Promise<void> {
@@ -772,6 +775,303 @@ export class DashboardController {
       console.error('Erro ao buscar resumo financeiro:', error);
       res.status(500).json({ success: false, message: 'Erro ao buscar resumo financeiro', error: error.message });
     }
+  }
+
+  /**
+   * Gráficos do dashboard executivo: evoluções, comparativo e categorias de venda.
+   * GET /api/dashboard/graficos-executivo?periodo=monthly|semester|annual
+   */
+  static async getGraficosExecutivo(req: Request, res: Response): Promise<void> {
+    try {
+      const { periodo = 'monthly' } = req.query;
+      const hoje = new Date();
+      const anoAtual = hoje.getFullYear();
+
+      let dataInicio: Date;
+      let dataFim: Date;
+      let modo: 'month' | 'semester' | 'year';
+
+      switch (periodo) {
+        case 'semester':
+          dataInicio = new Date(anoAtual - 2, 0, 1);
+          dataFim = hoje;
+          modo = 'semester';
+          break;
+        case 'annual':
+          dataInicio = new Date(anoAtual - 5, 0, 1);
+          dataFim = hoje;
+          modo = 'year';
+          break;
+        case 'monthly':
+        default:
+          dataInicio = new Date(anoAtual, 0, 1);
+          dataFim = new Date(anoAtual, 11, 31, 23, 59, 59, 999);
+          modo = 'month';
+      }
+
+      const [orcamentos, projetos, obras, vendas] = await Promise.all([
+        prisma.orcamento.findMany({
+          where: { createdAt: { gte: dataInicio, lte: dataFim } },
+          select: { createdAt: true, status: true }
+        }),
+        prisma.projeto.findMany({
+          where: { createdAt: { gte: dataInicio, lte: dataFim } },
+          select: { createdAt: true, status: true }
+        }),
+        prisma.obra.findMany({
+          where: { createdAt: { gte: dataInicio, lte: dataFim } },
+          select: { createdAt: true, status: true }
+        }),
+        prisma.venda.findMany({
+          where: { createdAt: { gte: dataInicio, lte: dataFim } },
+          select: { createdAt: true, valorTotal: true, formaPagamento: true }
+        })
+      ]);
+
+      const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+      let evolucaoOrcamentos: any[] = [];
+      let evolucaoOrdensServico: any[] = [];
+      let evolucaoObrasKanban: any[] = [];
+      let evolucaoPedidosVendas: any[] = [];
+      let comparativoMensal: any[] = [];
+      let categoriasVendas: { name: string; value: number }[] = [];
+
+      if (modo === 'month') {
+        for (let mes = 0; mes < 12; mes++) {
+          const oM = orcamentos.filter((o) => {
+            const d = new Date(o.createdAt);
+            return d.getFullYear() === anoAtual && d.getMonth() === mes;
+          });
+          const pM = projetos.filter((p) => {
+            const d = new Date(p.createdAt);
+            return d.getFullYear() === anoAtual && d.getMonth() === mes;
+          });
+          const obM = obras.filter((o) => {
+            const d = new Date(o.createdAt);
+            return d.getFullYear() === anoAtual && d.getMonth() === mes;
+          });
+          const vM = vendas.filter((v) => {
+            const d = new Date(v.createdAt);
+            return d.getFullYear() === anoAtual && d.getMonth() === mes;
+          });
+
+          evolucaoOrcamentos.push({
+            name: mesesNomes[mes],
+            criados: oM.length,
+            aprovados: oM.filter((o) => /aprovado/i.test(o.status || '')).length,
+            emAnalise: oM.filter(
+              (o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')
+            ).length
+          });
+
+          evolucaoOrdensServico.push({
+            name: mesesNomes[mes],
+            concluidas: pM.filter((p) => p.status === 'CONCLUIDO').length,
+            emAndamento: pM.filter((p) => p.status === 'EXECUCAO').length,
+            planejadas: pM.filter((p) =>
+              ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
+            ).length
+          });
+
+          evolucaoObrasKanban.push({
+            name: mesesNomes[mes],
+            backlog: obM.filter((o) => o.status === 'BACKLOG').length,
+            aFazer: obM.filter((o) => o.status === 'A_FAZER').length,
+            andamento: obM.filter((o) => o.status === 'ANDAMENTO').length,
+            concluidas: obM.filter((o) => o.status === 'CONCLUIDO').length
+          });
+
+          const valorVendas = vM.reduce((s, v) => s + (v.valorTotal || 0), 0);
+          evolucaoPedidosVendas.push({
+            name: mesesNomes[mes],
+            quantidade: vM.length,
+            valor: valorVendas
+          });
+
+          comparativoMensal.push({
+            name: mesesNomes[mes],
+            orcamentos: oM.length,
+            ordensServico: pM.length,
+            obras: obM.length,
+            pedidosVendas: vM.length
+          });
+        }
+
+        const mapaCat = new Map<string, number>();
+        vendas.forEach((v) => {
+          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
+          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
+        });
+        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
+      } else if (modo === 'semester') {
+        const anoBase = dataInicio.getFullYear();
+        const buckets: { start: Date; end: Date; label: string }[] = [];
+        for (let i = 0; i < 4; i++) {
+          const anoSem = Math.floor(anoBase + i / 2);
+          const semestre = (i % 2) + 1;
+          const start = new Date(anoSem, semestre === 1 ? 0 : 6, 1);
+          const end = new Date(anoSem, semestre === 1 ? 5 : 11, semestre === 1 ? 30 : 31, 23, 59, 59, 999);
+          buckets.push({
+            start: start < dataInicio ? dataInicio : start,
+            end: end > dataFim ? dataFim : end,
+            label: `${semestre}º Sem ${anoSem}`
+          });
+        }
+        evolucaoOrcamentos = buckets.map((b) =>
+          DashboardController.fillBucketOrcamentos(orcamentos, b)
+        );
+        evolucaoOrdensServico = buckets.map((b) =>
+          DashboardController.fillBucketProjetos(projetos, b)
+        );
+        evolucaoObrasKanban = buckets.map((b) => DashboardController.fillBucketObras(obras, b));
+        evolucaoPedidosVendas = buckets.map((b) => DashboardController.fillBucketVendas(vendas, b));
+        comparativoMensal = buckets.map((b) => {
+          const oB = orcamentos.filter((x) => inRange(x.createdAt, b));
+          const pB = projetos.filter((x) => inRange(x.createdAt, b));
+          const obB = obras.filter((x) => inRange(x.createdAt, b));
+          const vB = vendas.filter((x) => inRange(x.createdAt, b));
+          return {
+            name: b.label,
+            orcamentos: oB.length,
+            ordensServico: pB.length,
+            obras: obB.length,
+            pedidosVendas: vB.length
+          };
+        });
+        const mapaCat = new Map<string, number>();
+        vendas.forEach((v) => {
+          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
+          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
+        });
+        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
+      } else {
+        const anoIni = dataInicio.getFullYear();
+        const anoFim = dataFim.getFullYear();
+        for (let ano = anoIni; ano <= anoFim; ano++) {
+          const oY = orcamentos.filter((o) => new Date(o.createdAt).getFullYear() === ano);
+          const pY = projetos.filter((p) => new Date(p.createdAt).getFullYear() === ano);
+          const obY = obras.filter((o) => new Date(o.createdAt).getFullYear() === ano);
+          const vY = vendas.filter((v) => new Date(v.createdAt).getFullYear() === ano);
+
+          evolucaoOrcamentos.push({
+            name: String(ano),
+            criados: oY.length,
+            aprovados: oY.filter((o) => /aprovado/i.test(o.status || '')).length,
+            emAnalise: oY.filter(
+              (o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')
+            ).length
+          });
+          evolucaoOrdensServico.push({
+            name: String(ano),
+            concluidas: pY.filter((p) => p.status === 'CONCLUIDO').length,
+            emAndamento: pY.filter((p) => p.status === 'EXECUCAO').length,
+            planejadas: pY.filter((p) =>
+              ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
+            ).length
+          });
+          evolucaoObrasKanban.push({
+            name: String(ano),
+            backlog: obY.filter((o) => o.status === 'BACKLOG').length,
+            aFazer: obY.filter((o) => o.status === 'A_FAZER').length,
+            andamento: obY.filter((o) => o.status === 'ANDAMENTO').length,
+            concluidas: obY.filter((o) => o.status === 'CONCLUIDO').length
+          });
+          evolucaoPedidosVendas.push({
+            name: String(ano),
+            quantidade: vY.length,
+            valor: vY.reduce((s, v) => s + (v.valorTotal || 0), 0)
+          });
+          comparativoMensal.push({
+            name: String(ano),
+            orcamentos: oY.length,
+            ordensServico: pY.length,
+            obras: obY.length,
+            pedidosVendas: vY.length
+          });
+        }
+        const mapaCat = new Map<string, number>();
+        vendas.forEach((v) => {
+          const k = (v.formaPagamento && v.formaPagamento.trim()) || 'Não informado';
+          mapaCat.set(k, (mapaCat.get(k) || 0) + 1);
+        });
+        categoriasVendas = Array.from(mapaCat.entries()).map(([name, value]) => ({ name, value }));
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          periodo,
+          evolucaoOrcamentos,
+          evolucaoOrdensServico,
+          evolucaoObrasKanban,
+          evolucaoPedidosVendas,
+          comparativoMensal,
+          categoriasVendas
+        }
+      });
+    } catch (error: any) {
+      console.error('Erro ao buscar gráficos executivo:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao buscar gráficos executivo',
+        error: error.message
+      });
+    }
+  }
+
+  private static fillBucketOrcamentos(
+    orcamentos: { createdAt: Date; status: string }[],
+    b: { start: Date; end: Date; label: string }
+  ) {
+    const oB = orcamentos.filter((o) => inRange(o.createdAt, b));
+    return {
+      name: b.label,
+      criados: oB.length,
+      aprovados: oB.filter((o) => /aprovado/i.test(o.status || '')).length,
+      emAnalise: oB.filter((o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')).length
+    };
+  }
+
+  private static fillBucketProjetos(
+    projetos: { createdAt: Date; status: string }[],
+    b: { start: Date; end: Date; label: string }
+  ) {
+    const pB = projetos.filter((p) => inRange(p.createdAt, b));
+    return {
+      name: b.label,
+      concluidas: pB.filter((p) => p.status === 'CONCLUIDO').length,
+      emAndamento: pB.filter((p) => p.status === 'EXECUCAO').length,
+      planejadas: pB.filter((p) =>
+        ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
+      ).length
+    };
+  }
+
+  private static fillBucketObras(
+    obras: { createdAt: Date; status: string }[],
+    b: { start: Date; end: Date; label: string }
+  ) {
+    const obB = obras.filter((o) => inRange(o.createdAt, b));
+    return {
+      name: b.label,
+      backlog: obB.filter((o) => o.status === 'BACKLOG').length,
+      aFazer: obB.filter((o) => o.status === 'A_FAZER').length,
+      andamento: obB.filter((o) => o.status === 'ANDAMENTO').length,
+      concluidas: obB.filter((o) => o.status === 'CONCLUIDO').length
+    };
+  }
+
+  private static fillBucketVendas(
+    vendas: { createdAt: Date; valorTotal: number }[],
+    b: { start: Date; end: Date; label: string }
+  ) {
+    const vB = vendas.filter((v) => inRange(v.createdAt, b));
+    return {
+      name: b.label,
+      quantidade: vB.length,
+      valor: vB.reduce((s, v) => s + (v.valorTotal || 0), 0)
+    };
   }
 
   private static processarAtividades(atividades: any[], periodo: string): any[] {

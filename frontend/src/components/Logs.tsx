@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { axiosApiService } from '../services/axiosApi';
@@ -35,6 +35,12 @@ const XCircleIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+const WrenchIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L18.18 21.93M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.5 9.5l2.5 2.5 4-4" />
+    </svg>
+);
+
 interface AuditLog {
     id: string;
     userId?: string;
@@ -65,6 +71,10 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const authContext = useContext(AuthContext);
     const user = authContext?.user;
     
+    // Ambiente: localhost = Test-Dev, qualquer outra URL = Produção
+    const isProducao = typeof window !== 'undefined' && window.location?.hostname?.toLowerCase() !== 'localhost';
+    const ambienteLabel = isProducao ? 'Produção' : 'Test-Dev';
+    
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [stats, setStats] = useState<SystemStats>({ totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 });
     const [loading, setLoading] = useState(true);
@@ -72,7 +82,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [actionFilter, setActionFilter] = useState<string>('Todos');
     const [entityFilter, setEntityFilter] = useState<string>('Todos');
-    const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health'>('logs');
+    const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao'>('logs');
+    const [backfillLoading, setBackfillLoading] = useState(false);
 
     // Verificar acesso (apenas desenvolvedor)
     useEffect(() => {
@@ -83,38 +94,45 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
         }
     }, [user]);
 
-    // Carregar dados
+    const loadData = useCallback(async (opts?: { silent?: boolean }) => {
+        try {
+            if (!opts?.silent) {
+                setLoading(true);
+            }
+            const response = await axiosApiService.get<{ logs?: AuditLog[]; stats?: SystemStats }>(
+                '/api/logs/audit',
+                { limit: 300, offset: 0 }
+            );
+            if (response.success && response.data) {
+                const payload = response.data as { logs?: AuditLog[]; stats?: SystemStats };
+                setLogs(payload.logs || []);
+                setStats((s) => payload.stats || s);
+            }
+        } catch (error) {
+            console.error('Erro ao carregar logs:', error);
+            if (!opts?.silent) {
+                setLogs([]);
+                setStats({ totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 });
+            }
+        } finally {
+            if (!opts?.silent) {
+                setLoading(false);
+            }
+        }
+    }, []);
+
+    // Carregar dados e atualizar em intervalo curto (auditoria em tempo quase real)
     useEffect(() => {
         if (user?.role?.toLowerCase() === 'desenvolvedor') {
             loadData();
             checkBackendHealth();
-            // Atualizar a cada 30 segundos
             const interval = setInterval(() => {
-                loadData();
+                loadData({ silent: true });
                 checkBackendHealth();
-            }, 30000);
+            }, 10000);
             return () => clearInterval(interval);
         }
-    }, [user]);
-
-    const loadData = async () => {
-        try {
-            setLoading(true);
-            // TODO: Implementar endpoint real
-            const response = await axiosApiService.get<{ logs?: AuditLog[]; stats?: SystemStats }>('/api/logs/audit');
-            if (response.success && response.data) {
-                setLogs((response.data as any).logs || []);
-                setStats((response.data as any).stats || stats);
-            }
-        } catch (error) {
-            console.error('Erro ao carregar logs:', error);
-            // Mock data para desenvolvimento
-            setLogs([]);
-            setStats({ totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 });
-        } finally {
-            setLoading(false);
-        }
-    };
+    }, [user, loadData]);
 
     const checkBackendHealth = async () => {
         try {
@@ -126,6 +144,40 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
             }
         } catch (error) {
             setBackendStatus('offline');
+        }
+    };
+
+    const runBackfillOrcamentista = async () => {
+        if (backfillLoading) return;
+        setBackfillLoading(true);
+        try {
+            const response = await axiosApiService.post<{
+                orcamentosPreenchidos: number;
+                preenchidosPorAudit: number;
+                preenchidosPorUser: number;
+                preenchidosFallback: number;
+                vendasAtualizadas: number;
+            }>('/api/orcamentos/backfill-orcamentista', {});
+            if (response.success && response.data) {
+                const d = (response.data as any)?.data ?? response.data;
+                const total = d?.orcamentosPreenchidos ?? 0;
+                const vendas = d?.vendasAtualizadas ?? 0;
+                toast.success('Backfill concluído', {
+                    description: total > 0
+                        ? `${total} orçamento(s) com nome de orçamentista preenchido. ${vendas} venda(s) atualizada(s) com vendedor.`
+                        : 'Nenhum orçamento precisava de preenchimento.',
+                    duration: 6000
+                });
+            } else {
+                toast.error('Erro no backfill', { description: (response as any).error || 'Resposta inválida.' });
+            }
+        } catch (error: any) {
+            console.error('Erro ao executar backfill:', error);
+            toast.error('Erro ao executar backfill', {
+                description: error?.response?.data?.error || error?.message || 'Tente novamente.'
+            });
+        } finally {
+            setBackfillLoading(false);
         }
     };
 
@@ -198,6 +250,14 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-red-500 text-white shadow-medium ring-2 ring-red-300 dark:ring-red-800">
                                 🔓 DESENVOLVEDOR
                             </span>
+                            {/* Badge de Ambiente: Produção ou Test-Dev conforme URL (localhost = Test-Dev) */}
+                            <span className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-medium ring-2 ${
+                                isProducao 
+                                    ? 'bg-emerald-600 text-white ring-emerald-400 dark:ring-emerald-800' 
+                                    : 'bg-amber-500 text-white ring-amber-400 dark:ring-amber-700'
+                            }`}>
+                                {isProducao ? '🌐 Produção' : '🧪 Test-Dev'}
+                            </span>
                             {/* Status do Backend */}
                             <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                                 backendStatus === 'online' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
@@ -257,7 +317,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                         {[
                             { id: 'logs', label: '📋 Logs de Auditoria', icon: TerminalIcon },
                             { id: 'analytics', label: '📊 Analytics', icon: ChartBarIcon },
-                            { id: 'health', label: '💚 Health Check', icon: CheckCircleIcon }
+                            { id: 'health', label: '💚 Health Check', icon: CheckCircleIcon },
+                            { id: 'manutencao', label: '🔧 Manutenção', icon: WrenchIcon }
                         ].map(tab => (
                             <button
                                 key={tab.id}
@@ -278,6 +339,18 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                 <div className="p-6">
                     {activeTab === 'logs' && (
                         <div className="space-y-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                    Atualização automática a cada 10 segundos (sem recarregar a página).
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => loadData()}
+                                    className="btn-secondary whitespace-nowrap shrink-0"
+                                >
+                                    Atualizar agora
+                                </button>
+                            </div>
                             {/* Filtros */}
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <input
@@ -566,6 +639,29 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             >
                                 🔄 Atualizar Status do Sistema
                             </button>
+                        </div>
+                    )}
+
+                    {activeTab === 'manutencao' && (
+                        <div className="space-y-6">
+                            <h3 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-6">🔧 Manutenção (apenas desenvolvedor)</h3>
+                            <div className="card-secondary border-2 border-amber-200 dark:border-amber-800 rounded-2xl p-6">
+                                <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">Preencher nomes de orçamentistas</h4>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                    Após subir uma nova versão em produção, use este botão para preencher o campo &quot;orçamentista&quot; nos orçamentos antigos e atualizar o &quot;vendedor&quot; nas vendas. Não é necessário rodar script no servidor (ex.: TrueNAS).
+                                </p>
+                                <button
+                                    onClick={runBackfillOrcamentista}
+                                    disabled={backfillLoading}
+                                    className="btn-primary inline-flex items-center gap-2 disabled:opacity-60"
+                                >
+                                    {backfillLoading ? (
+                                        <>⏳ Executando...</>
+                                    ) : (
+                                        <>✅ Executar backfill de orçamentistas</>
+                                    )}
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

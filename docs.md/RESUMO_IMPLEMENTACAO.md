@@ -29,6 +29,7 @@ Quando adiciona um material, o sistema mostra:
 ```
 
 **Benefícios:**
+
 - ✅ Vê o custo real (CMP)
 - ✅ Vê a tendência do mercado (Última Compra)
 - ✅ Edita o preço final livremente
@@ -41,11 +42,13 @@ Quando adiciona um material, o sistema mostra:
 ### 🔍 **Materiais do Estoque**
 
 **Antes:**
+
 ```
 [Dropdown ▼] Selecione... (lista gigante difícil de navegar)
 ```
 
 **Depois:**
+
 ```
 [🔍 Digite para buscar materiais...]
      ↓ (digita "disj")
@@ -57,6 +60,7 @@ Quando adiciona um material, o sistema mostra:
 ```
 
 **Funcionalidades:**
+
 - ✅ Busca em tempo real ao digitar
 - ✅ Navegação por teclado (↑ ↓ Enter Esc)
 - ✅ Destaque visual
@@ -85,6 +89,7 @@ Quando adiciona um material, o sistema mostra:
 ```
 
 **Benefícios:**
+
 - ✅ Kits pré-montados
 - ✅ Preço já calculado
 - ✅ Badge diferencia Kit vs Produto
@@ -96,6 +101,7 @@ Quando adiciona um material, o sistema mostra:
 ## 4️⃣ MODAL REFORMULADO - UI/UX PREMIUM
 
 ### **Header:**
+
 ```
 ╔════════════════════════════════════════╗
 ║  🎨 CRIAR NOVO ORÇAMENTO               ║
@@ -103,6 +109,7 @@ Quando adiciona um material, o sistema mostra:
 ║                                    [✕] ║
 ╚════════════════════════════════════════╝
 ```
+
 - Gradiente azul
 - Texto branco
 - Subtítulo explicativo
@@ -110,11 +117,13 @@ Quando adiciona um material, o sistema mostra:
 ### **Conteúdo (Scrollável):**
 
 #### **Fieldset 1: Cliente e Projeto** (Azul)
+
 - Cliente com autocomplete
 - Box verde quando seleciona cliente
 - Nome e tipo do projeto
 
 #### **Fieldset 2: Detalhes e Custos** (Roxo)
+
 - Descrição do projeto
 - **Materiais do Estoque** (autocomplete)
 - **Itens do Catálogo** (autocomplete) ✨ NOVO
@@ -122,10 +131,12 @@ Quando adiciona um material, o sistema mostra:
 - Resumo financeiro com total em destaque
 
 #### **Fieldset 3: Finalização** (Laranja)
+
 - Upload de imagens (botão laranja)
 - Termos de pagamento
 
 ### **Footer (Fixo):**
+
 ```
 [✕ Cancelar] [⏰ Salvar Rascunho] [✓ Criar Orçamento]
 ```
@@ -206,21 +217,24 @@ Quando adiciona um material, o sistema mostra:
 ## 🎨 ELEMENTOS VISUAIS
 
 ### **Cores por Seção:**
-| Seção | Cor | Propósito |
-|-------|-----|-----------|
-| **Header** | Azul Gradiente | Destaque e profissionalismo |
-| **Materiais** | Roxo | Diferenciação visual |
-| **Catálogo** | Azul | Identidade de kits |
-| **Serviços** | Verde | Categoria diferente |
-| **Imagens** | Laranja | Seção especial |
-| **Resumo** | Azul Escuro | Destaque financeiro |
+
+| Seção         | Cor            | Propósito                   |
+| ------------- | -------------- | --------------------------- |
+| **Header**    | Azul Gradiente | Destaque e profissionalismo |
+| **Materiais** | Roxo           | Diferenciação visual        |
+| **Catálogo**  | Azul           | Identidade de kits          |
+| **Serviços**  | Verde          | Categoria diferente         |
+| **Imagens**   | Laranja        | Seção especial              |
+| **Resumo**    | Azul Escuro    | Destaque financeiro         |
 
 ### **Gradientes:**
+
 - Fieldsets: `from-[cor]-50 to-[cor]-50`
 - Buttons: `from-[cor]-500 to-[cor]-600`
 - Cards: `from-brand-blue to-blue-600`
 
 ### **Ícones:**
+
 - 👤 Cliente
 - 📁 Catálogo
 - 📦 Materiais (CubeIcon)
@@ -234,26 +248,26 @@ Quando adiciona um material, o sistema mostra:
 
 ### **Criação de Orçamento:**
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| **Busca de materiais** | Scroll em lista grande | Digite e encontre instantaneamente |
-| **Precificação** | Preço fixo do cadastro | Preço editável com custos de referência |
-| **Margem** | Calculava mentalmente | Automática e colorida |
-| **Kits** | Não disponível | Integrado em todos os tipos |
-| **Visual** | Simples, sem cor | Gradientes e cores por seção |
-| **Tempo** | ~30 minutos | ~10 minutos |
+| Aspecto                | Antes                  | Depois                                  |
+| ---------------------- | ---------------------- | --------------------------------------- |
+| **Busca de materiais** | Scroll em lista grande | Digite e encontre instantaneamente      |
+| **Precificação**       | Preço fixo do cadastro | Preço editável com custos de referência |
+| **Margem**             | Calculava mentalmente  | Automática e colorida                   |
+| **Kits**               | Não disponível         | Integrado em todos os tipos             |
+| **Visual**             | Simples, sem cor       | Gradientes e cores por seção            |
+| **Tempo**              | ~30 minutos            | ~10 minutos                             |
 
 ### **Visualização/PDF:**
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| **Layout** | Básico | Profissional com marca d'água |
-| **Cabeçalho** | Simples | Logo + contatos completos |
-| **Tabelas** | Sem cor | Headers coloridos, zebradas |
-| **Descrição** | Texto simples | Formatada e estruturada |
-| **Resumo** | Texto plano | Card azul destacado |
-| **Rodapé** | Básico | Contatos + CNPJ + branding |
-| **Impressão** | Problemas com cores | Otimizada para PDF |
+| Aspecto       | Antes               | Depois                        |
+| ------------- | ------------------- | ----------------------------- |
+| **Layout**    | Básico              | Profissional com marca d'água |
+| **Cabeçalho** | Simples             | Logo + contatos completos     |
+| **Tabelas**   | Sem cor             | Headers coloridos, zebradas   |
+| **Descrição** | Texto simples       | Formatada e estruturada       |
+| **Resumo**    | Texto plano         | Card azul destacado           |
+| **Rodapé**    | Básico              | Contatos + CNPJ + branding    |
+| **Impressão** | Problemas com cores | Otimizada para PDF            |
 
 ---
 
@@ -320,11 +334,11 @@ suggestedPrice = lastPurchasePrice × 1.30
 margin = ((priceQuoted - cmp) / cmp) × 100
 
 // Total do Orçamento
-total = materialsSubtotal + 
-        catalogItemsSubtotal + 
-        servicesSubtotal + 
-        laborCost - 
-        discount + 
+total = materialsSubtotal +
+        catalogItemsSubtotal +
+        servicesSubtotal +
+        laborCost -
+        discount +
         taxes
 ```
 
@@ -420,7 +434,7 @@ TOTAL GERAL:         R$ XXX,XX  (Azul Destaque)
 
 ```
          [Grande "S3E" transparente ao fundo]
-         
+
 ┌─────────────────────────────────┐
 │ [Logo S3E] ENGENHARIA ELÉTRICA  │
 │ Contatos completos              │
@@ -435,26 +449,31 @@ TOTAL GERAL:         R$ XXX,XX  (Azul Destaque)
 ### **Sistema Completo de Orçamentos com:**
 
 ✅ **Precificação Estratégica**
+
 - Custos de referência visíveis
 - Preços editáveis
 - Margem automática
 
 ✅ **Busca Otimizada**
+
 - Autocomplete inteligente
 - Navegação por teclado
 - Feedback visual
 
 ✅ **Integração com Catálogo**
+
 - Kits disponíveis
 - Todos os tipos de projeto
 - Subtotais separados
 
 ✅ **PDF Profissional**
+
 - Marca d'água S3E
 - Layout estruturado
 - Pronto para cliente
 
 ✅ **UX/UI Premium**
+
 - Cores e gradientes
 - Ícones contextuais
 - Responsivo
@@ -489,12 +508,14 @@ TOTAL GERAL:         R$ XXX,XX  (Azul Destaque)
 ## 🎯 PRÓXIMA ETAPA
 
 **O sistema está pronto para:**
+
 1. ✅ Criar orçamentos profissionais
 2. ✅ Gerenciar custos estrategicamente
 3. ✅ Apresentar propostas ao cliente
 4. ✅ Integrar com backend (quando pronto)
 
 **Agora você pode:**
+
 - Testar todas as funcionalidades
 - Criar orçamentos reais
 - Apresentar PDFs aos clientes
@@ -505,12 +526,14 @@ TOTAL GERAL:         R$ XXX,XX  (Azul Destaque)
 ## 📞 SUPORTE
 
 ### **Se precisar de ajustes:**
+
 - Cores podem ser alteradas em `tailwind.config`
 - Margens podem ser configuradas por categoria
 - PDF pode ter mais seções
 - Campos podem ser adicionados/removidos
 
 ### **Integração Futura:**
+
 - Backend fornecerá CMP real do banco de dados
 - Histórico de compras completo
 - Gráficos de variação de preços
@@ -535,5 +558,4 @@ TOTAL GERAL:         R$ XXX,XX  (Azul Destaque)
 **🎉 PARABÉNS! O sistema de orçamentos da S3E está no próximo nível! 🚀⚡**
 
 **Desenvolvido com ❤️ para S3E Engenharia Elétrica**  
-**www.s3eengenharia.com.br**
-
+**<www.s3eengenharia.com.br>**

@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
+import { getUploadUrl } from '../config/api';
 import { AuthContext } from '../contexts/AuthContext';
 import { equipeService, type EquipeDTO } from '../services/EquipeService';
 import { alocacaoService, type AlocacaoEquipeDTO } from '../services/alocacaoService';
-import CalendarioAlocacoes from '../components/CalendarioAlocacoes';
+import { obrasService, type MaterialObra, type CompraAvulsa } from '../services/obrasService';
 import ModalEquipesDeObra from '../components/Obras/ModalEquipesDeObra';
+import UserSearchMultiSelect from '../components/ui/UserSearchMultiSelect';
 
 // Types
 interface Obra {
@@ -23,6 +25,7 @@ interface TarefaObra {
   id: string;
   descricao: string;
   atribuidoA?: string;
+  atribuidosIds?: string[];
   atribuidoNome?: string;
   equipeId?: string;
   equipeNome?: string;
@@ -147,6 +150,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
   const [formTarefa, setFormTarefa] = useState({
     descricao: '',
     atribuidoA: '',
+    atribuidosIds: [] as string[],
     equipeId: '',
     dataPrevista: '',
     dataPrevistaFim: '',
@@ -173,8 +177,9 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
   // Sistema de Abas
   const [abaAtiva, setAbaAtiva] = useState<'visaoGeral' | 'materiais'>('visaoGeral');
 
-  // Materiais vinculados à obra
-  const [materiaisObra, setMateriaisObra] = useState<any[]>([]);
+  // Materiais vinculados à obra (agrupados por movimentação SAIDA/OBRA) e compras avulsas
+  const [materiaisObra, setMateriaisObra] = useState<MaterialObra[]>([]);
+  const [comprasAvulsas, setComprasAvulsas] = useState<CompraAvulsa[]>([]);
   const [loadingMateriais, setLoadingMateriais] = useState(false);
 
   // Modal de Visualização de Tarefa
@@ -245,8 +250,9 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
   const carregarEletricistas = async () => {
     try {
-      const response = await axiosApiService.get('/api/configuracoes/usuarios?role=eletricista');
-      setEletricistas(response.data?.data || response.data || []);
+      const response = await axiosApiService.get('/api/configuracoes/usuarios');
+      const list = response.data?.data ?? response.data ?? [];
+      setEletricistas(Array.isArray(list) ? list : []);
     } catch (error: any) {
       console.error('Erro ao carregar eletricistas:', error);
     }
@@ -295,25 +301,21 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
     if (!obraId || !obra) return;
     try {
       setLoadingMateriais(true);
-      // Usar o endpoint específico de materiais da obra
-      const response = await axiosApiService.get(`/api/obras/${obraId}/materiais`);
-      if (response.success && response.data) {
-        const materiaisArray = Array.isArray(response.data) ? response.data : [];
-        // Mapear para o formato esperado
-        const materiaisVinculados = materiaisArray.map((mov: any) => ({
-          ...mov,
-          material: mov.material || { nome: 'Material não encontrado', sku: '-', unidadeMedida: 'un' }
-        }));
-        
-        setMateriaisObra(materiaisVinculados);
-        console.log(`✅ ${materiaisVinculados.length} materiais encontrados para a obra`);
+      const resMateriais = await obrasService.getMateriaisObra(obraId);
+      if (resMateriais.success && resMateriais.data) {
+        setMateriaisObra(resMateriais.data.materiais || []);
+        console.log(`✅ ${resMateriais.data.materiais?.length ?? 0} materiais encontrados para a obra`);
       } else {
         setMateriaisObra([]);
       }
+      // Compras avulsas vinculadas à obra já geram movimentações de SAÍDA para OBRA,
+      // portanto a lista de materiais é suficiente nesta aba.
+      setComprasAvulsas([]);
     } catch (error: any) {
       console.error('Erro ao carregar materiais da obra:', error);
       toast.error('Erro ao carregar materiais');
       setMateriaisObra([]);
+      setComprasAvulsas([]);
     } finally {
       setLoadingMateriais(false);
     }
@@ -385,8 +387,9 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
       if (tipoAtribuicao === 'equipe' && formTarefa.equipeId) {
         tarefaData.equipeId = formTarefa.equipeId;
-      } else if (tipoAtribuicao === 'individual' && formTarefa.atribuidoA) {
-        tarefaData.atribuidoA = formTarefa.atribuidoA;
+      } else if (tipoAtribuicao === 'individual') {
+        const ids = formTarefa.atribuidosIds?.length ? formTarefa.atribuidosIds : (formTarefa.atribuidoA ? [formTarefa.atribuidoA] : []);
+        if (ids.length) tarefaData.atribuidosIds = ids;
       }
 
       const tarefaRes = await axiosApiService.post('/api/obras/tarefas', tarefaData);
@@ -422,7 +425,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
       }
       
       setModalNovaTarefa(false);
-      setFormTarefa({ descricao: '', atribuidoA: '', equipeId: '', dataPrevista: '', dataPrevistaFim: '', observacoes: '' });
+      setFormTarefa({ descricao: '', atribuidoA: '', atribuidosIds: [], equipeId: '', dataPrevista: '', dataPrevistaFim: '', observacoes: '' });
       carregarTarefas();
       carregarAlocacoes();
     } catch (error: any) {
@@ -445,16 +448,18 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
         progresso: tarefaEditando.progresso
       };
 
-      // Se for equipe, enviar equipeId e limpar atribuidoA
       if (tipoAtribuicaoEdicao === 'equipe' && tarefaEditando.equipeId) {
         payload.equipeId = tarefaEditando.equipeId;
         payload.atribuidoA = null;
-      } else if (tipoAtribuicaoEdicao === 'individual' && tarefaEditando.atribuidoA) {
-        payload.atribuidoA = tarefaEditando.atribuidoA;
+        payload.atribuidosIds = null;
+      } else if (tipoAtribuicaoEdicao === 'individual') {
+        const ids = tarefaEditando.atribuidosIds?.length ? tarefaEditando.atribuidosIds : (tarefaEditando.atribuidoA ? [tarefaEditando.atribuidoA] : []);
+        payload.atribuidoA = ids[0] || null;
+        payload.atribuidosIds = ids.length ? ids : null;
         payload.equipeId = null;
       } else {
-        // Se não tiver nenhum, limpar ambos
         payload.atribuidoA = null;
+        payload.atribuidosIds = null;
         payload.equipeId = null;
       }
 
@@ -517,16 +522,16 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
   const handleVoltar = () => {
     if (onNavigate) {
-      onNavigate('Obras');
+      onNavigate('Execução Obra');
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-orange-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Carregando dados da obra...</p>
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-orange-600 dark:border-orange-400 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-dark-text-secondary">Carregando dados da obra...</p>
         </div>
       </div>
     );
@@ -534,9 +539,9 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
   if (!obra) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
         <div className="text-center">
-          <p className="text-red-600 font-semibold mb-4 text-xl">Obra não encontrada</p>
+          <p className="text-red-600 dark:text-red-400 font-semibold mb-4 text-xl">Obra não encontrada</p>
           <button onClick={handleVoltar} className="btn-primary">
             Voltar
           </button>
@@ -549,7 +554,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
     <>
       <div className="min-h-screen bg-gray-50 dark:bg-dark-bg">
         {/* Header da Página */}
-        <div className="bg-gradient-to-r from-orange-600 to-orange-500 shadow-lg">
+        <div className="bg-gradient-to-r from-blue-600 to-blue-500 shadow-lg">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -566,7 +571,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                 </button>
                 <div className="flex-1">
                   <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">{obra.nomeObra}</h1>
-                  <div className="space-y-1 text-orange-50">
+                  <div className="space-y-1 text-blue-50">
                     <p className="flex items-center gap-2">
                       <UserIcon className="w-4 h-4" />
                       <span className="font-medium">Cliente:</span> {obra.clienteNome}
@@ -698,11 +703,13 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                                 👥 {tarefa.equipeNome}
                               </span>
                             )}
-                            {/* Mostrar eletricista individual */}
-                            {!tarefa.equipeNome && tarefa.atribuidoNome && (
+                            {/* Mostrar usuário(s) atribuído(s) */}
+                            {!tarefa.equipeNome && (tarefa.atribuidosIds?.length || tarefa.atribuidoNome) && (
                               <span className="flex items-center gap-1">
                                 <UserIcon className="w-4 h-4" />
-                                {tarefa.atribuidoNome}
+                                {tarefa.atribuidosIds?.length
+                                  ? tarefa.atribuidosIds.map(id => eletricistas.find(u => u.id === id)?.name || id).filter(Boolean).join(', ')
+                                  : tarefa.atribuidoNome}
                               </span>
                             )}
                             {/* Datas - mostrar período se tiver data fim */}
@@ -761,7 +768,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                         </div>
                         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                           <div
-                            className="bg-gradient-to-r from-orange-600 to-orange-500 h-2 rounded-full transition-all"
+                            className="bg-gradient-to-r from-blue-600 to-blue-500 h-2 rounded-full transition-all"
                             style={{ width: `${tarefa.progresso}%` }}
                           />
                         </div>
@@ -820,22 +827,6 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                 </div>
               )}
 
-              {/* Calendário de Alocações */}
-              <div className="mt-8 pt-8 border-t-2 border-gray-200 dark:border-dark-border">
-                <div className="mb-6">
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text flex items-center gap-2">
-                    <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    Calendário de Alocações de Equipes
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
-                    Visualize quando cada equipe está alocada nesta obra
-                  </p>
-                </div>
-                
-                {obraId && <CalendarioAlocacoes obraId={obraId} />}
-              </div>
             </>
           )}
 
@@ -843,9 +834,9 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
             <div>
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text">Materiais Alocados à Obra</h3>
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-dark-text">Materiais da Obra</h3>
                   <p className="text-sm text-gray-500 dark:text-dark-text-secondary mt-1">
-                    Materiais que foram alocados a esta obra através de baixas no estoque
+                    Materiais alocados à obra (baixas no estoque por início da obra e por compras avulsas vinculadas)
                   </p>
                 </div>
                 <button
@@ -864,82 +855,65 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
                   <p className="text-gray-600 dark:text-gray-400">Carregando materiais...</p>
                 </div>
-              ) : materiaisObra.length === 0 ? (
-                <div className="text-center py-12 bg-gray-50 dark:bg-dark-card rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
-                  <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                  </svg>
-                  <p className="text-gray-500 dark:text-dark-text-secondary mb-2">Nenhum material alocado a esta obra</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500">
-                    Os materiais aparecerão aqui quando houver baixas no estoque referenciadas a esta obra
-                  </p>
-                </div>
               ) : (
-                <div className="space-y-4">
-                  {materiaisObra.length === 0 ? (
-                    <div className="text-center py-12 bg-gray-50 dark:bg-dark-card rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
-                      <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                      </svg>
-                      <p className="text-gray-500 dark:text-dark-text-secondary mb-2">Nenhum material alocado a esta obra</p>
-                      <p className="text-sm text-gray-400 dark:text-gray-500">
-                        Os materiais aparecerão aqui quando houver alocações do estoque para esta obra
-                      </p>
-                    </div>
-                  ) : (
-                    materiaisObra.map((mov: any, index: number) => (
-                      <div key={mov.id || `material-${index}`} className="bg-white dark:bg-dark-card border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4 shadow-md hover:shadow-lg transition-all">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-3">
-                              <h4 className="font-bold text-gray-900 dark:text-dark-text text-lg">
-                                {mov.material?.nome || 'Material não encontrado'}
-                              </h4>
-                              <span className="px-3 py-1 rounded-lg font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">
-                                ✓ Alocado
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
-                                <strong className="text-gray-900 dark:text-dark-text">SKU:</strong>
-                                <span>{mov.material?.sku || '-'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
-                                <strong className="text-gray-900 dark:text-dark-text">Quantidade:</strong>
-                                <span className="font-semibold text-blue-600 dark:text-blue-400">
-                                  {mov.quantidade} {mov.material?.unidadeMedida || 'un'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
-                                <ClockIcon className="w-4 h-4" />
-                                <strong className="text-gray-900 dark:text-dark-text">Data de Alocação:</strong>
-                                <span>{new Date(mov.createdAt || mov.data).toLocaleDateString('pt-BR', { 
-                                  day: '2-digit', 
-                                  month: '2-digit', 
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}</span>
-                              </div>
-                              {mov.material?.categoria && (
-                                <div className="flex items-center gap-2 text-gray-600 dark:text-dark-text-secondary">
-                                  <strong className="text-gray-900 dark:text-dark-text">Categoria:</strong>
-                                  <span>{mov.material.categoria}</span>
-                                </div>
-                              )}
-                            </div>
-                            {mov.observacoes && (
-                              <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                                <p className="text-sm text-blue-900 dark:text-blue-300">
-                                  <strong>Observações:</strong> {mov.observacoes}
-                                </p>
-                              </div>
-                            )}
-                          </div>
+                <div className="space-y-8">
+                  {/* Seção: Materiais Disponíveis na Obra */}
+                  <div>
+                    <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">Materiais Disponíveis na Obra</h4>
+                    {materiaisObra.length === 0 ? (
+                      <div className="text-center py-12 bg-gray-50 dark:bg-dark-card rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
+                        <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                        <p className="text-gray-500 dark:text-dark-text-secondary mb-2">Nenhum material alocado a esta obra</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500">
+                          Os materiais aparecerão aqui quando houver baixas no estoque referenciadas a esta obra
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="bg-white dark:bg-dark-card border-2 border-blue-200 dark:border-blue-800 rounded-xl shadow-md overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-200 dark:divide-dark-border">
+                            <thead className="bg-gray-50 dark:bg-dark-bg">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Material</th>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">SKU</th>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Qtd</th>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Un</th>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Fornecedor</th>
+                                <th className="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-100 dark:divide-dark-border">
+                              {materiaisObra.map((mat, index) => (
+                                <tr key={mat.materialId || `mat-${index}`} className="hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors">
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-semibold text-gray-900 dark:text-dark-text">{mat.nome}</span>
+                                      {mat.isItemNovo && (
+                                        <span className="px-2 py-0.5 rounded-lg font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-xs">
+                                          NOVO
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{mat.sku || '-'}</td>
+                                  <td className="px-4 py-3 text-sm font-bold text-blue-700 dark:text-blue-300">{mat.quantidadeTotal}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{mat.unidadeMedida || 'un'}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{mat.fornecedor?.nome || '-'}</td>
+                                  <td className="px-4 py-3">
+                                    <span className="px-3 py-1 rounded-lg font-semibold bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 text-xs">
+                                      ✓ Alocado
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
                       </div>
-                    ))
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -952,7 +926,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
       {modalNovaTarefa && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[60] p-4">
           <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-gradient-to-r from-orange-600 to-orange-500 px-6 py-4 flex justify-between items-center">
+            <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-500 px-6 py-4 flex justify-between items-center">
               <h3 className="text-xl font-bold text-white">Nova Tarefa</h3>
               <button
                 onClick={() => setModalNovaTarefa(false)}
@@ -1076,21 +1050,13 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
               {/* Seletor Individual de Eletricista */}
               {tipoAtribuicao === 'individual' && (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                    Atribuir a Eletricista
-                  </label>
-                  <select
-                    value={formTarefa.atribuidoA}
-                    onChange={(e) => setFormTarefa({ ...formTarefa, atribuidoA: e.target.value })}
-                    className="select-field"
-                  >
-                    <option value="">Não atribuído</option>
-                    {eletricistas.map((eletricista) => (
-                      <option key={eletricista.id} value={eletricista.id}>
-                        {eletricista.name} ({eletricista.email})
-                      </option>
-                    ))}
-                  </select>
+                  <UserSearchMultiSelect
+                    label="Atribuir a (um ou mais usuários)"
+                    users={eletricistas.map(u => ({ id: u.id, name: u.name, email: u.email }))}
+                    value={formTarefa.atribuidosIds}
+                    onChange={(ids) => setFormTarefa({ ...formTarefa, atribuidosIds: ids, atribuidoA: ids[0] || '' })}
+                    placeholder="Buscar por nome e selecionar..."
+                  />
                 </div>
               )}
 
@@ -1272,21 +1238,13 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
               {/* Seletor Individual de Eletricista */}
               {tipoAtribuicaoEdicao === 'individual' && (
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                    Atribuir a Eletricista
-                  </label>
-                  <select
-                    value={tarefaEditando.atribuidoA || ''}
-                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, atribuidoA: e.target.value })}
-                    className="select-field"
-                  >
-                    <option value="">Não atribuído</option>
-                    {eletricistas.map((eletricista) => (
-                      <option key={eletricista.id} value={eletricista.id}>
-                        {eletricista.name} ({eletricista.email})
-                      </option>
-                    ))}
-                  </select>
+                  <UserSearchMultiSelect
+                    label="Atribuir a (um ou mais usuários)"
+                    users={eletricistas.map(u => ({ id: u.id, name: u.name, email: u.email }))}
+                    value={tarefaEditando.atribuidosIds ?? (tarefaEditando.atribuidoA ? [tarefaEditando.atribuidoA] : [])}
+                    onChange={(ids) => setTarefaEditando({ ...tarefaEditando, atribuidosIds: ids, atribuidoA: ids[0] || '' })}
+                    placeholder="Buscar por nome e selecionar..."
+                  />
                 </div>
               )}
 
@@ -1446,7 +1404,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                         onClick={() => abrirModalImagens(registroSelecionado.imagens)}
                       >
                         <img
-                          src={`${import.meta.env.VITE_API_URL || ''}${imagem}`}
+                          src={getUploadUrl(imagem)}
                           alt={`Foto ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
@@ -1505,7 +1463,7 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
 
           <div className="max-w-6xl max-h-[90vh] flex flex-col items-center">
             <img
-              src={`${import.meta.env.VITE_API_URL || ''}${imagensVisualizacao[imagemAtual]}`}
+              src={getUploadUrl(imagensVisualizacao[imagemAtual])}
               alt={`Imagem ${imagemAtual + 1}`}
               className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl"
             />
@@ -1646,6 +1604,31 @@ const DetalhesObra: React.FC<DetalhesObraProps> = ({ toggleSidebar, obraId, onNa
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Materiais alocados à obra (até 5, com badge NOVO) */}
+              {materiaisObra.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-500 dark:text-dark-text-secondary mb-2">
+                    Materiais alocados à obra
+                  </h4>
+                  <ul className="space-y-2">
+                    {materiaisObra.slice(0, 5).map((mat, idx) => (
+                      <li key={mat.materialId || idx} className="flex items-center gap-2 text-gray-900 dark:text-dark-text">
+                        <span>{mat.nome}</span>
+                        <span className="text-gray-500 dark:text-gray-400 text-sm">— {mat.quantidadeTotal} {mat.unidadeMedida || 'un'}</span>
+                        {mat.isItemNovo && (
+                          <span className="px-2 py-0.5 rounded font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 text-xs">
+                            NOVO
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                    {materiaisObra.length > 5 && (
+                      <li className="text-gray-500 dark:text-gray-400 text-sm">+ {materiaisObra.length - 5} outros</li>
+                    )}
+                  </ul>
                 </div>
               )}
 

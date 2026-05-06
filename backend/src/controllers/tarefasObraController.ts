@@ -1,17 +1,20 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { AuditoriaService } from '../services/auditoria.service';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const prisma = new PrismaClient();
-
 // No CommonJS, __dirname já está disponível automaticamente
 
 // Configuração do Multer para upload de imagens
+// Usar process.cwd() para ficar alinhado ao express.static (app.ts): em Docker cwd=/app, volume em /app/uploads
+const getTarefasObraUploadDir = () => path.join(process.cwd(), 'uploads', 'tarefas-obra');
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, '../../uploads/tarefas-obra');
+    const uploadDir = getTarefasObraUploadDir();
     
     // Criar diretório se não existir
     if (!fs.existsSync(uploadDir)) {
@@ -292,8 +295,9 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
     console.log(`🔍 [salvarResumoTarefa] Tarefa ID: ${tarefaId}`);
     console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída a: ${tarefa.atribuidoA || 'Nenhum'}, Equipe: ${tarefa.equipeId || 'Nenhuma'}`);
     
-    // Verificar permissões para eletricistas
-    if (!['desenvolvedor','gerente','engenheiro'].includes(userRole)) {
+    // Verificar permissões para eletricistas e usuários com privilégios especiais.
+    // Permitimos também desenhista_industrial e engenheiro_eletricista como editores com privilégios.
+    if (!['desenvolvedor','gerente','engenheiro','desenhista_industrial','engenheiro_eletricista'].includes(userRole)) {
       // Verificar se é tarefa atribuída diretamente ao usuário
       const tarefaAtribuidaDiretamente = tarefa.atribuidoA === userId;
       console.log(`🔍 [salvarResumoTarefa] Tarefa atribuída diretamente ao usuário: ${tarefaAtribuidaDiretamente}`);
@@ -394,9 +398,9 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
       });
     }
     
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'REGISTRO_TAREFA',
         entity: 'TarefaObra',
@@ -406,8 +410,10 @@ export const salvarResumoTarefa = async (req: Request, res: Response): Promise<v
           imagens: imagensUrls.length,
           concluida: concluida === 'true'
         }
-      }
-    });
+      });
+    } catch (err) {
+      console.error('Erro ao registrar audit (stub):', err);
+    }
     
     console.log(`✅ Resumo salvo para tarefa ${tarefaId} - ${imagensUrls.length} imagens`);
     
@@ -499,10 +505,19 @@ export const getTarefaById = async (req: Request, res: Response): Promise<void> 
  * POST /api/obras/tarefas
  * Criar nova tarefa (apenas gerente/engenheiro/admin/desenvolvedor)
  */
+function parseAtribuidosIds(body: { atribuidoA?: string; atribuidosIds?: string[] }): string[] {
+  const arr = Array.isArray(body.atribuidosIds) ? body.atribuidosIds : [];
+  if (arr.length) return arr.filter(Boolean);
+  if (body.atribuidoA) return [body.atribuidoA];
+  return [];
+}
+
 export const criarTarefa = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { obraId, descricao, atribuidoA, equipeId, dataPrevista, dataPrevistaFim, observacoes } = req.body;
+    const { obraId, descricao, atribuidoA, atribuidosIds, equipeId, dataPrevista, dataPrevistaFim, observacoes } = req.body;
     const userId = (req as any).user?.userId;
+    const ids = parseAtribuidosIds({ atribuidoA, atribuidosIds });
+    const primeiro = ids[0] || atribuidoA || null;
     
     if (!obraId || !descricao) {
       res.status(400).json({ 
@@ -522,26 +537,17 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
       return;
     }
     
-    // Verificar se o usuário atribuído é eletricista (se fornecido)
+    // Validar usuários atribuídos (se houver)
     let eletricista: { id: string; name: string; role: string } | null = null;
-    if (atribuidoA) {
+    if (primeiro) {
       const usuarioEncontrado = await prisma.user.findUnique({
-        where: { id: atribuidoA }
+        where: { id: primeiro }
       });
-      
-      if (!usuarioEncontrado || usuarioEncontrado.role.toLowerCase() !== 'eletricista') {
-        res.status(400).json({ 
-          success: false, 
-          error: 'Tarefas só podem ser atribuídas a eletricistas' 
-        });
+      if (!usuarioEncontrado) {
+        res.status(404).json({ success: false, error: 'Usuário atribuído não encontrado' });
         return;
       }
-      
-      eletricista = {
-        id: usuarioEncontrado.id,
-        name: usuarioEncontrado.name,
-        role: usuarioEncontrado.role
-      };
+      eletricista = { id: usuarioEncontrado.id, name: usuarioEncontrado.name, role: usuarioEncontrado.role };
     }
 
     // Verificar se equipe existe (se fornecida)
@@ -583,10 +589,18 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
       data: {
         obraId,
         descricao,
-        atribuidoA: atribuidoA || null,
+        atribuidoA: primeiro,
+        atribuidosIds: ids.length ? (ids as Prisma.InputJsonValue) : Prisma.DbNull,
         equipeId: equipeId || null,
-        dataPrevista: dataPrevista ? new Date(dataPrevista) : null,
-        dataPrevistaFim: dataPrevistaFim ? new Date(dataPrevistaFim) : null,
+        // Parsear datas no formato YYYY-MM-DD para evitar problema de timezone
+        dataPrevista: dataPrevista ? (typeof dataPrevista === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dataPrevista) ? ((): Date => {
+            const [y, m, d] = (dataPrevista as string).split('-').map(Number);
+            return new Date(y, m - 1, d, 12, 0, 0, 0);
+        })() : new Date(dataPrevista)) : null,
+        dataPrevistaFim: dataPrevistaFim ? (typeof dataPrevistaFim === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dataPrevistaFim) ? ((): Date => {
+            const [y, m, d] = (dataPrevistaFim as string).split('-').map(Number);
+            return new Date(y, m - 1, d, 12, 0, 0, 0);
+        })() : new Date(dataPrevistaFim)) : null,
         observacoes: observacoes || null,
         progresso: 0
       },
@@ -610,8 +624,9 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
       descricaoLog += ' sem atribuição';
     }
     
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'CREATE',
         entity: 'TarefaObra',
@@ -622,9 +637,20 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
           eletricistaId: atribuidoA || null,
           equipeId: equipeId || null
         }
-      }
-    });
+      });
+    } catch (err) {
+      console.error('Erro ao registrar audit (stub):', err);
+    }
     
+    for (const uid of ids) {
+      try {
+        const { notificarAtribuicaoKanbanObras } = await import('../services/notificacoes.service');
+        await notificarAtribuicaoKanbanObras(uid, obraId, tarefa.id, descricao || 'Nova tarefa', true);
+      } catch (err) {
+        console.error('Erro ao criar notificação de tarefa obra:', err);
+      }
+    }
+
     console.log(`✅ Tarefa criada: ${tarefa.id} ${equipe ? `- Atribuída à equipe ${equipe.nome}` : eletricista ? `- Atribuída a ${eletricista.name}` : '- Sem atribuição'}`);
     
     res.json({ 
@@ -648,8 +674,10 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
 export const atualizarTarefa = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { descricao, atribuidoA, equipeId, dataPrevista, dataPrevistaFim, progresso, observacoes } = req.body;
+    const { descricao, atribuidoA, atribuidosIds, equipeId, dataPrevista, dataPrevistaFim, progresso, observacoes } = req.body;
     const userId = (req as any).user?.userId;
+    const ids = atribuidosIds !== undefined ? parseAtribuidosIds({ atribuidoA, atribuidosIds }) : undefined;
+    const primeiro = ids !== undefined ? (ids[0] || null) : undefined;
     
     const tarefa = await prisma.tarefaObra.findUnique({
       where: { id }
@@ -660,25 +688,43 @@ export const atualizarTarefa = async (req: Request, res: Response): Promise<void
       return;
     }
     
-    // Preparar dados para atualização
     const dataToUpdate: any = {};
-    
     if (descricao !== undefined) dataToUpdate.descricao = descricao;
     if (observacoes !== undefined) dataToUpdate.observacoes = observacoes;
     if (progresso !== undefined) dataToUpdate.progresso = parseInt(progresso);
-    
-    // Campos que podem ser null
-    if (atribuidoA !== undefined) {
+    if (ids !== undefined) {
+      dataToUpdate.atribuidoA = ids[0] || null;
+      dataToUpdate.atribuidosIds = ids.length ? (ids as unknown as object) : null;
+    } else if (atribuidoA !== undefined) {
       dataToUpdate.atribuidoA = atribuidoA || null;
+      dataToUpdate.atribuidosIds = atribuidoA ? ([atribuidoA] as unknown as object) : null;
     }
     if (equipeId !== undefined) {
       dataToUpdate.equipeId = equipeId || null;
     }
     if (dataPrevista !== undefined) {
-      dataToUpdate.dataPrevista = dataPrevista ? new Date(dataPrevista) : null;
+      if (dataPrevista) {
+        if (typeof dataPrevista === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dataPrevista)) {
+          const [y, m, d] = dataPrevista.split('-').map(Number);
+          dataToUpdate.dataPrevista = new Date(y, m - 1, d, 12, 0, 0, 0);
+        } else {
+          dataToUpdate.dataPrevista = new Date(dataPrevista);
+        }
+      } else {
+        dataToUpdate.dataPrevista = null;
+      }
     }
     if (dataPrevistaFim !== undefined) {
-      dataToUpdate.dataPrevistaFim = dataPrevistaFim ? new Date(dataPrevistaFim) : null;
+      if (dataPrevistaFim) {
+        if (typeof dataPrevistaFim === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dataPrevistaFim)) {
+          const [y, m, d] = dataPrevistaFim.split('-').map(Number);
+          dataToUpdate.dataPrevistaFim = new Date(y, m - 1, d, 12, 0, 0, 0);
+        } else {
+          dataToUpdate.dataPrevistaFim = new Date(dataPrevistaFim);
+        }
+      } else {
+        dataToUpdate.dataPrevistaFim = null;
+      }
     }
     
     // Atualizar tarefa
@@ -703,17 +749,30 @@ export const atualizarTarefa = async (req: Request, res: Response): Promise<void
       }
     });
     
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    if (ids?.length) {
+      for (const uid of ids) {
+        try {
+          const { notificarAtribuicaoKanbanObras } = await import('../services/notificacoes.service');
+          await notificarAtribuicaoKanbanObras(uid, tarefa.obraId, id, tarefaAtualizada.descricao || 'Tarefa', true);
+        } catch (err) {
+          console.error('Erro ao criar notificação de tarefa obra:', err);
+        }
+      }
+    }
+    
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'UPDATE',
         entity: 'TarefaObra',
         entityId: id,
         description: `Tarefa atualizada`,
         metadata: req.body
-      }
-    });
+      });
+    } catch (err) {
+      console.error('Erro ao registrar audit (stub):', err);
+    }
     
     console.log(`✅ Tarefa atualizada: ${id}`);
     
@@ -754,9 +813,9 @@ export const deletarTarefa = async (req: Request, res: Response): Promise<void> 
       where: { id }
     });
     
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
+    // Audit log (desativado) — usa stub de auditoria
+    try {
+      await AuditoriaService.registrarEvento({
         userId: userId,
         action: 'DELETE',
         entity: 'TarefaObra',
@@ -765,8 +824,10 @@ export const deletarTarefa = async (req: Request, res: Response): Promise<void> 
         metadata: {
           obraId: tarefa.obraId
         }
-      }
-    });
+      });
+    } catch (err) {
+      console.error('Erro ao registrar audit (stub):', err);
+    }
     
     console.log(`✅ Tarefa deletada: ${id}`);
     

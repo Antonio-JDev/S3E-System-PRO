@@ -83,6 +83,9 @@ class ComprasService {
       numeroSequencial: compraDTO.numeroSequencial || compraDTO.numero || null, // ✅ Número sequencial da compra
       supplierId: compraDTO.fornecedorId || compraDTO.fornecedor?.id || '',
       supplierName: compraDTO.fornecedorNome || compraDTO.fornecedor?.nome || compraDTO.supplierName || 'Fornecedor',
+      fornecedorCNPJ: compraDTO.fornecedorCNPJ ?? compraDTO.fornecedor?.cnpj,
+      fornecedorTel: compraDTO.fornecedorTel ?? compraDTO.fornecedor?.telefone,
+      dataEmissaoNF: compraDTO.dataEmissaoNF,
       orderDate: compraDTO.dataCompra || compraDTO.orderDate,
       invoiceNumber: compraDTO.numeroNF || compraDTO.invoiceNumber,
       serieNF: compraDTO.serieNF || compraDTO.serie || compraDTO.numeroSerie || null, // ✅ Campo de série da NF
@@ -128,9 +131,15 @@ class ComprasService {
       frete: compraDTO.frete,
       valorIPI: compraDTO.valorIPI,
       outrasDespesas: compraDTO.outrasDespesas,
+      valorDesconto: compraDTO.valorDesconto ?? 0,
       valorTotalNota: compraDTO.valorTotalNota,
       destinatarioCNPJ: compraDTO.destinatarioCNPJ,
-      statusImportacao: compraDTO.statusImportacao
+      statusImportacao: compraDTO.statusImportacao,
+      // ✅ Empresa compradora (tomador/destinatário) para exibir no modal de detalhes
+      empresaCompradoraNome: compraDTO.empresaCompradoraNome ?? undefined,
+      empresaCompradoraCNPJ: compraDTO.empresaCompradoraCNPJ ?? undefined,
+      classificacao: compraDTO.classificacao ?? undefined,
+      xmlData: compraDTO.xmlData ?? undefined
     } as any;
   }
   /**
@@ -166,6 +175,14 @@ class ComprasService {
    */
   async createCompra(data: any) {
     const resp = await axiosApiService.post<any>('/api/compras', data);
+    return (resp as any)?.data ?? resp;
+  }
+
+  /**
+   * Atualizar compra existente
+   */
+  async updateCompra(id: string, data: any) {
+    const resp = await axiosApiService.put<any>(`/api/compras/${id}`, data);
     return (resp as any)?.data ?? resp;
   }
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { type PurchaseOrderItem, PurchaseStatus } from '../types';
@@ -7,7 +7,12 @@ import { readFileAsText } from '../utils/xmlParser';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { axiosApiService } from '../services/axiosApi';
 import { getUploadUrl } from '../config/api';
+import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
+import { formatCNPJ, formatTelefoneBR } from '../utils/inputMasks';
+import { empresaFiscalService } from '../services/empresaFiscalService';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
+import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
+import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
 
 // ==================== ICONS ====================
 const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -65,6 +70,15 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
     const [invoiceNumber, setInvoiceNumber] = useState('');
     const [status, setStatus] = useState<PurchaseStatus>(PurchaseStatus.Pendente);
+    const [classificacao, setClassificacao] = useState<'COMPOSICAO_ESTOQUE' | 'FERRAMENTAS' | 'RECURSOS_HUMANOS' | 'LIMPEZA_INSUMOS' | 'ESCRITORIO_INSUMOS' | 'DESPESAS_VARIADAS'>('COMPOSICAO_ESTOQUE');
+    const isDespesasVariadas = classificacao === 'DESPESAS_VARIADAS';
+
+    useEffect(() => {
+        if (classificacao === 'DESPESAS_VARIADAS') {
+            setStatus(PurchaseStatus.Recebido);
+        }
+    }, [classificacao]);
+
     const [purchaseItems, setPurchaseItems] = useState<ExtendedItem[]>([]);
     const [productToAdd, setProductToAdd] = useState<{
         name: string;
@@ -81,23 +95,31 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const [supplierPhone, setSupplierPhone] = useState('');
     const [supplierEmail, setSupplierEmail] = useState('');
     const [supplierAddress, setSupplierAddress] = useState('');
+    // Busca de fornecedores cadastrados (preenchimento manual)
+    const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+    const [showFornecedorDropdown, setShowFornecedorDropdown] = useState(false);
+    const fornecedorDropdownRef = useRef<HTMLDivElement>(null);
 
     // Custos e pagamento
     const [frete, setFrete] = useState<string>('0');
     const [outrasDespesas, setOutrasDespesas] = useState<string>('0');
+    const [descontos, setDescontos] = useState<string>('0');
     const [condicaoPagamento, setCondicaoPagamento] = useState<'AVISTA' | 'PARCELADO'>('AVISTA');
-    const [numParcelas, setNumParcelas] = useState<string>('1');
-    const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState<string>('');
 
     // Campos fiscais
     const [destinatarioCNPJ, setDestinatarioCNPJ] = useState<string>('');
     const [statusImportacao, setStatusImportacao] = useState<'MANUAL' | 'XML'>('MANUAL');
+    // Empresa Compradora (lista de empresas cadastradas)
+    const [empresasFiscais, setEmpresasFiscais] = useState<any[]>([]);
+    const [empresaCompradoraId, setEmpresaCompradoraId] = useState<string>('');
+    const [empresaCompradoraNome, setEmpresaCompradoraNome] = useState<string>('');
+    const [empresaCompradoraCNPJ, setEmpresaCompradoraCNPJ] = useState<string>('');
+    const [dataEmissaoNF, setDataEmissaoNF] = useState<string>(new Date().toISOString().split('T')[0]);
     const [valorIPI, setValorIPI] = useState<string>('0');
-    const [valorTotalProdutos, setValorTotalProdutos] = useState<string>('0');
-    const [valorTotalNota, setValorTotalNota] = useState<string>('0');
 
     // Parcelas
     const [parcelas, setParcelas] = useState<Array<{ numero: string; dataVencimento: string; valor: number }>>([]);
+    const [observacoes, setObservacoes] = useState('');
 
     // XML Import
     const [selectedXMLFile, setSelectedXMLFile] = useState<File | null>(null);
@@ -129,6 +151,16 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         tipoEmbalagem?: string;
         unidadeEmbalagem?: string;
     } | null>(null);
+    
+    // Estados para conversão de unidade
+    const [conversaoUnidadeModalOpen, setConversaoUnidadeModalOpen] = useState(false);
+    const [itemConversaoUnidade, setItemConversaoUnidade] = useState<{
+        productName: string;
+        quantity: number;
+        unitCost: number;
+        totalCost: number;
+        unidadeMedida?: string;
+    } | null>(null);
 
     // Carregar materiais do estoque
     useEffect(() => {
@@ -150,18 +182,142 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         carregarMateriais();
     }, []);
 
+    // Carregar fornecedores cadastrados para busca no preenchimento manual
+    useEffect(() => {
+        const carregarFornecedores = async () => {
+            try {
+                const resp = await fornecedoresService.listar({ ativo: true });
+                const data = (resp as any)?.data ?? (resp as any);
+                setFornecedores(Array.isArray(data) ? data : []);
+            } catch (error) {
+                console.error('Erro ao carregar fornecedores:', error);
+                setFornecedores([]);
+            }
+        };
+        carregarFornecedores();
+    }, []);
+
+    // Carregar empresas fiscais (para seletor de Empresa Compradora)
+    useEffect(() => {
+        const carregarEmpresasFiscais = async () => {
+            try {
+                const response = await empresaFiscalService.listar();
+                const data = (response as any)?.data ?? (response as any);
+                setEmpresasFiscais(Array.isArray(data) ? data : []);
+            } catch (error) {
+                console.error('Erro ao carregar empresas fiscais:', error);
+                setEmpresasFiscais([]);
+            }
+        };
+        carregarEmpresasFiscais();
+    }, []);
+
+    // Handler: ao selecionar Empresa Compradora, preenche nome, CNPJ e CNPJ Destinatário
+    const handleEmpresaCompradoraChange = (empresaId: string) => {
+        setEmpresaCompradoraId(empresaId);
+        if (empresaId === 'manual') {
+            setEmpresaCompradoraNome('');
+            setEmpresaCompradoraCNPJ('');
+            setDestinatarioCNPJ('');
+        } else {
+            const empresa = empresasFiscais.find((e: any) => e.id === empresaId);
+            if (empresa) {
+                const nome = empresa.razaoSocial || empresa.nomeFantasia || '';
+                const cnpj = empresa.cnpj ? formatCNPJ(String(empresa.cnpj)) : '';
+                setEmpresaCompradoraNome(nome);
+                setEmpresaCompradoraCNPJ(cnpj);
+                setDestinatarioCNPJ(cnpj);
+            } else {
+                setEmpresaCompradoraNome('');
+                setEmpresaCompradoraCNPJ('');
+            }
+        }
+    };
+
+    // Fechar dropdown de fornecedor ao clicar fora
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (fornecedorDropdownRef.current && !fornecedorDropdownRef.current.contains(e.target as Node)) {
+                setShowFornecedorDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Normaliza texto para busca (remove acentos, lowercase)
+    const normalizarParaBusca = (texto: string) =>
+        (texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Fornecedores filtrados pela digitação - cada caractere filtra em tempo real
+    // Prioriza: nome começa com termo > alguma palavra começa com termo > nome contém termo > CNPJ contém dígitos
+    const fornecedoresFiltrados = useMemo(() => {
+        const termo = supplierName.trim();
+        if (!termo) return fornecedores.slice(0, 10);
+
+        const termoNorm = normalizarParaBusca(termo);
+        const termoDigitos = termo.replace(/\D/g, '');
+
+        const filtrar = fornecedores
+            .map((f) => {
+                const nomeNorm = normalizarParaBusca(f.nome);
+                const cnpjDigits = (f.cnpj || '').replace(/\D/g, '');
+                const palavras = nomeNorm.split(/\s+/);
+
+                // Verifica se corresponde
+                const nomeComecaCom = nomeNorm.startsWith(termoNorm);
+                const algumaPalavraComeca = palavras.some((p) => p.startsWith(termoNorm));
+                const nomeContem = nomeNorm.includes(termoNorm);
+                const cnpjContem = termoDigitos.length >= 2 && cnpjDigits.includes(termoDigitos);
+
+                if (!nomeComecaCom && !algumaPalavraComeca && !nomeContem && !cnpjContem) return null;
+
+                // Ordenação: melhores matches primeiro
+                let score = 0;
+                if (nomeComecaCom) score = 100;
+                else if (algumaPalavraComeca) score = 80;
+                else if (nomeContem) score = 50;
+                else if (cnpjContem) score = 30;
+
+                return { fornecedor: f, score };
+            })
+            .filter((x): x is { fornecedor: Fornecedor; score: number } => x !== null)
+            .sort((a, b) => b.score - a.score)
+            .map((x) => x.fornecedor)
+            .slice(0, 10);
+
+        return filtrar;
+    }, [fornecedores, supplierName]);
+
+    const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setSupplierPhone(formatTelefoneBR(e.target.value));
+    };
+
+    // Preencher todos os dados do fornecedor ao selecionar na lista
+    const handleSelecionarFornecedor = (f: Fornecedor) => {
+        setSupplierName(f.nome);
+        setSupplierCNPJ(f.cnpj ? formatCNPJ(String(f.cnpj)) : '');
+        setSupplierPhone(f.telefone ? formatTelefoneBR(f.telefone) : '');
+        setSupplierEmail(f.email || '');
+        const partes = [f.endereco, f.cidade, f.estado, f.cep].filter(Boolean);
+        setSupplierAddress(partes.join(partes.length > 1 ? ', ' : ''));
+        setShowFornecedorDropdown(false);
+    };
+
     // Calculated values
     const totalProdutosCalculado = useMemo(() => {
         return purchaseItems.reduce((total, item) => total + item.totalCost, 0);
     }, [purchaseItems]);
 
     const valorTotalNotaCalculado = useMemo(() => {
+        const sub = totalProdutosCalculado;
+        const desc = Math.min(parseFloat(descontos || '0') || 0, sub);
+        const baseProdutos = Math.max(0, sub - desc);
         const freteNum = parseFloat(frete || '0') || 0;
         const outrasNum = parseFloat(outrasDespesas || '0') || 0;
         const ipiNum = parseFloat(valorIPI || '0') || 0;
-        const totalProdutosNum = parseFloat(valorTotalProdutos || String(totalProdutosCalculado)) || 0;
-        return totalProdutosNum + ipiNum + freteNum + outrasNum;
-    }, [valorIPI, frete, outrasDespesas, valorTotalProdutos, totalProdutosCalculado]);
+        return baseProdutos + ipiNum + freteNum + outrasNum;
+    }, [valorIPI, frete, outrasDespesas, descontos, totalProdutosCalculado]);
 
     // Filtrar materiais pela busca
     const materiaisFiltrados = useMemo(() => {
@@ -351,26 +507,38 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             // Preencher Fornecedor
             if (data.fornecedor) {
                 setSupplierName(data.fornecedor.nome || '');
-                setSupplierCNPJ(data.fornecedor.cnpj || '');
+                setSupplierCNPJ(data.fornecedor.cnpj ? formatCNPJ(String(data.fornecedor.cnpj)) : '');
                 setSupplierAddress(data.fornecedor.endereco || '');
             }
 
             // Preencher Informações da Compra
             setInvoiceNumber(data.numeroNF || '');
             if (data.dataEmissao) {
-                const dataEmissao = data.dataEmissao.split('T')[0];
-                setPurchaseDate(dataEmissao);
+                const dataEmissaoStr = (typeof data.dataEmissao === 'string' ? data.dataEmissao : '').split('T')[0];
+                if (dataEmissaoStr) {
+                    setDataEmissaoNF(dataEmissaoStr);
+                    setPurchaseDate(dataEmissaoStr);
+                }
             }
 
-            // Preencher CNPJ Destinatário
-            setDestinatarioCNPJ(data.destinatarioCNPJ || '');
+            // Preencher CNPJ Destinatário e tentar corresponder Empresa Compradora
+            const cnpjDest = data.destinatarioCNPJ != null ? String(data.destinatarioCNPJ) : '';
+            setDestinatarioCNPJ(cnpjDest ? formatCNPJ(cnpjDest) : '');
+            if (cnpjDest) {
+                const cnpjLimpo = cnpjDest.replace(/\D/g, '');
+                const empresaMatch = empresasFiscais.find((e: any) => (e.cnpj || '').replace(/\D/g, '') === cnpjLimpo);
+                if (empresaMatch) {
+                    setEmpresaCompradoraId(empresaMatch.id);
+                    setEmpresaCompradoraNome(empresaMatch.razaoSocial || empresaMatch.nomeFantasia || '');
+                    setEmpresaCompradoraCNPJ(empresaMatch.cnpj ? formatCNPJ(String(empresaMatch.cnpj)) : '');
+                }
+            }
 
             // Preencher Valores Fiscais
             setValorIPI(String(data.valorIPI || 0));
-            setValorTotalProdutos(String(data.valorTotalProdutos || 0));
-            setValorTotalNota(String(data.valorTotalNota || 0));
             setFrete(String(data.valorFrete || 0));
             setOutrasDespesas(String(data.outrasDespesas || 0));
+            setDescontos(String(data.valorDesconto ?? 0));
 
             // Preencher Itens
             if (data.items && Array.isArray(data.items)) {
@@ -396,7 +564,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 }
             }
 
-            // Preencher Parcelas
+            // Preencher Parcelas (Faturas / Duplicatas) — sem usar número de parcelas nem data 1º vencimento
             if (data.parcelas && Array.isArray(data.parcelas) && data.parcelas.length > 0) {
                 const xmlParcelas = data.parcelas.map((p: any) => ({
                     numero: p.numero || '',
@@ -405,19 +573,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 }));
                 setParcelas(xmlParcelas);
                 console.log(`✅ ${xmlParcelas.length} parcelas adicionadas`);
-                
-                if (xmlParcelas.length > 1) {
-                    setCondicaoPagamento('PARCELADO');
-                    setNumParcelas(String(xmlParcelas.length));
-                    if (xmlParcelas[0].dataVencimento) {
-                        setDataPrimeiroVencimento(xmlParcelas[0].dataVencimento);
-                    }
-                } else if (xmlParcelas.length === 1) {
-                    setCondicaoPagamento('AVISTA');
-                    if (xmlParcelas[0].dataVencimento) {
-                        setDataPrimeiroVencimento(xmlParcelas[0].dataVencimento);
-                    }
-                }
+                setCondicaoPagamento(xmlParcelas.length > 1 ? 'PARCELADO' : 'AVISTA');
             }
 
             setStatusImportacao('XML');
@@ -440,17 +596,38 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        // Obrigatório pelo menos uma fatura/parcela (gera Contas a Pagar)
+        if (parcelas.length === 0) {
+            toast.error('Registre pelo menos uma fatura ou parcela', {
+                description: 'Na seção "Faturas / Parcelas (Duplicatas)" clique em "Adicionar Parcela" e preencha número, data de vencimento e valor.',
+                duration: 6000
+            });
+            return;
+        }
+
+        // Validar se as parcelas têm data e valor válidos
+        const parcelasInvalidas = parcelas.filter(p => !p.dataVencimento || p.valor <= 0);
+        if (parcelasInvalidas.length > 0) {
+            toast.error('Existem parcelas incompletas', {
+                description: 'Todas as parcelas devem ter data de vencimento e valor maior que zero.',
+                duration: 5000
+            });
+            return;
+        }
+
         try {
             const payload: any = {
                 fornecedorNome: supplierName,
                 fornecedorCNPJ: supplierCNPJ,
                 fornecedorTel: supplierPhone,
                 numeroNF: invoiceNumber,
-                dataEmissaoNF: purchaseDate,
+                dataEmissaoNF: dataEmissaoNF || purchaseDate,
                 dataCompra: purchaseDate,
                 status: status,
+                classificacao: classificacao, // ✅ NOVO: Classificação da compra
                 valorFrete: parseFloat(frete || '0') || 0,
                 outrasDespesas: parseFloat(outrasDespesas || '0') || 0,
+                valorDesconto: parseFloat(descontos || '0') || 0,
                 items: purchaseItems.map((it) => ({
                     nomeProduto: it.productName,
                     quantidade: it.quantity,
@@ -464,14 +641,14 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     tipoEmbalagem: it.tipoEmbalagem,
                     unidadeEmbalagem: it.unidadeEmbalagem
                 })),
-                observacoes: '',
+                observacoes: observacoes.trim() || undefined,
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
-                parcelas: condicaoPagamento === 'PARCELADO' ? parseInt(numParcelas || '1') : 1,
-                dataPrimeiroVencimento: condicaoPagamento === 'PARCELADO' && dataPrimeiroVencimento ? dataPrimeiroVencimento : undefined,
-                destinatarioCNPJ,
+                destinatarioCNPJ: destinatarioCNPJ || empresaCompradoraCNPJ,
                 statusImportacao,
+                empresaCompradoraNome: empresaCompradoraNome || undefined,
+                empresaCompradoraCNPJ: empresaCompradoraCNPJ || undefined,
                 valorIPI: parseFloat(valorIPI || '0') || 0,
-                valorTotalProdutos: parseFloat(valorTotalProdutos || '0') || 0,
+                valorTotalProdutos: totalProdutosCalculado,
                 valorTotalNota: valorTotalNotaCalculado,
                 duplicatas: parcelas
             };
@@ -480,8 +657,13 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             const response = await comprasService.createCompra(payload);
             const estatisticas = (response as any)?.estatisticas || (response as any)?.data?.estatisticas;
 
-            // Exibir resumo se houver estatísticas
-            if (estatisticas) {
+            if (classificacao === 'DESPESAS_VARIADAS') {
+                toast.success('Despesa registrada', {
+                    description:
+                        'Compra e contas a pagar registradas. Não há recebimento de mercadoria nem entrada em estoque.',
+                    duration: 5000
+                });
+            } else if (estatisticas) {
                 const mensagem = `✅ Compra registrada com sucesso!\n\n` +
                     `📦 ${estatisticas.materiaisIncrementados || 0} item(ns) tiveram estoque incrementado em materiais existentes\n` +
                     `🆕 ${estatisticas.materiaisCriados || 0} novo(s) material(is) foram criados`;
@@ -588,18 +770,50 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft p-6 border border-gray-200 dark:border-dark-border">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Informações do Fornecedor</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
+                        <div className="relative" ref={fornecedorDropdownRef}>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                 Nome do Fornecedor *
                             </label>
                             <input
                                 type="text"
                                 value={supplierName}
-                                onChange={(e) => setSupplierName(e.target.value)}
+                                onChange={(e) => {
+                                    setSupplierName(e.target.value);
+                                    setShowFornecedorDropdown(true);
+                                }}
+                                onFocus={() => setShowFornecedorDropdown(true)}
                                 required
+                                autoComplete="off"
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                                placeholder="Nome da empresa fornecedora"
+                                placeholder="Digite para buscar fornecedores cadastrados ou nome da empresa"
                             />
+                            {showFornecedorDropdown && fornecedoresFiltrados.length > 0 && (
+                                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl shadow-lg max-h-60 overflow-auto">
+                                    {fornecedoresFiltrados.map((f) => (
+                                        <button
+                                            key={f.id}
+                                            type="button"
+                                            onClick={() => handleSelecionarFornecedor(f)}
+                                            className="w-full text-left px-4 py-3 hover:bg-orange-50 dark:hover:bg-orange-900/20 border-b border-gray-100 dark:border-dark-border last:border-b-0 transition-colors"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div className="font-medium text-gray-900 dark:text-white">{f.nome}</div>
+                                                {f.cnpj && (
+                                                    <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded font-mono">
+                                                        {f.cnpj}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {f.endereco && (
+                                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{f.endereco}</div>
+                                            )}
+                                            {f.telefone && (
+                                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Tel: {f.telefone}</div>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div>
@@ -609,7 +823,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <input
                                 type="text"
                                 value={supplierCNPJ}
-                                onChange={(e) => setSupplierCNPJ(e.target.value)}
+                                onChange={(e) => setSupplierCNPJ(formatCNPJ(e.target.value))}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
                                 placeholder="00.000.000/0000-00"
                             />
@@ -622,9 +836,9 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <input
                                 type="text"
                                 value={supplierPhone}
-                                onChange={(e) => setSupplierPhone(e.target.value)}
+                                onChange={handlePhoneChange}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                                placeholder="(00) 0000-0000"
+                                placeholder="(00) 00000-0000"
                             />
                         </div>
 
@@ -653,6 +867,196 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 placeholder="Endereço completo do fornecedor"
                             />
                         </div>
+                    </div>
+                </div>
+
+                {/* Card de Classificação da Compra */}
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-2xl shadow-soft p-6 border-2 border-blue-200 dark:border-blue-800">
+                    <div className="flex items-start gap-4 mb-4">
+                        <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-xl">
+                            <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
+                                Classificação da Compra
+                            </h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Selecione a classificação que melhor descreve esta compra
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
+                        {/* Composição Estoque */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('COMPOSICAO_ESTOQUE')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'COMPOSICAO_ESTOQUE'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'COMPOSICAO_ESTOQUE' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Composição Estoque</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Sempre incrementa materiais ao estoque</div>
+                                </div>
+                                {classificacao === 'COMPOSICAO_ESTOQUE' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Ferramentas */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('FERRAMENTAS')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'FERRAMENTAS'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'FERRAMENTAS' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Ferramentas</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Equipamentos e ferramentas</div>
+                                </div>
+                                {classificacao === 'FERRAMENTAS' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Recursos Humanos */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('RECURSOS_HUMANOS')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'RECURSOS_HUMANOS'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'RECURSOS_HUMANOS' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Recursos Humanos</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">EPIs, uniformes, equipamentos para funcionários</div>
+                                </div>
+                                {classificacao === 'RECURSOS_HUMANOS' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Limpeza - Insumos */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('LIMPEZA_INSUMOS')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'LIMPEZA_INSUMOS'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'LIMPEZA_INSUMOS' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Limpeza - Insumos</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Produtos de limpeza e higiene</div>
+                                </div>
+                                {classificacao === 'LIMPEZA_INSUMOS' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Escritório - Insumos */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('ESCRITORIO_INSUMOS')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'ESCRITORIO_INSUMOS'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'ESCRITORIO_INSUMOS' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Escritório - Insumos</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Materiais de escritório e papelaria</div>
+                                </div>
+                                {classificacao === 'ESCRITORIO_INSUMOS' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Despesas Variadas */}
+                        <button
+                            type="button"
+                            onClick={() => setClassificacao('DESPESAS_VARIADAS')}
+                            className={`p-4 rounded-xl border-2 transition-all text-left ${
+                                classificacao === 'DESPESAS_VARIADAS'
+                                    ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40 shadow-md'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-dark-card hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${classificacao === 'DESPESAS_VARIADAS' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Despesas Variadas</div>
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Outras despesas diversas</div>
+                                </div>
+                                {classificacao === 'DESPESAS_VARIADAS' && (
+                                    <div className="text-blue-500">
+                                        <CheckIcon className="w-5 h-5" />
+                                    </div>
+                                )}
+                            </div>
+                        </button>
                     </div>
                 </div>
 
@@ -688,17 +1092,38 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
 
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                Data de Emissão da NF
+                            </label>
+                            <input
+                                type="date"
+                                value={dataEmissaoNF}
+                                onChange={(e) => setDataEmissaoNF(e.target.value)}
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                                title="Preenchida automaticamente ao importar XML ou informe manualmente"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Preenchida pelo XML ou manualmente</p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                 Status
                             </label>
                             <select
                                 value={status}
                                 onChange={(e) => setStatus(e.target.value as PurchaseStatus)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                                disabled={isDespesasVariadas}
+                                title={isDespesasVariadas ? 'Despesas variadas são registradas como concluídas (sem remessa).' : undefined}
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white disabled:opacity-70"
                             >
                                 <option value={PurchaseStatus.Pendente}>Pendente</option>
                                 <option value={PurchaseStatus.Recebido}>Recebido</option>
                                 <option value={PurchaseStatus.Cancelado}>Cancelado</option>
                             </select>
+                            {isDespesasVariadas && (
+                                <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                                    Despesas variadas não aguardam recebimento de mercadoria; o status fica como concluído para fins de compra e financeiro.
+                                </p>
+                            )}
                         </div>
 
                         <div>
@@ -706,14 +1131,81 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <input
                                 type="text"
                                 value={destinatarioCNPJ}
-                                onChange={(e) => setDestinatarioCNPJ(e.target.value)}
+                                onChange={(e) => {
+                                    const v = formatCNPJ(e.target.value);
+                                    setDestinatarioCNPJ(v);
+                                    if (empresaCompradoraId === 'manual') {
+                                        setEmpresaCompradoraCNPJ(v);
+                                    }
+                                }}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
                                 placeholder="00.000.000/0000-00"
                             />
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-4">
+                    {/* Empresa Compradora - Seletor de empresas cadastradas */}
+                    <div className="mt-6">
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400">🏢</span>
+                            Empresa Compradora
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-1">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Selecionar Empresa
+                                </label>
+                                <select
+                                    value={empresaCompradoraId}
+                                    onChange={(e) => handleEmpresaCompradoraChange(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-white dark:bg-dark-bg dark:text-white"
+                                >
+                                    <option value="">Selecione uma empresa...</option>
+                                    {empresasFiscais.map((empresa: any) => (
+                                        <option key={empresa.id} value={empresa.id}>
+                                            {(empresa.razaoSocial || empresa.nomeFantasia || '').substring(0, 50)}{(empresa.razaoSocial || empresa.nomeFantasia || '').length > 50 ? '...' : ''} - {empresa.cnpj || ''}
+                                        </option>
+                                    ))}
+                                    <option value="manual">Manual</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-1">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    Nome da Empresa
+                                </label>
+                                <input
+                                    type="text"
+                                    value={empresaCompradoraNome}
+                                    onChange={(e) => setEmpresaCompradoraNome(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-gray-50 dark:bg-dark-bg dark:text-white"
+                                    placeholder="Nome/Razão Social"
+                                    readOnly={empresaCompradoraId ? empresaCompradoraId !== 'manual' : false}
+                                />
+                            </div>
+                            <div className="md:col-span-1">
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    CNPJ da Empresa
+                                </label>
+                                <input
+                                    type="text"
+                                    value={empresaCompradoraCNPJ}
+                                    onChange={(e) => {
+                                        const v = formatCNPJ(e.target.value);
+                                        setEmpresaCompradoraCNPJ(v);
+                                        if (empresaCompradoraId === 'manual') setDestinatarioCNPJ(v);
+                                    }}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 bg-gray-50 dark:bg-dark-bg dark:text-white"
+                                    placeholder="00.000.000/0000-00"
+                                    readOnly={empresaCompradoraId && empresaCompradoraId !== 'manual'}
+                                />
+                            </div>
+                        </div>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                            💡 Selecione a empresa compradora para preencher automaticamente o CNPJ destinatário
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Status de Importação</label>
                             <select
@@ -725,38 +1217,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 <option value="XML">XML</option>
                             </select>
                         </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Valor IPI</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={valorIPI}
-                                onChange={(e) => setValorIPI(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Total Produtos</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={valorTotalProdutos}
-                                onChange={(e) => setValorTotalProdutos(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Total da Nota</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={valorTotalNota}
-                                onChange={(e) => setValorTotalNota(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                            />
+                        <div className="flex flex-col justify-end">
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                Total de produtos e total da nota são calculados automaticamente na seção <strong>Custos e Pagamento</strong> e no resumo ao final.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1136,6 +1600,29 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 </svg>
                                                             </button>
                                                             
+                                                            {/* Botão de conversão de unidade (mostrar apenas para km, m ou cm) */}
+                                                            {item.unidadeMedida && ['km', 'm', 'cm'].includes(item.unidadeMedida.toLowerCase()) && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setItemConversaoUnidade({
+                                                                            productName: item.productName,
+                                                                            quantity: item.quantity,
+                                                                            unitCost: item.unitCost,
+                                                                            totalCost: item.totalCost,
+                                                                            unidadeMedida: item.unidadeMedida
+                                                                        });
+                                                                        setConversaoUnidadeModalOpen(true);
+                                                                    }}
+                                                                    className="p-1.5 text-purple-600 hover:text-purple-800 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
+                                                                    title="Converter unidade de medida (km ↔ m ↔ cm)"
+                                                                >
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                                                    </svg>
+                                                                </button>
+                                                            )}
+                                                            
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
@@ -1240,7 +1727,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 {/* Custos e Pagamento */}
                 <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft p-6 border border-gray-200 dark:border-dark-border">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Custos e Pagamento</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-6">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Valor do Frete</label>
                             <input
@@ -1254,13 +1741,27 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Outras Despesas/Descontos</label>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Outras despesas</label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Somam ao total (ex.: seguros, taxas)</p>
                             <input
                                 type="number"
                                 min="0"
                                 step="0.01"
                                 value={outrasDespesas}
                                 onChange={(e) => setOutrasDespesas(e.target.value)}
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                                placeholder="0,00"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Descontos</label>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Reduzem o valor dos produtos</p>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={descontos}
+                                onChange={(e) => setDescontos(e.target.value)}
                                 className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
                                 placeholder="0,00"
                             />
@@ -1278,15 +1779,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Total Produtos</label>
-                            <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                value={valorTotalProdutos || String(totalProdutosCalculado)}
-                                onChange={(e) => setValorTotalProdutos(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                            />
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Total produtos (automático)</label>
+                            <div className="w-full px-4 py-3 border border-gray-200 dark:border-dark-border rounded-xl bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white font-semibold">
+                                R$ {totalProdutosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Soma dos itens acima</p>
                         </div>
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Condição de Pagamento</label>
@@ -1306,43 +1803,21 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <select
                                 value={status}
                                 onChange={(e) => setStatus(e.target.value as PurchaseStatus)}
-                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 font-semibold dark:bg-dark-bg dark:text-white"
+                                disabled={isDespesasVariadas}
+                                title={isDespesasVariadas ? 'Despesas variadas são registradas como concluídas (sem remessa).' : undefined}
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 font-semibold dark:bg-dark-bg dark:text-white disabled:opacity-70"
                             >
                                 <option value={PurchaseStatus.Pendente}>⏳ Pendente</option>
                                 <option value={PurchaseStatus.Recebido}>✅ Recebido (Entrada no Estoque)</option>
                                 <option value={PurchaseStatus.Cancelado}>❌ Cancelado</option>
                             </select>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                ⚠️ Somente compras com status "Recebido" atualizam o estoque
+                                {isDespesasVariadas
+                                    ? 'Despesas variadas não entram em estoque; o registro é tratado como concluído (sem receber remessa).'
+                                    : '⚠️ Somente compras com status "Recebido" atualizam o estoque'}
                             </p>
                         </div>
-                        {condicaoPagamento === 'PARCELADO' && (
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Número de Parcelas</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    value={numParcelas}
-                                    onChange={(e) => setNumParcelas(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                                />
-                            </div>
-                        )}
                     </div>
-                    {condicaoPagamento === 'PARCELADO' && (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Data do 1º Vencimento</label>
-                                <input
-                                    type="date"
-                                    value={dataPrimeiroVencimento}
-                                    onChange={(e) => setDataPrimeiroVencimento(e.target.value)}
-                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
-                                />
-                            </div>
-                        </div>
-                    )}
                 </div>
 
                 {/* Parcelas */}
@@ -1395,12 +1870,32 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
 
+                {/* Observações */}
+                <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft p-6 border border-gray-200 dark:border-dark-border">
+                    <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-2">Observações</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                        Anotações internas sobre esta compra (visíveis nos detalhes da compra).
+                    </p>
+                    <textarea
+                        value={observacoes}
+                        onChange={(e) => setObservacoes(e.target.value)}
+                        rows={4}
+                        maxLength={8000}
+                        placeholder="Ex.: condições combinadas com o fornecedor, referência de pedido, etc."
+                        className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white resize-y min-h-[100px]"
+                    />
+                </div>
+
                 {/* Resumo de Totais */}
                 <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border-2 border-orange-200 dark:border-orange-800 p-4 rounded-xl">
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                         <div className="text-sm text-gray-700 dark:text-gray-300">
-                            <div className="font-semibold">Produtos</div>
-                            <div>R$ {(valorTotalProdutos ? parseFloat(valorTotalProdutos) : totalProdutosCalculado).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                            <div className="font-semibold">Produtos (itens)</div>
+                            <div>R$ {totalProdutosCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                        </div>
+                        <div className="text-sm text-gray-700 dark:text-gray-300">
+                            <div className="font-semibold">Descontos</div>
+                            <div className="text-red-700 dark:text-red-400">− R$ {Math.min(parseFloat(descontos || '0') || 0, totalProdutosCalculado).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                         </div>
                         <div className="text-sm text-gray-700 dark:text-gray-300">
                             <div className="font-semibold">IPI</div>
@@ -1411,10 +1906,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                             <div>R$ {parseFloat(frete || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                         </div>
                         <div className="text-sm text-gray-700 dark:text-gray-300">
-                            <div className="font-semibold">Outras Despesas</div>
+                            <div className="font-semibold">Outras despesas</div>
                             <div>R$ {parseFloat(outrasDespesas || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right sm:col-span-2 lg:col-span-1">
                             <div className="text-lg font-semibold text-gray-800 dark:text-white">TOTAL GERAL DA NOTA</div>
                             <div className="text-2xl font-bold text-orange-700 dark:text-orange-400">R$ {valorTotalNotaCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                         </div>
@@ -1467,88 +1962,52 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 }}
             />
 
-            {/* Modal de visualização de material */}
-            {materialVisualizando && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-200 dark:border-dark-border">
-                            <div className="flex justify-between items-center">
-                                <h3 className="text-xl font-bold text-gray-900 dark:text-white">Detalhes do Material</h3>
-                                <button
-                                    type="button"
-                                    onClick={() => setMaterialVisualizando(null)}
-                                    className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div className="p-6">
-                            {materialVisualizando.material && (
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Nome</label>
-                                        <p className="text-gray-900 dark:text-white">{materialVisualizando.material.nome}</p>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">SKU</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.sku}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Categoria</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.categoria || 'N/A'}</p>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Estoque</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.estoque || 0} {materialVisualizando.material.unidadeMedida || 'un'}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Unidade de Medida</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.unidadeMedida || 'un'}</p>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Preço de Compra</label>
-                                            <p className="text-gray-900 dark:text-white">R$ {(materialVisualizando.material.preco || 0).toFixed(2)}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Valor de Venda</label>
-                                            <p className="text-gray-900 dark:text-white">R$ {(materialVisualizando.material.valorVenda || 0).toFixed(2)}</p>
-                                        </div>
-                                    </div>
-                                    {materialVisualizando.material.ncm && (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">NCM</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.ncm}</p>
-                                        </div>
-                                    )}
-                                    {materialVisualizando.material.descricao && (
-                                        <div>
-                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Descrição</label>
-                                            <p className="text-gray-900 dark:text-white">{materialVisualizando.material.descricao}</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                        <div className="p-6 border-t border-gray-200 dark:border-dark-border flex justify-end">
-                            <button
-                                type="button"
-                                onClick={() => setMaterialVisualizando(null)}
-                                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                            >
-                                Fechar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Modal de visualização de material vinculado */}
+            <MaterialDetailsModal
+                open={!!materialVisualizando}
+                onClose={() => setMaterialVisualizando(null)}
+                item={materialVisualizando?.material ? {
+                    nome: materialVisualizando.material.nome,
+                    sku: materialVisualizando.material.sku,
+                    ncm: materialVisualizando.material.ncm,
+                    categoria: materialVisualizando.material.categoria,
+                    unidadeMedida: materialVisualizando.material.unidadeMedida,
+                    preco: materialVisualizando.material.preco,
+                    valorVenda: materialVisualizando.material.valorVenda,
+                    descricao: materialVisualizando.material.descricao,
+                    material: materialVisualizando.material
+                } : null}
+            />
+            
+            {/* Modal de Conversão de Unidade */}
+            <ConverterUnidadeModal
+                isOpen={conversaoUnidadeModalOpen}
+                onClose={() => {
+                    setConversaoUnidadeModalOpen(false);
+                    setItemConversaoUnidade(null);
+                }}
+                item={itemConversaoUnidade}
+                onSave={(convertedItem) => {
+                    if (itemConversaoUnidade) {
+                        const updatedItems = purchaseItems.map((item: any) => {
+                            if (item.productName === itemConversaoUnidade.productName && 
+                                item.quantity === itemConversaoUnidade.quantity &&
+                                item.unitCost === itemConversaoUnidade.unitCost) {
+                                return {
+                                    ...item,
+                                    quantity: convertedItem.quantity,
+                                    unitCost: convertedItem.unitCost,
+                                    totalCost: convertedItem.totalCost,
+                                    unidadeMedida: convertedItem.unidadeMedida
+                                };
+                            }
+                            return item;
+                        });
+                        setPurchaseItems(updatedItems);
+                        toast.success(`Unidade convertida para ${convertedItem.unidadeMedida} com sucesso!`);
+                    }
+                }}
+            />
         </div>
     );
 };

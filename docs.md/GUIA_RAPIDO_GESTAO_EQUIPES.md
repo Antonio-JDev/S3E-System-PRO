@@ -17,6 +17,7 @@ npx ts-node prisma/seed-equipes.ts
 ```
 
 Este script cria automaticamente 3 equipes:
+
 - **Equipe A** (MONTAGEM) - 2 membros
 - **Equipe B** (CAMPO) - 2 membros
 - **Equipe C** (DISTINTA) - 2 membros
@@ -58,6 +59,7 @@ curl -X GET "http://localhost:3000/api/obras/equipes/disponiveis?dataInicio=2025
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -94,6 +96,7 @@ curl -X POST http://localhost:3000/api/obras/alocar \
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -142,6 +145,7 @@ curl -X GET "http://localhost:3000/api/obras/alocacoes/calendario?mes=3&ano=2025
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -194,6 +198,7 @@ curl -X PUT http://localhost:3000/api/obras/alocacoes/alocacao-id/concluir \
 ```
 
 **Resultado:**
+
 - Status: `EmAndamento` → `Concluida`
 - `dataFimReal`: 18/03/2025 (3 dias antes do previsto)
 
@@ -222,6 +227,7 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 ```
 
 **Resposta:**
+
 ```json
 {
   "success": true,
@@ -244,16 +250,19 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 **Objetivo:** Planejar alocações para o próximo mês
 
 1. **Ver alocações atuais:**
+
    ```bash
    GET /api/obras/alocacoes?status=EmAndamento
    ```
 
 2. **Verificar disponibilidade:**
+
    ```bash
    GET /api/obras/equipes/disponiveis?dataInicio=2025-04-01&dataFim=2025-04-30
    ```
 
 3. **Alocar equipes aos novos projetos:**
+
    ```bash
    POST /api/obras/alocar
    ```
@@ -265,11 +274,13 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 **Objetivo:** Verificar progresso das equipes
 
 1. **Ver calendário da semana:**
+
    ```bash
    GET /api/obras/alocacoes/calendario?mes=3&ano=2025
    ```
 
 2. **Atualizar status conforme necessário:**
+
    ```bash
    PUT /api/obras/alocacoes/{id}/iniciar
    PUT /api/obras/alocacoes/{id}/concluir
@@ -282,16 +293,19 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 **Situação:** Equipe A precisa ser movida para outro projeto urgente
 
 1. **Cancelar alocação atual:**
+
    ```bash
    PUT /api/obras/alocacoes/{id}/cancelar
    ```
 
 2. **Verificar nova disponibilidade:**
+
    ```bash
    GET /api/obras/equipes/disponiveis?dataInicio=...&dataFim=...
    ```
 
 3. **Criar nova alocação:**
+
    ```bash
    POST /api/obras/alocar
    ```
@@ -302,16 +316,17 @@ curl -X GET http://localhost:3000/api/obras/estatisticas \
 
 Use esta tabela para converter duração em dias úteis:
 
-| Duração | Dias Úteis | Aproximado |
-|---------|------------|------------|
-| 1 semana | 5 dias | 7 dias corridos |
-| 2 semanas | 10 dias | 14 dias corridos |
-| 3 semanas | 15 dias | 21 dias corridos |
-| 1 mês | 20 dias | 28-30 dias corridos |
-| 1.5 meses | 30 dias | 42 dias corridos |
-| 2 meses | 40 dias | 56 dias corridos |
+| Duração   | Dias Úteis | Aproximado          |
+| --------- | ---------- | ------------------- |
+| 1 semana  | 5 dias     | 7 dias corridos     |
+| 2 semanas | 10 dias    | 14 dias corridos    |
+| 3 semanas | 15 dias    | 21 dias corridos    |
+| 1 mês     | 20 dias    | 28-30 dias corridos |
+| 1.5 meses | 30 dias    | 42 dias corridos    |
+| 2 meses   | 40 dias    | 56 dias corridos    |
 
 **Exemplo:**
+
 - Projeto de 1 mês → use `duracaoDias: 20`
 - Projeto de 2 semanas → use `duracaoDias: 10`
 
@@ -324,10 +339,13 @@ Use esta tabela para converter duração em dias úteis:
 **Causa:** Tentativa de alocar equipe já ocupada
 
 **Solução:**
+
 1. Verificar disponibilidade primeiro:
+
    ```bash
    GET /api/obras/equipes/disponiveis?...
    ```
+
 2. Escolher equipe disponível
 
 ---
@@ -337,10 +355,13 @@ Use esta tabela para converter duração em dias úteis:
 **Causa:** ID da equipe inválido
 
 **Solução:**
+
 1. Listar equipes disponíveis:
+
    ```bash
    GET /api/obras/equipes
    ```
+
 2. Usar ID correto
 
 ---
@@ -350,10 +371,13 @@ Use esta tabela para converter duração em dias úteis:
 **Causa:** ID do projeto inválido
 
 **Solução:**
+
 1. Verificar se o projeto existe:
+
    ```bash
    GET /api/orcamentos/{id}
    ```
+
 2. Garantir que o orçamento foi convertido em projeto
 
 ---
@@ -363,6 +387,7 @@ Use esta tabela para converter duração em dias úteis:
 **Causa:** Usuário não tem permissão de admin
 
 **Solução:**
+
 - Fazer login com usuário admin
 - Ou solicitar permissões ao administrador do sistema
 
@@ -417,6 +442,7 @@ Use esta tabela para converter duração em dias úteis:
 ## 🆘 Suporte
 
 **Problemas?**
+
 1. Verifique os logs do servidor
 2. Confirme que as migrations foram aplicadas
 3. Valide o token JWT
@@ -426,4 +452,3 @@ Use esta tabela para converter duração em dias úteis:
 
 **Última atualização:** 22 de outubro de 2025  
 **Versão:** 1.0.0
-

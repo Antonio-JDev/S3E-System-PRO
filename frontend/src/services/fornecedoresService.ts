@@ -7,10 +7,15 @@ export interface Fornecedor {
   email: string;
   telefone: string;
   endereco: string;
+  bairro?: string;
   cidade: string;
   estado: string;
   cep: string;
   categoria: string;
+  classificacao?: 'Fabricante' | 'Representante_Vendedor' | null;
+  cnae_fiscal?: number | null;
+  codigo_municipio_ibge?: number | null;
+  situacao_cadastral?: number | null;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -26,6 +31,11 @@ export interface CreateFornecedorData {
   estado: string;
   cep: string;
   categoria: string;
+  classificacao?: 'Fabricante' | 'Representante_Vendedor' | '';
+  bairro?: string;
+  cnae_fiscal?: number | null;
+  codigo_municipio_ibge?: number | null;
+  situacao_cadastral?: number | null;
 }
 
 export interface UpdateFornecedorData extends Partial<CreateFornecedorData> {

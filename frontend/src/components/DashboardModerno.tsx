@@ -1,14 +1,37 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { 
-  LineChart, Line, AreaChart, Area, BarChart, Bar, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer 
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  LabelList,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  ComposedChart
 } from 'recharts';
-import { 
-  TrendingUp, TrendingDown, Users, DollarSign, 
-  Package, AlertTriangle, Building2, Zap, 
-  Calendar, Download, FileText,
-  Activity, Star, Printer, X, ChevronDown
+import {
+  TrendingUp,
+  TrendingDown,
+  Users,
+  Package,
+  AlertTriangle,
+  Building2,
+  Zap,
+  Download,
+  FileText,
+  Star,
+  X,
+  LayoutGrid,
+  ClipboardList
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -37,21 +60,27 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const [dashboardData, setDashboardData] = useState<DashboardCompleto | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPeriod, setSelectedPeriod] = useState<'monthly' | 'semester' | 'annual'>('monthly');
-  const [selectedQuadrosPeriod, setSelectedQuadrosPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [lastUpdate, setLastUpdate] = useState<string>('');
-  const [obrasData, setObrasData] = useState<any[]>([]);
   const [quadrosData, setQuadrosData] = useState<any[]>([]);
-  const [atividadesData, setAtividadesData] = useState<any[]>([]);
+  const [graficosExec, setGraficosExec] = useState<{
+    evolucaoOrcamentos: any[];
+    evolucaoOrdensServico: any[];
+    evolucaoObrasKanban: any[];
+    evolucaoPedidosVendas: any[];
+    comparativoMensal: any[];
+    categoriasVendas: { name: string; value: number }[];
+  } | null>(null);
+  const [pieActiveIndex, setPieActiveIndex] = useState(0);
+  const [piePedidosActiveIndex, setPiePedidosActiveIndex] = useState(0);
   const [materiaisCriticos, setMateriaisCriticos] = useState<any[]>([]);
   const [exportando, setExportando] = useState(false);
   const [filtroEstoque, setFiltroEstoque] = useState<'todos' | 'criticos' | 'abaixo-minimo'>('todos');
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [filtroFornecedor, setFiltroFornecedor] = useState<string>('todos');
   
-  // Detectar tema para ajustar cores dos gráficos
+  // Detectar tema efetivo (igual ao que o ThemeContext aplica no <html>)
   const themeContext = useContext(ThemeContext);
-  const isDark = themeContext?.theme === 'dark' || 
-    (themeContext?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = themeContext?.effectiveTheme === 'dark';
   
   // Pegar usuário logado
   const { user } = useAuth();
@@ -83,19 +112,25 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     }
   };
 
-  // Carregar evolução de obras
-  const loadObrasData = async (periodo: 'monthly' | 'semester' | 'annual') => {
+  const loadGraficosExec = async (periodo: 'monthly' | 'semester' | 'annual') => {
     try {
-      const result = await dashboardService.getEvolucaoObras(periodo);
+      const result = await dashboardService.getGraficosExecutivo(periodo);
       if (result.success && result.data) {
-        setObrasData(result.data);
+        setGraficosExec({
+          evolucaoOrcamentos: result.data.evolucaoOrcamentos || [],
+          evolucaoOrdensServico: result.data.evolucaoOrdensServico || [],
+          evolucaoObrasKanban: result.data.evolucaoObrasKanban || [],
+          evolucaoPedidosVendas: result.data.evolucaoPedidosVendas || [],
+          comparativoMensal: result.data.comparativoMensal || [],
+          categoriasVendas: result.data.categoriasVendas || []
+        });
       }
     } catch (err) {
-      console.error('Erro ao carregar evolução de obras:', err);
+      console.error('Erro ao carregar gráficos executivo:', err);
     }
   };
 
-  // Carregar produção de quadros
+  // Carregar produção de quadros (apenas para o card de estatísticas)
   const loadQuadrosData = async (periodo: 'daily' | 'weekly' | 'monthly') => {
     try {
       const result = await dashboardService.getProducaoQuadros(periodo);
@@ -104,18 +139,6 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       }
     } catch (err) {
       console.error('Erro ao carregar produção de quadros:', err);
-    }
-  };
-
-  // Carregar atividades do sistema
-  const loadAtividadesData = async () => {
-    try {
-      const result = await dashboardService.getAtividades('daily');
-      if (result.success && result.data) {
-        setAtividadesData(result.data);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar atividades:', err);
     }
   };
 
@@ -188,14 +211,10 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         },
         
         // Evolução de obras
-        evolucaoObras: {
-          periodo: selectedPeriod,
-          dados: obrasData
-        },
+        graficosExecutivo: graficosExec,
         
-        // Produção de quadros
         producaoQuadros: {
-          periodo: selectedQuadrosPeriod,
+          periodo: 'monthly',
           dados: quadrosData
         },
         
@@ -649,25 +668,25 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           </div>
 
           <div class="section">
-            <h2>🏗️ Evolução de Obras (${selectedPeriod === 'monthly' ? 'Mensal' : selectedPeriod === 'semester' ? 'Semestral' : 'Anual'})</h2>
+            <h2>📈 Comparativo (${selectedPeriod === 'monthly' ? 'Mensal' : selectedPeriod === 'semester' ? 'Semestral' : 'Anual'})</h2>
             <table>
               <thead>
                 <tr>
                   <th>Período</th>
-                  <th>Concluídas</th>
-                  <th>Em Andamento</th>
-                  <th>Planejadas</th>
-                  <th>Receita</th>
+                  <th>Orçamentos</th>
+                  <th>OS</th>
+                  <th>Obras</th>
+                  <th>Pedidos</th>
                 </tr>
               </thead>
               <tbody>
-                ${obrasData.map(item => `
+                ${(graficosExec?.comparativoMensal || []).map((item: any) => `
                   <tr>
                     <td>${item.name}</td>
-                    <td>${item.concluidas}</td>
-                    <td>${item.emAndamento}</td>
-                    <td>${item.planejadas}</td>
-                    <td>R$ ${(item.receita || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                    <td>${item.orcamentos}</td>
+                    <td>${item.ordensServico}</td>
+                    <td>${item.obras}</td>
+                    <td>${item.pedidosVendas}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -675,7 +694,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           </div>
 
           <div class="section">
-            <h2>🔧 Produção de Quadros (${selectedQuadrosPeriod === 'daily' ? 'Diário' : selectedQuadrosPeriod === 'weekly' ? 'Semanal' : 'Mensal'})</h2>
+            <h2>🔧 Produção de Quadros (referência mensal)</h2>
             <table>
               <thead>
                 <tr>
@@ -755,105 +774,54 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
   useEffect(() => {
     loadDashboardData();
-    loadAtividadesData();
+    loadQuadrosData('monthly');
     loadMateriaisCriticos();
     loadFornecedores();
-    
+
     const interval = setInterval(() => {
       loadDashboardData();
-      loadAtividadesData();
       loadMateriaisCriticos();
     }, 5 * 60 * 1000);
-    
+
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Carregar dados de obras quando período mudar
   useEffect(() => {
-    loadObrasData(selectedPeriod);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadGraficosExec(selectedPeriod);
   }, [selectedPeriod]);
 
-  // Carregar dados de quadros quando período mudar
+  const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#EF4444'];
+
+  /** Fatias para pizza interativa: pedidos por período (evolução) */
+  const piePedidosPorPeriodo = useMemo(() => {
+    const rows = graficosExec?.evolucaoPedidosVendas ?? [];
+    if (!rows.length) return [{ name: 'Sem dados', value: 1 }];
+    let mapped = rows.map((r: any) => ({
+      name: String(r.name ?? '—'),
+      value: Number(r.quantidade ?? 0),
+      valor: Number(r.valor ?? 0)
+    }));
+    const sumQ = mapped.reduce((s, x) => s + x.value, 0);
+    if (sumQ === 0) {
+      mapped = mapped.map((x) => ({ ...x, value: Math.max(0, x.valor) }));
+    }
+    const sum = mapped.reduce((s, x) => s + x.value, 0);
+    if (sum <= 0) return [{ name: 'Sem dados', value: 1 }];
+    return mapped.filter((x) => x.value > 0);
+  }, [graficosExec?.evolucaoPedidosVendas]);
+
   useEffect(() => {
-    loadQuadrosData(selectedQuadrosPeriod);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedQuadrosPeriod]);
+    setPiePedidosActiveIndex(0);
+  }, [selectedPeriod, piePedidosPorPeriodo.length]);
 
-  // Usar dados reais da API ou fallback para dados mockados
-  const getObrasData = () => {
-    if (obrasData && obrasData.length > 0) {
-      return obrasData;
-    }
-    
-    // Fallback para dados mockados caso API não retorne dados
-    if (selectedPeriod === 'monthly') {
-      return [
-        { name: 'Jan', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Fev', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Mar', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Abr', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Mai', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Jun', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Jul', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Ago', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Set', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Out', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Nov', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: 'Dez', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-      ];
-    } else if (selectedPeriod === 'semester') {
-      return [
-        { name: '1º Sem 2023', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2º Sem 2023', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '1º Sem 2024', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2º Sem 2024', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-      ];
-    } else {
-      return [
-        { name: '2020', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2021', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2022', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2023', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-        { name: '2024', concluidas: 0, emAndamento: 0, planejadas: 0, receita: 0 },
-      ];
-    }
-  };
-
-  // Usar dados reais de quadros ou fallback
-  const getQuadrosData = () => {
-    if (quadrosData && quadrosData.length > 0) {
-      return quadrosData;
-    }
-    
-    // Fallback para dados mockados
-    return [
-      { hora: '8h', producao: 0 },
-      { hora: '10h', producao: 0 },
-      { hora: '12h', producao: 0 },
-      { hora: '14h', producao: 0 },
-      { hora: '16h', producao: 0 },
-      { hora: '18h', producao: 0 },
-    ];
-  };
-
-  // Usar dados reais de atividades ou fallback
-  const getAtividadesData = () => {
-    if (atividadesData && atividadesData.length > 0) {
-      return atividadesData;
-    }
-    
-    // Fallback para dados mockados
-    return [
-      { hora: '8h', sessoes: 0 },
-      { hora: '10h', sessoes: 0 },
-      { hora: '12h', sessoes: 0 },
-      { hora: '14h', sessoes: 0 },
-      { hora: '16h', sessoes: 0 },
-      { hora: '18h', sessoes: 0 },
-    ];
-  };
+  const osEmAndamentoAtual = useMemo(() => {
+    const rows = graficosExec?.evolucaoOrdensServico ?? [];
+    if (!rows.length) return 0;
+    const last = rows[rows.length - 1] as any;
+    const v = Number(last?.emAndamento ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  }, [graficosExec?.evolucaoOrdensServico]);
 
   // Métricas principais usando dados reais da API
   const metricsData: MetricCard[] = [
@@ -862,6 +830,13 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       value: dashboardData?.estatisticas?.projetos?.ativos?.toString() || '0',
       change: 28.4,
       icon: <Building2 className="w-5 h-5" />,
+      trend: 'up'
+    },
+    {
+      title: 'OS em andamento',
+      value: osEmAndamentoAtual.toString(),
+      change: 0,
+      icon: <ClipboardList className="w-5 h-5" />,
       trend: 'up'
     },
     {
@@ -931,12 +906,12 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       </div>
 
       {/* Métricas principais */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6 mb-8 items-stretch">
         {metricsData.map((metric, index) => (
-          <Card key={index} className="hover:shadow-lg transition-shadow">
-            <CardContent className="p-6">
+          <Card key={index} className="hover:shadow-lg transition-shadow h-full">
+            <CardContent className="p-6 h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
-                <div className="w-12 h-12 rounded-lg bg-brand-blue/10 dark:bg-brand-blue/20 flex items-center justify-center text-brand-blue">
+                <div className="w-12 h-12 rounded-lg bg-brand-blue/10 dark:bg-brand-blue/20 flex items-center justify-center text-brand-blue shrink-0">
                   {metric.icon}
                 </div>
                 <Badge 
@@ -951,7 +926,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                   {Math.abs(metric.change)}%
                 </Badge>
               </div>
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-dark-text mb-1">
+              <h3 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-dark-text mb-1 mt-auto">
                 {metric.value}
               </h3>
               <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
@@ -962,233 +937,395 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         ))}
       </div>
 
-      {/* Gráficos principais */}
+      {/* Painel analítico — período global */}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-2 text-gray-700 dark:text-dark-text-secondary">
+          <LayoutGrid className="w-5 h-5 text-brand-blue" />
+          <span className="font-medium">Período dos gráficos</span>
+        </div>
+        <Select value={selectedPeriod} onValueChange={(v: 'monthly' | 'semester' | 'annual') => setSelectedPeriod(v)}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="monthly">Mensal (ano atual)</SelectItem>
+            <SelectItem value="semester">Semestral</SelectItem>
+            <SelectItem value="annual">Anual</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Evolução de Obras */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="flex-1">
-                <CardTitle className="flex items-center gap-2">
-                  Evolução de Obras
-                  <Badge variant="success" className="gap-1">
-                    <TrendingUp className="w-3 h-3" />
-                    24.6%
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="mt-2">
-                  Acompanhamento de obras concluídas, em andamento e planejadas
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-3">
-                <Select value={selectedPeriod} onValueChange={(v: any) => setSelectedPeriod(v)}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="monthly">Mensal</SelectItem>
-                    <SelectItem value="semester">Semestral</SelectItem>
-                    <SelectItem value="annual">Anual</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Evolução de orçamentos</CardTitle>
+            <CardDescription>Criados, aprovados e em análise (por data de criação)</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={350}>
-              <AreaChart data={getObrasData()}>
+          <CardContent className="pt-0">
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={graficosExec?.evolucaoOrcamentos ?? []}>
                 <defs>
-                  <linearGradient id="colorConcluidas" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorAndamento" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                  <linearGradient id="gOrc1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  stroke={isDark ? '#334155' : '#E5E7EB'} 
-                />
-                <XAxis 
-                  dataKey="name" 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'}
-                />
-                <YAxis 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
+                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
+                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
                     border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                    color: isDark ? '#F8FAFC' : '#374151'
+                    borderRadius: 8,
+                    color: isDark ? '#F8FAFC' : '#334155'
                   }}
-                  itemStyle={{ color: isDark ? '#F8FAFC' : '#374151' }}
                 />
-                <Legend />
-                <Area 
-                  type="monotone" 
-                  dataKey="concluidas" 
-                  name="Concluídas"
-                  stroke="#8B5CF6" 
-                  fill="url(#colorConcluidas)"
-                  strokeWidth={2}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="emAndamento" 
-                  name="Em Andamento"
-                  stroke="#3B82F6" 
-                  fill="url(#colorAndamento)"
-                  strokeWidth={2}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="planejadas" 
-                  name="Planejadas"
-                  stroke="#10B981" 
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Area type="monotone" dataKey="criados" name="Criados" stroke="#3B82F6" fill="url(#gOrc1)" strokeWidth={2} />
+                <Area type="monotone" dataKey="aprovados" name="Aprovados" stroke="#10B981" fillOpacity={0} strokeWidth={2} />
+                <Area type="monotone" dataKey="emAnalise" name="Em análise" stroke="#F59E0B" fillOpacity={0} strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Produção de Quadros Elétricos */}
         <Card>
-          <CardHeader>
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  Produção de Quadros
-                  <Badge variant="success" className="gap-1">
-                    <TrendingUp className="w-3 h-3" />
-                    28.5%
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="mt-2">
-                  {selectedQuadrosPeriod === 'daily' && 'Últimas 12 horas'}
-                  {selectedQuadrosPeriod === 'weekly' && 'Últimos 7 dias'}
-                  {selectedQuadrosPeriod === 'monthly' && 'Último mês'}
-                </CardDescription>
-              </div>
-              <Select value={selectedQuadrosPeriod} onValueChange={(v: any) => setSelectedQuadrosPeriod(v)}>
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Diário</SelectItem>
-                  <SelectItem value="weekly">Semanal</SelectItem>
-                  <SelectItem value="monthly">Mensal</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Evolução de ordens de serviço</CardTitle>
+            <CardDescription>Projetos / OS por status (cadastro no período)</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={getQuadrosData()}>
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  stroke={isDark ? '#334155' : '#E5E7EB'} 
-                />
-                <XAxis 
-                  dataKey="hora" 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'} 
-                />
-                <YAxis 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'} 
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
+          <CardContent className="pt-0">
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={graficosExec?.evolucaoOrdensServico ?? []} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
+                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
+                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
                     border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: '8px',
-                    color: isDark ? '#F8FAFC' : '#374151'
+                    borderRadius: 8,
+                    color: isDark ? '#F8FAFC' : '#334155'
                   }}
                 />
-                <Bar 
-                  dataKey="producao" 
-                  fill="#8B5CF6" 
-                  radius={[8, 8, 0, 0]}
-                  name="Quadros Produzidos"
-                />
-              </BarChart>
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="concluidas" name="Concluídas" stroke="#8B5CF6" strokeWidth={2.5} dot={{ r: 4, fill: '#8B5CF6' }} activeDot={{ r: 6 }}>
+                  <LabelList
+                    dataKey="concluidas"
+                    position="top"
+                    fontSize={10}
+                    fill={isDark ? '#E2E8F0' : '#475569'}
+                    formatter={(v: number) => (v > 0 ? v : '')}
+                  />
+                </Line>
+                <Line type="monotone" dataKey="emAndamento" name="Em andamento" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3, fill: '#3B82F6' }}>
+                  <LabelList
+                    dataKey="emAndamento"
+                    position="top"
+                    offset={12}
+                    fontSize={10}
+                    fill={isDark ? '#E2E8F0' : '#475569'}
+                    formatter={(v: number) => (v > 0 ? v : '')}
+                  />
+                </Line>
+                <Line type="monotone" dataKey="planejadas" name="Planejamento" stroke="#10B981" strokeWidth={2} dot={{ r: 3, fill: '#10B981' }}>
+                  <LabelList
+                    dataKey="planejadas"
+                    position="top"
+                    offset={24}
+                    fontSize={10}
+                    fill={isDark ? '#E2E8F0' : '#475569'}
+                    formatter={(v: number) => (v > 0 ? v : '')}
+                  />
+                </Line>
+              </LineChart>
             </ResponsiveContainer>
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-gray-600 dark:text-dark-text-secondary">
-                {selectedQuadrosPeriod === 'daily' ? 'Hoje' : selectedQuadrosPeriod === 'weekly' ? 'Esta semana' : 'Este mês'}: <strong className="text-gray-900 dark:text-dark-text">
-                  {quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0)} quadros
-                </strong>
-              </span>
-              <Button variant="link" className="h-auto p-0">
-                Ver relatório →
-              </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Evolução de obras (Kanban)</CardTitle>
+            <CardDescription>Obras de campo por status (cadastro no período)</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={graficosExec?.evolucaoObrasKanban ?? []}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
+                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
+                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <Tooltip
+                  cursor={{ stroke: isDark ? '#64748B' : '#94A3B8', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    return (
+                      <div
+                        className="rounded-xl px-3 py-2.5 shadow-lg min-w-[200px]"
+                        style={{
+                          backgroundColor: isDark ? '#1E293B' : '#fff',
+                          border: `1px solid ${isDark ? '#334155' : '#E5E7EB'}`,
+                          color: isDark ? '#F8FAFC' : '#1E293B'
+                        }}
+                      >
+                        <p className="font-bold text-sm mb-2 pb-1.5 border-b" style={{ borderColor: isDark ? '#334155' : '#E5E7EB' }}>
+                          {label}
+                        </p>
+                        <ul className="space-y-1.5 text-xs">
+                          {payload.map((p: any) => (
+                            <li key={String(p.dataKey)} className="flex items-center justify-between gap-4">
+                              <span className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
+                                <span className="opacity-90">{p.name}</span>
+                              </span>
+                              <span className="font-semibold tabular-nums">{p.value}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Area type="monotone" dataKey="backlog" name="Backlog" stroke="#94A3B8" fill="#94A3B833" strokeWidth={2} />
+                <Area type="monotone" dataKey="aFazer" name="A fazer" stroke="#F59E0B" fill="#F59E0B33" strokeWidth={2} />
+                <Area type="monotone" dataKey="andamento" name="Andamento" stroke="#3B82F6" fill="#3B82F633" strokeWidth={2} />
+                <Area type="monotone" dataKey="concluidas" name="Concluídas" stroke="#10B981" fill="#10B98133" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Evolução de pedidos de venda</CardTitle>
+            <CardDescription>Quantidade e valor total por período — barras agrupadas</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={graficosExec?.evolucaoPedidosVendas ?? []} barGap={4} barCategoryGap="18%">
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
+                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
+                <YAxis
+                  yAxisId="left"
+                  stroke={isDark ? '#94A3B8' : '#64748B'}
+                  fontSize={11}
+                  allowDecimals={false}
+                  label={{ value: 'Qtd. pedidos', angle: -90, position: 'insideLeft', fill: isDark ? '#94A3B8' : '#64748B', fontSize: 10 }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke={isDark ? '#94A3B8' : '#64748B'}
+                  fontSize={11}
+                  tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
+                  label={{ value: 'Valor', angle: 90, position: 'insideRight', fill: isDark ? '#94A3B8' : '#64748B', fontSize: 10 }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: isDark ? '#1E293B' : '#fff',
+                    border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
+                    borderRadius: 8,
+                    color: isDark ? '#F8FAFC' : '#334155'
+                  }}
+                  formatter={(value: number, name: string) =>
+                    name === 'Valor (R$)' ? [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), name] : [value, name]
+                  }
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar yAxisId="left" dataKey="quantidade" name="Pedidos (qtd.)" fill="#0EA5E9" radius={[6, 6, 0, 0]} maxBarSize={40} />
+                <Bar yAxisId="right" dataKey="valor" name="Valor (R$)" fill="#A855F7" radius={[6, 6, 0, 0]} maxBarSize={40} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Comparativo — volume por período</CardTitle>
+          <CardDescription>Orçamentos, OS (projetos), obras e pedidos criados no intervalo</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart data={graficosExec?.comparativoMensal ?? []} barGap={4}>
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
+              <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} />
+              <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: isDark ? '#1E293B' : '#fff',
+                  border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
+                  borderRadius: 8,
+                  color: isDark ? '#F8FAFC' : '#334155'
+                }}
+              />
+              <Legend />
+              <Bar dataKey="orcamentos" name="Orçamentos" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="ordensServico" name="Ordens de serviço" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="obras" name="Obras" fill="#10B981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="pedidosVendas" name="Pedidos de venda" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Categorias de venda</CardTitle>
+            <CardDescription>Distribuição por forma de pagamento (pedidos no período)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={
+                      graficosExec?.categoriasVendas?.length
+                        ? graficosExec.categoriasVendas
+                        : [{ name: 'Sem dados', value: 1 }]
+                    }
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={56}
+                    outerRadius={96}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="name"
+                    onMouseEnter={(_, i) => setPieActiveIndex(i)}
+                  >
+                    {(graficosExec?.categoriasVendas?.length
+                      ? graficosExec.categoriasVendas
+                      : [{ name: 'Sem dados', value: 1 }]
+                    ).map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={PIE_COLORS[i % PIE_COLORS.length]}
+                        stroke={isDark ? '#1E293B' : '#fff'}
+                        strokeWidth={pieActiveIndex === i ? 3 : 1}
+                        style={{ cursor: 'pointer', opacity: pieActiveIndex === i ? 1 : 0.88 }}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: isDark ? '#1E293B' : '#fff',
+                      border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
+                      borderRadius: 8
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 space-y-2 w-full">
+                <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Destaque (interativo)</p>
+                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                  Passe o mouse ou clique nas fatias para destacar. A legenda reflete a forma de pagamento cadastrada no pedido.
+                </p>
+                <div className="rounded-lg bg-gray-50 dark:bg-slate-800/80 p-3 text-sm">
+                  {graficosExec?.categoriasVendas?.[pieActiveIndex] ? (
+                    <>
+                      <p className="font-medium text-gray-900 dark:text-dark-text">
+                        {graficosExec.categoriasVendas[pieActiveIndex].name}
+                      </p>
+                      <p className="text-brand-blue font-bold text-lg">
+                        {graficosExec.categoriasVendas[pieActiveIndex].value} pedido(s)
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-gray-500">Sem vendas no período selecionado.</p>
+                  )}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Atividades do Sistema */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              Atividades do Sistema
-              <Badge variant="success" className="gap-1">
-                <TrendingUp className="w-3 h-3" />
-                16.8%
-              </Badge>
-            </CardTitle>
-            <CardDescription className="mt-2">
-              <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-semibold">
-                <Activity className="w-4 h-4" />
-                Total: {atividadesData.reduce((sum, item) => sum + (item.sessoes || 0), 0)} atividades
-              </span>
-            </CardDescription>
+            <CardTitle>Pedidos de venda por fatia (pizza)</CardTitle>
+            <CardDescription>Distribuição da quantidade de pedidos entre os períodos do gráfico de evolução — destaque interativo</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={getAtividadesData()}>
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  stroke={isDark ? '#334155' : '#E5E7EB'} 
-                />
-                <XAxis 
-                  dataKey="hora" 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'} 
-                />
-                <YAxis 
-                  stroke={isDark ? '#CBD5E1' : '#6B7280'} 
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
-                    border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: '8px',
-                    color: isDark ? '#F8FAFC' : '#374151'
-                  }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="sessoes" 
-                  stroke="#8B5CF6" 
-                  strokeWidth={3}
-                  dot={{ r: 5, fill: '#8B5CF6' }}
-                  name="Sessões"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-gray-600 dark:text-dark-text-secondary">
-                Total: <strong className="text-gray-900 dark:text-dark-text">
-                  {atividadesData.reduce((sum, item) => sum + (item.sessoes || 0), 0)} atividades
-                </strong>
-              </span>
-              <Button variant="link" className="h-auto p-0">
-                Ver relatório →
-              </Button>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={piePedidosPorPeriodo}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={52}
+                    outerRadius={96}
+                    paddingAngle={2}
+                    dataKey="value"
+                    nameKey="name"
+                    onMouseEnter={(_, i) => setPiePedidosActiveIndex(i)}
+                    onClick={(_, i) => setPiePedidosActiveIndex(i)}
+                  >
+                    {piePedidosPorPeriodo.map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={PIE_COLORS[(i + 3) % PIE_COLORS.length]}
+                        stroke={isDark ? '#1E293B' : '#fff'}
+                        strokeWidth={piePedidosActiveIndex === i ? 3 : 1}
+                        style={{ cursor: 'pointer', opacity: piePedidosActiveIndex === i ? 1 : 0.88 }}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const row = payload[0].payload as { name: string; value: number; valor?: number };
+                      return (
+                        <div
+                          className="rounded-lg px-3 py-2 text-xs shadow-lg"
+                          style={{
+                            backgroundColor: isDark ? '#1E293B' : '#fff',
+                            border: `1px solid ${isDark ? '#334155' : '#E5E7EB'}`,
+                            color: isDark ? '#F8FAFC' : '#1E293B'
+                          }}
+                        >
+                          <p className="font-semibold mb-1">{row.name}</p>
+                          <p className="tabular-nums">
+                            {row.name === 'Sem dados' ? '—' : `${row.value} pedido(s)`}
+                          </p>
+                          {typeof row.valor === 'number' && row.name !== 'Sem dados' && (
+                            <p className="tabular-nums opacity-90 mt-0.5">
+                              {row.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="flex-1 space-y-2 w-full">
+                <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Período em destaque</p>
+                <p className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                  Passe o mouse ou clique na fatia para ver quantidade e valor no período.
+                </p>
+                <div className="rounded-lg bg-gray-50 dark:bg-slate-800/80 p-3 text-sm">
+                  {(() => {
+                    const destaque = piePedidosPorPeriodo[Math.min(piePedidosActiveIndex, piePedidosPorPeriodo.length - 1)];
+                    if (!destaque || destaque.name === 'Sem dados') {
+                      return <p className="text-gray-500">Sem pedidos no período selecionado.</p>;
+                    }
+                    const valorExtra = 'valor' in destaque ? (destaque as { valor?: number }).valor : undefined;
+                    return (
+                      <>
+                        <p className="font-medium text-gray-900 dark:text-dark-text">{destaque.name}</p>
+                        <p className="text-brand-blue font-bold text-lg">{destaque.value} pedido(s)</p>
+                        {typeof valorExtra === 'number' && (
+                          <p className="text-xs text-gray-600 dark:text-dark-text-secondary mt-1 tabular-nums">
+                            {valorExtra.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

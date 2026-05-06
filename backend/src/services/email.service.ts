@@ -1,56 +1,68 @@
 import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 /**
- * Configuração do transporter de email
- * Suporta SMTP padrão (incluindo porta 465 com SSL/TLS) ou Gmail
+ * Cria transporter SMTP a partir de variáveis de ambiente.
+ * @param envPrefix - Prefixo das variáveis: '' para SMTP_* (contato) ou 'FISCAL_' para SMTP_FISCAL_*
  */
-const createTransporter = () => {
-  // Se estiver em desenvolvimento e não houver configuração de email, usar console
-  if (process.env.NODE_ENV === 'development' && !process.env.SMTP_HOST) {
-    return null; // Retornar null para usar console.log em desenvolvimento
-  }
+function createSmtpTransporter(envPrefix: '' | 'FISCAL_'): Transporter | null {
+  const host = process.env[`SMTP_${envPrefix}HOST`];
+  const port = parseInt(process.env[`SMTP_${envPrefix}PORT`] || '587');
+  const user = process.env[`SMTP_${envPrefix}USER`];
+  const pass = process.env[`SMTP_${envPrefix}PASS`];
 
-  // Configuração para SMTP customizado
-  if (process.env.SMTP_HOST) {
-    const port = parseInt(process.env.SMTP_PORT || '587');
-    const isSecurePort = port === 465;
-    const secure = process.env.SMTP_SECURE === 'true' || isSecurePort;
-    
-    // Configuração base
-    const transporterConfig: any = {
-      host: process.env.SMTP_HOST,
-      port: port,
-      secure: secure, // true para 465 (SSL), false para outras portas (STARTTLS)
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+  if (!host || !user || !pass) return null;
+
+  const isSecurePort = port === 465;
+  const secure = process.env[`SMTP_${envPrefix}SECURE`] === 'true' || isSecurePort;
+  const transporterConfig: any = {
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  };
+  if (!isSecurePort) {
+    transporterConfig.tls = {
+      rejectUnauthorized: false,
+      ciphers: 'SSLv3',
     };
-
-    // Para porta 465 (SSL/TLS), não precisa de configuração TLS adicional
-    // Para outras portas (587, etc), usar STARTTLS
-    if (!isSecurePort) {
-      transporterConfig.tls = {
-        rejectUnauthorized: false, // Para desenvolvimento com certificados auto-assinados
-        ciphers: 'SSLv3', // Suporte para servidores mais antigos
-      };
-    }
-
-    return nodemailer.createTransport(transporterConfig);
   }
+  return nodemailer.createTransport(transporterConfig);
+}
 
-  // Configuração para Gmail (se SMTP_USER contém @gmail.com)
+/**
+ * Transporter para e-mails de contato: recuperação de senha, alteração de dados, notificações.
+ * Usa SMTP_* (contato@s3eengenharia.com.br).
+ */
+const createTransporter = (): Transporter | null => {
+  if (process.env.NODE_ENV === 'development' && !process.env.SMTP_HOST) {
+    return null;
+  }
+  if (process.env.SMTP_HOST) {
+    const t = createSmtpTransporter('');
+    if (t) return t;
+  }
   if (process.env.SMTP_USER?.includes('@gmail.com')) {
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS, // Senha de app do Gmail
+        pass: process.env.SMTP_PASS,
       },
     });
   }
-
   return null;
+};
+
+/**
+ * Transporter para e-mails fiscais: envio de NFS-e/NF-e (DANFE e XML).
+ * Usa SMTP_FISCAL_* (fiscal@s3eengenharia.com.br). Se não configurado, usa SMTP_* (contato).
+ */
+const createFiscalTransporter = (): Transporter | null => {
+  if (process.env.SMTP_FISCAL_HOST && process.env.SMTP_FISCAL_USER && process.env.SMTP_FISCAL_PASS) {
+    return createSmtpTransporter('FISCAL_');
+  }
+  return createTransporter();
 };
 
 /**
@@ -72,7 +84,7 @@ export const sendPasswordResetEmail = async (
   const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
 
   const mailOptions = {
-    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@s3eengenharia.com.br',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'contato@s3eengenharia.com.br',
     to,
     subject: 'Recuperação de Senha - S3E System PRO',
     html: `
@@ -419,6 +431,95 @@ export const sendUserDataChangeEmail = async (
       console.log(`   Alterações:`, changes);
     }
     // Não lançar erro para não interromper o fluxo
+  }
+};
+
+/**
+ * Envia email de notificação (Kanban, Financeiro, etc.)
+ */
+export const sendNotificationEmail = async (
+  to: string,
+  userName: string,
+  titulo: string,
+  mensagem: string
+): Promise<void> => {
+  const transporter = createTransporter();
+
+  const mailOptions = {
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'contato@s3eengenharia.com.br',
+    to,
+    subject: `[S3E] ${titulo}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"></head>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+          <h2 style="margin: 0;">Notificação - S3E System PRO</h2>
+        </div>
+        <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px;">
+          <p>Olá, <strong>${userName}</strong>!</p>
+          <p><strong>${titulo}</strong></p>
+          <p>${mensagem}</p>
+          <p style="margin-top: 24px; color: #666; font-size: 12px;">Este é um email automático. Acesse o sistema para mais detalhes.</p>
+        </div>
+      </body>
+      </html>
+    `,
+    text: `Olá, ${userName}!\n\n${titulo}\n\n${mensagem}\n\nAcesse o sistema para mais detalhes.`,
+  };
+
+  try {
+    if (transporter) {
+      await transporter.sendMail(mailOptions);
+      console.log(`✅ Notificação enviada por e-mail para: ${to}`);
+    } else {
+      console.log('📧 [DEV MODE] Notificação:', { to, userName, titulo, mensagem });
+    }
+  } catch (error) {
+    console.error('❌ Erro ao enviar e-mail de notificação:', error);
+  }
+};
+
+/**
+ * Envia email com anexos (PDF, XML) - usado para envio de DANFE/NFS-e ao cliente.
+ * Usa sempre o remetente fiscal (SMTP_FISCAL_* ou fallback SMTP_*).
+ */
+export const sendDocumentEmail = async (
+  to: string,
+  subject: string,
+  bodyHtml: string,
+  attachments: Array<{ filename: string; content: Buffer }>
+): Promise<void> => {
+  const transporter = createFiscalTransporter();
+  const from =
+    process.env.SMTP_FISCAL_FROM ||
+    process.env.SMTP_FISCAL_USER ||
+    process.env.SMTP_FROM ||
+    process.env.SMTP_USER ||
+    'fiscal@s3eengenharia.com.br';
+
+  const mailOptions = {
+    from,
+    to,
+    subject,
+    html: bodyHtml,
+    attachments: attachments.map((a) => ({
+      filename: a.filename,
+      content: a.content
+    }))
+  };
+
+  try {
+    if (transporter) {
+      await transporter.sendMail(mailOptions);
+      console.log(`✅ Email fiscal (anexos) enviado para: ${to}`);
+    } else {
+      console.log('📧 [DEV MODE] Email fiscal com anexos:', { to, subject, attachments: attachments.length });
+    }
+  } catch (error) {
+    console.error('❌ Erro ao enviar email fiscal com anexos:', error);
+    throw error;
   }
 };
 

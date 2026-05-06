@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 // Configuração de mão de obra para quadros (15% do custo de materiais)
 const MAO_OBRA_PERCENTUAL = 0.15;
@@ -531,6 +529,7 @@ export class BIService {
           select: {
             tipo: true,
             subtotal: true,
+            vendaDiretaFornecedor: true,
           },
         },
       },
@@ -567,6 +566,7 @@ export class BIService {
       let temServico = false;
 
       orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'QUADRO_PRONTO') {
           mesData.quadros += item.subtotal || 0;
           temQuadro = true;
@@ -635,6 +635,7 @@ export class BIService {
       const dadosDia = dadosPorData.get(data)!;
 
       orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'SERVICO') {
           const servicoNome = item.servicoNome || 'Serviço não especificado';
           const valor = item.subtotal || 0;
@@ -1251,6 +1252,748 @@ export class BIService {
     return meses;
   }
 
+  /**
+   * Serviços mais rentáveis (maiores lucros) nos pedidos de venda
+   */
+  static async getServicosRentaveis(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<Array<{
+    servicoNome: string;
+    classificacao: string;
+    receita: number;
+    custo: number;
+    lucro: number;
+    markup: number;
+    quantidade: number;
+  }>> {
+    // Buscar vendas realizadas no período
+    const vendas = await prisma.venda.findMany({
+      where: {
+        dataVenda: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelada',
+        },
+      },
+      include: {
+        orcamento: {
+          include: {
+            items: {
+              where: {
+                tipo: 'SERVICO',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Mapear serviços para suas classificações
+    const servicos = await prisma.servico.findMany({
+      select: {
+        id: true,
+        nome: true,
+        tipoServico: true,
+        custo: true,
+      },
+    });
+
+    const servicoMap = new Map<string, { tipoServico: string; custo: number | null }>();
+    servicos.forEach((s) => {
+      servicoMap.set(s.nome, {
+        tipoServico: s.tipoServico || 'MAO_DE_OBRA',
+        custo: s.custo || null,
+      });
+    });
+
+    const classificacaoLabels: Record<string, string> = {
+      MAO_DE_OBRA: 'Mão de Obra',
+      ENGENHARIA: 'Engenharia',
+      PROJETOS: 'Projetos',
+      ADMINISTRATIVO: 'Administrativo',
+      MONTAGEM: 'Montagem',
+    };
+
+    // Agrupar por serviço
+    const servicosMap = new Map<string, {
+      receita: number;
+      custo: number;
+      quantidade: number;
+      classificacao: string;
+    }>();
+
+    vendas.forEach((venda) => {
+      if (!venda.orcamento?.items) return;
+
+      venda.orcamento.items.forEach((item) => {
+        if (item.tipo === 'SERVICO' && item.servicoNome) {
+          const servicoNome = item.servicoNome;
+          const servicoInfo = servicoMap.get(servicoNome) || {
+            tipoServico: 'MAO_DE_OBRA',
+            custo: null,
+          };
+          const classificacao = classificacaoLabels[servicoInfo.tipoServico] || 'Mão de Obra';
+
+          const receita = item.precoUnit || 0;
+          const custo = servicoInfo.custo || item.custoUnit || 0;
+
+          if (!servicosMap.has(servicoNome)) {
+            servicosMap.set(servicoNome, {
+              receita: 0,
+              custo: 0,
+              quantidade: 0,
+              classificacao,
+            });
+          }
+
+          const stats = servicosMap.get(servicoNome)!;
+          stats.receita += receita;
+          stats.custo += custo;
+          stats.quantidade += 1;
+        }
+      });
+    });
+
+    // Converter para array e calcular lucro e markup
+    const resultado = Array.from(servicosMap.entries()).map(([servicoNome, stats]) => {
+      const lucro = stats.receita - stats.custo;
+      const markup = stats.custo > 0 ? (lucro / stats.custo) * 100 : 0;
+
+      return {
+        servicoNome,
+        classificacao: stats.classificacao,
+        receita: stats.receita,
+        custo: stats.custo,
+        lucro,
+        markup,
+        quantidade: stats.quantidade,
+      };
+    });
+
+    // Ordenar por lucro (maior para menor)
+    resultado.sort((a, b) => b.lucro - a.lucro);
+
+    return resultado;
+  }
+
+  /**
+   * Estatísticas de orçamentos por status (Aprovado, Pendente, Expirado, Declinado)
+   */
+  static async getEstatisticasOrcamentosPorStatus(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<{
+    aprovados: { quantidade: number; valorTotal: number };
+    pendentes: { quantidade: number; valorTotal: number };
+    expirados: { quantidade: number; valorTotal: number };
+    declinados: { quantidade: number; valorTotal: number };
+    total: { quantidade: number; valorTotal: number };
+    porStatus: Array<{ status: string; quantidade: number; valorTotal: number; cor: string }>;
+  }> {
+    const hoje = new Date();
+    hoje.setHours(23, 59, 59, 999);
+
+    // Buscar todos os orçamentos no período
+    const orcamentos = await prisma.orcamento.findMany({
+      where: {
+        createdAt: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        precoVenda: true,
+        validade: true,
+      },
+    });
+
+    let aprovados = { quantidade: 0, valorTotal: 0 };
+    let pendentes = { quantidade: 0, valorTotal: 0 };
+    let expirados = { quantidade: 0, valorTotal: 0 };
+    let declinados = { quantidade: 0, valorTotal: 0 };
+
+    orcamentos.forEach((orcamento) => {
+      const valor = orcamento.precoVenda || 0;
+      const status = orcamento.status || 'Pendente';
+      const validade = orcamento.validade;
+
+      // Verificar se está expirado (validade passou e não está aprovado)
+      const estaExpirado = validade && validade < hoje && status !== 'Aprovado';
+
+      if (status === 'Aprovado') {
+        aprovados.quantidade++;
+        aprovados.valorTotal += valor;
+      } else if (estaExpirado) {
+        expirados.quantidade++;
+        expirados.valorTotal += valor;
+      } else if (status === 'Declinado' || status === 'Recusado') {
+        declinados.quantidade++;
+        declinados.valorTotal += valor;
+      } else {
+        // Pendente, Rascunho, Enviado ao Cliente
+        pendentes.quantidade++;
+        pendentes.valorTotal += valor;
+      }
+    });
+
+    const total = {
+      quantidade: orcamentos.length,
+      valorTotal: orcamentos.reduce((sum, o) => sum + (o.precoVenda || 0), 0),
+    };
+
+    const porStatus = [
+      {
+        status: 'Aprovados',
+        quantidade: aprovados.quantidade,
+        valorTotal: aprovados.valorTotal,
+        cor: '#10B981', // verde
+      },
+      {
+        status: 'Pendentes',
+        quantidade: pendentes.quantidade,
+        valorTotal: pendentes.valorTotal,
+        cor: '#F59E0B', // amarelo
+      },
+      {
+        status: 'Expirados',
+        quantidade: expirados.quantidade,
+        valorTotal: expirados.valorTotal,
+        cor: '#EF4444', // vermelho
+      },
+      {
+        status: 'Declinados',
+        quantidade: declinados.quantidade,
+        valorTotal: declinados.valorTotal,
+        cor: '#1F2937', // preto
+      },
+    ];
+
+    return {
+      aprovados,
+      pendentes,
+      expirados,
+      declinados,
+      total,
+      porStatus,
+    };
+  }
+
+  /**
+   * Evolução de orçamentos por tipo de serviço com classificação
+   * (Mão de obra, Engenharia/projetos, Administrativo, Montagem)
+   */
+  static async getEvolucaoOrcamentosPorTipoServicoClassificado(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<{
+    porClassificacao: Array<{
+      classificacao: string;
+      quantidade: number;
+      valorTotal: number;
+      taxaAprovacao: number;
+      servicos: Array<{ nome: string; quantidade: number; valorTotal: number }>;
+    }>;
+    evolucaoMensal: Array<{
+      mes: string;
+      maoDeObra: number;
+      engenharia: number;
+      administrativo: number;
+      montagem: number;
+    }>;
+  }> {
+    // Buscar orçamentos com itens de serviço
+    const orcamentos = await prisma.orcamento.findMany({
+      where: {
+        createdAt: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+      },
+      include: {
+        items: {
+          where: {
+            tipo: 'SERVICO',
+          },
+        },
+      },
+    });
+
+    // Mapear serviços para suas classificações
+    const servicos = await prisma.servico.findMany({
+      select: {
+        id: true,
+        nome: true,
+        tipoServico: true,
+      },
+    });
+
+    const servicoMap = new Map<string, string>();
+    servicos.forEach((s) => {
+      servicoMap.set(s.nome, s.tipoServico || 'MAO_DE_OBRA');
+    });
+
+    // Classificações disponíveis
+    const classificacoes = ['MAO_DE_OBRA', 'ENGENHARIA', 'PROJETOS', 'ADMINISTRATIVO', 'MONTAGEM'];
+    const classificacaoLabels: Record<string, string> = {
+      MAO_DE_OBRA: 'Mão de Obra',
+      ENGENHARIA: 'Engenharia',
+      PROJETOS: 'Projetos',
+      ADMINISTRATIVO: 'Administrativo',
+      MONTAGEM: 'Montagem',
+    };
+
+    // Agrupar por classificação
+    const dadosPorClassificacao = new Map<
+      string,
+      {
+        servicos: Map<string, { quantidade: number; valorTotal: number }>;
+        quantidadeOrcamentos: Set<string>;
+        valorTotal: number;
+        aprovados: Set<string>;
+      }
+    >();
+
+    classificacoes.forEach((classif) => {
+      dadosPorClassificacao.set(classif, {
+        servicos: new Map(),
+        quantidadeOrcamentos: new Set(),
+        valorTotal: 0,
+        aprovados: new Set(),
+      });
+    });
+
+    // Processar orçamentos
+    orcamentos.forEach((orcamento) => {
+      const isAprovado = orcamento.status === 'Aprovado';
+
+      orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
+        if (item.tipo === 'SERVICO' && item.servicoNome) {
+          const servicoNome = item.servicoNome;
+          const classificacao = servicoMap.get(servicoNome) || 'MAO_DE_OBRA';
+          const valor = item.subtotal || 0;
+
+          const dados = dadosPorClassificacao.get(classificacao);
+          if (dados) {
+            dados.quantidadeOrcamentos.add(orcamento.id);
+            dados.valorTotal += valor;
+
+            if (isAprovado) {
+              dados.aprovados.add(orcamento.id);
+            }
+
+            // Agregar por serviço
+            const servicoDados = dados.servicos.get(servicoNome) || {
+              quantidade: 0,
+              valorTotal: 0,
+            };
+            dados.servicos.set(servicoNome, {
+              quantidade: servicoDados.quantidade + 1,
+              valorTotal: servicoDados.valorTotal + valor,
+            });
+          }
+        }
+      });
+    });
+
+    // Converter para array
+    const porClassificacao = Array.from(dadosPorClassificacao.entries())
+      .map(([classificacao, dados]) => {
+        const totalOrcamentos = dados.quantidadeOrcamentos.size;
+        const aprovados = dados.aprovados.size;
+        const taxaAprovacao = totalOrcamentos > 0 ? (aprovados / totalOrcamentos) * 100 : 0;
+
+        return {
+          classificacao: classificacaoLabels[classificacao] || classificacao,
+          quantidade: totalOrcamentos,
+          valorTotal: dados.valorTotal,
+          taxaAprovacao,
+          servicos: Array.from(dados.servicos.entries())
+            .map(([nome, dadosServico]) => ({
+              nome,
+              quantidade: dadosServico.quantidade,
+              valorTotal: dadosServico.valorTotal,
+            }))
+            .sort((a, b) => b.valorTotal - a.valorTotal),
+        };
+      })
+      .filter((item) => item.quantidade > 0);
+
+    // Evolução mensal
+    const evolucaoMensalMap = new Map<string, {
+      maoDeObra: number;
+      engenharia: number;
+      administrativo: number;
+      montagem: number;
+    }>();
+
+    orcamentos.forEach((orcamento) => {
+      const mes = orcamento.createdAt.toISOString().substring(0, 7); // YYYY-MM
+
+      let mesData = evolucaoMensalMap.get(mes);
+      if (!mesData) {
+        mesData = {
+          maoDeObra: 0,
+          engenharia: 0,
+          administrativo: 0,
+          montagem: 0,
+        };
+        evolucaoMensalMap.set(mes, mesData);
+      }
+
+      orcamento.items.forEach((item) => {
+        if (item.tipo === 'SERVICO' && item.servicoNome) {
+          const servicoNome = item.servicoNome;
+          const classificacao = servicoMap.get(servicoNome) || 'MAO_DE_OBRA';
+          const valor = item.subtotal || 0;
+
+          if (classificacao === 'MAO_DE_OBRA') {
+            mesData.maoDeObra += valor;
+          } else if (classificacao === 'ENGENHARIA' || classificacao === 'PROJETOS') {
+            mesData.engenharia += valor;
+          } else if (classificacao === 'ADMINISTRATIVO') {
+            mesData.administrativo += valor;
+          } else if (classificacao === 'MONTAGEM') {
+            mesData.montagem += valor;
+          }
+        }
+      });
+    });
+
+    const evolucaoMensal = Array.from(evolucaoMensalMap.entries())
+      .map(([mes, dados]) => ({
+        mes,
+        ...dados,
+      }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+
+    return {
+      porClassificacao,
+      evolucaoMensal,
+    };
+  }
+
+  /**
+   * Estatísticas de markup de vendas por tipo de serviço e período
+   * Retorna DRE detalhado por serviço (mês, semana, semestre, ano)
+   */
+  static async getMarkupVendasPorTipoServico(
+    dataInicio: Date,
+    dataFim: Date,
+    periodo: 'mes' | 'semana' | 'semestre' | 'ano' = 'mes'
+  ): Promise<{
+    periodo: string;
+    dados: Array<{
+      periodo: string;
+      classificacao: string;
+      servicoNome: string;
+      receita: number;
+      custo: number;
+      lucro: number;
+      markup: number;
+      quantidade: number;
+    }>;
+    resumoPorClassificacao: Array<{
+      classificacao: string;
+      receita: number;
+      custo: number;
+      lucro: number;
+      markup: number;
+      quantidade: number;
+    }>;
+  }> {
+    // Buscar vendas realizadas no período
+    const vendas = await prisma.venda.findMany({
+      where: {
+        dataVenda: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelada',
+        },
+      },
+      include: {
+        orcamento: {
+          include: {
+            items: {
+              where: {
+                tipo: 'SERVICO',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Mapear serviços para suas classificações
+    const servicos = await prisma.servico.findMany({
+      select: {
+        id: true,
+        nome: true,
+        tipoServico: true,
+        custo: true,
+      },
+    });
+
+    const servicoMap = new Map<string, { tipoServico: string; custo: number | null }>();
+    servicos.forEach((s) => {
+      servicoMap.set(s.nome, {
+        tipoServico: s.tipoServico || 'MAO_DE_OBRA',
+        custo: s.custo || null,
+      });
+    });
+
+    const classificacaoLabels: Record<string, string> = {
+      MAO_DE_OBRA: 'Mão de Obra',
+      ENGENHARIA: 'Engenharia',
+      PROJETOS: 'Projetos',
+      ADMINISTRATIVO: 'Administrativo',
+      MONTAGEM: 'Montagem',
+    };
+
+    // Agrupar por período e serviço
+    const dadosMap = new Map<string, Map<string, {
+      receita: number;
+      custo: number;
+      quantidade: number;
+    }>>();
+
+    vendas.forEach((venda) => {
+      if (!venda.orcamento?.items) return;
+
+      venda.orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
+        if (item.tipo === 'SERVICO' && item.servicoNome) {
+          const servicoNome = item.servicoNome;
+          const servicoInfo = servicoMap.get(servicoNome) || {
+            tipoServico: 'MAO_DE_OBRA',
+            custo: null,
+          };
+          const classificacao = servicoInfo.tipoServico;
+
+          // Determinar período baseado no parâmetro
+          let periodoKey: string;
+          const dataVenda = venda.dataVenda;
+
+          if (periodo === 'mes') {
+            periodoKey = dataVenda.toISOString().substring(0, 7); // YYYY-MM
+          } else if (periodo === 'semana') {
+            const semana = this.getSemanaAno(dataVenda);
+            periodoKey = `${dataVenda.getFullYear()}-S${semana}`;
+          } else if (periodo === 'semestre') {
+            const semestre = dataVenda.getMonth() < 6 ? 1 : 2;
+            periodoKey = `${dataVenda.getFullYear()}-S${semestre}`;
+          } else {
+            periodoKey = dataVenda.getFullYear().toString();
+          }
+
+          const chaveServico = `${classificacao}::${servicoNome}`;
+
+          if (!dadosMap.has(periodoKey)) {
+            dadosMap.set(periodoKey, new Map());
+          }
+
+          const periodoMap = dadosMap.get(periodoKey)!;
+          const servicoDados = periodoMap.get(chaveServico) || {
+            receita: 0,
+            custo: 0,
+            quantidade: 0,
+          };
+
+          const receita = item.subtotal || 0;
+          const custoUnit = servicoInfo.custo || item.custoUnit || 0;
+          const custo = custoUnit * (item.quantidade || 0);
+
+          periodoMap.set(chaveServico, {
+            receita: servicoDados.receita + receita,
+            custo: servicoDados.custo + custo,
+            quantidade: servicoDados.quantidade + (item.quantidade || 0),
+          });
+        }
+      });
+    });
+
+    // Converter para array
+    const dados: Array<{
+      periodo: string;
+      classificacao: string;
+      servicoNome: string;
+      receita: number;
+      custo: number;
+      lucro: number;
+      markup: number;
+      quantidade: number;
+    }> = [];
+
+    dadosMap.forEach((periodoMap, periodoKey) => {
+      periodoMap.forEach((servicoDados, chaveServico) => {
+        const [classificacao, servicoNome] = chaveServico.split('::');
+        const lucro = servicoDados.receita - servicoDados.custo;
+        const markup = servicoDados.custo > 0
+          ? (lucro / servicoDados.custo) * 100
+          : 0;
+
+        dados.push({
+          periodo: periodoKey,
+          classificacao: classificacaoLabels[classificacao] || classificacao,
+          servicoNome,
+          receita: servicoDados.receita,
+          custo: servicoDados.custo,
+          lucro,
+          markup,
+          quantidade: servicoDados.quantidade,
+        });
+      });
+    });
+
+    // Resumo por classificação
+    const resumoMap = new Map<string, {
+      receita: number;
+      custo: number;
+      quantidade: number;
+    }>();
+
+    dados.forEach((item) => {
+      const resumo = resumoMap.get(item.classificacao) || {
+        receita: 0,
+        custo: 0,
+        quantidade: 0,
+      };
+
+      resumoMap.set(item.classificacao, {
+        receita: resumo.receita + item.receita,
+        custo: resumo.custo + item.custo,
+        quantidade: resumo.quantidade + item.quantidade,
+      });
+    });
+
+    const resumoPorClassificacao = Array.from(resumoMap.entries())
+      .map(([classificacao, dados]) => {
+        const lucro = dados.receita - dados.custo;
+        const markup = dados.custo > 0 ? (lucro / dados.custo) * 100 : 0;
+
+        return {
+          classificacao,
+          receita: dados.receita,
+          custo: dados.custo,
+          lucro,
+          markup,
+          quantidade: dados.quantidade,
+        };
+      })
+      .sort((a, b) => b.receita - a.receita);
+
+    return {
+      periodo,
+      dados: dados.sort((a, b) => {
+        if (a.periodo !== b.periodo) {
+          return a.periodo.localeCompare(b.periodo);
+        }
+        return b.receita - a.receita;
+      }),
+      resumoPorClassificacao,
+    };
+  }
+
+  private static readonly CLASSIFICACAO_COMPRA_LABELS: Record<string, string> = {
+    COMPOSICAO_ESTOQUE: 'Material / composição de estoque',
+    FERRAMENTAS: 'Ferramentas',
+    RECURSOS_HUMANOS: 'Recursos humanos',
+    LIMPEZA_INSUMOS: 'Limpeza e insumos',
+    ESCRITORIO_INSUMOS: 'Escritório e insumos',
+    DESPESAS_VARIADAS: 'Despesas variadas',
+  };
+
+  /**
+   * Receita de orçamentos aprovados (período) vs compras agregadas por classificação da NF-e
+   */
+  static async getVendasEComprasPorClassificacao(
+    dataInicio: Date,
+    dataFim: Date
+  ): Promise<{
+    vendasOrcamentosAprovados: { valorTotal: number; quantidadeOrcamentos: number };
+    comprasPorClassificacao: Array<{
+      classificacao: string;
+      nomeExibicao: string;
+      valorTotal: number;
+      quantidadeCompras: number;
+    }>;
+  }> {
+    const aprovados = await prisma.orcamento.findMany({
+      where: {
+        status: 'Aprovado',
+        createdAt: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+      },
+      select: {
+        precoVenda: true,
+      },
+    });
+
+    const vendasOrcamentosAprovados = {
+      valorTotal: aprovados.reduce((s, o) => s + (o.precoVenda || 0), 0),
+      quantidadeOrcamentos: aprovados.length,
+    };
+
+    const compras = await prisma.compra.findMany({
+      where: {
+        dataCompra: {
+          gte: dataInicio,
+          lte: dataFim,
+        },
+        status: {
+          not: 'Cancelado',
+        },
+      },
+      select: {
+        classificacao: true,
+        valorTotal: true,
+      },
+    });
+
+    const map = new Map<string, { valorTotal: number; quantidadeCompras: number }>();
+    compras.forEach((c) => {
+      const key = c.classificacao || 'COMPOSICAO_ESTOQUE';
+      const cur = map.get(key) || { valorTotal: 0, quantidadeCompras: 0 };
+      map.set(key, {
+        valorTotal: cur.valorTotal + (c.valorTotal || 0),
+        quantidadeCompras: cur.quantidadeCompras + 1,
+      });
+    });
+
+    const comprasPorClassificacao = Array.from(map.entries())
+      .map(([classificacao, v]) => ({
+        classificacao,
+        nomeExibicao: this.CLASSIFICACAO_COMPRA_LABELS[classificacao] || classificacao,
+        valorTotal: v.valorTotal,
+        quantidadeCompras: v.quantidadeCompras,
+      }))
+      .sort((a, b) => b.valorTotal - a.valorTotal);
+
+    return {
+      vendasOrcamentosAprovados,
+      comprasPorClassificacao,
+    };
+  }
+
+  /**
+   * Calcula o número da semana do ano (1-52/53)
+   */
+  private static getSemanaAno(data: Date): number {
+    const d = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
+    const diaSemana = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - diaSemana);
+    const anoInicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d.getTime() - anoInicio.getTime()) / 86400000 + 1) / 7);
+  }
 
   /**
    * Resumo consolidado de todas as métricas

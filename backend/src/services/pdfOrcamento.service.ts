@@ -1,7 +1,26 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import puppeteer from 'puppeteer';
 
-const prisma = new PrismaClient();
+/** Remove <p> dentro de <li> preservando atributos do li (ex.: margin-left do recuo). */
+function normalizeListItemsForPdf(html: string | null | undefined): string {
+    if (!html) return '';
+    return html
+        .replace(/<li([^>]*)>\s*<p[^>]*>/gi, '<li$1>')
+        .replace(/<\/p>\s*<\/li>/gi, '</li>');
+}
+
+/** Preserva ENTER ENTER no PDF: TipTap salva parágrafos vazios como <p></p> / <p><br></p>. */
+function normalizeEmptyParagraphsForPdf(html: string | null | undefined): string {
+    if (!html) return '';
+    // Normaliza parágrafos vazios para garantir altura (NBSP + classe).
+    // (Regex aqui é suficiente pois estamos gerando HTML estático para Puppeteer.)
+    let out = html;
+    // <p ...></p>
+    out = out.replace(/<p([^>]*)>\s*<\/p>/gi, '<p$1 class="tiptap-empty-paragraph">&nbsp;</p>');
+    // <p ...><br></p>
+    out = out.replace(/<p([^>]*)>\s*<br\s*\/?>\s*<\/p>/gi, '<p$1 class="tiptap-empty-paragraph">&nbsp;</p>');
+    return out;
+}
 
 export class PDFOrcamentoService {
     /**
@@ -48,10 +67,11 @@ export class PDFOrcamentoService {
             const pdfBuffer = await page.pdf({
                 format: 'A4',
                 printBackground: true,
+                displayHeaderFooter: false,
                 margin: {
-                    top: '0mm',
+                    top: '95px',
                     right: '0mm',
-                    bottom: '0mm',
+                    bottom: '80px',
                     left: '0mm'
                 }
             });
@@ -129,6 +149,11 @@ export class PDFOrcamentoService {
             margin: 0;
         }
 
+        html {
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             font-family: 'Arial', 'Helvetica', sans-serif;
             font-size: 10pt;
@@ -162,95 +187,32 @@ export class PDFOrcamentoService {
             display: none !important;
         }
 
-
-        /* === SPACER FIXO NO TOPO E RODAPÉ DE TODAS AS PÁGINAS === */
-        .page-top-spacer {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            width: 100%;
-            height: 95px;
-            min-height: 95px;
-            background: transparent;
-            z-index: -2;
-            pointer-events: none;
-            display: block;
-        }
-
-
-        .page-bottom-spacer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            width: 100%;
-            height: 80px;
-            min-height: 80px;
-            background: transparent;
-            z-index: -2;
-            pointer-events: none;
-            display: block;
+        /* === ESTRUTURA DE PÁGINA COM MARGENS === */
+        .page-content {
+            padding-top: 95px;
+            padding-bottom: 100px;
+            padding-left: 20px;
+            padding-right: 20px;
+            min-height: 297mm;
+            box-sizing: border-box;
         }
 
         /* Garantir que a folha timbrada apareça em todas as páginas */
         @media print {
             .watermark-background {
                 position: fixed !important;
+                width: 210mm;
+                height: 297mm;
+                background-size: 210mm 297mm !important;
+                background-position: top left !important;
+                background-repeat: no-repeat !important;
             }
 
-            .page-top-spacer {
-                position: fixed !important;
-                top: 0 !important;
-                height: 95px !important;
-                display: block !important;
-            }
-
-
-            .page-bottom-spacer {
-                position: fixed !important;
-                bottom: 0 !important;
-                height: 80px !important;
-                display: block !important;
-            }
-
-            /* Garantir margin-top de 95px e margin-bottom de 80px em TODAS as páginas */
-            @page {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-            }
-
-            @page :first {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-            }
-
-            /* Garantir que TODAS as páginas subsequentes também tenham as margens */
-            @page :left {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            @page :right {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            /* Mantém o padding-top da div .page para a primeira página */
-            body > .page {
-                padding-top: 95px;
-                padding-bottom: 80px;
-                min-height: calc(100vh - 95px - 80px);
-            }
-
-            /* Quando descrição técnica quebra para nova página, o spacer fixo cuida do espaçamento */
-            .descricoes-wrapper {
-                padding-top: 95px;
-                padding-bottom: 80px;
+            .page-content {
+                padding-top: 95px !important;
+                padding-bottom: 100px !important;
+                padding-left: 20px !important;
+                padding-right: 20px !important;
             }
 
             /* Garantir que tabelas não quebrem mal */
@@ -264,7 +226,6 @@ export class PDFOrcamentoService {
                 page-break-before: auto !important;
                 page-break-after: auto !important;
             }
-
         }
 
         /* Cantos decorativos superiores */
@@ -310,47 +271,14 @@ export class PDFOrcamentoService {
         /* === PÁGINA === */
         .page {
             max-width: 100%;
-            margin: 0 15px;
-
-            padding: 95px 15px 80px 15px;
+            margin: 0;
+            padding: 0;
             position: relative;
             background: transparent;
-            min-height: calc(100vh - 95px - 80px);
         }
 
-        /* Adicionar padding-top em elementos que podem começar após quebra de página */
-        .descricao-content,
-        .observacoes-content {
-            position: relative;
-        }
-
-
-        /* Garantir padding-top e padding-bottom em todas as páginas após quebra de página */
+        /* Garantir que cores sejam impressas */
         @media print {
-            /* Aplicar margin-top de 95px e margin-bottom de 80px em TODAS as páginas */
-            @page {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            /* Primeira página também deve ter as margens */
-            @page :first {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            /* Garantir que TODAS as páginas subsequentes também tenham as margens */
-            @page :left {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            @page :right {
-                margin-top: 95px !important;
-                margin-bottom: 80px !important;
-            }
-
-            /* Garantir que qualquer quebra de página tenha padding-top e padding-bottom */
             * {
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
@@ -414,10 +342,6 @@ export class PDFOrcamentoService {
         .descricoes-wrapper {
             page-break-before: always;
             break-before: page;
-            padding-top: 95px;
-            padding-bottom: 80px;
-            position: relative;
-            min-height: calc(100vh - 95px - 80px);
         }
 
         /* Descrições podem quebrar se muito longas */
@@ -426,63 +350,7 @@ export class PDFOrcamentoService {
             break-inside: auto;
             orphans: 3;
             widows: 3;
-            position: relative;
-
             margin-bottom: 20px;
-        }
-
-        /* Garantir que quando descrição técnica quebra para nova página, tenha padding-top */
-        .descricao-section::before {
-            content: "";
-            display: block;
-            height: 95px;
-            position: absolute;
-            top: -95px;
-            left: 0;
-            width: 100%;
-            pointer-events: none;
-            visibility: hidden;
-        }
-
-        /* Adicionar espaço no topo de qualquer conteúdo que quebrar para nova página */
-        .descricao-section:first-child,
-        .observacoes-section:first-child {
-            margin-top: 0;
-        }
-
-
-        /* Garantir padding-top e padding-bottom em todas as páginas geradas automaticamente */
-        @media print {
-            /* O spacer fixo no topo + margin-top e margin-bottom do @page garantem o espaçamento em todas as páginas */
-            
-            /* Primeira seção de descrição em nova página tem padding-top do wrapper */
-            .descricoes-wrapper > .descricao-section:first-child,
-            .descricoes-wrapper > .observacoes-section:first-child {
-                margin-top: 0;
-            }
-
-            /* Quando conteúdo quebra para nova página, garantir que o spacer apareça */
-            .descricao-section,
-            .observacoes-section {
-                position: relative;
-            }
-
-            /* Adicionar padding-top se uma seção começar em nova página após quebra */
-            .descricao-section:not(:first-child)::before,
-            .observacoes-section:not(:first-child)::before {
-                content: "";
-                display: block;
-                height: 95px;
-                margin-top: -95px;
-                visibility: hidden;
-            }
-
-
-            /* Garantir que todas as seções respeitem o padding-bottom */
-            .descricao-section:last-child,
-            .observacoes-section:last-child {
-                padding-bottom: 80px;
-            }
         }
 
 
@@ -581,17 +449,35 @@ export class PDFOrcamentoService {
         /* === DESCRIÇÕES === */
         .descricao-section {
             background: transparent;
-            padding: 12px 0;
+            padding: 0;
             margin-bottom: 16px;
             border: none;
-            page-break-inside: avoid;
+            page-break-inside: auto;
+            break-inside: auto;
         }
 
         .descricao-content {
             color: #1e293b;
-            font-size: 12px;
+            font-size: 11px;
             line-height: 1.6;
-            margin-top: 6px;
+            margin-top: 8px;
+        }
+
+        .descricao-content p {
+            margin: 8px 0;
+        }
+        /* ENTER ENTER: garantir que parágrafo vazio tenha altura no PDF */
+        .descricao-content p.tiptap-empty-paragraph {
+            min-height: 1em;
+        }
+        .descricao-content p.tiptap-empty-paragraph::before {
+            content: "\\00a0";
+        }
+
+        .descricao-content h2, .descricao-content h3 {
+            margin: 12px 0 8px 0;
+            color: #0c4a6e;
+            font-size: 13px;
         }
 
         .descricao-section.projeto {
@@ -622,6 +508,13 @@ export class PDFOrcamentoService {
 
         .descricao-content ul, .descricao-content ol {
             margin: 8px 0 8px 20px;
+        }
+
+        /* Bullet/número e texto na mesma linha (Tiptap gera <li><p>...</p></li>) */
+        .descricao-content ul li p, .descricao-content ol li p {
+            display: inline !important;
+            margin: 0 !important;
+            padding: 0 !important;
         }
 
         .descricao-content table {
@@ -800,12 +693,6 @@ export class PDFOrcamentoService {
 </head>
 
     <body>
-    <!-- Spacer fixo no topo de todas as páginas -->
-    <div class="page-top-spacer"></div>
-    
-    <!-- Spacer fixo no rodapé de todas as páginas -->
-    <div class="page-bottom-spacer"></div>
-
     <!-- Folha Timbrada / Marca d'água de fundo -->
     <div class="watermark-background${folhaTimbradaUrl ? ' custom-letterhead' : ''}" ${folhaTimbradaUrl ? `style="--letterhead-url: url('${folhaTimbradaUrl}');"` : ''}>
         <!-- Cantos decorativos superiores -->
@@ -827,10 +714,14 @@ export class PDFOrcamentoService {
         </div>
     </div>
 
-    <div class="page">
-        <!-- Título do Orçamento -->
+    <div class="page-content">
+        <div class="page">
+            <!-- Título do Orçamento -->
         <div class="orcamento-title">
-            <h1>${orcamento.titulo || `ORÇAMENTO DE VENDA #${orcamento.numeroSequencial}`}</h1>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap;">
+                <h1 style="margin: 0;">${orcamento.titulo || `ORÇAMENTO DE VENDA #${orcamento.numeroSequencial}`}</h1>
+                <strong style="font-size: 14px; font-weight: bold; white-space: nowrap;">ORÇAMENTO: ${orcamento.numeroSequencial}</strong>
+            </div>
             <div class="orcamento-details">
                 <div class="detail-item">
                     <label>Cliente:</label>
@@ -845,7 +736,8 @@ export class PDFOrcamentoService {
                     <strong>${new Date(orcamento.validade).toLocaleDateString('pt-BR')}</strong>
                 </div>
                 <div class="detail-item">
-                    <strong style="font-size: 16px; font-weight: bold;">ORÇAMENTO ${orcamento.numeroSequencial}</strong>
+                    <label>Orçamentista:</label>
+                    <strong>${orcamento.orcamentistaNome || 'Não identificado'}</strong>
                 </div>
                 ${(orcamento.previsaoInicio && orcamento.previsaoTermino) || orcamento.previsaoTermino ? `
                 <div class="detail-item">
@@ -885,14 +777,14 @@ export class PDFOrcamentoService {
             </div>
         </div>
 
-        <!-- Endereços de Cobrança e Entrega -->
+        <!-- Endereços de Cobrança e Entrega (logradouro + número) -->
         ${orcamento.enderecoObra || orcamento.cliente.endereco ? `
         <div class="addresses-row">
             ${orcamento.cliente.endereco ? `
             <div class="address-box">
                 <div class="section-title">Endereço de Cobrança</div>
                 <div style="font-size: 12px; line-height: 1.4;">
-                    ${orcamento.cliente.endereco}
+                    ${orcamento.cliente.endereco}${orcamento.cliente.numero ? `, ${orcamento.cliente.numero}` : ''}
                 </div>
             </div>
             ` : ''}
@@ -900,7 +792,7 @@ export class PDFOrcamentoService {
             <div class="address-box">
                 <div class="section-title">Endereço da Obra</div>
                 <div style="font-size: 12px; line-height: 1.4;">
-                    ${orcamento.enderecoObra}${orcamento.bairro ? `, ${orcamento.bairro}` : ''}${orcamento.cidade ? ` - ${orcamento.cidade}` : ''}${orcamento.cep ? ` - ${orcamento.cep}` : ''}
+                    ${orcamento.enderecoObra}${orcamento.numeroObra ? `, ${orcamento.numeroObra}` : ''}${orcamento.bairro ? ` - ${orcamento.bairro}` : ''}${orcamento.cidade ? ` - ${orcamento.cidade}` : ''}${orcamento.cep ? ` - CEP: ${orcamento.cep}` : ''}
                 </div>
             </div>
             ` : ''}
@@ -974,14 +866,14 @@ export class PDFOrcamentoService {
 
         <!-- Totais -->
         <div class="totais-section">
-            <div class="totais-row">
-                <span>Total dos Itens:</span>
-                <strong>R$ ${orcamento.items.reduce((sum, item) => sum + item.subtotal, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            <div class="totais-row" style="margin-bottom: 4px;">
+                <span>Quantidade: ${orcamento.items.length} ${orcamento.items.length === 1 ? 'item' : 'itens'}</span>
+                <span>Valor total dos itens R$ ${orcamento.items.reduce((sum, item) => sum + item.subtotal, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             ${orcamento.descontoValor > 0 ? `
             <div class="totais-row">
                 <span>Desconto:</span>
-                <strong>R$ ${orcamento.descontoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <strong>- R$ ${orcamento.descontoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
             </div>
             ` : ''}
             ${orcamento.impostoPercentual > 0 ? `
@@ -991,7 +883,7 @@ export class PDFOrcamentoService {
             </div>
             ` : ''}
             <div class="totais-row total-final">
-                <span>VALOR TOTAL:</span>
+                <span>VALOR TOTAL DO ORÇAMENTO:</span>
                 <span>R$ ${orcamento.precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
         </div>
@@ -1025,12 +917,12 @@ export class PDFOrcamentoService {
                 <!-- Descrição Geral (na primeira página) -->
                 <div class="descricao-section" style="margin-bottom: 12px;">
                     <div class="section-title">Descrição Geral</div>
-                    <div class="descricao-content">${orcamento.descricao}</div>
+                    <div class="descricao-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.descricao))}</div>
                 </div>
                 ${orcamento.observacoes ? `
                 <div class="observacoes-section">
                     <div class="section-title">Observações Importantes</div>
-                    <div class="observacoes-content">${orcamento.observacoes}</div>
+                    <div class="observacoes-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.observacoes))}</div>
                 </div>
                 ` : ''}
                 `;
@@ -1043,21 +935,21 @@ export class PDFOrcamentoService {
                     ${orcamento.descricao ? `
                     <div class="descricao-section">
                         <div class="section-title">Descrição Geral</div>
-                        <div class="descricao-content">${orcamento.descricao}</div>
+                        <div class="descricao-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.descricao))}</div>
                     </div>
                     ` : ''}
                     
                     ${orcamento.descricaoProjeto ? `
                     <div class="descricao-section projeto">
                         <div class="section-title">Descrição Técnica do Projeto</div>
-                        <div class="descricao-content">${orcamento.descricaoProjeto}</div>
+                        <div class="descricao-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.descricaoProjeto))}</div>
                     </div>
                     ` : ''}
                     
                     ${orcamento.observacoes ? `
                     <div class="observacoes-section">
                         <div class="section-title">Observações Importantes</div>
-                        <div class="observacoes-content">${orcamento.observacoes}</div>
+                        <div class="observacoes-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.observacoes))}</div>
                     </div>
                     ` : ''}
                 </div>
@@ -1069,19 +961,20 @@ export class PDFOrcamentoService {
                 return `
                 <div class="observacoes-section" style="margin-bottom: 12px;">
                     <div class="section-title">Observações Importantes</div>
-                    <div class="observacoes-content">${orcamento.observacoes}</div>
+                    <div class="observacoes-content">${normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(orcamento.observacoes))}</div>
                 </div>
                 `;
             }
             
             return '';
         })()}
+        </div>
     </div>
 </body>
 </html>
         `;
 
-        console.log('✅ HTML do orçamento gerado com sucesso (versão atualizada - sem backgrounds, fonte 12px, padding 95px/80px, margin 15px)');
+        console.log('✅ HTML do orçamento gerado com sucesso (versão atualizada - paginação A4 com margens 95px/80px, folha timbrada fixa em todas as páginas)');
         return html;
     }
 

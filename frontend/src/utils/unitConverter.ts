@@ -219,6 +219,19 @@ export function formatarUnidade(unidade: string): string {
 }
 
 /**
+ * Normaliza unidade de medida para uso em orçamento e itens do kit.
+ * Itens cadastrados em metros entram e herdam como "metros" (e "cm" como "cm").
+ */
+export function normalizarUnidadeMedidaOrcamento(unidade: string | undefined | null): string {
+    if (!unidade) return 'un';
+    const u = unidade.trim();
+    const lower = u.toLowerCase();
+    if (lower === 'm' || lower === 'metro' || lower === 'metros' || lower === 'kg/m' || lower === 'm/kg') return 'metros';
+    if (lower === 'cm' || lower === 'centimetro' || lower === 'centimetros') return 'cm';
+    return u;
+}
+
+/**
  * Formata a unidade de medida para exibição no orçamento
  * Mostra "metros" quando for 'm' e "CM" quando for 'cm' para informação coesa
  */

@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
-
-const prisma = new PrismaClient();
+import { consultarCnpj } from '../services/cnpj-ws.service';
 
 // Configurar multer para upload de JSON
 const storage = multer.diskStorage({
@@ -26,6 +25,31 @@ export const uploadJSON = multer({
   },
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
+
+/**
+ * Consulta CNPJ na API CNPJ.ws (inscrições estaduais por UF) e retorna dados normalizados + IE + indIEDest.
+ */
+export const consultarCnpjCliente = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { cnpj } = req.params;
+    if (!cnpj) {
+      res.status(400).json({ success: false, error: 'CNPJ é obrigatório' });
+      return;
+    }
+    const data = await consultarCnpj(cnpj);
+    if (!data) {
+      res.status(404).json({ success: false, error: 'CNPJ não encontrado' });
+      return;
+    }
+    res.json({ success: true, data });
+  } catch (err: any) {
+    console.error('Erro ao consultar CNPJ:', err);
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Erro ao consultar CNPJ'
+    });
+  }
+};
 
 // Listar todos os clientes
 export const getClientes = async (req: Request, res: Response): Promise<void> => {
@@ -137,7 +161,7 @@ export const getClienteById = async (req: Request, res: Response): Promise<void>
 // Criar cliente
 export const createCliente = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep, tipo } = req.body;
+    const { nome, cpfCnpj, email, telefone, endereco, numero, bairro, inscricaoEstadual, indIEDest, cidade, estado, cep, tipo, dadosCnpjWs } = req.body;
 
     // Verificar se CPF/CNPJ já existe
     const clienteExistente = await prisma.cliente.findUnique({
@@ -152,18 +176,26 @@ export const createCliente = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const createData: any = {
+      nome,
+      cpfCnpj,
+      email,
+      telefone,
+      endereco,
+      numero: numero || undefined,
+      bairro: bairro || undefined,
+      inscricaoEstadual: inscricaoEstadual || undefined,
+      indIEDest: indIEDest != null ? Number(indIEDest) : undefined,
+      cidade,
+      estado,
+      cep,
+      tipo: tipo || 'PJ'
+    };
+    if (dadosCnpjWs !== undefined) {
+      createData.dadosCnpjWs = dadosCnpjWs;
+    }
     const cliente = await prisma.cliente.create({
-      data: {
-        nome,
-        cpfCnpj,
-        email,
-        telefone,
-        endereco,
-        cidade,
-        estado,
-        cep,
-        tipo: tipo || 'PJ'
-      }
+      data: createData
     });
 
     res.status(201).json({
@@ -238,7 +270,7 @@ export const createClienteRapido = async (req: Request, res: Response): Promise<
 export const updateCliente = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { nome, cpfCnpj, email, telefone, endereco, cidade, estado, cep, tipo } = req.body;
+    const { nome, cpfCnpj, email, telefone, endereco, numero, bairro, inscricaoEstadual, indIEDest, cidade, estado, cep, tipo, dadosCnpjWs } = req.body;
 
     // Verificar se cliente existe
     const clienteExistente = await prisma.cliente.findUnique({
@@ -268,19 +300,27 @@ export const updateCliente = async (req: Request, res: Response): Promise<void> 
       }
     }
 
+    const updateData: any = {
+      nome,
+      cpfCnpj,
+      email,
+      telefone,
+      endereco,
+      numero: numero !== undefined ? numero : undefined,
+      bairro: bairro || undefined,
+      inscricaoEstadual: inscricaoEstadual !== undefined ? inscricaoEstadual : undefined,
+      indIEDest: indIEDest !== undefined ? (indIEDest === '' ? null : Number(indIEDest)) : undefined,
+      cidade,
+      estado,
+      cep,
+      tipo: tipo || clienteExistente.tipo || 'PJ'
+    };
+    if (dadosCnpjWs !== undefined) {
+      updateData.dadosCnpjWs = dadosCnpjWs;
+    }
     const cliente = await prisma.cliente.update({
       where: { id },
-      data: {
-        nome,
-        cpfCnpj,
-        email,
-        telefone,
-        endereco,
-        cidade,
-        estado,
-        cep,
-        tipo: tipo || clienteExistente.tipo || 'PJ'
-      }
+      data: updateData
     });
 
     res.json({
@@ -611,6 +651,7 @@ export const importarClientes = async (req: Request, res: Response): Promise<voi
               email: clienteData.email,
               telefone: clienteData.telefone,
               endereco: clienteData.endereco || clienteExistente.endereco,
+              bairro: clienteData.bairro || clienteExistente.bairro,
               cidade: clienteData.cidade || clienteExistente.cidade,
               estado: clienteData.estado || clienteExistente.estado,
               cep: clienteData.cep || clienteExistente.cep,
@@ -636,6 +677,7 @@ export const importarClientes = async (req: Request, res: Response): Promise<voi
               email: clienteData.email,
               telefone: clienteData.telefone,
               endereco: clienteData.endereco || '',
+              bairro: clienteData.bairro || '',
               cidade: clienteData.cidade || '',
               estado: clienteData.estado || '',
               cep: clienteData.cep || '',
@@ -704,6 +746,7 @@ export const exportarTemplate = async (req: Request, res: Response): Promise<voi
           email: 'contato@empresaexemplo.com.br',
           telefone: '(47) 3333-4444',
           endereco: 'Rua Exemplo, 123',
+          bairro: 'Bairro Exemplo',
           cidade: 'Itajaí',
           estado: 'SC',
           cep: '88300-000',
@@ -716,6 +759,7 @@ export const exportarTemplate = async (req: Request, res: Response): Promise<voi
           email: 'joao.silva@email.com',
           telefone: '(47) 99999-8888',
           endereco: 'Avenida Principal, 456',
+          bairro: 'Centro',
           cidade: 'Florianópolis',
           estado: 'SC',
           cep: '88000-000',
@@ -756,6 +800,7 @@ export const exportarClientes = async (req: Request, res: Response): Promise<voi
         email: c.email,
         telefone: c.telefone,
         endereco: c.endereco,
+        bairro: (c as any).bairro || '',
         cidade: c.cidade,
         estado: c.estado,
         cep: c.cep,
