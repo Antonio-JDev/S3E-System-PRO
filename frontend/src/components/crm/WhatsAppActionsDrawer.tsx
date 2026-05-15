@@ -11,6 +11,7 @@ interface WhatsAppActionsDrawerProps {
   loading: boolean;
   modeSaving: boolean;
   linkLoading: boolean;
+  unlinkLoading: boolean;
   sendingOrcamentoId: string | null;
   clienteSearch: string;
   onClienteSearchChange: (value: string) => void;
@@ -18,6 +19,7 @@ interface WhatsAppActionsDrawerProps {
   clientesLoading: boolean;
   onRefresh: () => void;
   onLinkCliente: (clienteId: string) => void;
+  onUnlinkCliente: () => void;
   onSendOrcamentoPdf: (params: { orcamentoId: string; modeOverride?: WhatsappOrcamentoStatusMode }) => void;
   onChangeMode: (mode: WhatsappOrcamentoStatusMode) => void;
 }
@@ -96,6 +98,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   loading,
   modeSaving,
   linkLoading,
+  unlinkLoading,
   sendingOrcamentoId,
   clienteSearch,
   onClienteSearchChange,
@@ -103,12 +106,22 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   clientesLoading,
   onRefresh,
   onLinkCliente,
+  onUnlinkCliente,
   onSendOrcamentoPdf,
   onChangeMode,
 }) => {
   const [selectedClienteId, setSelectedClienteId] = useState('');
   const [selectedOrcamentoId, setSelectedOrcamentoId] = useState('');
+  const [orcamentoSearch, setOrcamentoSearch] = useState('');
   const orcamentos = context?.orcamentos || [];
+  const filteredOrcamentos = useMemo(() => {
+    const q = orcamentoSearch.trim().toLowerCase();
+    if (!q) return orcamentos;
+    return orcamentos.filter((o) => {
+      const hay = `${o.numeroSequencial ?? ''} ${o.titulo ?? ''} ${o.status ?? ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [orcamentoSearch, orcamentos]);
   const selectedOrcamento = useMemo(
     () => orcamentos.find((o) => o.id === selectedOrcamentoId) || null,
     [orcamentos, selectedOrcamentoId]
@@ -118,6 +131,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
     if (!open) return;
     setSelectedClienteId(context?.cliente?.id || '');
     setSelectedOrcamentoId(context?.orcamentos?.[0]?.id || '');
+    setOrcamentoSearch('');
   }, [open, context?.cliente?.id, context?.orcamentos]);
 
   const singleApprovedProposal = useMemo(
@@ -181,8 +195,20 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                 <p>
                   Lead: <span className="font-medium">{context?.lead?.nome || 'Não identificado'}</span>
                 </p>
-                <p>
-                  Cliente: <span className="font-medium">{context?.cliente?.nome || 'Não vinculado'}</span>
+                <p className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate">
+                    Cliente: <span className="font-medium">{context?.cliente?.nome || 'Não vinculado'}</span>
+                  </span>
+                  {context?.cliente?.id ? (
+                    <button
+                      type="button"
+                      disabled={unlinkLoading}
+                      onClick={onUnlinkCliente}
+                      className="shrink-0 rounded-lg border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+                    >
+                      {unlinkLoading ? 'Desvinculando…' : 'Desvincular'}
+                    </button>
+                  ) : null}
                 </p>
               </div>
             )}
@@ -206,18 +232,37 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
               placeholder="Buscar cliente por nome, telefone ou CPF/CNPJ"
               className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
             />
-            <select
-              value={selectedClienteId}
-              onChange={(e) => setSelectedClienteId(e.target.value)}
-              className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
-            >
-              <option value="">{clientesLoading ? 'Carregando clientes...' : 'Selecione um cliente'}</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome} {c.telefone ? `· ${c.telefone}` : ''} {c.cpfCnpj ? `· ${c.cpfCnpj}` : ''}
-                </option>
-              ))}
-            </select>
+            <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-dark-border dark:bg-dark-bg">
+              {clientesLoading ? (
+                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">Carregando clientes…</p>
+              ) : clientes.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">
+                  {clienteSearch.trim() ? 'Nenhum cliente encontrado' : 'Digite para buscar clientes'}
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-white/10">
+                  {clientes.map((c) => {
+                    const active = c.id === selectedClienteId;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedClienteId(c.id)}
+                          className={`w-full px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-white/5 ${
+                            active ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                          }`}
+                        >
+                          <p className="truncate font-semibold text-gray-900 dark:text-dark-text">{c.nome}</p>
+                          <p className="mt-0.5 truncate text-[11px] text-gray-600 dark:text-dark-text-secondary">
+                            {[c.telefone, c.cpfCnpj].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
             <button
               type="button"
               disabled={!selectedClienteId || linkLoading}
@@ -251,21 +296,47 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
             ) : null}
 
             <label className="mt-3 block text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Orçamento</label>
-            <select
-              value={selectedOrcamentoId}
-              onChange={(e) => setSelectedOrcamentoId(e.target.value)}
+            <input
+              value={orcamentoSearch}
+              onChange={(e) => setOrcamentoSearch(e.target.value)}
+              placeholder="Buscar orçamento por número, título ou status"
               className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
-            >
-              <option value="">Selecione um orçamento</option>
-              {orcamentos.map((o) => {
-                const meta = statusColorMeta(resolveOrcamentoStatusKind(o.status));
-                return (
-                <option key={o.id} value={o.id}>
-                    {meta.dot} #{o.numeroSequencial} · {o.status} · {o.titulo}
-                </option>
-                );
-              })}
-            </select>
+            />
+            <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-dark-border dark:bg-dark-bg">
+              {filteredOrcamentos.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">
+                  {orcamentoSearch.trim() ? 'Nenhum orçamento encontrado' : 'Nenhum orçamento disponível'}
+                </p>
+              ) : (
+                <ul className="divide-y divide-gray-100 dark:divide-white/10">
+                  {filteredOrcamentos.map((o) => {
+                    const kind = resolveOrcamentoStatusKind(o.status);
+                    const meta = statusColorMeta(kind);
+                    const active = o.id === selectedOrcamentoId;
+                    return (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrcamentoId(o.id)}
+                          className={`w-full px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-white/5 ${
+                            active ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="min-w-0 truncate font-semibold text-gray-900 dark:text-dark-text">
+                              {meta.dot} #{o.numeroSequencial} · {o.titulo}
+                            </p>
+                            <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] ${meta.chipClass} ${meta.textClass}`}>
+                              {o.status}
+                            </span>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
             {orcamentos.length > 0 ? (
               <div className="mt-2 space-y-1.5">
                 {orcamentos.slice(0, 6).map((o) => {

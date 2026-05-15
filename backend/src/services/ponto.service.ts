@@ -115,7 +115,7 @@ export type ImportarPresencaResultado = {
   descontosDiariaAutonomo?: { funcionariosProcessados: number; lancamentosCriados: number };
 };
 
-function calcularMetricasRegistro(params: {
+export function calcularMetricasRegistro(params: {
   batidas: string[];
   ano: number;
   mes: number;
@@ -156,8 +156,21 @@ function calcularMetricasRegistro(params: {
       shiftSaida: workShift.saida2,
       toleranceMin: tolerancia,
     });
-    minutosAtraso = diff.minutosAtrasoEntrada;
-    minutosHorasDevidas = diff.minutosSaidaAntecipada;
+    // Compensação diária: minutos extras (chegada antes/saída depois) abatem atraso/saída antecipada no mesmo dia.
+    // Ex.: entrou 08:06 (atraso 6) e saiu 17:36 (extra 6) => atraso líquido 0 (sem desconto).
+    let atrasoEntrada = diff.minutosAtrasoEntrada;
+    let saidaAntecipada = diff.minutosSaidaAntecipada;
+    let compensacao = Math.max(0, diff.minutosExtraTotal);
+
+    const abatEntrada = Math.min(atrasoEntrada, compensacao);
+    atrasoEntrada -= abatEntrada;
+    compensacao -= abatEntrada;
+
+    const abatSaida = Math.min(saidaAntecipada, compensacao);
+    saidaAntecipada -= abatSaida;
+
+    minutosAtraso = atrasoEntrada;
+    minutosHorasDevidas = saidaAntecipada;
 
     const minutosJornada = jornadaMinutosPorDia(workShift);
     minutosExtra20 = Math.max(0, minutosTrabalhados - minutosJornada);

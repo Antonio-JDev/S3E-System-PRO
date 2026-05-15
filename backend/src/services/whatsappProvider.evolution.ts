@@ -3,10 +3,15 @@
  * Mantidos em arquivo separado para não inflar demais o whatsappProvider.service.
  */
 
-/** Padrão `evolution` (Docker). O valor `waha` é mantido apenas para compatibilidade legada. */
+/** Evolution API v2 (Node) ou Evolution Go — ambos exceto `waha`. */
 export function isEvolutionProviderKind(): boolean {
   const k = (process.env.WHATSAPP_PROVIDER_KIND || 'evolution').trim().toLowerCase();
   return k !== 'waha';
+}
+
+/** Evolution Go (REST diferente da v2); usado pelo bridge em `whatsappEvolutionGoBridge.ts`. */
+export function isEvolutionGoKind(): boolean {
+  return (process.env.WHATSAPP_PROVIDER_KIND || '').trim().toLowerCase() === 'evolution-go';
 }
 
 /** Converte JID (5511...@c.us ou grupo @g.us) para o campo `number` da Evolution. */
@@ -31,7 +36,13 @@ export function evolutionMediaType(
     case 'video':
       return { mediatype: 'video', mimetype: 'video/mp4', fileName: 'video.mp4' };
     case 'voice':
-      return { mediatype: 'document', mimetype: 'audio/ogg', fileName: 'audio.ogg' };
+      // Voice = nota de voz (PTT). Para o WhatsApp do destinatário exibir a barra
+      // de progresso + foto do perfil (não o ícone de "arquivo"), precisamos:
+      //  - `mediatype: 'audio'` no body do sendMedia (NÃO 'document');
+      //  - `mimetype: 'audio/ogg; codecs=opus'` — sem o `codecs=opus`, o iOS
+      //    em particular não toca inline e cai em fallback de "arquivo";
+      //  - `ptt: true` no body (adicionado em sendWhatsappProviderMediaRaw).
+      return { mediatype: 'audio', mimetype: 'audio/ogg; codecs=opus', fileName: 'audio.ogg' };
     case 'file':
     default:
       return { mediatype: 'document', mimetype: 'application/octet-stream', fileName: 'file.bin' };
@@ -42,13 +53,16 @@ export function evolutionMediaType(
 export function parseEvolutionMessageId(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
   const o = data as Record<string, unknown>;
-  const key = o.key;
+  const nested =
+    o.data && typeof o.data === 'object' && !Array.isArray(o.data) ? (o.data as Record<string, unknown>) : null;
+  const target = nested || o;
+  const key = target.key;
   if (key && typeof key === 'object') {
     const id = (key as Record<string, unknown>).id;
     if (typeof id === 'string' && id.length > 0) return id;
     if (typeof id === 'number' && !Number.isNaN(id)) return String(id);
   }
-  return parseEvolutionMessageIdFlat(o);
+  return parseEvolutionMessageIdFlat(target);
 }
 
 function parseEvolutionMessageIdFlat(o: Record<string, unknown>): string | null {

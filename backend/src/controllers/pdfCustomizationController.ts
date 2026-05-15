@@ -5,6 +5,7 @@ import fs from 'fs';
 import { prisma } from '../lib/prisma';
 import DynamicPDFService from '../services/DynamicPDFService';
 import { PDFCustomization, OrcamentoPDFData } from '../types/pdfCustomization';
+import { buildContentDisposition } from '../utils/filename.util';
 
 // Configuração do multer para uploads
 const storage = multer.diskStorage({
@@ -69,7 +70,10 @@ export class PDFCustomizationController {
 
             // Configurar headers para download
             res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename=Orcamento_${orcamentoData.numero}.pdf`);
+            res.setHeader(
+                'Content-Disposition',
+                buildContentDisposition('attachment', `Orcamento_${orcamentoData.numero}.pdf`, 'orcamento.pdf')
+            );
             res.setHeader('Content-Length', pdfBuffer.length);
 
             res.send(pdfBuffer);

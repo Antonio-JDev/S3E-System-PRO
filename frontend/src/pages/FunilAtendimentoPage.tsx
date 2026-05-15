@@ -28,6 +28,7 @@ import ClienteCreateEditModal from '../components/ui/ClienteCreateEditModal';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { maskCpfCnpj, maskWhatsApp, maskCep, onlyDigits } from '../utils/masks';
 import { toWhatsappChatId } from '../utils/whatsappChat';
+import { fetchWhatsappResolveOpenChat } from '../services/whatsappChatService';
 
 const HORAS_ALERTA_ATRASO = 48;
 const MAX_ANEXOS_LEAD = 8;
@@ -191,7 +192,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
   const [cepLoading, setCepLoading] = useState(false);
   const cepAbortRef = useRef<AbortController | null>(null);
   const cepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openChatForLead = (lead: ContatoLead) => {
+  const openChatForLead = async (lead: ContatoLead) => {
     const digits = onlyDigits(lead.whatsapp || '');
     if (!digits) {
       toast.error('Lead sem WhatsApp', {
@@ -199,7 +200,23 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       });
       return;
     }
-    onNavigate('Chat WhatsApp', toWhatsappChatId(lead.whatsapp || digits), lead.nome);
+    const phoneInput = (lead.whatsapp || digits).trim();
+    try {
+      const r = await fetchWhatsappResolveOpenChat(phoneInput);
+      if (r.success && r.data?.chatId) {
+        if (!r.data.numberExists) {
+          toast.warning('Número não consta como registrado no WhatsApp', {
+            description:
+              'A conversa será aberta no formato cadastrado; se o envio falhar, confira o número ou aguarde o contato aparecer na instância.',
+          });
+        }
+        onNavigate('Chat WhatsApp', r.data.chatId, lead.nome);
+        return;
+      }
+    } catch {
+      // fallback abaixo
+    }
+    onNavigate('Chat WhatsApp', toWhatsappChatId(phoneInput), lead.nome);
   };
 
   const loadLeads = async (showLoading = true) => {

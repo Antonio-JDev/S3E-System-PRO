@@ -9,22 +9,35 @@ import {
   evolutionExtractChatsUpdateData,
   evolutionExtractContactsUpdateData,
   evolutionExtractMessagesUpsertData,
+  evolutionExtractReactionFromReactionEvent,
+  evolutionExtractReactionFromUpsert,
   evolutionMessageUpdateToAckPayload,
   evolutionPresenceToProviderPayload,
   evolutionUpsertMessageToProviderRaw,
   evolutionWebhookSession
 } from '../utils/whatsappEvolutionWebhook.util';
+import { adaptEvolutionGoWebhookBody } from '../utils/whatsappEvolutionGoWebhook.util';
+import { normalizeStoredMediaFilename } from '../utils/filename.util';
+import { requestEvoGoReconnect } from '../services/whatsappProvider.service';
+import { canonicalWhatsappChatId, waJidToDigits } from '../utils/whatsappChat.util';
+import {
+  normalizePhoneDigitsKey,
+  recordWhatsappChatIdentity
+} from '../services/whatsappIdentity.service';
 
 const WHATSAPP_PROVIDER_WEBHOOK_EVENTS = new Set([
   'message',
   'message.any',
   'message.ack',
+  'message.reaction',
   'presence.update',
   'connection.update',
   'CONNECTION_UPDATE',
   'connections.update',
   'messages.upsert',
   'messages.update',
+  'messages.reaction',
+  'MESSAGES_REACTION',
   'contacts.update',
   'chats.update',
   'chats.upsert'
@@ -205,6 +218,10 @@ function normalizeWhatsappProviderMessagePayload(
     if (typeof mt === 'string' && mt.trim()) mediaType = mt.trim();
   }
 
+  if (typeof raw.mediaFilename === 'string' && raw.mediaFilename.trim()) {
+    mediaFilename = mediaFilename || raw.mediaFilename.trim();
+  }
+
   const hints = extractEngineMediaHints(raw);
   mediaUrl = mediaUrl || hints.mediaUrl;
   mediaMimetype = mediaMimetype || hints.mediaMimetype;
@@ -235,6 +252,22 @@ function normalizeWhatsappProviderMessagePayload(
     if (!Number.isNaN(n)) ack = n;
   }
 
+  // Evolution Go (whatsmeow nativo) com WEBHOOK_FILES=true entrega o conteúdo
+  // binário inline como `Message.base64`. O adapter copia esse valor para o
+  // `data.evoGoMediaBase64`, e o util `evolutionUpsertMessageToProviderRaw`
+  // preserva o raw original em `_data`. Propagamos para `mediaBase64` no
+  // payload normalizado (o service persiste em disco no INSERT).
+  const _data = raw._data as Record<string, unknown> | undefined;
+  const directEvoGo = (raw.evoGoMediaBase64 ?? raw._evoGoMediaBase64) as unknown;
+  const nestedEvoGo = _data ? (_data.evoGoMediaBase64 as unknown) : undefined;
+  const evoGoMediaBase64Candidate =
+    typeof directEvoGo === 'string' && directEvoGo.length > 0
+      ? directEvoGo
+      : typeof nestedEvoGo === 'string' && nestedEvoGo.length > 0
+      ? nestedEvoGo
+      : undefined;
+  const evoGoMediaBase64 = evoGoMediaBase64Candidate || undefined;
+
   return {
     id: extractRawMessageId(raw),
     from: raw.from,
@@ -244,14 +277,56 @@ function normalizeWhatsappProviderMessagePayload(
     body: typeof raw.body === 'string' ? raw.body : undefined,
     timestamp,
     ack,
-    hasMedia,
+    hasMedia: hasMedia || !!evoGoMediaBase64,
     mediaUrl,
     mediaMimetype,
-    mediaFilename,
+    mediaFilename: normalizeStoredMediaFilename(mediaFilename),
     providerMediaId,
     mediaFileSize,
-    mediaType
+    mediaType,
+    mediaBase64: evoGoMediaBase64
   };
+}
+
+/**
+ * Quando o adapter da EvoGo injeta `evoGoDirectIdentity` numa mensagem
+ * `messages.upsert` (DM), persistimos o mapping LID↔PN em
+ * `whatsapp_chat_identities`. O `recordWhatsappChatIdentity` aplica a
+ * política de "prefere LID como primary" — chamadas subsequentes com PN
+ * apenas adicionam aliases.
+ */
+async function maybeRegisterEvoGoIdentityFromUpsert(raw: Record<string, unknown>): Promise<void> {
+  const ident = raw.evoGoDirectIdentity as Record<string, unknown> | undefined;
+  if (!ident || typeof ident !== 'object') return;
+  const chat = typeof ident.chat === 'string' ? ident.chat.trim() : '';
+  const senderAlt = typeof ident.senderAlt === 'string' ? ident.senderAlt.trim() : '';
+  const sender = typeof ident.sender === 'string' ? ident.sender.trim() : '';
+  // Só registramos se temos pelo menos 1 JID além do `chat` (o alt é o que dá
+  // valor — vincula formatos diferentes ao mesmo telefone).
+  if (!chat || (!senderAlt && !sender)) return;
+  // `chat` é o JID principal da DM. Em DMs entregues pelo LID, será `@lid`
+  // e `senderAlt` será `@s.whatsapp.net`. No caminho inverso, `chat` é PN
+  // e `senderAlt` é LID. O `recordWhatsappChatIdentity` resolve qual virá
+  // a ser primary (LID é sempre preferido).
+  const candidates = [chat, sender, senderAlt].filter((x) => x && x !== 'status@broadcast');
+  // Achamos um PN p/ usar como chave de dígitos (o LID não tem um número
+  // de telefone associado de forma confiável). Caso só tenhamos LID, sem
+  // PN, não dá pra registrar — esperamos o próximo evento que traga o PN.
+  const pnLike = candidates.find((j) => !j.toLowerCase().endsWith('@lid'));
+  if (!pnLike) return;
+  const phoneKey = normalizePhoneDigitsKey(waJidToDigits(canonicalWhatsappChatId(pnLike)));
+  if (!phoneKey) return;
+  const lidLike = candidates.find((j) => j.toLowerCase().endsWith('@lid'));
+  // Se houver LID, ele vira primary. Senão, mantemos o PN canon (que o
+  // serviço já trata como "vai promover quando achar um LID").
+  const primary = lidLike || canonicalWhatsappChatId(pnLike);
+  const extras = candidates.filter((j) => j !== primary).map((j) => canonicalWhatsappChatId(j));
+  await recordWhatsappChatIdentity({
+    phoneDigitsKey: phoneKey,
+    primaryChatId: primary,
+    source: 'webhook_evo_go',
+    extraJids: extras
+  });
 }
 
 export async function whatsappWebhook(req: Request, res: Response): Promise<void> {
@@ -264,8 +339,19 @@ export async function whatsappWebhook(req: Request, res: Response): Promise<void
     }
   }
 
-  const body = req.body as Record<string, unknown> | undefined;
-  if (!body || typeof body.event !== 'string') {
+  const rawBody = req.body as Record<string, unknown> | undefined;
+  if (!rawBody || typeof rawBody !== 'object') {
+    res.status(200).json({ ok: true, ignored: true });
+    return;
+  }
+
+  // Evolution Go (whatsmeow nativo) usa eventos em PascalCase ("Message",
+  // "Receipt", "PushName", ...) e estrutura {Info, Message}. O backend foi
+  // escrito para Evolution v2 ("messages.upsert", "messages.update", ...).
+  // O adapter detecta o formato EvoGo e converte para v2 antes do switch.
+  const body = adaptEvolutionGoWebhookBody(rawBody);
+
+  if (typeof body.event !== 'string') {
     res.status(200).json({ ok: true, ignored: true });
     return;
   }
@@ -297,6 +383,15 @@ export async function whatsappWebhook(req: Request, res: Response): Promise<void
         state: state || n || null,
         session: incoming || expected || null
       });
+      // Auto-reconexão: a Evolution Go (whatsmeow) dispara `Disconnected` /
+      // `StreamReplaced` quando perde o WebSocket com o WhatsApp. Sem
+      // reagir, a sessão fica em `Connected: false` indefinidamente —
+      // mensagens enviadas não recebem ACK, fotos não carregam (IQ trava
+      // 75s). Disparamos `/instance/reconnect` (com cooldown global de
+      // 60s) e o webhook `Connected` chega ~3-10s depois.
+      if (disconnected) {
+        void requestEvoGoReconnect(`webhook:${state || n || 'close'}`);
+      }
       res.status(200).json({ ok: true });
       return;
     }
@@ -305,6 +400,35 @@ export async function whatsappWebhook(req: Request, res: Response): Promise<void
       const data = body.data;
       const list = evolutionExtractMessagesUpsertData(data);
       for (const raw of list) {
+        // Mapping LID↔PN automático: o adapter da EvoGo coloca
+        // `evoGoDirectIdentity` no top-level do data com `chat`, `sender`
+        // e `senderAlt`. Em DMs onde o WhatsApp moderno entrega pelo LID,
+        // `chat` é o LID e `senderAlt` é o PN (`@s.whatsapp.net`). Aqui
+        // registramos esse vínculo em `whatsapp_chat_identities` para que
+        // (a) envios futuros usem o JID que tem ACK (LID) e (b) a UI
+        // consolide os 2 chats fragmentados (LID + PN antigo) em um só.
+        try {
+          await maybeRegisterEvoGoIdentityFromUpsert(raw);
+        } catch (idErr) {
+          console.warn('[WA-WEBHOOK] maybeRegisterEvoGoIdentityFromUpsert falhou:', idErr);
+        }
+
+        // Reaction: Baileys/Evolution embute `message.reactionMessage` no upsert
+        // padrão (não é uma "nova mensagem", é update da que recebeu o emoji).
+        // Tratamos ANTES do mapeamento normal — evita ruído no chat.
+        const reaction = evolutionExtractReactionFromUpsert(raw);
+        if (reaction) {
+          await handleWhatsappProviderWebhookEvent({
+            event: 'message.reaction',
+            session,
+            payload: {
+              targetProviderMessageId: reaction.targetProviderMessageId,
+              reaction: reaction.reaction
+            }
+          });
+          continue;
+        }
+
         const mapped = evolutionUpsertMessageToProviderRaw(raw);
         if (!mapped) continue;
         const payload = normalizeWhatsappProviderMessagePayload(mapped);
@@ -313,6 +437,29 @@ export async function whatsappWebhook(req: Request, res: Response): Promise<void
           event: 'message',
           session,
           payload
+        });
+      }
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    if (body.event === 'messages.reaction' || body.event === 'MESSAGES_REACTION') {
+      const data = body.data ?? body.payload;
+      const items = Array.isArray(data)
+        ? (data as unknown[]).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+        : data
+          ? [data as Record<string, unknown>]
+          : [];
+      for (const item of items) {
+        const reaction = evolutionExtractReactionFromReactionEvent(item);
+        if (!reaction) continue;
+        await handleWhatsappProviderWebhookEvent({
+          event: 'message.reaction',
+          session,
+          payload: {
+            targetProviderMessageId: reaction.targetProviderMessageId,
+            reaction: reaction.reaction
+          }
         });
       }
       res.status(200).json({ ok: true });

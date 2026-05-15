@@ -157,6 +157,7 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
     Vendas: () => import('../components/Vendas'),
     Clientes: () => import('../components/ClientesModerno'),
     'Chat WhatsApp': () => import('../pages/WhatsAppChatPage'),
+    'Contatos S3E': () => import('../pages/ContatosS3ePage'),
   };
 
   const handlePrefetch = useCallback((viewName: string) => {
@@ -240,7 +241,7 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
   }, []);
 
   const geral = useMemo(() => filteredNavLinks.filter((l) => l.name === 'Dashboard'), [filteredNavLinks]);
-  const comercial = useMemo(() => filteredNavLinks.filter((l) => ['Funil de Atendimento', 'Chat WhatsApp', 'Clientes', 'Orçamentos', 'Vendas', 'Cotações', 'Serviços'].includes(l.name)), [filteredNavLinks]);
+  const comercial = useMemo(() => filteredNavLinks.filter((l) => ['Funil de Atendimento', 'Chat WhatsApp', 'Contatos S3E', 'Clientes', 'Orçamentos', 'Vendas', 'Cotações', 'Serviços'].includes(l.name)), [filteredNavLinks]);
   const suprimentos = useMemo(() => filteredNavLinks.filter((l) => ['Fornecedores', 'Estoque', 'Movimentações', 'Catálogo'].includes(l.name)), [filteredNavLinks]);
   const operacional = useMemo(() => filteredNavLinks.filter((l) => ['Tarefas Internas', 'Ordem De Serviços', 'Execução Obra', 'Tarefas da Obra', 'Ferramentas'].includes(l.name)), [filteredNavLinks]);
   const financeiro = useMemo(() => filteredNavLinks.filter((l) => ['Financeiro', 'Compras', 'Emissão NF-e', 'Logs'].includes(l.name)), [filteredNavLinks]);

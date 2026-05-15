@@ -9,6 +9,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // Workaround p/ bug do Vitest 4.x ("failed to find the runner") em Windows/Node 22
+    pool: 'vmThreads',
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

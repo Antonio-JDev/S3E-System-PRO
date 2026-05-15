@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { axiosApiService } from '../services/axiosApi';
+import { useWhatsAppRealtimeStatus, useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -84,6 +85,14 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [entityFilter, setEntityFilter] = useState<string>('Todos');
     const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao'>('logs');
     const [backfillLoading, setBackfillLoading] = useState(false);
+
+    // Probe Socket.io somente na aba Health (DEV)
+    useWhatsAppSocket(
+        () => {},
+        undefined,
+        { enabled: user?.role?.toLowerCase() === 'desenvolvedor' && activeTab === 'health' }
+    );
+    const realtime = useWhatsAppRealtimeStatus();
 
     // Verificar acesso (apenas desenvolvedor)
     useEffect(() => {
@@ -529,6 +538,65 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             <h3 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-6">💚 Health Check do Sistema</h3>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Tempo real (Socket.io) */}
+                                <div className={`p-6 rounded-2xl border-2 ${
+                                    realtime.connected
+                                        ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                                        : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                                }`}>
+                                    <div className="flex items-center gap-3 mb-3">
+                                        {realtime.connected ? (
+                                            <CheckCircleIcon className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
+                                        ) : (
+                                            <XCircleIcon className="w-10 h-10 text-orange-600 dark:text-orange-400" />
+                                        )}
+                                        <div className="min-w-0">
+                                            <h3 className="font-bold text-lg text-gray-900 dark:text-dark-text">Tempo real (Socket.io)</h3>
+                                            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                                                WhatsApp CRM — eventos em tempo real (DEV)
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className={`text-3xl font-bold mb-2 ${
+                                        realtime.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'
+                                    }`}>
+                                        {realtime.connected ? '✓ ONLINE' : '⚠ OFFLINE'}
+                                    </div>
+                                    <div className="text-xs text-gray-600 dark:text-dark-text-secondary space-y-1">
+                                        <p>
+                                            <span className="font-semibold">Último evento:</span>{' '}
+                                            {realtime.lastEvent ? `${realtime.lastEvent.name} • ${new Date(realtime.lastEvent.atMs).toLocaleTimeString('pt-BR')}` : '—'}
+                                        </p>
+                                        <p>
+                                            <span className="font-semibold">Última conexão:</span>{' '}
+                                            {realtime.lastConnectedAtMs ? new Date(realtime.lastConnectedAtMs).toLocaleTimeString('pt-BR') : '—'}
+                                        </p>
+                                        <p>
+                                            <span className="font-semibold">Última queda:</span>{' '}
+                                            {realtime.lastDisconnectedAtMs ? new Date(realtime.lastDisconnectedAtMs).toLocaleTimeString('pt-BR') : '—'}
+                                        </p>
+                                        {realtime.lastError ? (
+                                            <p className="text-orange-700 dark:text-orange-400">
+                                                <span className="font-semibold">Erro:</span> {realtime.lastError}
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                                        <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
+                                            msgs: {realtime.eventCounts['whatsapp:message'] ?? 0}
+                                        </span>
+                                        <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
+                                            meta: {realtime.eventCounts['whatsapp:chat:meta'] ?? 0}
+                                        </span>
+                                        <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
+                                            ack: {realtime.eventCounts['whatsapp:message:ack'] ?? 0}
+                                        </span>
+                                        <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
+                                            unread: {realtime.eventCounts['update_unread_count'] ?? 0}
+                                        </span>
+                                    </div>
+                                </div>
+
                                 {/* Backend Status */}
                                 <div className={`p-6 rounded-2xl border-2 ${
                                     backendStatus === 'online' 

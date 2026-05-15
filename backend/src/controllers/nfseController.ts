@@ -6,6 +6,7 @@ import { sendDocumentEmail } from '../services/email.service';
 import PDFDocument from 'pdfkit';
 import { gerarPdfNfseBuffer } from '../services/pdfNfse.service';
 import { gerarPdfNfsePuppeteerBuffer } from '../services/pdfNfsePuppeteer.service';
+import { buildContentDisposition } from '../utils/filename.util';
 
 type RpsNfsePayload = RpsNfse & { dataEmissao?: string | Date };
 
@@ -280,7 +281,7 @@ export async function getXml(req: Request, res: Response): Promise<void> {
     }
     const filename = `nfse-${nfse.numeroNfse || id}.xml`;
     res.setHeader('Content-Type', 'application/xml');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', buildContentDisposition('attachment', filename, 'nfse.xml'));
     res.send(nfse.xmlEnvio);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -316,7 +317,7 @@ export async function getPdf(req: Request, res: Response): Promise<void> {
     const filename = `Nota_Fiscl_No_${numero}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Disposition', buildContentDisposition('inline', filename, 'nfse.pdf'));
     res.send(pdfBuffer);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);

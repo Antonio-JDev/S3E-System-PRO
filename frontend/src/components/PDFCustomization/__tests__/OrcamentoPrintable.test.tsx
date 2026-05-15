@@ -5,10 +5,44 @@
  * npm test -- OrcamentoPrintable.test.tsx
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import OrcamentoPrintable from '../OrcamentoPrintable';
 import { OrcamentoPDFData } from '../../../types/pdfCustomization';
+
+// JSDOM nao calcula layout: simulamos alturas determinísticas por tipo de bloco
+// para exercitar o algoritmo de paginação por altura.
+const buildRect = (height: number): DOMRect => ({
+    height,
+    width: 754,
+    top: 0,
+    left: 0,
+    bottom: height,
+    right: 754,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+} as DOMRect);
+
+const installLayoutMock = () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const measure = this.getAttribute?.('data-measure');
+        switch (measure) {
+            case 'header-pg1':
+                return buildRect(300);
+            case 'header-pgn':
+                return buildRect(60);
+            case 'totais':
+                return buildRect(80);
+            case 'pagamento':
+                return buildRect(50);
+            case 'item-row':
+                return buildRect(24);
+            default:
+                return buildRect(0);
+        }
+    });
+};
 
 const mockOrcamentoData: OrcamentoPDFData = {
     numero: 'B5704E6A',
@@ -178,21 +212,24 @@ describe('OrcamentoPrintable', () => {
 
     describe('Conteúdo do Orçamento', () => {
         it('deve renderizar dados do cliente', () => {
-            const { container, getAllByText, getByText } = render(
+            const { getAllByText } = render(
                 <OrcamentoPrintable orcamento={mockOrcamentoData} />
             );
 
+            // Cliente aparece nas paginas visiveis e no host invisivel de medicao,
+            // por isso usamos getAllByText.
             expect(getAllByText('EMPRESA TESTE LTDA').length).toBeGreaterThan(0);
-            expect(getByText('teste@empresa.com')).toBeInTheDocument();
+            expect(getAllByText('teste@empresa.com').length).toBeGreaterThan(0);
         });
 
         it('deve renderizar itens do orçamento na tabela', () => {
-            const { getByText } = render(
+            const { getAllByText } = render(
                 <OrcamentoPrintable orcamento={mockOrcamentoData} />
             );
 
-            expect(getByText('Item Teste 1')).toBeInTheDocument();
-            expect(getByText('Item Teste 2')).toBeInTheDocument();
+            // Itens aparecem nas paginas visiveis e no host invisivel de medicao.
+            expect(getAllByText('Item Teste 1').length).toBeGreaterThan(0);
+            expect(getAllByText('Item Teste 2').length).toBeGreaterThan(0);
         });
 
         it('deve renderizar total do orçamento', () => {
@@ -286,6 +323,94 @@ describe('OrcamentoPrintable', () => {
             // Estilos devem estar presentes (aplicados inline)
             const styleElements = container.querySelectorAll('style');
             expect(styleElements.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('Paginação Dinâmica de Itens', () => {
+        beforeEach(() => {
+            installLayoutMock();
+        });
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('deve usar 1 página quando poucos itens cabem na primeira', () => {
+            const poucosItens: OrcamentoPDFData = {
+                ...mockOrcamentoData,
+                items: Array.from({ length: 3 }, (_, i) => ({
+                    nome: `Item ${i + 1}`,
+                    quantidade: 1,
+                    valorUnitario: 10,
+                    valorTotal: 10,
+                    unidade: 'UN',
+                })),
+            };
+
+            const { container } = render(<OrcamentoPrintable orcamento={poucosItens} />);
+
+            // Apenas as paginas visiveis - desconsidera o measure-host (que nao usa .pdf-page)
+            const pages = container.querySelectorAll('.pdf-page');
+            expect(pages.length).toBe(1);
+        });
+
+        it('deve paginar em múltiplas páginas com 50 itens', () => {
+            const muitosItens: OrcamentoPDFData = {
+                ...mockOrcamentoData,
+                items: Array.from({ length: 50 }, (_, i) => ({
+                    nome: `Item ${i + 1}`,
+                    quantidade: 1,
+                    valorUnitario: 10,
+                    valorTotal: 10,
+                    unidade: 'UN',
+                })),
+            };
+
+            const { container } = render(<OrcamentoPrintable orcamento={muitosItens} />);
+
+            const pages = container.querySelectorAll('.pdf-page');
+            // Com altura de 24px/linha e header pg1 de 300px, a primeira pagina aceita ~26 itens.
+            // Os demais geram pelo menos 1 pagina adicional.
+            expect(pages.length).toBeGreaterThanOrEqual(2);
+        });
+
+        it('deve gerar título de continuação nas páginas seguintes de itens', () => {
+            const muitosItens: OrcamentoPDFData = {
+                ...mockOrcamentoData,
+                items: Array.from({ length: 50 }, (_, i) => ({
+                    nome: `Item ${i + 1}`,
+                    quantidade: 1,
+                    valorUnitario: 10,
+                    valorTotal: 10,
+                    unidade: 'UN',
+                })),
+            };
+
+            const { container } = render(<OrcamentoPrintable orcamento={muitosItens} />);
+
+            // Texto de continuacao deve aparecer nas paginas seguintes (alem do measure-host).
+            const occurrences = container.textContent?.match(/Itens do Orçamento \(continuação\)/g) ?? [];
+            expect(occurrences.length).toBeGreaterThanOrEqual(2); // measure-host + ao menos 1 pagina visivel
+        });
+
+        it('deve manter PrintRenderer da descrição técnica após páginas de itens', () => {
+            const muitosItens: OrcamentoPDFData = {
+                ...mockOrcamentoData,
+                items: Array.from({ length: 50 }, (_, i) => ({
+                    nome: `Item ${i + 1}`,
+                    quantidade: 1,
+                    valorUnitario: 10,
+                    valorTotal: 10,
+                    unidade: 'UN',
+                })),
+                descricaoTecnica: '<p>Conteúdo técnico</p>',
+            };
+
+            const { container } = render(<OrcamentoPrintable orcamento={muitosItens} />);
+
+            // PrintRenderer continua presente apos as paginas de itens
+            const printRenderer = container.querySelector('.print-renderer');
+            expect(printRenderer).toBeInTheDocument();
         });
     });
 });

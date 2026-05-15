@@ -17,6 +17,7 @@ import {
   listarCompensacoesCompetencia,
   listarWorkShifts,
 } from '../services/rhJornada.service';
+import { buildContentDisposition } from '../utils/filename.util';
 
 export const RhController = {
   /**
@@ -158,7 +159,7 @@ export const RhController = {
       const buf = await gerarBufferPdfConferenciaPonto(folha);
       const nomeArquivo = `conferencia-ponto-${folha.nome.replace(/\s+/g, '_')}-${mes}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nomeArquivo)}`);
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', nomeArquivo, 'conferencia.pdf'));
       return res.send(buf);
     } catch (error: any) {
       console.error('❌ Erro PDF conferência:', error);

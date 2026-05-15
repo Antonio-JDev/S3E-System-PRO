@@ -41,7 +41,8 @@ export const getBackendUrl = (): string => {
  * Caso contrário, tenta usar o endpoint específico primeiro,
  * depois tenta a URL direta via express.static.
  * 
- * ⚠️ IMPORTANTE: Sempre usa a porta 3001 (backend), nunca 8080 (frontend)
+ * Em dev (8080/5173): usa backend na porta 3001.
+ * Em produção com Traefik: mesma origem do browser (porta 80), path /uploads → backend.
  */
 export const getUploadUrl = (url: string): string => {
   if (!url) return '';
@@ -57,8 +58,14 @@ export const getUploadUrl = (url: string): string => {
     return url;
   }
   
-  // ✅ CORREÇÃO: Garantir que sempre usa a porta 3001 (backend)
-  const baseUrl = getBackendUrl();
+  let baseUrl = getBackendUrl();
+  if (typeof window !== 'undefined') {
+    const origin = window.location.origin;
+    const isDev = origin.includes(':8080') || origin.includes(':5173');
+    if (!isDev) {
+      baseUrl = origin;
+    }
+  }
   
   // ✅ SIMPLIFICADO: Usar express.static para TODAS as imagens de uploads
   // O backend já serve /uploads via express.static(uploadsPath) com CORS configurado

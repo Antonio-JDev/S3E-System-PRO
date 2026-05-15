@@ -1,7 +1,33 @@
 import React, { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import {
+  Archive,
+  ArrowLeft,
+  CalendarFold,
+  Check,
+  CheckCheck,
+  Contact,
+  FileText,
+  Images,
+  LogOut,
+  MessageCircle,
+  Mic,
+  Plus,
+  QrCode,
+  Smile,
+  Sticker,
+  Search,
+  SquareCheck,
+  Star,
+  Trash2,
+  User,
+  UserPlus,
+  UserRound,
+} from 'lucide-react';
 import { PDF_CUSTOMIZATION_STORAGE_KEY } from '../../hooks/usePDFCustomization';
+import chatBgWebp from '../../assets/bg-darkBlack.webp';
+import chatBgWhiteWebp from '../../assets/bg-white.webp';
 import {
   fetchWhatsappChats,
   fetchWhatsappArchivedChats,
@@ -10,8 +36,10 @@ import {
   fetchWhatsappConnectionQr,
   fetchWhatsappMessages,
   fetchWhatsappProviderContacts,
+  fetchWhatsappProviderContactsSearch,
   fetchWhatsappProviderGroups,
   fetchWhatsappProviderProfilePicture,
+  fetchWhatsappGroupParticipantCache,
   fetchWhatsappProviderContactMeta,
   postWhatsappUpsertContactCache,
   postWhatsappMarkRead,
@@ -20,15 +48,21 @@ import {
   sendWhatsappMedia,
   postWhatsappSendFile,
   deleteWhatsappMessage,
+  deleteWhatsappMessageForMe,
   editWhatsappMessage,
   deleteWhatsappContactCacheAll,
+  fetchWhatsappProfileFetchTarget,
+  fetchWhatsappResolveOpenChat,
   deleteWhatsappConversation,
   archiveWhatsappConversation,
+  postWhatsappPinConversation,
+  postWhatsappFavoriteConversation,
   postWhatsappProviderLogout,
   postWhatsappMarkAllRead,
   postWhatsappUnarchive,
   fetchWhatsappActionsContext,
   postWhatsappLinkCliente,
+  postWhatsappUnlinkCliente,
   postWhatsappSendOrcamentoPdf,
   putWhatsappOrcamentoStatusMode,
   checkWhatsappProviderPhoneExists,
@@ -36,9 +70,12 @@ import {
   whatsappProviderMediaProxyDownloadUrl,
   whatsappMessageMediaInlineUrl,
   whatsappMessageMediaDownloadUrl,
+  postWhatsappForwardMessages,
+  reactToWhatsappMessage,
   postEvolutionMarkMessagesRead,
   postEvolutionFindStatusMessage,
   postEvolutionMarkChatUnread,
+  postEvolutionSendContact,
   postEvolutionSendLocation,
   postEvolutionInstanceSetPresence,
   postEvolutionGroupUpdatePicture,
@@ -74,15 +111,37 @@ import {
   type WhatsappActionsContextData,
   type WhatsappOrcamentoStatusMode,
 } from '../../services/whatsappChatService';
+import { Twemoji } from 'react-emoji-render';
 import { clientesService, type Cliente } from '../../services/clientesService';
+import { listContatosS3e, type ContatoS3eDto } from '../../services/contatosS3eService';
 import { orcamentosService } from '../../services/orcamentosService';
+import { getEmojiOnlyCount } from '../../utils/emojiOnly';
 import type { OrcamentoPDFData, PDFCustomization } from '../../types/pdfCustomization';
+import { getBackoffRemainingMs, registerBackoffSuccess, registerRateLimitBackoff } from '../../utils/rateLimitBackoff';
+import { onlyDigits } from '../../utils/masks';
 import { renderOrcamentoPdfBase64 } from '../../utils/orcamentoPdfRender';
+import { downloadInNewTab, openInNewTab } from '../../utils/browserLinks';
 import WhatsAppActionsDrawer from './WhatsAppActionsDrawer';
 import AudioMessage from './AudioMessage';
+import WhatsAppForwardModal from './WhatsAppForwardModal';
+import ImagePreviewModal from './ImagePreviewModal';
+import NovaConversaDrawer from './NovaConversaDrawer';
+import WhatsAppChatLabelEditDrawer from './WhatsAppChatLabelEditDrawer';
+import WhatsAppChatLabelPickChatsDrawer, { type SelectableChat } from './WhatsAppChatLabelPickChatsDrawer';
+import { listChatLabels, type WhatsappChatLabelDto } from '../../services/whatsappChatLabelsService';
 import { AuthContext } from '../../contexts/AuthContext';
 import { useWhatsAppSocket } from '../../hooks/useWhatsAppSocket';
-import { EmojiInput } from '../ui/emoji/EmojiInput';
+import { useWhatsAppRealtimeStatus } from '../../hooks/useWhatsAppSocket';
+import { ComposerEmojiGifStickerModal, type ComposerPickerTab } from './ComposerEmojiGifStickerModal';
+import { EmojiInput, type EmojiInputHandle } from '../ui/emoji/EmojiInput';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
 import {
   chatIdToDisplayLabel,
   firstNameOnly,
@@ -95,11 +154,18 @@ import {
   displayNameForChatHeader,
   resolveChatPreviewLabels,
   isWhatsappGroupChatId,
+  shortGroupIdLabel,
   stripOutboundPrefixForEdit,
   canonicalWhatsappChatId,
   outboundAckVisual,
   waJidToDigits,
   sanitizeWhatsappContactMetaForChat,
+  formatChatDate,
+  isSameChatDay,
+  resolveOutboundChatId,
+  repairUtf8Mojibake,
+  fileWithNormalizedUploadName,
+  formatPhoneForProviderContact,
 } from '../../utils/whatsappChat';
 
 const FALLBACK_WHATSAPP_PROVIDER_DASHBOARD =
@@ -109,6 +175,13 @@ const WHATSAPP_QR_ROTATION_MS = 75_000;
 const chatsQueryKey = ['whatsapp-chats'] as const;
 const archivedChatsQueryKey = ['whatsapp-archived-chats'] as const;
 const messagesQueryKey = (chatId: string) => ['whatsapp-messages', canonicalWhatsappChatId(chatId)] as const;
+
+const WA_SEND_CONTACT_MAX = 3;
+const WA_SEND_CONTACT_API_GAP_MS = 520;
+/** Máximo de linhas renderizadas no picker (evita travar o React). */
+const WA_SEND_CONTACT_PICKER_RENDER_CAP = 450;
+/** Máximo de fotos buscadas na agenda lateral (Evolution). */
+const WA_AGENDA_AVATAR_FETCH_CAP = 72;
 
 function pickFirstNonEmptyString(obj: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -275,22 +348,38 @@ function normalizeGroupMembers(raw: unknown): GroupParticipantRow[] {
     raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as Record<string, unknown>).data
       ? (raw as Record<string, unknown>).data
       : raw;
-  const arr =
-    Array.isArray(data) ? data : data && typeof data === 'object' ? (data as Record<string, unknown>).participants : [];
+  // EvoGo retorna `Participants` (PascalCase); Evolution v2 retorna `participants`.
+  const dataObj = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
+  const arr = Array.isArray(data)
+    ? data
+    : dataObj
+      ? (dataObj.participants ?? dataObj.Participants ?? [])
+      : [];
   if (!Array.isArray(arr)) return [];
   return arr
     .map((p): GroupParticipantRow | null => {
       if (!p || typeof p !== 'object') return null;
       const o = p as Record<string, unknown>;
-      const id = typeof o.id === 'string' ? o.id.trim() : '';
+      // EvoGo: JID (LID interno) ou PhoneNumber (PN canônico). Preferimos PhoneNumber
+      // quando disponível porque é o que cruza com `contatos_s3e` e o cache do banco.
+      const evoPhone = typeof o.PhoneNumber === 'string' ? o.PhoneNumber.trim() : '';
+      const evoJid = typeof o.JID === 'string' ? o.JID.trim() : '';
+      const id =
+        (typeof o.id === 'string' && o.id.trim()) ||
+        evoPhone ||
+        evoJid ||
+        (typeof o.jid === 'string' && o.jid.trim()) ||
+        '';
       if (!id) return null;
+      const display = typeof o.DisplayName === 'string' ? o.DisplayName.trim() : '';
       return {
         id,
-        admin: typeof o.admin === 'string' ? o.admin : undefined,
+        admin: typeof o.admin === 'string' ? o.admin : (o.IsAdmin === true ? 'admin' : undefined),
         name:
           (typeof o.name === 'string' && o.name.trim()) ||
           (typeof o.notify === 'string' && o.notify.trim()) ||
           (typeof o.pushName === 'string' && o.pushName.trim()) ||
+          display ||
           undefined,
       };
     })
@@ -401,9 +490,168 @@ function normalizeSearchText(s: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-/** Padrão de fundo semelhante ao papel de parede clássico do chat (SVG genérico). */
-const CHAT_BG_PATTERN =
-  'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000\' fill-opacity=\'0.03\'%3E%3Cpath d=\'M30 0h30v30H30zM0 30h30v30H0z\'/%3E%3C/g%3E%3C/svg%3E")';
+/** Limite enviado ao backend ao listar a agenda inteira (Evolution já devolve tudo; WAHA agrega páginas). */
+const WHATSAPP_AGENDA_LIST_LIMIT = 150_000;
+/** Com menos caracteres, listamos tudo; a partir disso usa-se a rota de busca no servidor. */
+const WHATSAPP_AGENDA_SEARCH_MIN_CHARS = 2;
+
+/** Dígitos do telefone para abrir conversa a partir da agenda (campo `number` ou JID numérico). */
+function agendaContactWhatsappDigits(row: WhatsappProviderContactRow): string {
+  const n = (row.number || '').replace(/\D/g, '');
+  if (n.length >= 10) return n;
+  const fromId = waJidToDigits(row.id || '');
+  if (fromId.length >= 10) return fromId;
+  return '';
+}
+
+type ParsedVCard = {
+  displayName: string | null;
+  /** Dígitos com DDI quando possível (ex. 5511999999999), até 3 entradas. */
+  phoneDigits: string[];
+};
+
+function vCardValueAfterColon(line: string): string {
+  const i = line.indexOf(':');
+  if (i === -1) return '';
+  return line.slice(i + 1).trim();
+}
+
+function normalizeVCardPhoneDigits(raw: string): string {
+  let d = onlyDigits(raw);
+  if (!d) return '';
+  if (d.length >= 10 && d.length <= 11 && !d.startsWith('55')) d = `55${d}`;
+  return d;
+}
+
+function formatInternationalBrFromDigits(d: string): string {
+  const x = onlyDigits(d);
+  if (!x) return '';
+  if (x.startsWith('55') && x.length >= 12 && x.length <= 13) {
+    const ddd = x.slice(2, 4);
+    const rest = x.slice(4);
+    if (rest.length === 9) return `+55 ${ddd} ${rest.slice(0, 5)}-${rest.slice(5)}`;
+    if (rest.length === 8) return `+55 ${ddd} ${rest.slice(0, 4)}-${rest.slice(4)}`;
+  }
+  if (x.length >= 10) return `+${x}`;
+  return x;
+}
+
+function evolutionWuidFromContactRow(row: WhatsappProviderContactRow): string {
+  const n = onlyDigits(String(row.number || ''));
+  if (n.length >= 10 && n.length <= 15) {
+    let d = n;
+    if (d.length <= 11 && !d.startsWith('55')) d = `55${d}`;
+    return d;
+  }
+  const jidDigits = waJidToDigits(row.id);
+  if (jidDigits.length >= 10) {
+    let d = jidDigits;
+    if (d.length <= 11 && !d.startsWith('55')) d = `55${d}`;
+    return d;
+  }
+  return '';
+}
+
+function contactRowIsEvolutionSendable(row: WhatsappProviderContactRow): boolean {
+  if (row.isGroup) return false;
+  const w = evolutionWuidFromContactRow(row);
+  return w.length >= 8;
+}
+
+function buildEvolutionPhoneStylizedFromRow(row: WhatsappProviderContactRow): string {
+  const w = evolutionWuidFromContactRow(row);
+  if (w) return formatInternationalBrFromDigits(w);
+  return formatPhoneForProviderContact(row) || formatPhoneForDisplay(row.id);
+}
+
+/**
+ * Linha do picker "Enviar contato" — extensão do `WhatsappProviderContactRow`
+ * (formato esperado pelos helpers existentes) com os campos extras vindos da
+ * agenda S3E (`empresa`, `revisado`, etc.). Mantemos compatibilidade total com
+ * `whatsappContactDisplayName`, `evolutionWuidFromContactRow`,
+ * `contactRowIsEvolutionSendable` e demais helpers sem precisar refatorar.
+ */
+type S3eContactPickerRow = WhatsappProviderContactRow & {
+  /** Empresa associada na agenda S3E (vai como `organization` no vcard EvoGo). */
+  s3eEmpresa: string | null;
+  /** True quando o contato ainda não foi revisado pelo operador (importação automática). */
+  s3eRevisado: boolean;
+  /** Snapshot da `nomeAgenda` original — útil para exibir mesmo se cair em fallback. */
+  s3eNomeAgenda: string | null;
+};
+
+/**
+ * Converte um `ContatoS3eDto` (vindo de /api/contatos-s3e) para uma linha que se
+ * encaixa no picker existente. O `id` virou um wuid sintético (`digits@c.us`),
+ * suficiente para que `evolutionWuidFromContactRow` e o estado de seleção
+ * (`sendContactSelectedIds`) operem normalmente.
+ */
+function s3eContactToProviderRow(c: ContatoS3eDto): S3eContactPickerRow {
+  const digits = onlyDigits(c.numero);
+  const syntheticId = digits ? `${digits}@c.us` : c.id;
+  const displayName = (c.nomeAgenda || c.empresa || c.pushName || '').trim();
+  return {
+    id: syntheticId,
+    number: digits,
+    name: displayName,
+    pushname: c.pushName || '',
+    shortName: '',
+    isMe: false,
+    isGroup: false,
+    isWAContact: true,
+    isMyContact: true,
+    isBlocked: false,
+    s3eEmpresa: c.empresa,
+    s3eRevisado: c.revisado,
+    s3eNomeAgenda: c.nomeAgenda
+  };
+}
+
+function parseVCardFromText(raw: string): ParsedVCard | null {
+  const text = (raw || '').trim();
+  if (!text) return null;
+  if (!/BEGIN:VCARD/i.test(text)) return null;
+  const lines = text.split(/\r?\n/);
+  let displayName: string | null = null;
+  const fnLine = lines.find((l) => /^FN/i.test(l));
+  if (fnLine) {
+    const v = vCardValueAfterColon(fnLine);
+    if (v) displayName = v.split(';')[0].trim();
+  }
+  if (!displayName) {
+    const nLine = lines.find((l) => /^N:/i.test(l));
+    if (nLine) {
+      const v = vCardValueAfterColon(nLine);
+      const parts = v.split(';');
+      const family = (parts[0] || '').trim();
+      const given = (parts[1] || '').trim();
+      const composed = [given, family].filter(Boolean).join(' ').trim();
+      if (composed) displayName = composed;
+    }
+  }
+  const phoneDigits = Array.from(
+    new Set(
+      lines
+        .filter((l) => /^TEL/i.test(l))
+        .map((l) => normalizeVCardPhoneDigits(vCardValueAfterColon(l)))
+        .filter(Boolean)
+    )
+  ).slice(0, 3);
+  return { displayName, phoneDigits };
+}
+
+/** Wallpaper do chat (asset local) — tamanho da “ladrilha” para repeat (menor = padrão mais fino). */
+const CHAT_BG_TILE_DARK = `url(${chatBgWebp})`;
+const CHAT_BG_TILE_LIGHT = `url(${chatBgWhiteWebp})`;
+const CHAT_BG_TILE_PX = 380;
+
+const chatWallpaperLayerStyle = (imageUrl: string, baseColor: string): React.CSSProperties => ({
+  backgroundColor: baseColor,
+  backgroundImage: imageUrl,
+  backgroundSize: `${CHAT_BG_TILE_PX}px`,
+  backgroundPosition: '0 0',
+  backgroundRepeat: 'repeat',
+});
 
 function formatMsgTime(iso: string): string {
   try {
@@ -430,20 +678,114 @@ function formatListTime(iso: string): string {
   }
 }
 
-/** *negrito* no estilo WhatsApp (trechos entre asteriscos). */
+/**
+ * Renderiza texto WhatsApp com:
+ *  - *negrito* (trechos entre asteriscos);
+ *  - emojis em SVG via Twemoji (set do Twitter/X, alta definição, idêntico em
+ *    Windows/Linux/Mac/mobile). Substitui o glyph nativo do Windows que sai
+ *    com aparência "cartoon" (Segoe UI Emoji).
+ *
+ * As `<img>` injetadas pelo Twemoji ficam estilizadas via `.message-emoji-text`
+ * em `index.css` para alinharem na baseline do texto sem quebrar o leading.
+ */
+/**
+ * Regex para detecção de URLs no corpo do texto. Reconhece:
+ *   - URLs com esquema explícito (http://, https://);
+ *   - URLs implícitas (www.dominio.com/...) — convertidas em `https://` ao montar
+ *     o `href`.
+ * Os trailing characters comuns de pontuação (`.,;:!?)]}>"`) são deixados de
+ * fora do match para não estragar a leitura.
+ */
+const WHATSAPP_URL_REGEX = /((?:https?:\/\/|www\.)[^\s<>"]+?)(?=$|[\s<>"]|[.,;:!?)\]}]+(?:\s|$))/gi;
+
+/**
+ * Quebra um pedaço de texto em `text` / `url`, preservando a ordem e o conteúdo
+ * exato (concatenar tudo retorna a string original). Usado pelo
+ * `renderWhatsAppText` para evitar uma segunda passada no `string.split`.
+ */
+function splitTextByUrls(text: string): Array<{ kind: 'text' | 'url'; value: string }> {
+  if (!text) return [];
+  const out: Array<{ kind: 'text' | 'url'; value: string }> = [];
+  let lastIndex = 0;
+  for (const m of text.matchAll(WHATSAPP_URL_REGEX)) {
+    if (m.index === undefined) continue;
+    if (m.index > lastIndex) out.push({ kind: 'text', value: text.slice(lastIndex, m.index) });
+    out.push({ kind: 'url', value: m[0] });
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < text.length) out.push({ kind: 'text', value: text.slice(lastIndex) });
+  return out;
+}
+
 function renderWhatsAppText(text: string): React.ReactNode {
-  const parts = text.split(/(\*[^*]+\*)/g);
-  return parts.map((part, i) => {
+  const t = repairUtf8Mojibake(text || '');
+  if (!t) return null;
+  const boldParts = t.split(/(\*[^*]+\*)/g);
+  const nodes: React.ReactNode[] = [];
+  boldParts.forEach((part, i) => {
+    // String.split() com grupo capturador gera entradas vazias quando o padrão
+    // bate no início/fim do texto ou entre dois padrões consecutivos (ex.:
+    // "*olá*" → ["", "*olá*", ""]). <Twemoji text=""> lança "either children
+    // or text prop must be provided", então filtramos aqui.
+    if (!part) return;
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
-      return (
-        <strong key={i} className="font-semibold">
-          {part.slice(1, -1)}
+      const inner = part.slice(1, -1);
+      const innerNodes = splitTextByUrls(inner).map((seg, j) => {
+        if (seg.kind === 'url') {
+          const href = seg.value.startsWith('www.') ? `https://${seg.value}` : seg.value;
+          return (
+            <a
+              key={`b${i}-u${j}`}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline break-all dark:text-blue-400"
+            >
+              <Twemoji svg className="message-emoji-text" text={seg.value} />
+            </a>
+          );
+        }
+        return <Twemoji key={`b${i}-t${j}`} svg className="message-emoji-text" text={seg.value} />;
+      });
+      nodes.push(
+        <strong key={`b${i}`} className="font-semibold">
+          {innerNodes}
         </strong>
       );
+      return;
     }
-    return <span key={i}>{part}</span>;
+    splitTextByUrls(part).forEach((seg, j) => {
+      if (seg.kind === 'url') {
+        const href = seg.value.startsWith('www.') ? `https://${seg.value}` : seg.value;
+        nodes.push(
+          <a
+            key={`p${i}-u${j}`}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline break-all dark:text-blue-400"
+          >
+            <Twemoji svg className="message-emoji-text" text={seg.value} />
+          </a>
+        );
+      } else {
+        nodes.push(<Twemoji key={`p${i}-t${j}`} svg className="message-emoji-text" text={seg.value} />);
+      }
+    });
   });
+  return nodes;
 }
+
+/**
+ * Mapeia a contagem de emojis-only (1, 2 ou 3) na classe CSS que controla o
+ * tamanho do glyph "jumbo" — replica o comportamento progressivo do WhatsApp
+ * Web: quanto menos emojis, maior cada um aparece.
+ */
+const JUMBO_EMOJI_SIZE_CLASS: Record<1 | 2 | 3, string> = {
+  1: 'text-[64px] leading-none',
+  2: 'text-[56px] leading-none',
+  3: 'text-[48px] leading-none'
+};
 
 type ParsedLocationPayload = {
   latitude: number;
@@ -506,7 +848,7 @@ const ContactAvatar = memo(function ContactAvatar({
         />
       ) : (
         <div
-          className={`flex h-full w-full items-center justify-center rounded-full bg-[#dfe5e7] font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0] ${size === 'list' ? 'text-[15px]' : 'text-sm'}`}
+          className={`flex h-full w-full items-center justify-center rounded-full bg-[#dfe5e7] font-medium text-[#54656f] dark:bg-[#54656f] dark:text-[#e9edef] ${size === 'list' ? 'text-[15px]' : 'text-sm'}`}
         >
           {avatarLetter(label)}
         </div>
@@ -525,35 +867,38 @@ const CheckDoubleIcon = (p: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const CheckSingleIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 16 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <path
-      d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.064-.512z"
-      fill="currentColor"
-    />
-  </svg>
-);
-
-function OutboundAckIcon({ ack }: { ack: number | null | undefined }) {
+/**
+ * Ticks de envio (WhatsApp-style) — usando `lucide-react` (Check / CheckCheck).
+ *
+ *  - ack=1 (single): ✓ cinza            → "enviada ao servidor"
+ *  - ack=2 (double_grey): ✓✓ cinza      → "entregue ao destinatário"
+ *  - ack=3 (double_blue): ✓✓ azul #4fc3f7 → "lida pelo destinatário"
+ *
+ * Em balão verde escuro (mensagens nossas) usamos um cinza mais claro pra
+ * manter contraste com o fundo, como faz o WhatsApp Web.
+ */
+function OutboundAckIcon({
+  ack,
+  onOutgoingBubble,
+}: {
+  ack: number | null | undefined;
+  onOutgoingBubble?: boolean;
+}) {
   const vis = outboundAckVisual(ack);
+  const greyCls = onOutgoingBubble ? 'text-[#667781] dark:text-[#b8e8d8]' : 'text-[#8696a0]';
   if (vis === 'single') {
-    return (
-      <span className="material-symbols-outlined ml-0.5 h-3.5 w-3.5 shrink-0 text-[#8696a0] text-[16px] leading-none">
-        check
-      </span>
-    );
+    return <Check size={16} strokeWidth={1.75} className={`ml-0.5 shrink-0 ${greyCls}`} aria-hidden />;
   }
   if (vis === 'double_grey') {
-    return (
-      <span className="material-symbols-outlined ml-0.5 h-3.5 w-4 shrink-0 text-[#8696a0] text-[16px] leading-none">
-        done_all
-      </span>
-    );
+    return <CheckCheck size={16} strokeWidth={1.75} className={`ml-0.5 shrink-0 ${greyCls}`} aria-hidden />;
   }
   return (
-    <span className="material-symbols-outlined ml-0.5 h-3.5 w-4 shrink-0 text-[#53bdeb] text-[16px] leading-none">
-      done_all
-    </span>
+    <CheckCheck
+      size={16}
+      strokeWidth={1.75}
+      className="ml-0.5 shrink-0 text-[#4fc3f7]"
+      aria-hidden
+    />
   );
 }
 
@@ -576,20 +921,22 @@ const LocationPinIcon = (p: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const ContactsBookIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-  </svg>
-);
-
 const EllipsisVerticalIcon = (p: React.SVGProps<SVGSVGElement>) => (
   <svg {...p} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden>
     <circle cx="12" cy="5" r="2" />
     <circle cx="12" cy="12" r="2" />
     <circle cx="12" cy="19" r="2" />
+  </svg>
+);
+
+/** Ícones do menu ⋮ da lista (traço fino, cinza — estilo WhatsApp Web). */
+const WA_SIDEBAR_MENU_ICON = 'h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[#8696a0]';
+
+/** Ícone “nova conversa” (quadrado com +), alinhado ao WhatsApp Web. */
+const NewChatSquareIcon = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+    <rect x="3" y="3" width="18" height="18" rx="3" ry="3" />
+    <path d="M12 8v8M8 12h8" />
   </svg>
 );
 
@@ -604,10 +951,33 @@ function detectMediaType(mime: string): WhatsappProviderMediaType {
 const MEDIA_ACCEPT = 'image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar';
 const MAX_FILE_SIZE_MB = 50;
 
+/** Pausa entre envios em lote (Evolution/Meta) — ms. Override: `VITE_WA_UPLOAD_BATCH_DELAY_MS`. Mínimo 800 ms. */
+const WA_UPLOAD_BATCH_DELAY_MS = Math.max(
+  800,
+  Number.parseInt(String(import.meta.env.VITE_WA_UPLOAD_BATCH_DELAY_MS || ''), 10) || 2200
+);
+/** Máximo de arquivos por lote. Override: `VITE_WA_UPLOAD_BATCH_MAX_FILES`. */
+const WA_UPLOAD_BATCH_MAX_FILES = Math.min(
+  30,
+  Math.max(2, Number.parseInt(String(import.meta.env.VITE_WA_UPLOAD_BATCH_MAX_FILES || ''), 10) || 15)
+);
+/** Uploads em paralelo no envio (1 = só sequencial). Máx. 2 — `VITE_WA_UPLOAD_SEND_CONCURRENCY`. */
+const WA_UPLOAD_SEND_CONCURRENCY = Math.min(
+  2,
+  Math.max(1, Number.parseInt(String(import.meta.env.VITE_WA_UPLOAD_SEND_CONCURRENCY || ''), 10) || 1)
+);
+
 interface PendingMedia {
+  id: string;
   file: File;
   mediaType: WhatsappProviderMediaType;
   previewUrl: string | null;
+}
+
+function newPendingMediaId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 interface PendingRecordedAudio {
@@ -734,8 +1104,15 @@ function tokenQueryString(): string {
   return t ? `&token=${encodeURIComponent(t)}` : '';
 }
 
-function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
-  const [docPreviewOpen, setDocPreviewOpen] = useState(false);
+function MediaRenderer({
+  m,
+  onImageClick,
+  audioFooterRight,
+}: {
+  m: WhatsappMessageDto;
+  onImageClick?: (url: string) => void;
+  audioFooterRight?: React.ReactNode;
+}) {
   // `m.id` sempre existe (id interno do BD) e NÃO indica mídia.
   // Só renderiza bloco de arquivo/mídia quando houver referência real de mídia.
   const hasAnyMediaRef = Boolean(
@@ -748,7 +1125,7 @@ function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
       m.mediaFilename
   );
   if (!hasAnyMediaRef) return null;
-  const fname = m.mediaFilename || m.fileName || 'arquivo';
+  const fname = repairUtf8Mojibake(m.mediaFilename || m.fileName || 'arquivo');
   const legacy = m.mediaUrl ? whatsappProviderMediaProxyUrl(m.mediaUrl, fname) + tokenQueryString() : null;
   // Stream por id só faz sentido quando a mensagem realmente tem mídia (o backend valida `hasMedia`).
   const byId = m.hasMedia ? whatsappMessageMediaInlineUrl(m.id) : null;
@@ -769,30 +1146,44 @@ function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
       ? 'audio/ogg'
       : m.mediaMimetype || 'audio/ogg';
   const handleDownload = () => {
-    const a = document.createElement('a');
-    a.href = mediaSrcDownload;
-    a.download = fname;
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const url = mediaSrcDownload ?? mediaSrc;
+    downloadInNewTab({ url, filename: fname });
   };
 
   if (cat === 'image') {
     return (
-      <a href={mediaSrc} target="_blank" rel="noopener noreferrer" className="block mb-1">
+      <button
+        type="button"
+        onClick={() => onImageClick?.(mediaSrc)}
+        className="block mb-1 cursor-pointer"
+        aria-label="Abrir imagem"
+        title="Abrir imagem"
+      >
         <img
           src={mediaSrc}
           alt={fname}
           className="max-w-full max-h-72 rounded object-contain bg-black/5 dark:bg-white/5"
           loading="lazy"
         />
-      </a>
+      </button>
     );
   }
 
   if (cat === 'audio') {
-    return <AudioMessage src={mediaSrc} mimeType={audioMime} filename={fname} />;
+    const mt = (m.mediaType || '').toLowerCase();
+    const low = fname.toLowerCase();
+    const isVoiceNote =
+      mt === 'voice' || mt === 'ptt' || low.endsWith('.opus') || low.includes('ptt') || low.endsWith('.oga');
+    return (
+      <AudioMessage
+        src={mediaSrc}
+        mimeType={audioMime}
+        filename={fname}
+        variant={m.fromMe ? 'outgoing' : 'incoming'}
+        isVoiceNote={isVoiceNote}
+        footerRight={audioFooterRight}
+      />
+    );
   }
 
   if (cat === 'video') {
@@ -809,17 +1200,31 @@ function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
     (m.mediaMimetype || '').toLowerCase().includes('pdf') ||
     lowName.endsWith('.pdf');
 
+  const openPdfAsBlobInNewTab = async () => {
+    try {
+      const resp = await fetch(mediaSrc, { credentials: 'include' });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      openInNewTab(url);
+      window.setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // ignore
+        }
+      }, 60_000);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível abrir o PDF');
+      // fallback: tenta abrir direto
+      openInNewTab(mediaSrc);
+    }
+  };
+
   return (
-    <div className="mb-1 overflow-hidden rounded-lg border border-black/10 bg-white/60 dark:border-white/10 dark:bg-[#111b21]/40">
-      {canInlineDoc && docPreviewOpen ? (
-        <iframe
-          src={mediaSrc}
-          title={fname}
-          className="h-[260px] w-full bg-white"
-          loading="lazy"
-          sandbox="allow-same-origin allow-scripts"
-        />
-      ) : null}
+    <div className="mb-1 overflow-hidden rounded-lg border border-black/10 bg-white/60 dark:border-white/10 dark:bg-[#161717]/40">
       <div className="flex items-center gap-3 px-2 py-2">
         <svg className="h-8 w-8 flex-shrink-0 text-[#00a884]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
@@ -832,14 +1237,14 @@ function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
           type="button"
           onClick={() => {
             if (canInlineDoc) {
-              setDocPreviewOpen((v) => !v);
-              return;
+              void openPdfAsBlobInNewTab();
+            } else {
+              openInNewTab(mediaSrc);
             }
-            window.open(mediaSrc, '_blank', 'noopener,noreferrer');
           }}
           className="rounded-md border border-[#00a884] px-2 py-1 text-[11px] font-medium text-[#00a884] hover:bg-[#00a884]/10"
         >
-          {canInlineDoc ? (docPreviewOpen ? 'Ocultar' : 'Visualizar') : 'Visualizar'}
+          {canInlineDoc ? 'Abrir PDF' : 'Visualizar'}
         </button>
         <button
           type="button"
@@ -853,20 +1258,111 @@ function MediaRenderer({ m }: { m: WhatsappMessageDto }) {
   );
 }
 
+/** Ícones do menu de ações da mensagem (estilo WhatsApp Web — stroke, ~18px). */
+const WaMenuIconWrap = (p: { children: React.ReactNode; className?: string }) => (
+  <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center ${p.className ?? ''}`}>{p.children}</span>
+);
+
+const WaMenuIconReply = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 015.5 5.5V19" />
+  </svg>
+);
+
+const WaMenuIconPencil = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </svg>
+);
+
+const WaMenuIconCopy = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+  </svg>
+);
+
+const WaMenuIconStar = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M12 3.5l2.2 5.2 5.6.4-4.3 3.7 1.4 5.5L12 15.9 6.1 18.3l1.4-5.5L3.2 9.1l5.6-.4L12 3.5z" />
+  </svg>
+);
+
+const WaMenuIconForward = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 004 14.5V19" />
+  </svg>
+);
+
+const WaMenuIconEyeOff = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22" />
+  </svg>
+);
+
+const WaMenuIconTrash = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+    <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6" />
+  </svg>
+);
+
+const WA_MSG_MENU_ITEM =
+  'flex cursor-pointer select-none items-center gap-3 rounded-md px-2.5 py-2 text-[14px] leading-snug text-[#111b21] outline-none transition-colors dark:text-[#e9edef] data-[highlighted]:bg-[#f7f5f3] data-[highlighted]:text-[#111b21] dark:data-[highlighted]:bg-[#2a3942] dark:data-[highlighted]:text-[#e9edef] focus:bg-[#f7f5f3] focus:text-[#111b21] dark:focus:bg-[#2a3942] dark:focus:text-[#e9edef]';
+
+const WA_MSG_MENU_ITEM_DANGER =
+  'flex cursor-pointer select-none items-center gap-3 rounded-md px-2.5 py-2 text-[14px] leading-snug text-red-600 outline-none transition-colors dark:text-red-400 data-[highlighted]:bg-red-50 data-[highlighted]:text-red-700 dark:data-[highlighted]:bg-red-950/35 dark:data-[highlighted]:text-red-300 focus:bg-red-50 focus:text-red-700 dark:focus:bg-red-950/35 dark:focus:text-red-300';
+
+const WA_MSG_MENU_ICON = 'h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[#b0b9bf]';
+
+/**
+ * Reações rápidas exibidas no topo do menu da mensagem (estilo WhatsApp Web).
+ * Mantemos curto (6) pra caber em uma linha; o usuário pode digitar/colar
+ * outros emojis no futuro via picker dedicado.
+ */
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
+
 const MessageBubble = memo(function MessageBubble({
   m,
   layout,
   groupParticipantLabel,
   showGroupParticipant,
+  onDeleteMessage,
+  onDeleteForMe,
+  onStartForwardSelection,
+  onReplyToMessage,
+  onEditMessage,
+  onReactToMessage,
+  onToggleFavoriteMessage,
+  isFavoriteMessage,
+  onImageClick,
+  onNavigateWhatsappChat,
+  actionsDisabled,
 }: {
   m: WhatsappMessageDto;
   layout: 'compact' | 'full';
   groupParticipantLabel?: string | null;
   showGroupParticipant?: boolean;
+  onDeleteMessage: (messageId: string) => void;
+  onDeleteForMe: (messageId: string) => void;
+  onStartForwardSelection: (messageId: string) => void;
+  onReplyToMessage: (message: WhatsappMessageDto) => void;
+  onEditMessage: (message: WhatsappMessageDto) => void;
+  onReactToMessage: (message: WhatsappMessageDto, emoji: string) => void;
+  onToggleFavoriteMessage: (message: WhatsappMessageDto) => void;
+  isFavoriteMessage: (messageId: string) => boolean;
+  onImageClick?: (url: string) => void;
+  /** Abre conversa ao tocar em “Conversar” no cartão de contato (vCard). */
+  onNavigateWhatsappChat?: (chatId: string, label: string) => void;
+  actionsDisabled?: boolean;
 }) {
+  const [bubbleMenuOpen, setBubbleMenuOpen] = useState(false);
   const maxW = layout === 'full' ? 'max-w-[min(78%,720px)]' : 'max-w-[min(65%,420px)]';
+  const vcard = useMemo(() => parseVCardFromText(m.content || ''), [m.content]);
+  const showContactCard = Boolean(vcard);
   const hasMedia =
+    !showContactCard &&
     m.mediaType !== 'location' &&
+    m.mediaType !== 'contact' &&
     (!!m.hasMedia ||
       !!m.mediaUrl ||
       !!m.mediaType ||
@@ -879,25 +1375,264 @@ const MessageBubble = memo(function MessageBubble({
   const showContent =
     m.content &&
     (!hasMedia || !['📷 Imagem', '🎤 Áudio', '🎥 Vídeo'].includes(m.content)) &&
-    !(locationPayload && isFormattedLocationText);
+    !(locationPayload && isFormattedLocationText) &&
+    !showContactCard;
   const showAck = Boolean(m.fromMe);
+  const primaryMediaIsAudio = useMemo(() => {
+    if (!hasMedia) return false;
+    const fname = repairUtf8Mojibake(m.mediaFilename || m.fileName || 'arquivo');
+    let cat = mediaMimeCategory(m.mediaMimetype ?? m.mimeType ?? undefined, m.mediaType, fname);
+    if (cat === 'document') {
+      const c = (m.content || '').toLowerCase();
+      if (c.includes('áudio') || c.includes('audio') || c.includes('🎤')) cat = 'audio';
+      else if (c.includes('imagem') || c.includes('foto') || c.includes('📷')) cat = 'image';
+    }
+    return cat === 'audio';
+  }, [hasMedia, m.mediaFilename, m.fileName, m.mediaMimetype, m.mimeType, m.mediaType, m.content]);
+
+  const bubblePadX = primaryMediaIsAudio ? 'px-2.5' : 'px-2';
+  const embedAudioMetaFooter = primaryMediaIsAudio && !showContent;
+  const embedVCardMetaFooter = Boolean(showContactCard && vcard);
+
+  /**
+   * Modo "emoji jumbo" estilo WhatsApp Web: quando a mensagem contém APENAS
+   * de 1 a 3 emojis (sem texto, sem mídia, sem vCard, sem localização), a
+   * bolha some — emojis grandes flutuam sobre o fundo da conversa.
+   *
+   * Requisitos para entrar nesse modo:
+   *  - `showContent` true (a mensagem renderiza texto, não placeholder);
+   *  - Nenhuma mídia/vCard/location embutida (mantém bolha quando há);
+   *  - `getEmojiOnlyCount` retornou 1, 2 ou 3.
+   */
+  const emojiJumboCount = useMemo<0 | 1 | 2 | 3>(() => {
+    if (!showContent) return 0;
+    if (hasMedia || showContactCard || (locationPayload && isFormattedLocationText)) return 0;
+    return getEmojiOnlyCount(m.content);
+  }, [showContent, hasMedia, showContactCard, locationPayload, isFormattedLocationText, m.content]);
+  const isEmojiJumbo = emojiJumboCount > 0;
+
+  /**
+   * Pílula com o emoji de reação "pendurada" no canto inferior da bolha
+   * (estilo WhatsApp Web). Posição muda conforme o lado:
+   *  - Mensagem nossa (`fromMe`): canto inferior esquerdo da bolha.
+   *  - Mensagem do cliente: canto inferior direito.
+   */
+  const reactionBadge =
+    m.reaction && m.reaction.trim() ? (
+      <button
+        type="button"
+        className={`absolute -bottom-2.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-white px-1.5 text-[14px] leading-none shadow-[0_1px_2px_rgba(0,0,0,0.15)] ring-1 ring-black/10 transition hover:scale-110 dark:bg-[#2a3942] dark:ring-white/10 ${
+          m.fromMe ? '-left-1.5' : '-right-1.5'
+        }`}
+        onClick={(e) => {
+          e.preventDefault();
+          // Clicar no badge da própria reação NÃO remove pelo cliente —
+          // apenas reage de volta com o mesmo emoji (toggle só faz sentido
+          // se a reação for nossa; UI futura pode tratar esse caso).
+          onReactToMessage(m, m.reaction || '');
+        }}
+        aria-label={`Reação: ${m.reaction}`}
+        title={`Reação: ${m.reaction}`}
+      >
+        <span aria-hidden>{m.reaction}</span>
+      </button>
+    ) : null;
+
+  /**
+   * Quando entra no modo "emoji jumbo": removemos a bolha (bg, shadow, rounded)
+   * e damos um `bubblePadX` mais frouxo, mantendo apenas o `relative` para
+   * ancorar a reaction badge e o footer de horário/ack que continuam sobre os
+   * emojis. O texto em si fica num `<p>` separado abaixo, com classe gigante.
+   */
+  const bubbleAppearanceClasses = isEmojiJumbo
+    ? 'bg-transparent shadow-none'
+    : m.fromMe
+      ? 'bg-[#d9fdd3] text-[#111b21] rounded-lg rounded-tr-none shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] dark:bg-[#005c4b] dark:text-[#e9edef]'
+      : 'bg-white text-[#111b21] rounded-lg rounded-tl-none shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] dark:bg-[#202c33] dark:text-[#e9edef]';
+  const bubblePadYClass = isEmojiJumbo ? 'py-2' : 'py-1.5';
+
   return (
     <div className={`flex w-full px-9 sm:px-12 py-0.5 ${m.fromMe ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`relative ${maxW} px-2 py-1.5 shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] ${
-          m.fromMe
-            ? 'bg-[#d9fdd3] text-[#111b21] rounded-lg rounded-tr-none dark:bg-[#005c4b] dark:text-[#e9edef]'
-            : 'bg-white text-[#111b21] rounded-lg rounded-tl-none dark:bg-[#202c33] dark:text-[#e9edef]'
-        }`}
+        className={`relative ${maxW} ${bubblePadX} ${bubblePadYClass} ${bubbleAppearanceClasses}`}
       >
+        {reactionBadge}
+        {!actionsDisabled ? (
+          <div
+            className={`absolute right-1 top-1 z-10 transition-opacity ${
+              bubbleMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            {/* Editar / excluir mensagem: somente neste menu (sem duplicar em barra ou seleção). */}
+            <DropdownMenu open={bubbleMenuOpen} onOpenChange={setBubbleMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#54656f] hover:bg-black/10 dark:text-[#a9b4ba] dark:hover:bg-white/10"
+                  aria-label="Ações da mensagem"
+                  title="Ações"
+                >
+                  <ChevronDownIcon className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                sideOffset={6}
+                align={m.fromMe ? 'end' : 'start'}
+                className="min-w-[240px] rounded-lg border border-gray-200 p-1.5 shadow-lg dark:border-[#3b4a54] dark:bg-[#233138] dark:text-[#e9edef]"
+              >
+                {m.providerMessageId ? (
+                  <>
+                    <div
+                      className="mb-1 flex items-center justify-between gap-1 rounded-md bg-black/[0.03] px-1 py-1 dark:bg-white/[0.04]"
+                      role="group"
+                      aria-label="Reagir à mensagem"
+                    >
+                      {QUICK_REACTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none transition-transform hover:scale-125 hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+                          aria-label={`Reagir com ${emoji}`}
+                          title={`Reagir com ${emoji}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setBubbleMenuOpen(false);
+                            onReactToMessage(m, emoji);
+                          }}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                    <DropdownMenuSeparator className="my-1 bg-gray-200 dark:bg-[#3b4a54]" />
+                  </>
+                ) : null}
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onReplyToMessage(m);
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconReply className={WA_MSG_MENU_ICON} />
+                  </WaMenuIconWrap>
+                  Responder
+                </DropdownMenuItem>
+                {m.fromMe && m.providerMessageId ? (
+                  <DropdownMenuItem
+                    className={WA_MSG_MENU_ITEM}
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      onEditMessage(m);
+                    }}
+                  >
+                    <WaMenuIconWrap>
+                      <WaMenuIconPencil className={WA_MSG_MENU_ICON} />
+                    </WaMenuIconWrap>
+                    Editar mensagem
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM}
+                  onSelect={async (e) => {
+                    e.preventDefault();
+                    const raw = (m.content || '').trim();
+                    const text = repairUtf8Mojibake(raw || (m.mediaFilename || m.fileName || ''));
+                    if (!text) {
+                      toast.message('Nada para copiar');
+                      return;
+                    }
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      toast.success('Copiado');
+                    } catch {
+                      toast.error('Não foi possível copiar');
+                    }
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconCopy className={WA_MSG_MENU_ICON} />
+                  </WaMenuIconWrap>
+                  Copiar
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onToggleFavoriteMessage(m);
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconStar className={WA_MSG_MENU_ICON} />
+                  </WaMenuIconWrap>
+                  {isFavoriteMessage(m.id) ? 'Desfavoritar' : 'Favoritar'}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onStartForwardSelection(m.id);
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconForward className={WA_MSG_MENU_ICON} />
+                  </WaMenuIconWrap>
+                  Encaminhar mensagem
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onDeleteForMe(m.id);
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconEyeOff className={WA_MSG_MENU_ICON} />
+                  </WaMenuIconWrap>
+                  Apagar pra mim
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1 bg-gray-200 dark:bg-[#3b4a54]" />
+                <DropdownMenuLabel className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+                  Para todos no chat
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  className={WA_MSG_MENU_ITEM_DANGER}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onDeleteMessage(m.id);
+                  }}
+                >
+                  <WaMenuIconWrap>
+                    <WaMenuIconTrash className="h-[18px] w-[18px] shrink-0 text-red-600 dark:text-red-400" />
+                  </WaMenuIconWrap>
+                  Excluir mensagem
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : null}
         {showGroupParticipant && !m.fromMe && groupParticipantLabel ? (
           <p className="mb-1 truncate text-[12px] font-semibold text-[#00a884] dark:text-[#00a884]">
             {groupParticipantLabel}
           </p>
         ) : null}
-        {hasMedia && <MediaRenderer m={m} />}
+        {hasMedia && (
+          <MediaRenderer
+            m={m}
+            onImageClick={onImageClick}
+            audioFooterRight={
+              embedAudioMetaFooter ? (
+                <>
+                  <span>{formatMsgTime(m.timestamp)}</span>
+                  {showAck ? <OutboundAckIcon ack={m.ack} onOutgoingBubble={m.fromMe} /> : null}
+                </>
+              ) : undefined
+            }
+          />
+        )}
         {locationPayload ? (
-          <div className="mb-1 rounded-lg border border-[#d1d7db] bg-white/70 p-2 dark:border-[#2a3942] dark:bg-[#111b21]/30">
+          <div className="mb-1 rounded-lg border border-[#d1d7db] bg-white/70 p-2 dark:border-[#2a3942] dark:bg-[#161717]/30">
             <p className="text-[13px] font-semibold text-[#111b21] dark:text-[#e9edef]">
               📍 {locationPayload.name || 'Localização'}
             </p>
@@ -919,24 +1654,155 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
         ) : null}
-        {showContent && (
-          <p className="whitespace-pre-wrap break-words text-[14.2px] leading-[19px] pr-14 pb-0.5">
-            {renderWhatsAppText(m.content)}
-          </p>
-        )}
-        {!showContent && <div className="pb-4" />}
-        <div
-          className={`absolute bottom-1 right-2 flex items-center gap-0.5 text-[11px] tabular-nums ${
-            m.fromMe ? 'text-[#667781]' : 'text-[#667781]'
-          }`}
-        >
-          <span>{formatMsgTime(m.timestamp)}</span>
-          {showAck ? <OutboundAckIcon ack={m.ack} /> : null}
-        </div>
+        {showContactCard && vcard ? (
+          <div
+            className={`mb-1 min-w-[260px] max-w-[min(100%,320px)] overflow-hidden rounded-[10px] border shadow-sm ${
+              m.fromMe
+                ? 'border-[#00000014] bg-white/90 dark:border-white/10 dark:bg-[#0b2a24]/90'
+                : 'border-[#d1d7db] bg-white dark:border-[#2a3942] dark:bg-[#182229]'
+            }`}
+          >
+            <div className="relative flex gap-2.5 px-2.5 pb-2 pt-2.5 pr-[4.5rem]">
+              <div
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[#54656f] ${
+                  m.fromMe ? 'bg-[#dfe5e7] dark:bg-[#2a3942]' : 'bg-[#dfe5e7] dark:bg-[#2a3942]'
+                }`}
+              >
+                <UserRound className="h-7 w-7 opacity-80" strokeWidth={1.5} aria-hidden />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[15px] font-semibold leading-tight text-[#111b21] dark:text-[#e9edef]">
+                  {vcard.displayName || 'Contato'}
+                </p>
+                {vcard.phoneDigits[0] ? (
+                  <div className="mt-1.5 flex items-start gap-2">
+                    <span className="mt-0.5 rounded bg-[#00a884]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#00a884]/25 dark:text-[#53d4b0]">
+                      Tel
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] leading-snug text-[#111b21] dark:text-[#e9edef]">
+                        {formatInternationalBrFromDigits(vcard.phoneDigits[0])}
+                      </p>
+                      {vcard.phoneDigits.slice(1).map((d) => (
+                        <p key={d} className="mt-0.5 text-[12px] text-[#54656f] dark:text-[#a9b4ba]">
+                          {formatInternationalBrFromDigits(d)}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div
+                className={`absolute bottom-1.5 right-2 flex items-center gap-0.5 text-[11px] tabular-nums ${
+                  m.fromMe ? 'text-[#667781] dark:text-[#b8e8d8]' : 'text-[#667781]'
+                }`}
+              >
+                <span>{formatMsgTime(m.timestamp)}</span>
+                {showAck ? <OutboundAckIcon ack={m.ack} onOutgoingBubble={m.fromMe} /> : null}
+              </div>
+            </div>
+            <div
+              className={`grid grid-cols-2 divide-x ${
+                m.fromMe
+                  ? 'divide-[#00000012] border-t border-[#00000012] dark:divide-white/10 dark:border-white/10'
+                  : 'divide-[#e9edef] border-t border-[#e9edef] dark:divide-[#2a3942] dark:border-[#2a3942]'
+              }`}
+            >
+              <button
+                type="button"
+                className="flex items-center justify-center gap-1.5 py-2.5 text-[13px] font-medium text-[#027e5f] transition hover:bg-black/[0.03] dark:text-[#53d4b0] dark:hover:bg-white/[0.04]"
+                onClick={() => {
+                  const raw = (m.content || '').trim();
+                  if (!raw) {
+                    toast.message('Nada para salvar');
+                    return;
+                  }
+                  try {
+                    const blob = new Blob([raw], { type: 'text/vcard;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${(vcard.displayName || 'contato').replace(/[/\\?%*:|"<>]/g, '_').slice(0, 40) || 'contato'}.vcf`;
+                    a.click();
+                    window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
+                    toast.success('Contato baixado');
+                  } catch {
+                    toast.error('Não foi possível salvar o contato');
+                  }
+                }}
+              >
+                <Contact className="h-4 w-4 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
+                Salvar contato
+              </button>
+              <button
+                type="button"
+                disabled={!vcard.phoneDigits[0]}
+                className="flex items-center justify-center gap-1.5 py-2.5 text-[13px] font-medium text-[#027e5f] transition enabled:hover:bg-black/[0.03] disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#53d4b0] dark:enabled:hover:bg-white/[0.04]"
+                onClick={() => {
+                  const d = vcard.phoneDigits[0];
+                  if (!d) {
+                    toast.message('Telefone não disponível neste cartão');
+                    return;
+                  }
+                  if (!onNavigateWhatsappChat) {
+                    toast.message('Abra o chat na lista para usar “Conversar”.');
+                    return;
+                  }
+                  const jid = toWhatsappChatId(d);
+                  onNavigateWhatsappChat(jid, formatInternationalBrFromDigits(d));
+                }}
+              >
+                <MessageCircle className="h-4 w-4 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
+                Mandar mensagem
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {showContent && (() => {
+          if (isEmojiJumbo) {
+            const jumboText = repairUtf8Mojibake(m.content || '');
+            if (!jumboText) return null;
+            return (
+              // Visual "emoji jumbo": glyphs gigantes sem bolha. O `pr-14` mantém
+              // espaço lateral para o timestamp/ack absoluto não sobrepor o emoji.
+              <p
+                className={`${JUMBO_EMOJI_SIZE_CLASS[emojiJumboCount as 1 | 2 | 3]} whitespace-pre-wrap break-words pr-14 pb-1 select-text`}
+              >
+                <Twemoji
+                  svg
+                  className="message-emoji-text message-emoji-jumbo"
+                  text={jumboText}
+                />
+              </p>
+            );
+          }
+          return (
+            <p className="whitespace-pre-wrap break-words text-[14.2px] leading-[19px] pr-14 pb-0.5">
+              {renderWhatsAppText(m.content)}
+            </p>
+          );
+        })()}
+        {!showContent && <div className={primaryMediaIsAudio || embedVCardMetaFooter ? 'pb-1' : 'pb-4'} />}
+        {!embedAudioMetaFooter && !embedVCardMetaFooter ? (
+          <div
+            className={`absolute bottom-1 right-2 flex items-center gap-0.5 text-[11px] tabular-nums ${
+              m.fromMe ? 'text-[#667781]' : 'text-[#667781]'
+            }`}
+          >
+            <span>{formatMsgTime(m.timestamp)}</span>
+            {showAck ? <OutboundAckIcon ack={m.ack} /> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 });
+
+const ChevronDownIcon = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
 
 export interface WhatsAppChatPanelProps {
   /** Quando vazio, a coluna da direita mostra apenas o estado vazio. */
@@ -960,13 +1826,223 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 }) => {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
+  const [replyToMessage, setReplyToMessage] = useState<WhatsappMessageDto | null>(null);
+
+  const favoritesStorageKey = useMemo(() => `wa-chat-favs:${canonicalWhatsappChatId(chatId)}`, [chatId]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(favoritesStorageKey);
+      const arr = raw ? (JSON.parse(raw) as unknown) : [];
+      if (Array.isArray(arr)) {
+        setFavoriteIds(new Set(arr.filter((x) => typeof x === 'string')));
+      } else {
+        setFavoriteIds(new Set());
+      }
+    } catch {
+      setFavoriteIds(new Set());
+    }
+  }, [favoritesStorageKey]);
+
+  // Fixar/Favoritar conversa agora é persistido no backend (por usuário).
+
+  const isFavoriteMessage = useCallback((messageId: string) => favoriteIds.has(messageId), [favoriteIds]);
+
+  const persistFavorites = useCallback((next: Set<string>) => {
+    try {
+      localStorage.setItem(favoritesStorageKey, JSON.stringify([...next.values()]));
+    } catch {
+      // ignore
+    }
+  }, [favoritesStorageKey]);
+
+  const toggleFavoriteMessage = useCallback((m: WhatsappMessageDto) => {
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(m.id)) {
+        next.delete(m.id);
+        toast.message('Mensagem desfavoritada');
+      } else {
+        next.add(m.id);
+        toast.message('Mensagem favoritada');
+      }
+      persistFavorites(next);
+      return next;
+    });
+  }, [persistFavorites]);
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  /**
+   * Reset visual imediato ao trocar de chat:
+   * evita “piscar” o nome do contato anterior enquanto o novo header/meta ainda não carregou.
+   */
+  const [forceHeaderReset, setForceHeaderReset] = useState(false);
+  const [isInForwardSelectionMode, setIsInForwardSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwardTargetChatId, setForwardTargetChatId] = useState<string | null>(null);
+  const [forwardingNow, setForwardingNow] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
-  const [openPhoneDraft, setOpenPhoneDraft] = useState('');
+  const [newPhoneComposerOpen, setNewPhoneComposerOpen] = useState(false);
+  /**
+   * Filtros built-in: `all` (Tudo) e `unread / favorites / groups`.
+   * Filtros customizados: `label:<id>` — pertinência via `whatsapp_chat_label_memberships`.
+   */
+  const [chatSidebarFilter, setChatSidebarFilter] = useState<string>('all');
+  const [labelEditOpen, setLabelEditOpen] = useState(false);
+  const [labelEditTarget, setLabelEditTarget] = useState<WhatsappChatLabelDto | null>(null);
+  const [labelPickChatsOpen, setLabelPickChatsOpen] = useState(false);
+  const labelPickChatsResolverRef = useRef<((v: string[] | null) => void) | null>(null);
+  const [labelPickInitialIds, setLabelPickInitialIds] = useState<string[]>([]);
   const [chatSearch, setChatSearch] = useState('');
-  const [pendingMedia, setPendingMedia] = useState<PendingMedia | null>(null);
+  const [pendingMediaList, setPendingMediaList] = useState<PendingMedia[]>([]);
   const [mediaCaption, setMediaCaption] = useState('');
+  const [isDraggingFileOverChat, setIsDraggingFileOverChat] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ chatId: string; label: string } | null>(null);
+  const WA_ASIDE_MIN_WIDTH = 408;
+  const WA_ASIDE_MAX_WIDTH = 720;
+  const [asideWidth, setAsideWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return WA_ASIDE_MIN_WIDTH;
+    try {
+      const stored = window.localStorage.getItem('wa-chat-aside-width');
+      const v = stored ? Number(stored) : NaN;
+      if (Number.isFinite(v)) {
+        return Math.max(WA_ASIDE_MIN_WIDTH, Math.min(WA_ASIDE_MAX_WIDTH, v));
+      }
+    } catch {
+      // localStorage indisponível — usa default
+    }
+    return WA_ASIDE_MIN_WIDTH;
+  });
+  const [isResizingAside, setIsResizingAside] = useState(false);
+  const asideRef = useRef<HTMLElement | null>(null);
+  const filterTabsRef = useRef<HTMLDivElement | null>(null);
+  const filterTabsDragRef = useRef<{ startX: number; startScroll: number; pointerId: number; moved: boolean } | null>(null);
+  const filterTabsJustDraggedRef = useRef(false);
+  const asideResizeRef = useRef<{
+    startX: number;
+    startW: number;
+    pointerId: number;
+    target: HTMLDivElement;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('wa-chat-aside-width', String(asideWidth));
+    } catch {
+      // localStorage indisponível — ignora persistência
+    }
+  }, [asideWidth]);
+
+  const handleFilterTabsPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse') return;
+    if (e.button !== 0) return;
+    const el = filterTabsRef.current;
+    if (!el) return;
+    filterTabsDragRef.current = {
+      startX: e.clientX,
+      startScroll: el.scrollLeft,
+      pointerId: e.pointerId,
+      moved: false,
+    };
+  }, []);
+
+  const handleFilterTabsPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = filterTabsDragRef.current;
+    const el = filterTabsRef.current;
+    if (!state || !el) return;
+    const dx = e.clientX - state.startX;
+    if (!state.moved && Math.abs(dx) > 4) {
+      state.moved = true;
+      try {
+        el.setPointerCapture(state.pointerId);
+      } catch {
+        // setPointerCapture pode falhar — segue com listeners normais
+      }
+    }
+    if (state.moved) {
+      el.scrollLeft = state.startScroll - dx;
+      e.preventDefault();
+    }
+  }, []);
+
+  const handleFilterTabsPointerEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = filterTabsDragRef.current;
+    if (!state) return;
+    const el = filterTabsRef.current;
+    if (state.moved) {
+      filterTabsJustDraggedRef.current = true;
+      window.setTimeout(() => {
+        filterTabsJustDraggedRef.current = false;
+      }, 0);
+      try {
+        el?.releasePointerCapture?.(state.pointerId);
+      } catch {
+        // releasePointerCapture pode falhar — ignorado
+      }
+    }
+    filterTabsDragRef.current = null;
+    e.stopPropagation();
+  }, []);
+
+  const handleAsideResizeStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const target = e.currentTarget;
+    const startW = asideRef.current?.getBoundingClientRect().width ?? asideWidth;
+    asideResizeRef.current = {
+      startX: e.clientX,
+      startW,
+      pointerId: e.pointerId,
+      target,
+    };
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {
+      // setPointerCapture pode falhar — usa listeners
+    }
+    setIsResizingAside(true);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  }, [asideWidth]);
+
+  const handleAsideResizeMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = asideResizeRef.current;
+    if (!state) return;
+    const dx = e.clientX - state.startX;
+    // O `sm:max-w-[60vw]` no CSS cuida do clamp visual em telas estreitas; aqui só impomos os limites lógicos.
+    const next = Math.max(
+      WA_ASIDE_MIN_WIDTH,
+      Math.min(WA_ASIDE_MAX_WIDTH, Math.round(state.startW + dx))
+    );
+    setAsideWidth(next);
+  }, []);
+
+  const handleAsideResizeEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const state = asideResizeRef.current;
+    if (!state) return;
+    try {
+      state.target.releasePointerCapture?.(state.pointerId);
+    } catch {
+      // releasePointerCapture pode falhar — ignorado
+    }
+    asideResizeRef.current = null;
+    setIsResizingAside(false);
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+  }, []);
+  const [batchUploadProgress, setBatchUploadProgress] = useState<{ current: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stickerInputRef = useRef<HTMLInputElement>(null);
+  const photosVideosInputRef = useRef<HTMLInputElement>(null);
+  const gifInputRef = useRef<HTMLInputElement>(null);
+  const [composerPickerOpen, setComposerPickerOpen] = useState(false);
+  const [composerPickerTab, setComposerPickerTab] = useState<ComposerPickerTab>('emoji');
+  const composerPickerPanelRef = useRef<HTMLDivElement>(null);
+  const composerPickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const composerDraftInputRef = useRef<EmojiInputHandle>(null);
+  const chatFileDragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const evolutionReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -976,18 +2052,41 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [peerTyping, setPeerTyping] = useState(false);
   const typingHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const chatIdRef = useRef(chatId);
+
+  useEffect(() => {
+    if (!composerPickerOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (composerPickerPanelRef.current?.contains(t)) return;
+      if (composerPickerTriggerRef.current?.contains(t)) return;
+      setComposerPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [composerPickerOpen]);
+
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [contactsPanelOpen, setContactsPanelOpen] = useState(false);
-  const [contactsFilter, setContactsFilter] = useState('');
+  const [contactsPanelForceRefresh, setContactsPanelForceRefresh] = useState(false);
+  const [groupsForceRefresh, setGroupsForceRefresh] = useState(false);
+  const [contactsAgendaSearchInput, setContactsAgendaSearchInput] = useState('');
+  const [debouncedAgendaSearch, setDebouncedAgendaSearch] = useState('');
   const [contactsSortBy, setContactsSortBy] = useState<'name' | 'id'>('name');
   const [contactsSortOrder, setContactsSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [contactsLimit, setContactsLimit] = useState(500);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedAgendaSearch(contactsAgendaSearchInput.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [contactsAgendaSearchInput]);
   const [checkPhoneDraft, setCheckPhoneDraft] = useState('');
   const [checkPhoneResult, setCheckPhoneResult] = useState<{ numberExists: boolean; chatId: string | null } | null>(
     null
   );
   const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
   const [archivedPanelOpen, setArchivedPanelOpen] = useState(false);
+  const [sendContactStep, setSendContactStep] = useState<'idle' | 'pick' | 'confirm'>('idle');
+  const [sendContactSearch, setSendContactSearch] = useState('');
+  const [sendContactSelectedIds, setSendContactSelectedIds] = useState<string[]>([]);
+  const [sendContactConfirmRows, setSendContactConfirmRows] = useState<S3eContactPickerRow[]>([]);
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   const [contactPanelOpen, setContactPanelOpen] = useState(false);
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
@@ -1006,6 +2105,23 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     'announcement'
   );
 
+  const exitForwardSelectionMode = useCallback(() => {
+    setIsInForwardSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    setForwardModalOpen(false);
+    setForwardTargetChatId(null);
+  }, []);
+
+  const toggleForwardSelectedMessage = useCallback((messageId: string) => {
+    if (!messageId) return;
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+  }, []);
+
   // Edição de mensagem (precisa ser declarada antes do handler global de teclado)
   const startEditMessage = useCallback((m: WhatsappMessageDto) => {
     setEditingId(m.id);
@@ -1015,6 +2131,34 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const cancelEditMessage = useCallback(() => {
     setEditingId(null);
     setEditDraft('');
+  }, []);
+
+  /**
+   * Reage a uma mensagem (ou remove a reação ao passar `''`).
+   *
+   * Atualização da UI: ainda NÃO persistimos reactions localmente — uma vez
+   * que a EvoGo aceite, o webhook `messages.upsert` traz o evento de reaction
+   * e a próxima sync do chat reflete (fase 2 do roadmap). Por isso só
+   * dispara o request e mostra toast — não há optimistic update no painel.
+   */
+  const reactToMessage = useCallback(async (m: WhatsappMessageDto, emoji: string) => {
+    if (!m.id) return;
+    if (!m.providerMessageId) {
+      toast.message('Aguarde a mensagem ser entregue antes de reagir.');
+      return;
+    }
+    const trimmed = (emoji || '').trim();
+    try {
+      const res = await reactToWhatsappMessage(m.id, trimmed);
+      if (!res.success) {
+        toast.error(res.error || 'Não foi possível reagir');
+        return;
+      }
+      toast.success(trimmed ? `Reação ${trimmed} enviada` : 'Reação removida');
+    } catch (err) {
+      console.warn('[WA] reactToWhatsappMessage falhou', err);
+      toast.error('Não foi possível reagir');
+    }
   }, []);
   const [groupEphemeralExpiration, setGroupEphemeralExpiration] = useState('86400');
   const [groupInviteUrl, setGroupInviteUrl] = useState('');
@@ -1028,6 +2172,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrIssuedAtMs, setQrIssuedAtMs] = useState<number | null>(null);
   const presenceResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Flag local que indica se já enviamos `available` ao provedor para a
+   * "digitação atual". Evita disparar uma chamada HTTP a cada tecla — o
+   * `useEffect` que observa `draft` re-executa em todo keystroke e antes
+   * essa chamada acontecia N vezes (gerando lag visível e ruído de rede).
+   */
+  const presenceAvailableSentRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingAudioCtxRef = useRef<AudioContext | null>(null);
@@ -1058,6 +2209,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const ackFallbackSignatureRef = useRef('');
   const auth = useContext(AuthContext);
   const crmUser = auth?.user ?? null;
+  const realtime = useWhatsAppRealtimeStatus();
   chatIdRef.current = chatId;
 
   useEffect(() => {
@@ -1085,8 +2237,20 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       );
     },
     // Fallback se o Socket.io falhar (CORS, proxy, etc.)
-    refetchInterval: 20_000,
+    refetchInterval: realtime.connected ? 60_000 : 20_000,
     refetchIntervalInBackground: false,
+  });
+
+  const { data: chatLabels = [] } = useQuery({
+    queryKey: ['whatsapp-chat-labels'] as const,
+    queryFn: async (): Promise<WhatsappChatLabelDto[]> => {
+      const r = await listChatLabels();
+      if (r.success && Array.isArray(r.data)) return r.data;
+      return [];
+    },
+    // O usuário cria/edita listas raramente — uma janela grande é OK.
+    refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false
   });
 
   const { data: messages = [], isLoading: loadingMsgs } = useQuery({
@@ -1098,11 +2262,14 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       return r.data;
     },
     enabled: Boolean(chatId),
-    refetchInterval: Boolean(chatId) ? 12_000 : false,
+    // Socket-first: quando tempo real está online, não precisa polling agressivo.
+    refetchInterval: Boolean(chatId) ? (realtime.connected ? false : 60_000) : false,
     refetchIntervalInBackground: false,
     retry: 1,
     retryDelay: 2_000,
   });
+
+  const outboundChatId = useMemo(() => resolveOutboundChatId(chatId), [chatId]);
 
   const displayMessages = useMemo(() => {
     const byId = new Map<string, WhatsappMessageDto>();
@@ -1119,6 +2286,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     return digits;
   }, []);
 
+  const sendContactRecipientPretty = useMemo(() => {
+    const num = evolutionNumberFromChat(outboundChatId);
+    const intl = formatInternationalBrFromDigits(num);
+    if (intl && intl.length > 1) return intl;
+    return formatPhoneForDisplay(resolveOutboundChatId(outboundChatId));
+  }, [outboundChatId, evolutionNumberFromChat]);
+
   const { data: connectionStatus } = useQuery({
     queryKey: ['whatsapp-connection-status'],
     queryFn: async () => {
@@ -1126,8 +2300,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       if (!r.success || !r.data) return null;
       return r.data;
     },
-    refetchInterval: 12_000,
-    refetchIntervalInBackground: true,
+    // Socket-first: quando conectado, confia no evento `whatsapp:connection:status`.
+    // Fallback leve só quando o socket estiver offline.
+    refetchInterval: realtime.connected ? false : 60_000,
+    refetchIntervalInBackground: false,
     retry: 1,
     retryDelay: 2_000,
   });
@@ -1184,41 +2360,189 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       if (!r.success || !Array.isArray(r.data)) return [];
       return r.data;
     },
-    staleTime: 90_000,
-    refetchInterval: 120_000,
-    refetchIntervalInBackground: false,
+    enabled: false, // evita chamadas automáticas ao abrir o chat (reduz risco de ban)
+    staleTime: 30 * 60 * 1000,
   });
 
+  const useAgendaServerSearch = debouncedAgendaSearch.length >= WHATSAPP_AGENDA_SEARCH_MIN_CHARS;
+
   const {
-    data: contactsPanelRows = [],
-    isLoading: contactsPanelLoading,
+    data: agendaListFull = [],
+    isLoading: agendaListFullLoading,
     refetch: refetchContactsPanel,
   } = useQuery({
-    queryKey: ['whatsapp-provider-contacts-panel', contactsSortBy, contactsSortOrder, contactsLimit],
+    queryKey: ['whatsapp-provider-contacts-panel', contactsSortBy, contactsSortOrder],
     queryFn: async (): Promise<WhatsappProviderContactRow[]> => {
-      const r = await fetchWhatsappProviderContacts({
-        limit: contactsLimit,
-        offset: 0,
-        sortBy: contactsSortBy,
-        sortOrder: contactsSortOrder,
-        refresh: true,
-      });
+      const r = await fetchWhatsappProviderContacts(
+        {
+          limit: WHATSAPP_AGENDA_LIST_LIMIT,
+          offset: 0,
+          sortBy: contactsSortBy,
+          sortOrder: contactsSortOrder,
+          refresh: contactsPanelForceRefresh,
+        },
+        { timeout: 120_000 }
+      );
       if (!r.success || !Array.isArray(r.data)) return [];
       return r.data;
     },
-    enabled: contactsPanelOpen,
-    staleTime: 0,
+    enabled: contactsPanelOpen && !useAgendaServerSearch,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const filteredContactsPanel = useMemo(() => {
-    const q = normalizeSearchText(contactsFilter);
-    if (!q) return contactsPanelRows;
-    return contactsPanelRows.filter((c) => {
+  const {
+    data: agendaListSearch = [],
+    isFetching: agendaListSearchFetching,
+    refetch: refetchAgendaSearch,
+  } = useQuery({
+    queryKey: ['whatsapp-provider-contacts-search', debouncedAgendaSearch] as const,
+    queryFn: async (): Promise<WhatsappProviderContactRow[]> => {
+      const r = await fetchWhatsappProviderContactsSearch(debouncedAgendaSearch);
+      if (!r.success || !Array.isArray(r.data)) return [];
+      return r.data;
+    },
+    enabled: contactsPanelOpen && useAgendaServerSearch,
+    staleTime: 60 * 1000,
+  });
+
+  const agendaDisplayedRows = useAgendaServerSearch ? agendaListSearch : agendaListFull;
+  const agendaDisplayedLoading = useAgendaServerSearch ? agendaListSearchFetching : agendaListFullLoading;
+
+  const agendaDisplayedRowsSorted = useMemo(() => {
+    const rows = [...agendaDisplayedRows];
+    const mul = contactsSortOrder === 'asc' ? 1 : -1;
+    const key = (r: WhatsappProviderContactRow) =>
+      contactsSortBy === 'id'
+        ? String(r.id || '')
+        : (whatsappContactDisplayName(r) || r.id || '').toLowerCase();
+    rows.sort((a, b) => key(a).localeCompare(key(b), 'pt-BR', { sensitivity: 'base' }) * mul);
+    return rows;
+  }, [agendaDisplayedRows, contactsSortBy, contactsSortOrder]);
+
+  const sendContactFlowActive = sendContactStep !== 'idle';
+  /**
+   * Fonte do picker "Enviar contato": agenda S3E (`contatos_s3e`), NÃO mais a
+   * agenda do provedor (Evolution/Baileys). Motivação:
+   *  - A agenda do provedor não inclui mais o catálogo da Meta (foi bloqueada),
+   *    então só listava quem o operador já conversou — cobertura ruim;
+   *  - A agenda S3E carrega os ~3k contatos importados via CSV + os novos
+   *    capturados automaticamente em mensagens inbound;
+   *  - Os nomes da S3E (`nomeAgenda`) são os reais cadastrados, não cache do
+   *    WhatsApp que poderia ser replicado entre conversas.
+   * Limite de 5000 é o teto cap do backend (suficiente para a base atual).
+   */
+  const {
+    data: sendContactPickerRows = [] as S3eContactPickerRow[],
+    isLoading: sendContactPickerLoading,
+  } = useQuery({
+    queryKey: ['s3e-contacts-send-flow', 5000] as const,
+    queryFn: async (): Promise<S3eContactPickerRow[]> => {
+      const r = await listContatosS3e({
+        pageSize: 5000,
+        page: 1,
+        orderBy: 'nome',
+        revisado: 'todos'
+      });
+      if (!r.success || !r.data || !Array.isArray(r.data.items)) return [];
+      return r.data.items.map(s3eContactToProviderRow);
+    },
+    enabled: sendContactFlowActive,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  /** Fotos no picker desativadas: buscar URL por contato em massa sobrecarrega Evolution e congela a UI. */
+  const sendFlowPicByContactId = useMemo(() => new Map<string, string | null>(), []);
+
+  const sendContactFilteredRows = useMemo(() => {
+    const base = sendContactPickerRows.filter((r) => !r.isGroup);
+    const q = normalizeSearchText(sendContactSearch);
+    if (!q) return base;
+    return base.filter((c) => {
       const label = whatsappContactDisplayName(c);
-      const hay = normalizeSearchText([label, c.id, c.number || '', c.pushname || '', c.shortName || ''].join(' '));
+      // Inclui `s3eEmpresa` no haystack — permite localizar por nome da empresa
+      // (ex.: "Fortlev", "Cattoni") sem precisar lembrar do contato pessoal.
+      const hay = normalizeSearchText(
+        [label, c.id, c.number || '', c.pushname || '', c.shortName || '', c.s3eEmpresa || ''].join(' ')
+      );
       return hay.includes(q);
     });
-  }, [contactsPanelRows, contactsFilter]);
+  }, [sendContactPickerRows, sendContactSearch]);
+
+  /**
+   * Ordena pela `nomeAgenda` (já que a agenda S3E não tem `isMe`) e corta no
+   * teto de render para não estourar o DOM. `youRows` é mantido como `[]` por
+   * compatibilidade com o consumer abaixo, mas a seção visual foi removida.
+   */
+  const sendPickerLayout = useMemo(() => {
+    const filtered = sendContactFilteredRows;
+    const sorted = [...filtered].sort((a, b) =>
+      whatsappContactDisplayName(a).localeCompare(whatsappContactDisplayName(b), 'pt-BR', { sensitivity: 'base' })
+    );
+    const cap = WA_SEND_CONTACT_PICKER_RENDER_CAP;
+    const otherShown = sorted.slice(0, cap);
+    const hiddenCount = Math.max(0, filtered.length - otherShown.length);
+    return { youRows: [] as S3eContactPickerRow[], otherRows: otherShown, hiddenCount, total: filtered.length };
+  }, [sendContactFilteredRows]);
+
+  const sendContactYouRows = sendPickerLayout.youRows;
+  const sendContactOtherRows = sendPickerLayout.otherRows;
+
+  const closeSendContactFlow = useCallback(() => {
+    setSendContactStep('idle');
+    setSendContactSearch('');
+    setSendContactSelectedIds([]);
+    setSendContactConfirmRows([]);
+  }, []);
+
+  const toggleSendContactSelected = useCallback((id: string, sendable: boolean) => {
+    if (!sendable) {
+      toast.message('Este contato não pode ser enviado (número indisponível).');
+      return;
+    }
+    setSendContactSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= WA_SEND_CONTACT_MAX) {
+        toast.message(`No máximo ${WA_SEND_CONTACT_MAX} contatos por envio.`);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const openSendContactConfirmStep = useCallback(() => {
+    if (!sendContactSelectedIds.length) {
+      toast.message('Selecione ao menos um contato.');
+      return;
+    }
+    const map = new Map(sendContactPickerRows.map((r) => [r.id, r]));
+    const rows: S3eContactPickerRow[] = [];
+    for (const id of sendContactSelectedIds) {
+      const r = map.get(id);
+      if (!r) continue;
+      if (!contactRowIsEvolutionSendable(r)) {
+        toast.error(`Contato sem número válido: ${whatsappContactDisplayName(r) || id}`);
+        return;
+      }
+      rows.push(r);
+    }
+    if (!rows.length) {
+      toast.error('Não foi possível montar a lista de envio.');
+      return;
+    }
+    setSendContactConfirmRows(rows);
+    setSendContactStep('confirm');
+  }, [sendContactPickerRows, sendContactSelectedIds]);
+
+  const sendContactSelectedSummary = useMemo(() => {
+    const map = new Map(sendContactPickerRows.map((r) => [r.id, r]));
+    return sendContactSelectedIds
+      .map((id) => {
+        const r = map.get(id);
+        return r ? whatsappContactDisplayName(r) || formatPhoneForDisplay(r.id) : '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }, [sendContactPickerRows, sendContactSelectedIds]);
 
   const checkPhoneMut = useMutation({
     mutationFn: async (phone: string) => {
@@ -1338,13 +2662,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const { data: providerGroupRows = [] } = useQuery({
     queryKey: ['whatsapp-provider-groups'],
     queryFn: async (): Promise<WhatsappProviderGroupRow[]> => {
-      const r = await fetchWhatsappProviderGroups();
+      const r = await fetchWhatsappProviderGroups({ refresh: groupsForceRefresh });
       if (!r.success || !Array.isArray(r.data)) return [];
       return r.data;
     },
-    staleTime: 90_000,
-    refetchInterval: 120_000,
-    refetchIntervalInBackground: false,
+    enabled: false, // evita chamadas automáticas ao abrir o chat (reduz risco de ban)
+    staleTime: 30 * 60 * 1000,
     retry: 1,
     retryDelay: 3_000,
   });
@@ -1387,35 +2710,64 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     return m;
   }, [chatList, profilePictures]);
 
+  const agendaRowsForAvatarFetch = useMemo(
+    () => agendaDisplayedRowsSorted.slice(0, WA_AGENDA_AVATAR_FETCH_CAP),
+    [agendaDisplayedRowsSorted]
+  );
+
   const contactAvatarQueries = useQueries({
-    queries: contactsPanelRows.map((row) => ({
+    queries: agendaRowsForAvatarFetch.map((row) => ({
       queryKey: ['whatsapp-evolution-contact-avatar', row.id] as const,
       queryFn: async (): Promise<string | null> => {
-        const r = await postEvolutionFetchProfilePicture({ number: row.id.trim() });
-        if (!r.success) return null;
-        const u = r.data?.profilePictureUrl;
-        return typeof u === 'string' && u.length > 0 ? u : null;
+        try {
+          const r = await postEvolutionFetchProfilePicture({ number: row.id.trim() });
+          if (!r.success) return null;
+          const u = r.data?.profilePictureUrl;
+          return typeof u === 'string' && u.length > 0 ? u : null;
+        } catch {
+          return null;
+        }
       },
       staleTime: 30 * 60 * 1000,
       gcTime: 60 * 60 * 1000,
-      enabled: contactsPanelOpen && contactsPanelRows.length > 0,
+      enabled: contactsPanelOpen && agendaRowsForAvatarFetch.length > 0,
     })),
   });
 
   const contactPicByContactId = useMemo(() => {
     const m = new Map<string, string | null>();
-    contactsPanelRows.forEach((row, i) => {
+    agendaRowsForAvatarFetch.forEach((row, i) => {
       m.set(row.id, contactAvatarQueries[i]?.data ?? null);
     });
     return m;
-  }, [contactsPanelRows, contactAvatarQueries]);
+  }, [agendaRowsForAvatarFetch, contactAvatarQueries]);
 
   const filteredChats = useMemo(() => {
+    let list = chatList;
+    if (chatSidebarFilter === 'unread') list = list.filter((c) => (c.unreadCount ?? 0) > 0);
+    else if (chatSidebarFilter === 'favorites') list = list.filter((c) => !!c.favorite);
+    else if (chatSidebarFilter === 'groups') list = list.filter((c) => isWhatsappGroupChatId(c.chatId));
+    else if (chatSidebarFilter.startsWith('label:')) {
+      // Filtro por lista customizada — usa as memberships já carregadas
+      // pela query `whatsapp-chat-labels`. Comparamos `chatId` canonicalizado
+      // dos dois lados para casar PN ↔ LID sem depender do roteamento atual.
+      const labelId = chatSidebarFilter.slice('label:'.length);
+      const label = chatLabels.find((l) => l.id === labelId);
+      if (label) {
+        const ids = new Set(label.chatIds.map((c) => canonicalWhatsappChatId(c)));
+        list = list.filter((c) => ids.has(canonicalWhatsappChatId(c.chatId)));
+      } else {
+        // ID inválido / lista deletada — não mostra nada e segura o estado
+        // até o operador escolher outro filtro.
+        list = [];
+      }
+    }
+
     const raw = chatSearch.trim();
-    if (!raw) return chatList;
+    if (!raw) return list;
     const q = normalizeSearchText(raw);
     const qDigits = raw.replace(/\D/g, '');
-    return chatList.filter((c) => {
+    return list.filter((c) => {
       const isG = isWhatsappGroupChatId(c.chatId);
       const w = !isG ? findWhatsappContactInRows(providerContactRows, c.chatId) : undefined;
       const wg = isG ? findWhatsappGroupInRows(providerGroupRows, c.chatId) : undefined;
@@ -1432,7 +2784,49 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       }
       return false;
     });
-  }, [chatList, chatSearch, providerContactRows, providerGroupRows]);
+  }, [chatList, chatSearch, chatSidebarFilter, chatLabels, providerContactRows, providerGroupRows]);
+
+  /**
+   * Conversas elegíveis para entrar em uma lista — universo completo do
+   * CRM (sem filtros / sem busca). Memoizado porque entra no modal de
+   * seleção e pode ter centenas de itens; recalcular a cada render é
+   * pesado por causa do `resolveChatPreviewLabels` por linha.
+   */
+  const selectableChatsForLabel = useMemo<SelectableChat[]>(() => {
+    return chatList.map((c) => {
+      const isG = isWhatsappGroupChatId(c.chatId);
+      const w = !isG ? findWhatsappContactInRows(providerContactRows, c.chatId) : undefined;
+      const wg = isG ? findWhatsappGroupInRows(providerGroupRows, c.chatId) : undefined;
+      const { listTitle } = resolveChatPreviewLabels(c, w, wg);
+      const title = listTitle || formatPhoneForDisplay(c.chatId);
+      return {
+        chatId: canonicalWhatsappChatId(c.chatId),
+        title,
+        subtitle: c.providerCachedName && c.providerCachedName !== title ? c.providerCachedName : null,
+        profilePictureUrl: c.cachedProfilePictureUrl ?? null
+      };
+    });
+  }, [chatList, providerContactRows, providerGroupRows]);
+
+  const chatTitleByIdMemo = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of selectableChatsForLabel) m.set(c.chatId, c.title);
+    return m;
+  }, [selectableChatsForLabel]);
+
+  const sortedFilteredChats = useMemo(() => {
+    const list = filteredChats.slice();
+    list.sort((a, b) => {
+      const ap = a.pinned ? 1 : 0;
+      const bp = b.pinned ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      const af = a.favorite ? 1 : 0;
+      const bf = b.favorite ? 1 : 0;
+      if (af !== bf) return bf - af;
+      return new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime();
+    });
+    return list;
+  }, [filteredChats]);
 
   const logoutMut = useMutation({
     mutationFn: async () => {
@@ -1497,6 +2891,20 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   }, [chatList, chatId]);
   const activeIsGroup = useMemo(() => isWhatsappGroupChatId(chatId), [chatId]);
 
+  const GROUP_META_COOLDOWN_MS = Number(import.meta.env.VITE_WA_GROUP_META_COOLDOWN_MS) || 60_000;
+  const GROUP_MEMBERS_COOLDOWN_MS = Number(import.meta.env.VITE_WA_GROUP_MEMBERS_COOLDOWN_MS) || 60_000;
+  const GROUP_BACKOFF_BASE_MS = Number(import.meta.env.VITE_WA_GROUP_BACKOFF_BASE_MS) || 10_000;
+  const GROUP_BACKOFF_MAX_MS = Number(import.meta.env.VITE_WA_GROUP_BACKOFF_MAX_MS) || 120_000;
+  const lastGroupMetaFetchAtRef = useRef<Map<string, number>>(new Map());
+  const lastGroupMembersFetchAtRef = useRef<Map<string, number>>(new Map());
+
+  const isLikelyRateLimit = useCallback((res: { success: boolean; status?: number; error?: string } | null | undefined) => {
+    if (!res || res.success) return false;
+    const st = res.status;
+    const low = `${res.error || ''} ${st ?? ''}`.toLowerCase();
+    return st === 429 || low.includes('rate-overlimit') || low.includes('rate overlimit') || low.includes('too many') || low.includes('429');
+  }, []);
+
   const groupMembersQuery = useQuery({
     queryKey: ['whatsapp-group-members', chatId],
     queryFn: async (): Promise<GroupParticipantRow[]> => {
@@ -1505,23 +2913,53 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       if (!r.success) return [];
       return normalizeGroupMembers(r.data);
     },
-    enabled: Boolean(chatId && activeIsGroup),
-    staleTime: 60_000,
-    refetchInterval: activeIsGroup ? 120_000 : false,
+    // IMPORTANT: membros de grupo podem causar rate-limit (429).
+    // Só buscamos quando o usuário pedir explicitamente no painel de grupo.
+    enabled: false,
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
+  });
+
+  /**
+   * Cache local de participantes (servido pelo backend): nome resolvido por
+   * agenda S3E + `whatsapp_contact_cache`. É barato (só leitura no banco) e
+   * pode ser puxado em toda abertura de grupo sem rate-limit. Garante que
+   * o balão da mensagem mostre o nome legível do remetente em vez de
+   * `+digits`.
+   */
+  const groupParticipantsCacheQuery = useQuery({
+    queryKey: ['whatsapp-group-participants-cache', chatId],
+    queryFn: async () => {
+      if (!chatId || !isWhatsappGroupChatId(chatId)) return [];
+      const r = await fetchWhatsappGroupParticipantCache(chatId);
+      if (!r.success || !r.data) return [];
+      return r.data;
+    },
+    enabled: Boolean(chatId && isWhatsappGroupChatId(chatId)),
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
   });
 
   const groupParticipantLabelByDigits = useMemo(() => {
     const m = new Map<string, string>();
+    // Fonte primária: cache do backend (agenda S3E + whatsapp_contact_cache).
+    for (const row of groupParticipantsCacheQuery.data ?? []) {
+      const digits = (row.digits || '').trim();
+      const label = (row.displayName || '').trim();
+      if (digits && label) m.set(digits, label);
+    }
+    // Fonte secundária: `/group/participants` (só carrega se o painel for aberto).
     const rows = (groupMembersQuery.data ?? groupInfo?.participants ?? []).slice();
     for (const p of rows) {
       const digits = waJidToDigits(String(p.id || ''));
       if (!digits) continue;
       const label = (p.name || '').trim();
-      if (label) m.set(digits, label);
+      // Não sobrescreve: o cache do backend tem prioridade (já cruzou com S3E).
+      if (label && !m.has(digits)) m.set(digits, label);
     }
     return m;
-  }, [groupMembersQuery.data, groupInfo?.participants]);
+  }, [groupParticipantsCacheQuery.data, groupMembersQuery.data, groupInfo?.participants]);
 
   const resolveGroupParticipantLabel = useCallback(
     (participantJid: string | null | undefined): string | null => {
@@ -1538,23 +2976,65 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     [groupParticipantLabelByDigits, providerContactRows]
   );
 
-  const { primary: headerPrimary, secondary: headerSecondary } = useMemo(
-    () =>
-      displayNameForChatHeader({
-        chatId,
-        crmName: activePreview?.contactName,
-        cachedProviderName: activePreview?.providerCachedName,
-        providerContactName: whatsappContactDisplayName(activeContactMeta?.contact ?? undefined),
-        groupName: whatsappGroupDisplayName(activeContactMeta?.group ?? undefined),
-        fallbackTitle: title,
-      }),
-    [chatId, activePreview?.contactName, activePreview?.providerCachedName, activeContactMeta?.contact, activeContactMeta?.group, title]
-  );
+  const { primary: headerPrimary, secondary: headerSecondary } = useMemo(() => {
+    if (forceHeaderReset) {
+      const phone = formatPhoneForDisplay(chatId);
+      return {
+        primary: phone,
+        secondary: isWhatsappGroupChatId(chatId) ? `Grupo · ${shortGroupIdLabel(chatId)}` : 'WhatsApp',
+      };
+    }
+    return displayNameForChatHeader({
+      chatId,
+      crmName: activePreview?.contactName,
+      agendaS3eName: activeContactMeta?.nomeAgendaS3e ?? activePreview?.agendaS3eName,
+      cachedProviderName: activePreview?.providerCachedName,
+      providerContactName: whatsappContactDisplayName(activeContactMeta?.contact ?? undefined),
+      providerContact: activeContactMeta?.contact ?? findWhatsappContactInRows(providerContactRows, chatId) ?? null,
+      // Telefone real preferido: backend já injeta no `contact-meta` para
+      // o chat ativo e na própria preview (`phoneNumberFromS3e`).
+      s3ePhoneDigits: activeContactMeta?.numeroContatoS3e ?? activePreview?.phoneNumberFromS3e ?? null,
+      groupName: whatsappGroupDisplayName(activeContactMeta?.group ?? undefined),
+      fallbackTitle: title,
+    });
+  }, [
+    chatId,
+    forceHeaderReset,
+    activePreview?.contactName,
+    activePreview?.providerCachedName,
+    activePreview?.agendaS3eName,
+    activePreview?.phoneNumberFromS3e,
+    activeContactMeta?.nomeAgendaS3e,
+    activeContactMeta?.numeroContatoS3e,
+    activeContactMeta?.contact,
+    activeContactMeta?.group,
+    providerContactRows,
+    title,
+  ]);
+
+  useEffect(() => {
+    if (!chatId) return;
+    setForceHeaderReset(true);
+    const t = window.setTimeout(() => setForceHeaderReset(false), 350);
+    return () => window.clearTimeout(t);
+  }, [chatId]);
 
   const totalUnreadMsgs = useMemo(
     () => chatList.reduce((acc, c) => acc + Math.max(0, c.unreadCount || 0), 0),
     [chatList]
   );
+
+  const sidebarFilterCounts = useMemo(() => {
+    let unreadChats = 0;
+    let favoriteChats = 0;
+    let groupChats = 0;
+    for (const c of chatList) {
+      if ((c.unreadCount ?? 0) > 0) unreadChats += 1;
+      if (c.favorite) favoriteChats += 1;
+      if (isWhatsappGroupChatId(c.chatId)) groupChats += 1;
+    }
+    return { unreadChats, favoriteChats, groupChats };
+  }, [chatList]);
 
   const actionsContextQuery = useQuery({
     queryKey: ['whatsapp-actions-context', chatId],
@@ -1589,7 +3069,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const linkClienteMut = useMutation({
     mutationFn: async (clienteId: string) => {
       const r = await postWhatsappLinkCliente(chatId, clienteId);
-      if (!r.success) throwAfterWhatsappToast(r, 'Falha ao vincular contato ao cliente');
+      if (!r.success) {
+        toastWhatsappApiError(r, { titleFallback: 'Falha ao vincular contato ao cliente' });
+        throwAfterWhatsappToast();
+      }
       return true;
     },
     onSuccess: () => {
@@ -1602,10 +3085,36 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  const unlinkClienteMut = useMutation({
+    mutationFn: async () => {
+      const r = await postWhatsappUnlinkCliente(chatId);
+      if (!r.success) {
+        toastWhatsappApiError(r, { titleFallback: 'Falha ao desvincular contato do cliente' });
+        throwAfterWhatsappToast();
+      }
+      return true;
+    },
+    onSuccess: () => {
+      toast.success('Contato desvinculado do cliente');
+      void actionsContextQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+    },
+    onError: (e: Error) => {
+      if (!isWhatsappErrorAlreadyToasted(e)) toast.error(e.message || 'Erro ao desvincular contato');
+    },
+  });
+
   const updateStatusModeMut = useMutation({
     mutationFn: async (mode: WhatsappOrcamentoStatusMode) => {
       const r = await putWhatsappOrcamentoStatusMode(mode);
-      if (!r.success || !r.data) throwAfterWhatsappToast(r, 'Falha ao salvar configuração');
+      if (!r.success) {
+        toastWhatsappApiError(r, { titleFallback: 'Falha ao salvar configuração' });
+        throwAfterWhatsappToast();
+      }
+      if (!r.data) {
+        toast.error('Falha ao salvar configuração');
+        throwAfterWhatsappToast();
+      }
       return r.data.mode;
     },
     onSuccess: (mode) => {
@@ -1713,7 +3222,15 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ...(pdfCustomization ? { pdfCustomization: pdfCustomization as unknown as Record<string, unknown> } : {}),
         ...(seemsEmpty ? {} : { pdfBase64: rendered.base64, pdfFilename: rendered.filename })
       });
-      if (!r.success || !r.data) throwAfterWhatsappToast(r, 'Falha ao enviar PDF do orçamento');
+      const httpOk = r.status == null || (r.status >= 200 && r.status < 300);
+      if (!httpOk || !r.success) {
+        toastWhatsappApiError(r, { titleFallback: 'Falha ao enviar PDF do orçamento' });
+        throwAfterWhatsappToast();
+      }
+      if (!r.data) {
+        toast.error('Falha ao enviar PDF do orçamento');
+        throwAfterWhatsappToast();
+      }
       return r.data;
     },
     onMutate: (payload) => {
@@ -1722,6 +3239,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     onSuccess: (data) => {
       if (data?.message) {
         mergeMessage(data.message);
+      } else {
+        toast.warning('Envio registrado sem confirmação da mensagem no histórico', {
+          description: 'Confira o chat; se não aparecer o PDF, tente novamente.',
+        });
       }
       toast.success(
         data?.statusUpdated
@@ -1822,13 +3343,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   useEffect(() => {
     if (!chatId) return;
     const text = draft.trim();
-    if (!text) return;
-    void postEvolutionInstanceSetPresence('available').catch(() => {
-      /* endpoint Evolution opcional */
-    });
+    if (!text) {
+      // Draft esvaziado — reseta a flag para o próximo "começar a digitar".
+      presenceAvailableSentRef.current = false;
+      return;
+    }
+    // Só dispara `available` UMA vez por sessão de digitação (a primeira tecla).
+    // Antes, este effect rodava a cada tecla, fazendo uma chamada HTTP por
+    // keystroke — isso causava o atraso percebido no composer.
+    if (!presenceAvailableSentRef.current) {
+      presenceAvailableSentRef.current = true;
+      void postEvolutionInstanceSetPresence('available').catch(() => {
+        /* endpoint Evolution opcional */
+      });
+    }
     if (presenceResetRef.current) clearTimeout(presenceResetRef.current);
     presenceResetRef.current = setTimeout(() => {
       presenceResetRef.current = null;
+      presenceAvailableSentRef.current = false;
       void postEvolutionInstanceSetPresence('unavailable').catch(() => {
         /* endpoint Evolution opcional */
       });
@@ -2069,6 +3601,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     [queryClient]
   );
 
+  /**
+   * Socket: cliente reagiu (ou removeu reação) a uma mensagem nossa, OU nós
+   * mesmos reagimos pelo painel — em ambos os casos o backend persistiu e
+   * propagou. Aqui fazemos patch no cache do React Query da conversa para o
+   * emoji aparecer no canto da bolha sem refetch.
+   */
+  const onSocketReaction = useCallback(
+    (p: { id: string; chatId: string; reaction: string | null }) => {
+      const cid = canonicalWhatsappChatId(p.chatId);
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+        (old ?? []).map((x) => (x.id === p.id ? { ...x, reaction: p.reaction } : x))
+      );
+    },
+    [queryClient]
+  );
+
   const onSocketAck = useCallback(
     (p: { id: string; chatId: string; ack: number | null }) => {
       const cid = canonicalWhatsappChatId(p.chatId);
@@ -2216,6 +3764,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const onSocketChatMeta = useCallback(
     (payload: { chatId: string; displayName: string | null; profilePictureUrl: string | null }) => {
       const cid = canonicalWhatsappChatId(payload.chatId);
+      if (
+        (import.meta as any)?.env?.VITE_WHATSAPP_DEBUG_IDS === '1' ||
+        (import.meta as any)?.env?.VITE_WHATSAPP_DEBUG_IDS === 'true'
+      ) {
+        // eslint-disable-next-line no-console
+        console.debug('[WA-UI-META] payload.chatId=%s canonical=%s name=%s', payload.chatId, cid, payload.displayName);
+      }
       queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
         (old ?? []).map((c) =>
           canonicalWhatsappChatId(c.chatId) === cid
@@ -2224,6 +3779,20 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 providerCachedName: payload.displayName ?? c.providerCachedName ?? null,
                 cachedProfilePictureUrl: payload.profilePictureUrl ?? c.cachedProfilePictureUrl ?? null,
               }
+            : c
+        )
+      );
+    },
+    [queryClient]
+  );
+
+  const onSocketChatFlags = useCallback(
+    (payload: { chatId: string; pinned: boolean; favorite: boolean }) => {
+      const cid = canonicalWhatsappChatId(payload.chatId);
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+        (old ?? []).map((c) =>
+          canonicalWhatsappChatId(c.chatId) === cid
+            ? { ...c, pinned: payload.pinned, favorite: payload.favorite }
             : c
         )
       );
@@ -2242,9 +3811,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     onDeleted: onSocketMessageDeleted,
     onEdited: onSocketMessageEdited,
     onAck: onSocketAck,
+    onReaction: onSocketReaction,
     onPresence: onSocketPresence,
     onChatRemoved: onSocketChatRemoved,
     onChatArchived: onSocketChatArchived,
+    onChatFlags: onSocketChatFlags,
     onChatMeta: onSocketChatMeta,
     onConnectionStatus: onSocketConnectionStatus,
   });
@@ -2278,6 +3849,23 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  const deleteForMeMut = useMutation({
+    mutationFn: async (messageId: string) => {
+      const r = await deleteWhatsappMessageForMe(messageId);
+      if (!r.success || !r.data) throw new Error(r.error || 'Falha ao apagar mensagem');
+      return r.data;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(data.chatId), (old) =>
+        (old ?? []).filter((m) => m.id !== data.id)
+      );
+      toast.success('Mensagem apagada (somente para você)');
+    },
+    onError: (e: Error) => {
+      toast.error(e.message || 'Erro ao apagar mensagem');
+    },
+  });
+
   const editMessageMut = useMutation({
     mutationFn: async (vars: { messageId: string; text: string }) => {
       const r = await editWhatsappMessage(vars.messageId, vars.text);
@@ -2299,34 +3887,79 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   });
 
   const sendMediaMut = useMutation({
-    mutationFn: async (pm: PendingMedia) => {
-      const r = await postWhatsappSendFile({
-        chatId,
-        file: pm.file,
-        caption: mediaCaption.trim() || undefined,
-      });
-      if (!r.success || !r.data) throw new Error(r.error || 'Falha ao enviar mídia');
-      return r.data;
+    mutationFn: async ({ items }: { items: PendingMedia[] }) => {
+      if (!items.length) throw new Error('Nenhum arquivo');
+      if (!outboundChatId?.trim()) throw new Error('Selecione uma conversa.');
+
+      const replyPrefix = replyToMessage
+        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
+        : '';
+      const captionFirst = (replyPrefix + mediaCaption.trim()).trim() || undefined;
+      const captionRest = replyPrefix.trim() || undefined;
+
+      const conc = WA_UPLOAD_SEND_CONCURRENCY;
+      let done = 0;
+      setBatchUploadProgress({ current: 0, total: items.length });
+
+      const uploadOne = async (pm: PendingMedia, globalIndex: number) => {
+        const file = fileWithNormalizedUploadName(pm.file);
+        const caption = globalIndex === 0 ? captionFirst : captionRest;
+        const r = await postWhatsappSendFile({
+          chatId: outboundChatId,
+          file,
+          caption: caption?.trim() ? caption : undefined,
+        });
+        if (!r.success || !r.data) {
+          throw new Error(r.error || `Falha ao enviar ${file.name}`);
+        }
+        mergeMessage(r.data);
+        done += 1;
+        setBatchUploadProgress({ current: done, total: items.length });
+      };
+
+      for (let wave = 0; wave < items.length; wave += conc) {
+        const slice = items.slice(wave, wave + conc);
+        await Promise.all(
+          slice.map((pm, k) => uploadOne(pm, wave + k))
+        );
+        if (wave + conc < items.length) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, WA_UPLOAD_BATCH_DELAY_MS);
+          });
+        }
+      }
+
+      return items.length;
     },
-    onSuccess: (data) => {
-      setPendingMedia(null);
+    onSuccess: (count, vars) => {
+      for (const pm of vars.items) {
+        if (pm.previewUrl) URL.revokeObjectURL(pm.previewUrl);
+      }
+      setPendingMediaList([]);
       setMediaCaption('');
-      if (data) mergeMessage(data);
-      toast.success('Mídia enviada');
+      setReplyToMessage(null);
+      setBatchUploadProgress(null);
+      toast.success(count === 1 ? 'Mídia enviada' : `${count} arquivos enviados.`);
+      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
     },
     onError: (e: Error) => {
+      setBatchUploadProgress(null);
       toast.error(e.message || 'Erro ao enviar mídia');
     },
   });
 
   const sendAudioMut = useMutation({
     mutationFn: async (payload: { base64Data: string; mimetype: string; filename: string }) => {
+      const replyPrefix = replyToMessage
+        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
+        : '';
       const r = await sendWhatsappMedia({
-        chatId,
+        chatId: outboundChatId,
         mediaType: 'voice',
         base64Data: payload.base64Data,
         mimetype: payload.mimetype,
         filename: payload.filename,
+        caption: replyPrefix.trim() || undefined,
       });
       if (!r.success || !r.data) throw new Error(r.error || 'Falha ao enviar áudio');
       return r.data;
@@ -2336,6 +3969,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         if (prev?.url) URL.revokeObjectURL(prev.url);
         return null;
       });
+      setReplyToMessage(null);
       if (data) mergeMessage(data);
       toast.success('Áudio enviado');
       void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
@@ -2347,7 +3981,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const sendLocationMut = useMutation({
     mutationFn: async () => {
-      const number = evolutionNumberFromChat(chatId);
+      const number = evolutionNumberFromChat(outboundChatId);
       if (!number || number.length < 8) {
         throw new Error('Localização Evolution requer número válido (chat individual).');
       }
@@ -2386,6 +4020,59 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  const sendContactConfirmMut = useMutation({
+    mutationFn: async (rows: S3eContactPickerRow[]) => {
+      if (isWhatsappGroupChatId(outboundChatId)) {
+        throw new Error('Envio de contato (Evolution) está disponível apenas para chats individuais.');
+      }
+      const number = evolutionNumberFromChat(outboundChatId);
+      if (!number || number.length < 8) {
+        throw new Error('Contato Evolution requer número válido (chat individual).');
+      }
+      for (let i = 0; i < rows.length; i += 1) {
+        if (i > 0) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, WA_SEND_CONTACT_API_GAP_MS);
+          });
+        }
+        const row = rows[i];
+        const wuid = evolutionWuidFromContactRow(row);
+        if (!wuid || wuid.length < 8) {
+          throw new Error(`Contato sem número válido para envio: ${whatsappContactDisplayName(row) || row.id}`);
+        }
+        const phoneNumber = buildEvolutionPhoneStylizedFromRow(row);
+        const fullName = whatsappContactDisplayName(row) || formatPhoneForDisplay(row.id) || 'Contato';
+        // `organization`: prioriza a empresa da agenda S3E quando disponível,
+        // caindo em '-' apenas se vazio. A EvoGo aceita string vazia, mas
+        // mantemos '-' para preservar o comportamento original do backend.
+        const organization = (row.s3eEmpresa || '').trim() || '-';
+        const r = await postEvolutionSendContact({
+          number,
+          contact: [
+            {
+              wuid,
+              phoneNumber,
+              fullName,
+              organization,
+              email: '-',
+              url: '-',
+            },
+          ],
+        });
+        if (!r.success) throw new Error(r.error || 'Falha ao enviar contato no Evolution');
+      }
+    },
+    onSuccess: (_, rows) => {
+      toast.success(rows.length === 1 ? 'Contato enviado' : `${rows.length} contatos enviados`);
+      closeSendContactFlow();
+      void queryClient.invalidateQueries({ queryKey: messagesQueryKey(chatId) });
+      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+    },
+    onError: (e: Error) => {
+      toast.error(e.message || 'Erro ao enviar contato');
+    },
+  });
+
   const handleUseCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
       toast.error('Geolocalização não suportada neste navegador.');
@@ -2403,34 +4090,162 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     );
   }, []);
 
-  const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (!file) return;
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      toast.error(`Arquivo muito grande (máximo ${MAX_FILE_SIZE_MB} MB)`);
-      return;
-    }
-    try {
-      const mediaType = detectMediaType(file.type);
-      const previewUrl = mediaType === 'image' ? URL.createObjectURL(file) : null;
-      setPendingMedia({ file, mediaType, previewUrl });
+  const stageFilesFromPicker = useCallback(
+    (rawFiles: File[]) => {
+      if (sendMediaMut.isPending) {
+        toast.message('Aguarde o envio em andamento.');
+        return;
+      }
+      const maxBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
+      const next: PendingMedia[] = [];
+      for (const file of rawFiles) {
+        if (file.size > maxBytes) {
+          toast.error(`${repairUtf8Mojibake(file.name)} excede ${MAX_FILE_SIZE_MB} MB e foi ignorado.`);
+          continue;
+        }
+        if (next.length >= WA_UPLOAD_BATCH_MAX_FILES) {
+          toast.message(
+            `No máximo ${WA_UPLOAD_BATCH_MAX_FILES} arquivos por seleção (proteção Evolution/Meta).`
+          );
+          break;
+        }
+        try {
+          const mediaType = detectMediaType(file.type);
+          const previewUrl = mediaType === 'image' ? URL.createObjectURL(file) : null;
+          next.push({ id: newPendingMediaId(), file, mediaType, previewUrl });
+        } catch {
+          toast.error('Não foi possível ler um dos arquivos');
+        }
+      }
+      if (!next.length) return;
+      setPendingMediaList((prev) => {
+        for (const pm of prev) {
+          if (pm.previewUrl) URL.revokeObjectURL(pm.previewUrl);
+        }
+        return next;
+      });
       setMediaCaption('');
-    } catch {
-      toast.error('Não foi possível ler o arquivo');
-    }
+    },
+    [sendMediaMut.isPending]
+  );
+
+  const handleStickerSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      if (!file) return;
+      stageFilesFromPicker([file]);
+      if (stickerInputRef.current) stickerInputRef.current.value = '';
+    },
+    [stageFilesFromPicker]
+  );
+
+  const handleGifSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      if (!file) return;
+      stageFilesFromPicker([file]);
+      if (gifInputRef.current) gifInputRef.current.value = '';
+    },
+    [stageFilesFromPicker]
+  );
+
+  const handlePhotosVideosSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      if (!files.length) return;
+      stageFilesFromPicker(files);
+      if (photosVideosInputRef.current) photosVideosInputRef.current.value = '';
+    },
+    [stageFilesFromPicker]
+  );
+
+  const handleFileSelected = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const list = e.target.files ? Array.from(e.target.files) : [];
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (!list.length) return;
+      stageFilesFromPicker(list);
+    },
+    [stageFilesFromPicker]
+  );
+
+  const removePendingMediaById = useCallback((id: string) => {
+    setPendingMediaList((prev) => {
+      const hit = prev.find((p) => p.id === id);
+      if (hit?.previewUrl) URL.revokeObjectURL(hit.previewUrl);
+      return prev.filter((p) => p.id !== id);
+    });
   }, []);
 
+  const dataTransferHasFiles = (dt: DataTransfer | null): boolean => {
+    if (!dt?.types) return false;
+    return Array.from(dt.types).includes('Files');
+  };
+
+  const handleChatFileDragOverCapture = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!chatId || isInForwardSelectionMode) return;
+      if (!dataTransferHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    },
+    [chatId, isInForwardSelectionMode]
+  );
+
+  const handleChatFileDragEnter = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!chatId || isInForwardSelectionMode) return;
+      if (!dataTransferHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      const rt = e.relatedTarget as Node | null;
+      if (rt instanceof Node && e.currentTarget.contains(rt)) return;
+      chatFileDragCounterRef.current += 1;
+      if (chatFileDragCounterRef.current === 1) setIsDraggingFileOverChat(true);
+    },
+    [chatId, isInForwardSelectionMode]
+  );
+
+  const handleChatFileDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!chatId) return;
+    e.preventDefault();
+    const rt = e.relatedTarget as Node | null;
+    if (rt instanceof Node && e.currentTarget.contains(rt)) return;
+    chatFileDragCounterRef.current = Math.max(0, chatFileDragCounterRef.current - 1);
+    if (chatFileDragCounterRef.current === 0) setIsDraggingFileOverChat(false);
+  }, [chatId]);
+
+  const handleChatFileDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      if (!chatId || isInForwardSelectionMode) return;
+      e.preventDefault();
+      chatFileDragCounterRef.current = 0;
+      setIsDraggingFileOverChat(false);
+      if (!dataTransferHasFiles(e.dataTransfer)) return;
+      const list = Array.from(e.dataTransfer.files);
+      if (!list.length) return;
+      if (sendMediaMut.isPending) {
+        toast.message('Aguarde o envio em andamento.');
+        return;
+      }
+      stageFilesFromPicker(list);
+    },
+    [chatId, isInForwardSelectionMode, sendMediaMut.isPending, stageFilesFromPicker]
+  );
+
   const cancelMedia = useCallback(() => {
-    if (pendingMedia?.previewUrl) URL.revokeObjectURL(pendingMedia.previewUrl);
-    setPendingMedia(null);
+    setPendingMediaList((prev) => {
+      for (const pm of prev) {
+        if (pm.previewUrl) URL.revokeObjectURL(pm.previewUrl);
+      }
+      return [];
+    });
     setMediaCaption('');
-  }, [pendingMedia]);
+  }, []);
 
   const handleSendMedia = useCallback(() => {
-    if (!pendingMedia || sendMediaMut.isPending) return;
-    sendMediaMut.mutate(pendingMedia);
-  }, [pendingMedia, sendMediaMut]);
+    if (!pendingMediaList.length || sendMediaMut.isPending) return;
+    sendMediaMut.mutate({ items: pendingMediaList });
+  }, [pendingMediaList, sendMediaMut]);
 
   const stopRecordingStream = useCallback(() => {
     if (recordingTickerRef.current) {
@@ -2480,9 +4295,36 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     });
   }, []);
 
+  const startForwardSelectionMode = useCallback(
+    (messageIdToSelect?: string) => {
+      // Ao entrar no modo seleção, cancelamos compositores para ficar fiel ao WhatsApp Web.
+      setPendingMediaList((prev) => {
+        for (const pm of prev) {
+          if (pm.previewUrl) URL.revokeObjectURL(pm.previewUrl);
+        }
+        return [];
+      });
+      setMediaCaption('');
+      discardRecordedAudio();
+      setLocationComposerOpen(false);
+      setIsInForwardSelectionMode(true);
+      setForwardModalOpen(false);
+      setForwardTargetChatId(null);
+      setEditingId(null);
+      setEditDraft('');
+      setSelectedMessageIds(() => {
+        const s = new Set<string>();
+        if (messageIdToSelect) s.add(messageIdToSelect);
+        return s;
+      });
+    },
+    [discardRecordedAudio]
+  );
+
   useEffect(
     () => () => {
       if (presenceResetRef.current) clearTimeout(presenceResetRef.current);
+      presenceAvailableSentRef.current = false;
       void postEvolutionInstanceSetPresence('unavailable').catch(() => {
         /* endpoint Evolution opcional */
       });
@@ -2711,7 +4553,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   }, [sendAudioMut, chatId, stopRecordingStream, discardRecordedAudio, recordingElapsedSec]);
 
   useEffect(() => {
-    setPendingMedia(null);
+    setPendingMediaList((prev) => {
+      for (const pm of prev) {
+        if (pm.previewUrl) URL.revokeObjectURL(pm.previewUrl);
+      }
+      return [];
+    });
     setMediaCaption('');
     discardRecordedAudio();
     const rec = mediaRecorderRef.current;
@@ -2735,23 +4582,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   useEffect(() => {
     setEditingId(null);
     setEditDraft('');
+    exitForwardSelectionMode();
   }, [chatId]);
-
-  const handleOpenByPhone = useCallback(() => {
-    const digits = openPhoneDraft.replace(/\D/g, '');
-    if (digits.length < 10) {
-      toast.error('Informe DDD + número (mínimo 10 dígitos).');
-      return;
-    }
-    if (!onNavigateChat) {
-      toast.error('Abrir por número só está disponível na página Chat WhatsApp.');
-      return;
-    }
-    const cid = toWhatsappChatId(openPhoneDraft);
-    const label = chatIdToDisplayLabel(cid);
-    onNavigateChat(cid, label);
-    setOpenPhoneDraft('');
-  }, [openPhoneDraft, onNavigateChat]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2792,9 +4624,65 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  const pinConversationMut = useMutation({
+    mutationFn: async (vars: { chatId: string; pinned: boolean }) => {
+      const cid = canonicalWhatsappChatId(vars.chatId);
+      if (!cid || !String(cid).trim()) throw new Error('chatId inválido');
+      const r = await postWhatsappPinConversation(cid, vars.pinned);
+      if (!r.success) {
+        toastWhatsappApiError(r);
+        throwAfterWhatsappToast();
+      }
+      return { chatId: cid, pinned: vars.pinned };
+    },
+    onMutate: async (vars) => {
+      const cid = canonicalWhatsappChatId(vars.chatId);
+      const previous = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey);
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+        (old ?? []).map((c) =>
+          canonicalWhatsappChatId(c.chatId) === cid ? { ...c, pinned: vars.pinned } : c
+        )
+      );
+      return { previous };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(chatsQueryKey, ctx.previous);
+      if (isWhatsappErrorAlreadyToasted(e)) return;
+      toast.error(e instanceof Error ? e.message : 'Erro ao fixar conversa');
+    },
+  });
+
+  const favoriteConversationMut = useMutation({
+    mutationFn: async (vars: { chatId: string; favorite: boolean }) => {
+      const cid = canonicalWhatsappChatId(vars.chatId);
+      if (!cid || !String(cid).trim()) throw new Error('chatId inválido');
+      const r = await postWhatsappFavoriteConversation(cid, vars.favorite);
+      if (!r.success) {
+        toastWhatsappApiError(r);
+        throwAfterWhatsappToast();
+      }
+      return { chatId: cid, favorite: vars.favorite };
+    },
+    onMutate: async (vars) => {
+      const cid = canonicalWhatsappChatId(vars.chatId);
+      const previous = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey);
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
+        (old ?? []).map((c) =>
+          canonicalWhatsappChatId(c.chatId) === cid ? { ...c, favorite: vars.favorite } : c
+        )
+      );
+      return { previous };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(chatsQueryKey, ctx.previous);
+      if (isWhatsappErrorAlreadyToasted(e)) return;
+      toast.error(e instanceof Error ? e.message : 'Erro ao favoritar conversa');
+    },
+  });
+
   const deleteConversationMut = useMutation({
-    mutationFn: async () => {
-      const cid = canonicalWhatsappChatId(chatId);
+    mutationFn: async (vars: { targetChatId: string; label: string }) => {
+      const cid = canonicalWhatsappChatId(vars.targetChatId || chatId);
       if (!cid || !String(cid).trim()) {
         toast.error('Não foi possível apagar: chatId inválido');
         throw new Error('chatId inválido');
@@ -2805,17 +4693,19 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         throwAfterWhatsappToast();
       }
     },
-    onMutate: async () => {
-      const cid = canonicalWhatsappChatId(chatId);
+    onMutate: async (vars) => {
+      const cid = canonicalWhatsappChatId(vars.targetChatId || chatId);
       const previous = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey);
       const messagesSnapshot = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid));
       queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
         (old ?? []).filter((c) => canonicalWhatsappChatId(c.chatId) !== cid)
       );
       queryClient.removeQueries({ queryKey: messagesQueryKey(cid) });
-      onNavigateChat?.('', '');
+      if (canonicalWhatsappChatId(chatId) === cid) {
+        onNavigateChat?.('', '');
+      }
       setChatMenuOpen(false);
-      return { previous, cid, label: headerPrimary, messagesSnapshot };
+      return { previous, cid, label: vars.label || headerPrimary, messagesSnapshot };
     },
     onError: (e, _v, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(chatsQueryKey, ctx.previous);
@@ -2852,24 +4742,21 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const refreshGroupInfoMut = useMutation({
     mutationFn: async () => {
       const groupJid = canonicalWhatsappChatId(chatId);
-      const [groupRes, membersRes] = await Promise.all([
-        getEvolutionGroupFindByJid(groupJid),
-        getEvolutionGroupFindMembers(groupJid),
-      ]);
+      const groupRes = await getEvolutionGroupFindByJid(groupJid);
       if (!groupRes.success) {
+        if (isLikelyRateLimit(groupRes)) {
+          const key = `wa-group-meta:${groupJid}`;
+          const { waitMs } = registerRateLimitBackoff(key, { baseMs: GROUP_BACKOFF_BASE_MS, maxMs: GROUP_BACKOFF_MAX_MS });
+          toast.message(`Limite do WhatsApp atingido. Tentaremos novamente após ${(waitMs / 1000).toFixed(0)}s.`);
+        }
         toastWhatsappApiError(groupRes);
         throwAfterWhatsappToast();
       }
-      if (!membersRes.success) {
-        toastWhatsappApiError(membersRes);
-        throwAfterWhatsappToast();
-      }
       const base = normalizeGroupInfo(groupRes.data, groupJid);
-      const members = normalizeGroupMembers(membersRes.data);
-      const merged = { ...base, participants: members.length > 0 ? members : base.participants };
-      return merged;
+      return base;
     },
     onSuccess: (info) => {
+      registerBackoffSuccess(`wa-group-meta:${canonicalWhatsappChatId(chatId)}`);
       setGroupInfo(info);
       setGroupSubjectDraft(info.subject);
       setGroupDescriptionDraft(info.desc);
@@ -3085,10 +4972,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
-  useEffect(() => {
-    if (!groupPanelOpen || !activeIsGroup) return;
-    refreshGroupInfoMut.mutate();
-  }, [activeIsGroup, groupPanelOpen, refreshGroupInfoMut]);
+  // Removido autofetch agressivo de metadados de grupo ao abrir o painel
+  // para evitar rate-limit em grupos grandes. Agora é somente sob ação do usuário.
 
   useEffect(() => {
     if (!chatId) return;
@@ -3188,14 +5073,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       setProfileLookupJson(JSON.stringify(data ?? null, null, 2));
       try {
         const parsed = normalizeEvolutionContactProfile(data);
-        const fallbackLiveName = whatsappContactDisplayName(activeContactMeta?.contact ?? undefined);
-        const fallbackDisplay =
-          parsed.displayName.trim() ||
-          fallbackLiveName.trim() ||
-          (activePreview?.providerCachedName ?? '').trim() ||
-          '';
-        const displayName =
-          fallbackDisplay && !isJustDigitsLabel(fallbackDisplay) ? fallbackDisplay : '';
+        // Só atualiza o nome quando a Evolution realmente retornar um nome válido.
+        // Isso evita sobrescrever com fallback e reduz “flapping” de labels.
+        const dn = parsed.displayName.trim();
+        const displayName = dn && !isJustDigitsLabel(dn) ? dn : '';
         const profilePictureUrl =
           parsed.profilePictureUrl.trim() ||
           (activeContactMeta?.profilePictureUrl ?? '').trim() ||
@@ -3236,41 +5117,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
-  useEffect(() => {
-    if (!contactPanelOpen) return;
-    if (!chatId || activeIsGroup) return;
-    if (evoFetchContactProfileMut.isPending) return;
-
-    const cid = canonicalWhatsappChatId(chatId);
-    const already = contactPanelAutoFetchKeyRef.current;
-    if (already === cid) return;
-
-    const cachedName = activePreview?.providerCachedName ?? null;
-    const liveName = whatsappContactDisplayName(activeContactMeta?.contact ?? undefined);
-    const hasName = hasMeaningfulName(cachedName) || hasMeaningfulName(liveName);
-    const hasPic = Boolean(
-      (activePreview?.cachedProfilePictureUrl ?? '').trim() ||
-        (activeContactMeta?.profilePictureUrl ?? '').trim()
-    );
-    if (hasName && hasPic) {
-      contactPanelAutoFetchKeyRef.current = cid;
-      return;
-    }
-
-    const digits = waJidToDigits(cid);
-    if (!digits || digits.length < 8) return;
-    contactPanelAutoFetchKeyRef.current = cid;
-    evoFetchContactProfileMut.mutate(digits);
-  }, [
-    contactPanelOpen,
-    chatId,
-    activeIsGroup,
-    activePreview?.providerCachedName,
-    activePreview?.cachedProfilePictureUrl,
-    activeContactMeta?.contact,
-    activeContactMeta?.profilePictureUrl,
-    evoFetchContactProfileMut,
-  ]);
+  // Nota: removemos o autofetch ao abrir o painel para evitar chamadas “surpresa” à Evolution.
+  // O usuário pode clicar em “Buscar perfil” quando quiser atualizar.
 
   const evoFetchBusinessProfileMut = useMutation({
     mutationFn: async (number: string) => {
@@ -3326,12 +5174,16 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const sendMut = useMutation({
     mutationFn: async (text: string) => {
-      const r = await sendWhatsappMessage(chatId, text);
+      const prefix = replyToMessage
+        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
+        : '';
+      const r = await sendWhatsappMessage(outboundChatId, `${prefix}${text}`);
       if (!r.success) throw new Error(r.error || 'Falha ao enviar');
       return r.data;
     },
     onSuccess: (data) => {
       setDraft('');
+      setReplyToMessage(null);
       if (data) mergeMessage(data);
     },
     onError: (e: Error) => {
@@ -3339,8 +5191,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  // Lê o draft via ref para não invalidar este callback a cada keystroke
+  // (o EmojiInput depende dele como prop `onSubmit`; recriar a cada tecla
+  // contribuía para o lag de digitação relatado).
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const handleSend = useCallback(() => {
-    const t = draft.trim();
+    const t = draftRef.current.trim();
     if (!t || sendMut.isPending || sendLockRef.current) return;
     sendLockRef.current = true;
     sendMut.mutate(t, {
@@ -3348,43 +5205,63 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         sendLockRef.current = false;
       },
     });
-  }, [draft, sendMut]);
+  }, [sendMut]);
 
   const rootClass =
     layout === 'full'
-      ? 'flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 border-y border-[#e9edef] bg-white shadow-none dark:border-dark-border dark:bg-[#111b21]'
-      : 'flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border border-[#d1d7db] bg-white shadow-[0_6px_18px_rgba(11,20,26,0.15)] dark:border-dark-border dark:bg-[#111b21]';
+      ? 'flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 border-y border-[#e9edef] bg-white shadow-none dark:border-dark-border dark:bg-[#161717]'
+      : 'flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border border-[#d1d7db] bg-white shadow-[0_6px_18px_rgba(11,20,26,0.15)] dark:border-dark-border dark:bg-[#161717]';
 
   const asideClass =
     layout === 'full'
-      ? 'flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#111b21] sm:w-[400px] sm:max-w-[40vw] sm:shrink-0'
-      : 'flex w-full max-w-[300px] shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#111b21] sm:max-w-[320px]';
+      ? 'flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] sm:w-[var(--wa-aside-w,408px)] sm:max-w-[60vw] sm:shrink-0'
+      : 'flex w-full max-w-[300px] shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] sm:max-w-[320px]';
 
   return (
     <div className={rootClass}>
       {/* Coluna esquerda — lista (estilo WhatsApp Web) */}
-      <aside className={`${asideClass} relative`}>
-        <div className="flex h-[60px] shrink-0 items-center gap-2 bg-[#f0f2f5] px-2 dark:bg-[#202c33] sm:gap-3 sm:px-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-sm font-medium text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
-            CRM
+      <aside
+        ref={asideRef}
+        className={`${asideClass} relative`}
+        style={
+          layout === 'full'
+            ? ({ ['--wa-aside-w' as string]: `${asideWidth}px` } as React.CSSProperties)
+            : undefined
+        }
+      >
+        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#161717]">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <h1 className="truncate text-[19px] font-bold tracking-tight text-[#1daa61] dark:text-white">WhatsApp</h1>
+            {totalUnreadMsgs > 0 ? (
+              <span
+                className="inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-full bg-[#25d366] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm"
+                title={`${totalUnreadMsgs} mensagem(ns) não lida(s) no total`}
+              >
+                {totalUnreadMsgs > 99 ? '99+' : totalUnreadMsgs}
+              </span>
+            ) : null}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">Conversas</p>
-            <p className="truncate text-[12px] text-[#667781]">
-              S3E · WhatsApp
-              {totalUnreadMsgs > 0 ? (
-                <span className="ml-2 inline-flex min-w-[1.35rem] items-center justify-center rounded-full bg-[#25d366] px-1.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
-                  {totalUnreadMsgs > 99 ? '99+' : totalUnreadMsgs}
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <div className="relative shrink-0" ref={sidebarMenuRef}>
+          <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+            <button
+              type="button"
+              title="Nova conversa"
+              aria-expanded={newPhoneComposerOpen}
+              aria-controls="wa-sidebar-new-phone"
+              onClick={() => {
+                setNewPhoneComposerOpen(true);
+                setSidebarMenuOpen(false);
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#f7f5f3] dark:text-[#aebac1] dark:hover:bg-white/10"
+              aria-label="Nova conversa"
+            >
+              <NewChatSquareIcon className="h-[22px] w-[22px]" />
+            </button>
+            <div className="relative shrink-0" ref={sidebarMenuRef}>
             <button
               type="button"
               title="Menu"
               onClick={() => setSidebarMenuOpen((o) => !o)}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-[#54656f] hover:bg-black/10 dark:text-[#8696a0] dark:hover:bg-white/10"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#aebac1] dark:hover:bg-white/10"
               aria-expanded={sidebarMenuOpen}
               aria-haspopup="menu"
               aria-label="Menu da lista de conversas"
@@ -3399,100 +5276,145 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  onClick={() => {
+                    window.open(
+                      connectionStatus?.dashboardUrl || FALLBACK_WHATSAPP_PROVIDER_DASHBOARD,
+                      '_blank',
+                      'noopener,noreferrer'
+                    );
+                    setSidebarMenuOpen(false);
+                  }}
+                >
+                  <span
+                    className={`flex h-2.5 w-2.5 shrink-0 rounded-full ${connectionStatus?.connected ? 'bg-[#25d366]' : 'bg-red-500'}`}
+                    aria-hidden
+                  />
+                  Painel do provedor (sessão)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  onClick={() => {
+                    setQrModalOpen(true);
+                    setSidebarMenuOpen(false);
+                  }}
+                >
+                  <QrCode className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
+                  QR code da sessão
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  onClick={() => {
+                    setContactsPanelOpen(true);
+                    setCheckPhoneResult(null);
+                    setSidebarMenuOpen(false);
+                  }}
+                >
+                  <Contact className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
+                  Agenda de contatos
+                </button>
+                <div className="my-1 border-t border-[#e9edef] dark:border-[#2a3942]" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Para criar um grupo, use o WhatsApp no telefone ou o painel do provedor.');
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    👥
-                  </span>
+                  <UserPlus className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Novo grupo
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     setArchivedPanelOpen(true);
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    📦
-                  </span>
+                  <Archive className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Arquivadas
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Mensagens favoritas ainda não estão disponíveis no CRM.');
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    ⭐
-                  </span>
+                  <Star className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Mensagens favoritas
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     toast.message('Seleção em massa em breve.');
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    ☑️
-                  </span>
+                  <SquareCheck className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Selecionar conversas
                 </button>
                 <button
                   type="button"
                   role="menuitem"
                   disabled={markAllReadMut.isPending}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 disabled:opacity-50 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 disabled:opacity-50 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     markAllReadMut.mutate();
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    ✓✓
-                  </span>
+                  <CheckCheck className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Marcar todas como lidas
                 </button>
                 <div className="my-1 border-t border-[#e9edef] dark:border-[#2a3942]" role="separator" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={() => {
                     setProfilePanelOpen(true);
                     setSidebarMenuOpen(false);
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    👤
-                  </span>
+                  <User className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Meu perfil
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#111b21] hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/5"
                   onClick={async () => {
                     setSidebarMenuOpen(false);
                     try {
                       const r = await deleteWhatsappContactCacheAll();
                       if (r.success) {
-                        toast.success(`Cache de nomes limpo (${r.data?.deleted ?? 0} entradas removidas)`);
+                        const deleted = r.data?.deleted ?? 0;
+                        const rebuilt = r.data?.rebuilt ?? 0;
+                        toast.success(
+                          rebuilt > 0
+                            ? `Cache limpo (${deleted} apagados). ${rebuilt} entradas regravadas a partir do CRM (Cliente/Lead).`
+                            : `Cache do WhatsApp apagado (${deleted} registros). Nada foi regravado na hora — se o nome continuar errado, verifique o cadastro Cliente/Lead ou o nome que o WhatsApp envia ao chegar mensagem.`
+                        );
+                        // Recarrega lista e meta do chat ativo para evitar “vazar” estado antigo após clear.
                         void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+                        if (chatId) {
+                          void queryClient.invalidateQueries({ queryKey: ['whatsapp-contact-meta', chatId] });
+                        }
+                        // Remove cache em memória do React Query (base key) para não reaproveitar payload antigo.
+                        queryClient.removeQueries({ queryKey: ['whatsapp-contact-meta'] });
                       } else {
                         toast.error('Erro ao limpar cache');
                       }
@@ -3501,197 +5423,336 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     }
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    🗑️
-                  </span>
+                  <Trash2 className={WA_SIDEBAR_MENU_ICON} strokeWidth={1.75} aria-hidden />
                   Limpar cache de nomes
                 </button>
                 <button
                   type="button"
                   role="menuitem"
                   disabled={logoutMut.isPending}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[14px] text-[#b91c1c] hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 disabled:opacity-50"
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-[14px] text-[#b91c1c] hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30 disabled:opacity-50"
                   onClick={() => {
                     setSidebarMenuOpen(false);
                     handleWhatsappProviderLogout();
                   }}
                 >
-                  <span className="text-base" aria-hidden>
-                    🚪
-                  </span>
+                  <LogOut className="h-[18px] w-[18px] shrink-0 text-current" strokeWidth={1.75} aria-hidden />
                   Desconectar WhatsApp
                 </button>
               </div>
             ) : null}
+            </div>
           </div>
-          <button
-            type="button"
-            title="Agenda de contatos (GET /api/contacts/all no provedor)"
-            onClick={() => {
-              setContactsPanelOpen(true);
-              setCheckPhoneResult(null);
-            }}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#00a884] transition hover:bg-black/10 dark:hover:bg-white/10"
-            aria-label="Ver contatos WhatsApp"
-          >
-            <ContactsBookIcon className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            title="Ler QR code da sessão WhatsApp"
-            onClick={() => setQrModalOpen(true)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#00a884] transition hover:bg-black/10 dark:hover:bg-white/10"
-            aria-label="Abrir QR code da sessão WhatsApp"
-          >
-            <span className="text-base leading-none" aria-hidden>
-              QR
-            </span>
-          </button>
-          <button
-            type="button"
-            title={
-              connectionStatus?.connected
-                ? 'WhatsApp conectado (sessão ativa) — abrir painel do provedor'
-                : 'WhatsApp desconectado — clique para abrir o painel e ler o QR code'
-            }
-            onClick={() =>
-              window.open(connectionStatus?.dashboardUrl || FALLBACK_WHATSAPP_PROVIDER_DASHBOARD, '_blank', 'noopener,noreferrer')
-            }
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-white shadow-sm transition hover:opacity-90 dark:border-[#2a3942] ${
-              connectionStatus?.connected ? 'bg-[#25d366]' : 'bg-red-500'
-            }`}
-            aria-label={connectionStatus?.connected ? 'Abrir painel do provedor (conectado)' : 'Abrir painel do provedor (desconectado)'}
-          >
-            <span className="h-2.5 w-2.5 rounded-full bg-white/90" aria-hidden />
-          </button>
         </div>
-        <div className="shrink-0 space-y-2 border-b border-[#e9edef] px-3 py-2 dark:border-[#2a3942]">
+        <div className="shrink-0 space-y-2 border-b border-[#e9edef] bg-white px-3 py-2 dark:border-[#2a3942] dark:bg-[#161717]">
           <div className="relative" role="search">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] opacity-50">
-              🔍
+            <span className="pointer-events-none absolute left-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#8696a0] dark:text-[#8696a0]">
+              <Search className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} aria-hidden />
             </span>
             <input
               type="search"
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
-              placeholder="Pesquisar conversa (nome, número ou última mensagem)"
+              placeholder="Pesquisar ou começar uma nova conversa"
               autoComplete="off"
-              className="w-full rounded-lg border border-transparent bg-[#f0f2f5] py-2 pl-9 pr-3 text-[14px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:bg-[#2a3942] dark:text-[#e9edef]"
+              className="w-full rounded-full border border-transparent bg-[#f7f5f3] py-2.5 pl-10 pr-4 text-[14px] text-[#111b21] shadow-none placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:bg-[#202c33] dark:text-[#e9edef]"
             />
           </div>
-          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
-            <input
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              value={openPhoneDraft}
-              onChange={(e) => setOpenPhoneDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleOpenByPhone();
-                }
-              }}
-              placeholder="Novo: DDD + número (sem cadastrar lead)"
-              className="min-w-0 flex-1 rounded-lg border border-[#d1d7db] bg-white px-2.5 py-2 text-[13px] text-[#111b21] placeholder:text-[#8696a0] focus:border-[#00a884] focus:outline-none focus:ring-1 focus:ring-[#00a884] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-            />
+          <div
+            ref={filterTabsRef}
+            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden select-none cursor-grab active:cursor-grabbing touch-pan-y"
+            role="tablist"
+            aria-label="Filtros da lista de conversas (arraste lateralmente para navegar)"
+            onPointerDown={handleFilterTabsPointerDown}
+            onPointerMove={handleFilterTabsPointerMove}
+            onPointerUp={handleFilterTabsPointerEnd}
+            onPointerCancel={handleFilterTabsPointerEnd}
+            onClickCapture={(e) => {
+              if (filterTabsJustDraggedRef.current) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            }}
+          >
+            {(
+              [
+                { id: 'all' as const, label: 'Tudo' },
+                {
+                  id: 'unread' as const,
+                  label: 'Não lidas',
+                  count: sidebarFilterCounts.unreadChats,
+                },
+                { id: 'favorites' as const, label: 'Favoritas', count: sidebarFilterCounts.favoriteChats },
+                { id: 'groups' as const, label: 'Grupos', count: sidebarFilterCounts.groupChats },
+              ] as const
+            ).map((tab) => {
+              const active = chatSidebarFilter === tab.id;
+              const count = 'count' in tab ? tab.count : 0;
+              const showCount = typeof count === 'number' && count > 0 && tab.id !== 'all';
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setChatSidebarFilter(tab.id)}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium transition ${
+                    active
+                      ? 'bg-[#00a884] text-white shadow-sm'
+                      : 'bg-[#f7f5f3] text-[#54656f] hover:bg-[#edeae7] dark:bg-[#202c33] dark:text-[#e9edef] dark:hover:bg-[#2a3942]'
+                  }`}
+                >
+                  {tab.label}
+                  {showCount ? ` ${count}` : ''}
+                </button>
+              );
+            })}
+            {chatLabels.map((label) => {
+              const filterId = `label:${label.id}`;
+              const active = chatSidebarFilter === filterId;
+              return (
+                <button
+                  key={label.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setChatSidebarFilter(filterId)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setLabelEditTarget(label);
+                    setLabelEditOpen(true);
+                  }}
+                  onDoubleClick={() => {
+                    setLabelEditTarget(label);
+                    setLabelEditOpen(true);
+                  }}
+                  title={`${label.nome} — duplo-clique para editar`}
+                  style={
+                    active && label.cor
+                      ? { backgroundColor: label.cor, color: '#fff', borderColor: label.cor }
+                      : undefined
+                  }
+                  className={`flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-[13px] font-medium transition ${
+                    active
+                      ? 'bg-[#00a884] text-white shadow-sm'
+                      : 'border-[#e9edef] bg-[#f7f5f3] text-[#54656f] hover:bg-[#edeae7] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#e9edef] dark:hover:bg-[#2a3942]'
+                  }`}
+                >
+                  {label.emoji ? <span aria-hidden>{label.emoji}</span> : null}
+                  <span className="truncate">{label.nome}</span>
+                  {label.total > 0 ? <span className="opacity-70"> · {label.total}</span> : null}
+                </button>
+              );
+            })}
             <button
               type="button"
-              onClick={handleOpenByPhone}
-              className="shrink-0 rounded-lg bg-[#00a884] px-3 py-2 text-[13px] font-medium text-white hover:bg-[#008f6f]"
+              title="Criar nova lista"
+              aria-label="Criar nova lista"
+              onClick={() => {
+                setLabelEditTarget(null);
+                setLabelEditOpen(true);
+              }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-[#8696a0]/50 text-[#8696a0] hover:bg-[#f7f5f3] dark:hover:bg-white/10"
             >
-              Abrir conversa
+              <span className="text-lg leading-none">+</span>
             </button>
           </div>
         </div>
-        <div className="wa-scroll flex-1 overflow-y-auto">
+        <div className="wa-scroll flex-1 overflow-y-auto bg-white px-1.5 dark:bg-[#161717]">
           {chatList.length === 0 && (
             <p className="p-4 text-center text-[13px] text-[#667781]">Nenhuma conversa sincronizada ainda.</p>
           )}
-          {chatList.length > 0 && filteredChats.length === 0 && (
-            <p className="p-4 text-center text-[13px] text-[#667781]">
-              Nenhuma conversa corresponde a &quot;{chatSearch.trim()}&quot;.
-            </p>
-          )}
-          {filteredChats.map((c) => {
+          {chatList.length > 0 && filteredChats.length === 0 ? (
+            <div className="p-4 text-center text-[13px] text-[#667781] dark:text-[#8696a0]">
+              <p>
+                {chatSearch.trim()
+                  ? `Nenhuma conversa corresponde a "${chatSearch.trim()}".`
+                  : chatSidebarFilter === 'unread'
+                    ? 'Nenhuma conversa não lida.'
+                    : chatSidebarFilter === 'favorites'
+                      ? 'Nenhuma conversa favorita.'
+                      : chatSidebarFilter === 'groups'
+                        ? 'Nenhum grupo nesta lista.'
+                        : chatSidebarFilter.startsWith('label:')
+                          ? 'Esta lista ainda está vazia. Clique no nome dela para adicionar conversas.'
+                          : 'Nenhuma conversa encontrada.'}
+              </p>
+              {chatSidebarFilter.startsWith('label:') ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = chatSidebarFilter.slice('label:'.length);
+                    const label = chatLabels.find((l) => l.id === id);
+                    if (label) {
+                      setLabelEditTarget(label);
+                      setLabelEditOpen(true);
+                    }
+                  }}
+                  className="mt-2 rounded-full bg-[#00a884] px-3 py-1 text-[12px] font-medium text-white hover:bg-[#008f6f]"
+                >
+                  Adicionar conversas
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {sortedFilteredChats.map((c) => {
             const isG = isWhatsappGroupChatId(c.chatId);
             const w = !isG ? findWhatsappContactInRows(providerContactRows, c.chatId) : undefined;
             const wg = isG ? findWhatsappGroupInRows(providerGroupRows, c.chatId) : undefined;
-            const { listTitle, phone, showPhoneSub, avatarLabel, headerForChat } = resolveChatPreviewLabels(c, w, wg);
+            const { listTitle, avatarLabel, headerForChat } = resolveChatPreviewLabels(c, w, wg);
             const active = canonicalWhatsappChatId(c.chatId) === canonicalWhatsappChatId(chatId);
             const unread = (c.unreadCount ?? 0) > 0;
             const uCount = c.unreadCount ?? 0;
+            const canonCid = canonicalWhatsappChatId(c.chatId);
+            const pinned = !!c.pinned;
+            const fav = !!c.favorite;
+            const lastPreview = repairUtf8Mojibake(c.lastContent);
             const rowPic =
               c.cachedProfilePictureUrl ||
               (c.chatId === chatId ? activeContactMeta?.profilePictureUrl : null) ||
               profileUrlByChatId.get(c.chatId) ||
               null;
             return (
-              <button
+              <div
                 key={c.chatId}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   onNavigateChat?.(canonicalWhatsappChatId(c.chatId), headerForChat);
                 }}
-                className={`flex w-full gap-3 border-b border-[#f0f2f5] px-3 py-3 text-left transition-colors dark:border-[#2a3942] ${
-                  active ? 'bg-[#f0f2f5] dark:bg-[#2a394275]' : 'hover:bg-[#f5f6f6] dark:hover:bg-[#202c33]'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onNavigateChat?.(canonicalWhatsappChatId(c.chatId), headerForChat);
+                  }
+                }}
+                className={`group relative my-0.5 flex min-h-[4.5rem] w-full cursor-pointer items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-[#111b21] ${
+                  active ? 'bg-[#edeae7] dark:bg-[#2a3942]' : 'hover:bg-[#f7f5f3] dark:hover:bg-[#2a3942]'
                 }`}
               >
-                <ContactAvatar imageUrl={rowPic} label={avatarLabel} size="list">
-                  {unread ? (
+                <ContactAvatar imageUrl={rowPic} label={avatarLabel} size="list" />
+                <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center gap-1">
+                  <div className="flex items-center justify-between gap-2">
                     <span
-                      className="absolute -bottom-0.5 -right-0.5 flex min-h-[1.15rem] min-w-[1.15rem] items-center justify-center rounded-full border-2 border-white bg-[#25d366] px-1 text-[10px] font-bold leading-none text-white dark:border-[#111b21]"
-                      aria-label={`${uCount} não lidas`}
-                    >
-                      {uCount > 99 ? '99+' : uCount}
-                    </span>
-                  ) : null}
-                </ContactAvatar>
-                <div className="min-w-0 flex-1 border-b border-transparent pt-0.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span
-                      className={`truncate text-[16px] text-[#111b21] dark:text-[#e9edef] ${
-                        unread ? 'font-bold text-[#111b21] dark:text-white' : ''
+                      className={`min-w-0 truncate text-[16px] leading-tight text-[#111b21] dark:text-[#e9edef] ${
+                        unread ? 'font-bold text-[#111b21] dark:text-white' : 'font-medium'
                       }`}
                     >
                       {listTitle}
                     </span>
-                    <span
-                      className={`shrink-0 text-[11px] tabular-nums ${unread ? 'font-semibold text-[#25d366]' : 'text-[#667781]'}`}
-                    >
-                      {formatListTime(c.lastAt)}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {pinned ? (
+                        <span className="text-[12px] leading-none text-[#8696a0] dark:text-[#667781]" title="Fixada" aria-hidden>
+                          📌
+                        </span>
+                      ) : null}
+                      <span
+                        className={`text-[11px] tabular-nums leading-none ${
+                          unread ? 'font-semibold text-[#25d366]' : 'font-normal text-[#667781] dark:text-[#8696a0]'
+                        }`}
+                      >
+                        {formatListTime(c.lastAt)}
+                      </span>
+                    </div>
                   </div>
-                  {showPhoneSub ? (
-                    <p className="truncate text-[12px] leading-snug text-[#8696a0] dark:text-[#8696a0]">{phone}</p>
-                  ) : null}
-                  <p
-                    className={`mt-0.5 truncate text-[14px] ${
-                      unread ? 'font-semibold text-[#111b21] dark:text-[#e9edef]' : 'text-[#667781] dark:text-[#8696a0]'
-                    }`}
-                  >
-                    {c.lastFromMe ? (
-                      <>
-                        <span className="inline-flex translate-y-[1px]">
-                          <OutboundAckIcon ack={c.lastAck} />
-                        </span>{' '}
-                        Você:{' '}
-                      </>
+                  <div className="flex items-end justify-between gap-2">
+                    <p
+                      className={`min-w-0 flex-1 truncate text-[14px] leading-snug ${
+                        unread ? 'font-medium text-[#111b21] dark:text-[#e9edef]' : 'font-normal text-[#667781] dark:text-[#8696a0]'
+                      }`}
+                    >
+                      {c.lastFromMe ? (
+                        <>
+                          <span className="inline-flex translate-y-[1px]">
+                            <OutboundAckIcon ack={c.lastAck} />
+                          </span>{' '}
+                          Você:{' '}
+                        </>
+                      ) : null}
+                      {lastPreview.slice(0, 52)}
+                      {lastPreview.length > 52 ? '…' : ''}
+                    </p>
+                    {unread ? (
+                      <span
+                        className="flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-[#25d366] px-1.5 text-[11px] font-semibold tabular-nums leading-none text-white"
+                        aria-label={`${uCount} não lidas`}
+                      >
+                        {uCount > 99 ? '99+' : uCount}
+                      </span>
                     ) : null}
-                    {c.lastContent.slice(0, 48)}
-                    {c.lastContent.length > 48 ? '…' : ''}
-                  </p>
+                  </div>
                 </div>
-              </button>
+
+                {/* Indicadores (favorito — fixado já aparece ao lado do horário) */}
+                <div className="absolute right-11 top-1/2 z-0 hidden -translate-y-1/2 items-center gap-1.5 text-[12px] text-[#667781] group-hover:flex dark:text-[#8696a0]">
+                  {fav ? <span title="Conversa favorita">⭐</span> : null}
+                </div>
+
+                {/* Setinha + dropdown */}
+                <div className="absolute right-2 top-1/2 z-10 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[#54656f] hover:bg-black/10 dark:text-[#a9b4ba] dark:hover:bg-white/10"
+                        aria-label="Ações da conversa"
+                        title="Ações"
+                      >
+                        <ChevronDownIcon className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent sideOffset={6} align="end" className="min-w-[220px]">
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          if (!window.confirm('Arquivar esta conversa?')) return;
+                          onNavigateChat?.(canonCid, headerForChat);
+                          archiveConversationMut.mutate();
+                        }}
+                        disabled={archiveConversationMut.isPending}
+                      >
+                        Arquivar conversa
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          pinConversationMut.mutate({ chatId: canonCid, pinned: !pinned });
+                        }}
+                      >
+                        {pinned ? 'Desafixar conversa' : 'Fixar conversa'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          favoriteConversationMut.mutate({ chatId: canonCid, favorite: !fav });
+                        }}
+                      >
+                        {fav ? 'Desfavoritar conversa' : 'Favoritar conversa'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setDeleteConfirm({ chatId: canonCid, label: headerForChat });
+                        }}
+                        disabled={deleteConversationMut.isPending}
+                        className="text-red-700 focus:text-red-700 dark:text-red-400 dark:focus:text-red-400"
+                      >
+                        Apagar conversa
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
             );
           })}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-2 py-2 dark:border-[#2a3942] dark:bg-[#202c33]">
+        <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-white px-2 py-2 dark:border-[#2a3942] dark:bg-[#202c33]">
           <button
             type="button"
             onClick={() => setProfilePanelOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-black/5 dark:hover:bg-white/5"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-[#f7f5f3] dark:hover:bg-white/5"
             title="Meu perfil (WhatsApp e CRM)"
           >
             {sessionProfilePayload?.profilePictureUrl ? (
@@ -3739,7 +5800,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </p>
               ) : null}
 
-              <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-[#e9edef] bg-[#f8f9fa] p-3 dark:border-[#2a3942] dark:bg-[#111b21]">
+              <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-[#e9edef] bg-[#f8f9fa] p-3 dark:border-[#2a3942] dark:bg-[#161717]">
                 {loadingConnectionQr ? (
                   <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
                 ) : connectionQr?.base64 ? (
@@ -3781,7 +5842,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {archivedPanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#111b21]">
+          <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
             <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
               <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
                 Arquivadas
@@ -3812,7 +5873,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   const isG = isWhatsappGroupChatId(c.chatId);
                   const w = !isG ? findWhatsappContactInRows(providerContactRows, c.chatId) : undefined;
                   const wg = isG ? findWhatsappGroupInRows(providerGroupRows, c.chatId) : undefined;
-                  const { listTitle, phone, showPhoneSub, headerForChat } = resolveChatPreviewLabels(c, w, wg);
+                  const { listTitle, headerForChat } = resolveChatPreviewLabels(c, w, wg);
                   return (
                     <div
                       key={c.chatId}
@@ -3827,10 +5888,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         className="min-w-0 flex-1 rounded-lg px-2 py-1.5 text-left hover:bg-white dark:hover:bg-[#202c33]"
                       >
                         <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">{listTitle}</p>
-                        {showPhoneSub ? (
-                          <p className="truncate text-[12px] text-[#8696a0]">{phone}</p>
-                        ) : null}
-                        <p className="mt-0.5 truncate text-[13px] text-[#667781]">{c.lastContent.slice(0, 56)}</p>
+                        <p className="mt-0.5 truncate text-[13px] text-[#667781] dark:text-[#8696a0]">
+                          {repairUtf8Mojibake(c.lastContent).slice(0, 56)}
+                        </p>
                       </button>
                       <button
                         type="button"
@@ -3848,7 +5908,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {profilePanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21]">
+          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
             <div className="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
               <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">Perfil</h2>
               <button
@@ -4106,7 +6166,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {contactPanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21]">
+          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
             <div className="sticky top-0 flex h-12 shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
               <button
                 type="button"
@@ -4180,9 +6240,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   disabled={evoFetchContactProfileMut.isPending}
-                  onClick={() => {
-                    const digits = waJidToDigits(canonicalWhatsappChatId(chatId));
-                    evoFetchContactProfileMut.mutate(digits);
+                  onClick={async () => {
+                    try {
+                      const r = await fetchWhatsappProfileFetchTarget(chatId);
+                      if (!r.success) {
+                        toastWhatsappApiError(r, { titleFallback: 'Não foi possível resolver o JID para buscar o perfil' });
+                        return;
+                      }
+                      const t = r.data?.target?.trim();
+                      if (!t) {
+                        toast.error('Não foi possível resolver o JID para buscar o perfil');
+                        return;
+                      }
+                      evoFetchContactProfileMut.mutate(t);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Erro ao resolver JID do contato');
+                    }
                   }}
                   className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
                 >
@@ -4191,9 +6264,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   disabled={evoFetchBusinessProfileMut.isPending}
-                  onClick={() => {
-                    const digits = waJidToDigits(canonicalWhatsappChatId(chatId));
-                    evoFetchBusinessProfileMut.mutate(digits);
+                  onClick={async () => {
+                    try {
+                      const r = await fetchWhatsappProfileFetchTarget(chatId);
+                      if (!r.success) {
+                        toastWhatsappApiError(r, { titleFallback: 'Não foi possível resolver o JID para buscar o perfil' });
+                        return;
+                      }
+                      const t = r.data?.target?.trim();
+                      if (!t) {
+                        toast.error('Não foi possível resolver o JID para buscar o perfil');
+                        return;
+                      }
+                      evoFetchBusinessProfileMut.mutate(t);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Erro ao resolver JID do contato');
+                    }
                   }}
                   className="rounded-lg border border-[#d1d7db] px-3 py-2 text-[12px] font-medium text-[#54656f] hover:bg-black/5 dark:border-[#2a3942] dark:text-[#8696a0] dark:hover:bg-white/10 disabled:opacity-50"
                 >
@@ -4253,7 +6339,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     {preview.length > 0 ? (
                       <div className="grid grid-cols-4 gap-2">
                         {preview.map((m) => {
-                          const fname = m.mediaFilename || m.fileName || 'imagem';
+                          const fname = repairUtf8Mojibake(m.mediaFilename || m.fileName || 'imagem');
                           const legacy = m.mediaUrl ? whatsappProviderMediaProxyUrl(m.mediaUrl, fname) + tokenQueryString() : null;
                           const byId = m.hasMedia ? whatsappMessageMediaInlineUrl(m.id) : null;
                           const src = byId || legacy;
@@ -4303,14 +6389,31 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {groupPanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#111b21]">
+          <div className="absolute inset-0 z-50 flex min-h-0 flex-col overflow-y-auto bg-[#f0f2f5] dark:bg-[#161717]">
             <div className="sticky top-0 flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
               <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">Gerenciar grupo</h2>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  disabled={refreshGroupInfoMut.isPending}
-                  onClick={() => refreshGroupInfoMut.mutate()}
+                      disabled={refreshGroupInfoMut.isPending}
+                      onClick={() => {
+                        const cid = canonicalWhatsappChatId(chatId);
+                        const now = Date.now();
+                        const backoffKey = `wa-group-meta:${cid}`;
+                        const backoffRemaining = getBackoffRemainingMs(backoffKey, now);
+                        if (backoffRemaining > 0) {
+                          toast.message(`Aguarde ${(backoffRemaining / 1000).toFixed(0)}s (rate-limit) para tentar novamente.`);
+                          return;
+                        }
+                        const last = lastGroupMetaFetchAtRef.current.get(cid) ?? 0;
+                        const remaining = GROUP_META_COOLDOWN_MS - (now - last);
+                        if (remaining > 0) {
+                          toast.message(`Aguarde ${(remaining / 1000).toFixed(0)}s para atualizar dados do grupo novamente.`);
+                          return;
+                        }
+                        lastGroupMetaFetchAtRef.current.set(cid, now);
+                        refreshGroupInfoMut.mutate();
+                      }}
                   className="rounded-lg px-3 py-1.5 text-[12px] font-medium text-[#00a884] hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/5"
                 >
                   {refreshGroupInfoMut.isPending ? 'Atualizando…' : 'Atualizar'}
@@ -4335,7 +6438,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </p>
               <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[#667781] dark:text-[#8696a0]">
                 <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
-                  {groupInfo?.participants.length ?? 0} membros
+                      {(groupMembersQuery.data?.length ?? groupInfo?.participants.length ?? 0)} membros
                 </span>
                 {typeof groupInfo?.announce === 'boolean' ? (
                   <span className="rounded-full bg-black/5 px-2 py-1 dark:bg-white/10">
@@ -4482,6 +6585,49 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               <p className="mt-1 text-[11px] text-[#667781] dark:text-[#8696a0]">
                 Para adicionar/remover/promover/rebaixar, informe números com DDI (ex.: 5511999999999).
               </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={groupMembersQuery.isFetching}
+                  onClick={async () => {
+                    const cid = canonicalWhatsappChatId(chatId);
+                    const now = Date.now();
+                    const backoffKey = `wa-group-members:${cid}`;
+                    const backoffRemaining = getBackoffRemainingMs(backoffKey, now);
+                    if (backoffRemaining > 0) {
+                      toast.message(`Aguarde ${(backoffRemaining / 1000).toFixed(0)}s (rate-limit) para buscar membros novamente.`);
+                      return;
+                    }
+                    const last = lastGroupMembersFetchAtRef.current.get(cid) ?? 0;
+                    const remaining = GROUP_MEMBERS_COOLDOWN_MS - (now - last);
+                    if (remaining > 0) {
+                      toast.message(`Aguarde ${(remaining / 1000).toFixed(0)}s para buscar membros novamente.`);
+                      return;
+                    }
+                    lastGroupMembersFetchAtRef.current.set(cid, now);
+                    const r = await groupMembersQuery.refetch();
+                    if (r.error) {
+                      const low = String((r.error as any)?.message || r.error).toLowerCase();
+                      if (low.includes('rate-overlimit') || low.includes('429') || low.includes('too many')) {
+                        const { waitMs } = registerRateLimitBackoff(backoffKey, {
+                          baseMs: GROUP_BACKOFF_BASE_MS,
+                          maxMs: GROUP_BACKOFF_MAX_MS,
+                          now,
+                        });
+                        toast.message(`Limite do WhatsApp atingido. Tente novamente após ${(waitMs / 1000).toFixed(0)}s.`);
+                      }
+                    } else {
+                      registerBackoffSuccess(backoffKey);
+                    }
+                  }}
+                  className="rounded-lg border border-[#00a884] px-3 py-2 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10 disabled:opacity-50"
+                >
+                  {groupMembersQuery.isFetching ? 'Buscando…' : 'Buscar membros'}
+                </button>
+                <span className="text-[11px] text-[#667781] dark:text-[#8696a0]">
+                  (somente quando necessário — evita rate-limit)
+                </span>
+              </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <select
                   value={groupMembersAction}
@@ -4510,8 +6656,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 placeholder={'5511999999999\n5511888888888'}
               />
               <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-[#e9edef] dark:border-[#2a3942]">
-                {groupInfo?.participants.length ? (
-                  groupInfo.participants.map((p) => (
+                {(groupMembersQuery.data?.length ?? groupInfo?.participants.length ?? 0) > 0 ? (
+                  (groupMembersQuery.data?.length ? groupMembersQuery.data : groupInfo?.participants || []).map((p) => (
                     <div
                       key={p.id}
                       className="flex items-center justify-between border-b border-[#f0f2f5] px-3 py-2 text-[12px] last:border-b-0 dark:border-[#2a3942]"
@@ -4598,7 +6744,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         ) : null}
 
         {contactsPanelOpen ? (
-          <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#111b21]">
+          <div className="absolute inset-0 z-50 flex min-h-0 flex-col bg-[#f0f2f5] dark:bg-[#161717]">
             <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
               <h2 className="truncate text-[15px] font-semibold text-[#111b21] dark:text-[#e9edef]">
                 Agenda de contatos
@@ -4612,20 +6758,32 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </button>
             </div>
             <p className="shrink-0 border-b border-[#e9edef] px-3 py-2 text-[11px] leading-snug text-[#667781] dark:border-[#2a3942] dark:text-[#8696a0]">
-              Dados do provedor (<code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">GET /api/contacts/all</code>
-              ). No motor NOWEB é necessário ter a <strong>Store</strong> ativa para listar contatos. Antes de enviar para
-              número novo no Brasil, use a verificação abaixo (dígito 9). Consulte a documentação do seu provedor WhatsApp
-              para detalhes da API de contatos.
+              Lista completa via backend (<code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">GET …/whatsapp/provider-contacts</code>
+              ) e busca por nome/número em{' '}
+              <code className="rounded bg-black/5 px-1 text-[10px] dark:bg-white/10">GET …/whatsapp/provider-contacts/search</code>.
+              Os nomes no CRM continuam vindo das mensagens e do cache; aqui são os contatos salvos no aparelho (Evolution/WAHA).
+              No motor NOWEB mantenha a <strong>Store</strong> ativa. Para número novo no Brasil, use a verificação abaixo.
             </p>
             <div className="shrink-0 space-y-2 border-b border-[#e9edef] px-3 py-2 dark:border-[#2a3942]">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  disabled={contactsPanelLoading}
-                  onClick={() => void refetchContactsPanel()}
+                  disabled={agendaDisplayedLoading}
+                  onClick={async () => {
+                    setContactsPanelForceRefresh(true);
+                    try {
+                      if (debouncedAgendaSearch.length >= WHATSAPP_AGENDA_SEARCH_MIN_CHARS) {
+                        await refetchAgendaSearch();
+                      } else {
+                        await refetchContactsPanel();
+                      }
+                    } finally {
+                      setContactsPanelForceRefresh(false);
+                    }
+                  }}
                   className="rounded-lg bg-[#00a884] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-[#008f6f] disabled:opacity-50"
                 >
-                  {contactsPanelLoading ? 'Carregando…' : 'Atualizar lista'}
+                  {agendaDisplayedLoading ? 'Carregando…' : 'Atualizar lista'}
                 </button>
                 <label className="flex items-center gap-1 text-[12px] text-[#667781]">
                   Ordenar
@@ -4644,25 +6802,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     <option value="id-desc">ID decrescente</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-1 text-[12px] text-[#667781]">
-                  Limite
-                  <select
-                    value={contactsLimit}
-                    onChange={(e) => setContactsLimit(Number(e.target.value))}
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1 text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                  >
-                    <option value={100}>100</option>
-                    <option value={250}>250</option>
-                    <option value={500}>500</option>
-                    <option value={1000}>1000</option>
-                  </select>
-                </label>
               </div>
               <input
                 type="search"
-                value={contactsFilter}
-                onChange={(e) => setContactsFilter(e.target.value)}
-                placeholder="Filtrar nesta página (nome, JID, número)…"
+                value={contactsAgendaSearchInput}
+                onChange={(e) => setContactsAgendaSearchInput(e.target.value)}
+                placeholder={`Buscar na agenda (mín. ${WHATSAPP_AGENDA_SEARCH_MIN_CHARS} letras ou 2+ dígitos no número) — vazio lista todos`}
                 className="w-full rounded-lg border border-[#d1d7db] bg-white px-3 py-2 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
               />
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -4712,31 +6857,56 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               ) : null}
             </div>
             <div className="wa-scroll min-h-0 flex-1 overflow-y-auto">
-              {contactsPanelLoading && !contactsPanelRows.length ? (
+              {agendaDisplayedLoading && !agendaDisplayedRowsSorted.length ? (
                 <div className="flex justify-center py-12">
                   <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
                 </div>
               ) : null}
-              {!contactsPanelLoading && filteredContactsPanel.length === 0 ? (
+              {!agendaDisplayedLoading && agendaDisplayedRowsSorted.length === 0 ? (
                 <p className="p-4 text-center text-[13px] text-[#667781]">
-                  {contactsPanelRows.length === 0
-                    ? 'Nenhum contato retornado pelo provedor (confira sessão, motor e Store).'
-                    : 'Nenhum resultado para o filtro.'}
+                  {useAgendaServerSearch
+                    ? 'Nenhum contato encontrado para essa busca.'
+                    : agendaListFull.length === 0
+                      ? 'Nenhum contato retornado pelo provedor (confira sessão, motor e Store).'
+                      : 'Nenhum resultado.'}
                 </p>
               ) : null}
-              {filteredContactsPanel.map((row) => {
+              {agendaDisplayedRowsSorted.map((row) => {
                 const primary = whatsappContactDisplayName(row) || formatPhoneForDisplay(row.id);
-                const sub = [row.pushname, row.id !== primary ? row.id : '', row.number].filter(Boolean).join(' · ');
+                const rowIdLabel = String(row.id || '').toLowerCase().endsWith('@lid') ? '' : (row.id !== primary ? row.id : '');
+                const sub = [row.pushname, rowIdLabel, row.number].filter(Boolean).join(' · ');
+                const waDigits = agendaContactWhatsappDigits(row);
+                const waLine =
+                  waDigits.length >= 10
+                    ? formatPhoneForDisplay(`${waDigits.replace(/^\+/, '')}@c.us`)
+                    : row.number?.trim() || (String(row.id || '').toLowerCase().endsWith('@lid') ? 'ID interno (sem número na agenda)' : row.id);
                 const rowPic = contactPicByContactId.get(row.id) ?? null;
                 return (
                   <button
                     key={row.id}
                     type="button"
-                    onClick={() => {
-                      const numberDigits = (row.number || '').replace(/\D/g, '');
-                      const source = numberDigits.length >= 10 ? toWhatsappChatId(numberDigits) : row.id;
+                    onClick={async () => {
+                      const title = whatsappContactDisplayName(row) || formatPhoneForDisplay(row.id);
+                      if (waDigits.length >= 10) {
+                        try {
+                          const r = await fetchWhatsappResolveOpenChat(waDigits);
+                          if (r.success && r.data?.chatId) {
+                            onNavigateChat?.(canonicalWhatsappChatId(r.data.chatId), title);
+                            setContactsPanelOpen(false);
+                            if (!r.data.numberExists) {
+                              toast.message('Conversa aberta pelo número cadastrado.', {
+                                description: 'Se não enviar mensagem, confira o chip no aparelho.',
+                              });
+                            }
+                            return;
+                          }
+                        } catch {
+                          // fallback abaixo
+                        }
+                      }
+                      const source = waDigits.length >= 10 ? toWhatsappChatId(waDigits) : row.id;
                       const jid = canonicalWhatsappChatId(source);
-                      onNavigateChat?.(jid, whatsappContactDisplayName(row) || formatPhoneForDisplay(jid));
+                      onNavigateChat?.(jid, title);
                       setContactsPanelOpen(false);
                     }}
                     className="flex w-full gap-3 border-b border-[#e9edef] px-3 py-2.5 text-left transition-colors hover:bg-white dark:border-[#2a3942] dark:hover:bg-[#202c33]"
@@ -4762,6 +6932,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       {sub ? (
                         <span className="truncate text-[12px] text-[#667781] dark:text-[#8696a0]">{sub}</span>
                       ) : null}
+                      <span className="truncate font-mono text-[12px] text-[#00a884] dark:text-[#25d366]" title="Usado para abrir a conversa e enviar mensagem">
+                        WhatsApp: {waLine}
+                      </span>
                     </div>
                   </button>
                 );
@@ -4769,12 +6942,88 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </div>
           </div>
         ) : null}
+        <NovaConversaDrawer
+          open={newPhoneComposerOpen}
+          onClose={() => setNewPhoneComposerOpen(false)}
+          onOpenChat={(cid, label) => {
+            onNavigateChat?.(canonicalWhatsappChatId(cid), label);
+          }}
+          onContatoSalvo={() => {
+            // invalida a lista da página de Contatos S3E (se aberta em outra aba/tela)
+            queryClient.invalidateQueries({ queryKey: ['contatos-s3e'] });
+          }}
+          variant="panel-overlay"
+        />
+        <WhatsAppChatLabelEditDrawer
+          open={labelEditOpen}
+          onClose={() => setLabelEditOpen(false)}
+          initialLabel={labelEditTarget}
+          onSaved={(label) => {
+            queryClient.invalidateQueries({ queryKey: ['whatsapp-chat-labels'] });
+            // Se a lista atual foi deletada, volta para "Tudo".
+            if (
+              chatSidebarFilter === `label:${label.id}` &&
+              (label as { id: string }).id === '__deleted__'
+            ) {
+              setChatSidebarFilter('all');
+            }
+          }}
+          resolveChatTitle={(cid) =>
+            chatTitleByIdMemo.get(canonicalWhatsappChatId(cid)) || formatPhoneForDisplay(cid)
+          }
+          onPickChats={(currentChatIds) =>
+            new Promise<string[] | null>((resolve) => {
+              labelPickChatsResolverRef.current = resolve;
+              setLabelPickInitialIds(currentChatIds);
+              setLabelPickChatsOpen(true);
+            })
+          }
+        />
+        <WhatsAppChatLabelPickChatsDrawer
+          open={labelPickChatsOpen}
+          onClose={() => {
+            labelPickChatsResolverRef.current?.(null);
+            labelPickChatsResolverRef.current = null;
+            setLabelPickChatsOpen(false);
+          }}
+          initialSelected={labelPickInitialIds}
+          availableChats={selectableChatsForLabel}
+          onConfirm={(ids) => {
+            labelPickChatsResolverRef.current?.(ids);
+            labelPickChatsResolverRef.current = null;
+            setLabelPickChatsOpen(false);
+          }}
+        />
+
+        {layout === 'full' ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionar barra de conversas (arraste)"
+            title="Arraste para alargar a barra de conversas (duplo clique restaura)"
+            onPointerDown={handleAsideResizeStart}
+            onPointerMove={handleAsideResizeMove}
+            onPointerUp={handleAsideResizeEnd}
+            onPointerCancel={handleAsideResizeEnd}
+            onDoubleClick={() => setAsideWidth(WA_ASIDE_MIN_WIDTH)}
+            className={`group absolute -right-[3px] top-0 z-30 hidden h-full w-1.5 cursor-col-resize select-none touch-none sm:block ${
+              isResizingAside ? 'bg-[#00a884]/30' : 'hover:bg-[#00a884]/20'
+            }`}
+          >
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px transition-colors ${
+                isResizingAside ? 'bg-[#00a884]' : 'bg-transparent group-hover:bg-[#00a884]/70'
+              }`}
+            />
+          </div>
+        ) : null}
       </aside>
 
       {/* Coluna direita — conversa ativa */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#0b141a]">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#161717]">
         {!chatId ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-[#efeae2] px-6 text-center dark:bg-[#0b141a]">
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-[#efeae2] px-6 text-center dark:bg-[#161717]">
             <div className="text-5xl opacity-40" aria-hidden>
               💬
             </div>
@@ -4785,7 +7034,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           </div>
         ) : (
           <>
-            <header className="flex h-[60px] shrink-0 items-center gap-2 border-b border-[#e9edef] bg-[#f0f2f5] px-3 dark:border-[#2a3942] dark:bg-[#202c33]">
+            <header className="flex h-[60px] shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#161717]">
               <button
                 type="button"
                 onClick={() => {
@@ -4907,14 +7156,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       className="block w-full px-4 py-2.5 text-left text-[14px] text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          !window.confirm(
-                            'Apagar esta conversa no CRM e no WhatsApp? O histórico local será removido.'
-                          )
-                        ) {
-                          return;
-                        }
-                        deleteConversationMut.mutate();
+                        setChatMenuOpen(false);
+                        setDeleteConfirm({
+                          chatId: canonicalWhatsappChatId(chatId),
+                          label: headerPrimary || formatPhoneForDisplay(chatId) || chatId,
+                        });
                       }}
                     >
                       Apagar conversa
@@ -4952,6 +7198,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               )}
             </header>
 
+            <div
+              className="relative flex min-h-0 flex-1 flex-col"
+              onDragOverCapture={handleChatFileDragOverCapture}
+              onDragEnter={handleChatFileDragEnter}
+              onDragLeave={handleChatFileDragLeave}
+              onDrop={handleChatFileDrop}
+            >
             <WhatsAppActionsDrawer
               open={actionsPanelOpen}
               onClose={() => setActionsPanelOpen(false)}
@@ -4961,6 +7214,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               loading={actionsContextQuery.isLoading || actionsContextQuery.isFetching}
               modeSaving={updateStatusModeMut.isPending}
               linkLoading={linkClienteMut.isPending}
+              unlinkLoading={unlinkClienteMut.isPending}
               sendingOrcamentoId={sendingOrcamentoId}
               clienteSearch={actionsClienteSearch}
               onClienteSearchChange={setActionsClienteSearch}
@@ -4973,6 +7227,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 if (!chatId || !clienteId) return;
                 linkClienteMut.mutate(clienteId);
               }}
+              onUnlinkCliente={() => {
+                if (!chatId) return;
+                if (!window.confirm('Desvincular este contato do cliente?')) return;
+                unlinkClienteMut.mutate();
+              }}
               onSendOrcamentoPdf={(params) => {
                 if (!chatId || !params?.orcamentoId) return;
                 sendOrcamentoPdfMut.mutate(params);
@@ -4982,24 +7241,39 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               }}
             />
 
-            <div
-              className="wa-scroll relative min-h-0 flex-1 overflow-y-auto py-2"
-              style={{
-                backgroundColor: '#efeae2',
-                backgroundImage: CHAT_BG_PATTERN,
-              }}
-            >
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-0 bg-[#efeae2] dark:hidden"
+                style={chatWallpaperLayerStyle(CHAT_BG_TILE_LIGHT, '#efeae2')}
+              />
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 z-0 hidden bg-[#161717] dark:block"
+                style={chatWallpaperLayerStyle(CHAT_BG_TILE_DARK, '#161717')}
+              />
+              <div className="wa-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto bg-transparent py-2">
               {loadingMsgs && (
                 <div className="flex justify-center py-16">
                   <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
                 </div>
               )}
               {!loadingMsgs &&
-                displayMessages.map((m) => (
+                displayMessages.map((m, idx) => {
+                  const prev = idx > 0 ? displayMessages[idx - 1] : null;
+                  const showDateHeader = idx === 0 || (prev ? !isSameChatDay(m.timestamp, prev.timestamp) : true);
+                  return (
                   <div
                     key={m.id}
                     className={`group flex w-full flex-col py-0.5 ${m.fromMe ? 'items-end' : 'items-start'}`}
                   >
+                    {showDateHeader ? (
+                      <div className="pointer-events-none sticky top-3 z-[12] my-2 flex w-full justify-center">
+                        <span className="pointer-events-auto rounded-full bg-[#1f2c33]/70 px-3 py-1 text-[11px] font-medium text-[#e9edef] shadow-sm backdrop-blur-sm">
+                          {formatChatDate(m.timestamp)}
+                        </span>
+                      </div>
+                    ) : null}
                     {editingId === m.id ? (
                       <div
                         className="flex w-full max-w-[min(78%,720px)] flex-col gap-2 rounded-lg border border-[#00a884] bg-white p-3 shadow-sm dark:border-[#00a884] dark:bg-[#202c33] sm:max-w-[min(65%,420px)]"
@@ -5033,85 +7307,156 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       </div>
                     ) : (
                       <>
-                        <MessageBubble
-                          m={m}
-                          layout={layout}
-                          showGroupParticipant={activeIsGroup}
-                          groupParticipantLabel={activeIsGroup ? resolveGroupParticipantLabel(m.participant) : null}
-                        />
-                        {m.fromMe && m.providerMessageId ? (
-                          <div
-                            className={`mt-0.5 flex max-w-[min(78%,720px)] gap-4 px-1 opacity-0 transition-opacity group-hover:opacity-100 sm:max-w-[min(65%,420px)] ${m.fromMe ? 'justify-end' : ''}`}
-                          >
+                        <div
+                          className={`flex w-full items-stretch ${
+                            isInForwardSelectionMode ? 'cursor-pointer select-none' : ''
+                          } ${m.fromMe ? 'justify-end' : 'justify-start'}`}
+                          onClick={() => {
+                            if (!isInForwardSelectionMode) return;
+                            toggleForwardSelectedMessage(m.id);
+                          }}
+                          role={isInForwardSelectionMode ? 'button' : undefined}
+                          aria-pressed={isInForwardSelectionMode ? selectedMessageIds.has(m.id) : undefined}
+                        >
+                          {isInForwardSelectionMode ? (
                             <button
                               type="button"
-                              className="text-[12px] font-medium text-[#00a884] hover:underline"
-                              onClick={() => startEditMessage(m)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleForwardSelectedMessage(m.id);
+                              }}
+                              className="ml-3 mr-1 flex h-[38px] w-[38px] items-center justify-center rounded-full text-[#54656f] hover:bg-black/10 dark:text-[#a9b4ba] dark:hover:bg-white/10"
+                              aria-label={selectedMessageIds.has(m.id) ? 'Desmarcar mensagem' : 'Marcar mensagem'}
                             >
-                              Editar
+                              <span
+                                className={`flex h-5 w-5 items-center justify-center rounded border ${
+                                  selectedMessageIds.has(m.id)
+                                    ? 'border-[#00a884] bg-[#00a884] text-white'
+                                    : 'border-[#cbd5da] bg-transparent text-transparent dark:border-[#2a3942]'
+                                }`}
+                              >
+                                <CheckIcon className="h-4 w-4" />
+                              </span>
                             </button>
-                            <button
-                              type="button"
-                              className="text-[12px] font-medium text-red-600 hover:underline disabled:opacity-50"
-                              disabled={deleteMessageMut.isPending}
-                              onClick={() => handleDeleteMessage(m.id)}
-                            >
-                              Excluir
-                            </button>
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <MessageBubble
+                              m={m}
+                              layout={layout}
+                              showGroupParticipant={activeIsGroup}
+                              groupParticipantLabel={activeIsGroup ? resolveGroupParticipantLabel(m.participant) : null}
+                              onDeleteMessage={handleDeleteMessage}
+                      onDeleteForMe={(messageId) => {
+                        if (deleteForMeMut.isPending) return;
+                        deleteForMeMut.mutate(messageId);
+                      }}
+                              onStartForwardSelection={(messageId) => startForwardSelectionMode(messageId)}
+                      onReplyToMessage={(msg) => {
+                        setReplyToMessage(msg);
+                      }}
+                      onEditMessage={startEditMessage}
+                      onReactToMessage={(msg, emoji) => {
+                        void reactToMessage(msg, emoji);
+                      }}
+                      onToggleFavoriteMessage={toggleFavoriteMessage}
+                      isFavoriteMessage={isFavoriteMessage}
+                              onImageClick={(url) => setSelectedImageUrl(url)}
+                              onNavigateWhatsappChat={(jid, label) => onNavigateChat?.(jid, label)}
+                              actionsDisabled={isInForwardSelectionMode}
+                            />
                           </div>
-                        ) : null}
+                        </div>
                       </>
                     )}
                   </div>
-                ))}
+                );
+                })}
               <div ref={bottomRef} />
+              </div>
             </div>
 
-            {pendingMedia && (
+            {!isInForwardSelectionMode && pendingMediaList.length > 0 ? (
               <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-                <div className="flex items-start gap-3">
-                  {pendingMedia.previewUrl ? (
-                    <img
-                      src={pendingMedia.previewUrl}
-                      alt="Preview"
-                      className="h-20 w-20 shrink-0 rounded-lg object-cover shadow-sm"
-                    />
-                  ) : (
-                    <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-[#dfe5e7] text-2xl dark:bg-[#2a3942]">
-                      {pendingMedia.mediaType === 'voice' ? '🎤' : pendingMedia.mediaType === 'video' ? '🎥' : '📎'}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
-                      {pendingMedia.file.name}
-                    </p>
-                    <p className="text-[12px] text-[#667781]">
-                      {(pendingMedia.file.size / 1024).toFixed(0)} KB
-                      {' · '}
-                      {pendingMedia.mediaType === 'image' ? 'Imagem' : pendingMedia.mediaType === 'voice' ? 'Áudio' : pendingMedia.mediaType === 'video' ? 'Vídeo' : 'Documento'}
-                    </p>
-                    <input
-                      type="text"
-                      value={mediaCaption}
-                      onChange={(e) => setMediaCaption(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSendMedia();
-                        }
-                      }}
-                      placeholder="Legenda (opcional)"
-                      className="mt-1.5 w-full rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] placeholder:text-[#8696a0] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                    />
+                <p className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">
+                  {pendingMediaList.length === 1
+                    ? '1 arquivo para enviar'
+                    : `${pendingMediaList.length} arquivos para enviar (fila com concorrência limitada)`}
+                </p>
+                <div className="max-h-[min(40vh,280px)] overflow-y-auto rounded-lg border border-[#d1d7db] bg-white/80 p-2 dark:border-[#2a3942] dark:bg-[#161717]/60">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                    {pendingMediaList.map((pm) => {
+                      const label =
+                        pm.mediaType === 'image'
+                          ? 'Imagem'
+                          : pm.mediaType === 'voice'
+                            ? 'Áudio'
+                            : pm.mediaType === 'video'
+                              ? 'Vídeo'
+                              : 'Documento';
+                      const sizeKb = pm.file.size / 1024;
+                      const sizeStr =
+                        sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toFixed(0)} KB`;
+                      const displayName = repairUtf8Mojibake(pm.file.name);
+                      return (
+                        <div
+                          key={pm.id}
+                          className="group relative flex flex-col gap-1 rounded-md border border-[#e9edef] bg-[#f8f9fa] p-1.5 dark:border-[#2a3942] dark:bg-[#202c33]"
+                        >
+                          <button
+                            type="button"
+                            disabled={sendMediaMut.isPending}
+                            onClick={() => removePendingMediaById(pm.id)}
+                            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-[11px] text-white opacity-90 hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-40"
+                            aria-label={`Remover ${displayName}`}
+                            title="Remover da fila"
+                          >
+                            ✕
+                          </button>
+                          <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded bg-[#dfe5e7] dark:bg-[#2a3942]">
+                            {pm.previewUrl ? (
+                              <img
+                                src={pm.previewUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-2xl">
+                                {pm.mediaType === 'voice' ? '🎤' : pm.mediaType === 'video' ? '🎥' : '📎'}
+                              </span>
+                            )}
+                          </div>
+                          <p className="line-clamp-2 px-0.5 text-[11px] font-medium leading-tight text-[#111b21] dark:text-[#e9edef]">
+                            {displayName}
+                          </p>
+                          <p className="px-0.5 text-[10px] text-[#667781] dark:text-[#8696a0]">
+                            {sizeStr} · {label}
+                          </p>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+                <input
+                  type="text"
+                  value={mediaCaption}
+                  onChange={(e) => setMediaCaption(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSendMedia();
+                    }
+                  }}
+                  placeholder="Legenda (opcional; aplicada ao primeiro arquivo da fila)"
+                  className="w-full rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] placeholder:text-[#8696a0] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
+                />
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
+                    disabled={sendMediaMut.isPending}
                     onClick={cancelMedia}
-                    className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 dark:text-[#8696a0]"
+                    className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 disabled:opacity-50 dark:text-[#8696a0]"
                   >
-                    Cancelar
+                    Cancelar tudo
                   </button>
                   <button
                     type="button"
@@ -5128,13 +7473,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   </button>
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {pendingRecordedAudio && !isRecordingAudio ? (
+            {!isInForwardSelectionMode && pendingRecordedAudio && !isRecordingAudio ? (
               <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-lg dark:bg-[#2a3942]">
-                    🎙
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#8696a0]">
+                    <Mic className="h-6 w-6" strokeWidth={1.75} aria-hidden />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">
@@ -5196,7 +7541,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             ) : null}
 
-            {locationComposerOpen ? (
+            {!isInForwardSelectionMode && locationComposerOpen ? (
               <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <div className="flex items-center gap-2">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-lg dark:bg-[#2a3942]">
@@ -5273,98 +7618,708 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             ) : null}
 
-            <footer className="flex shrink-0 items-end gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={MEDIA_ACCEPT}
-                className="hidden"
-                onChange={handleFileSelected}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="mb-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
-                aria-label="Anexar arquivo"
-                title="Enviar imagem, áudio, vídeo ou documento"
-              >
-                <AttachIcon className="h-6 w-6" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLocationComposerOpen((v) => !v)}
-                disabled={sendLocationMut.isPending || isWhatsappGroupChatId(chatId)}
-                className="mb-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 disabled:opacity-40 dark:text-[#8696a0] dark:hover:bg-white/5"
-                aria-label="Enviar localização"
-                title="Enviar localização (sendLocation)"
-              >
-                <LocationPinIcon className="h-6 w-6" />
-              </button>
-              {isRecordingAudio ? (
-                <div className="mb-2 inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-[11px] font-medium text-red-700 dark:bg-red-900/40 dark:text-red-300">
-                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                  Gravando {formatRecordingElapsed(recordingElapsedSec)}
+            {isInForwardSelectionMode ? (
+              <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={exitForwardSelectionMode}
+                    className="flex h-11 w-11 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/10"
+                    aria-label="Cancelar seleção"
+                    title="Cancelar"
+                  >
+                    <CloseXIcon className="h-5 w-5" />
+                  </button>
+                  <p className="text-[13px] font-medium text-[#111b21] dark:text-[#e9edef]">
+                    {selectedMessageIds.size} selecionada(s)
+                  </p>
                 </div>
-              ) : null}
-              <button
-                type="button"
-                onClick={toggleAudioRecording}
-                disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
-                className={`mb-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition disabled:opacity-40 ${
-                  isRecordingAudio
-                    ? 'bg-red-500 text-white hover:bg-red-600'
-                    : 'text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5'
-                }`}
-                aria-label="Enviar áudio WhatsApp"
-                title={isRecordingAudio ? 'Parar e enviar áudio' : 'Gravar áudio (sendWhatsAppAudio)'}
-              >
-                {sendAudioMut.isPending ? (
-                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : isRecordingAudio ? (
-                  <span className="text-base font-bold leading-none" aria-hidden>
-                    ■
-                  </span>
-                ) : (
-                  <span className="text-xl leading-none" aria-hidden>
-                    🎙
-                  </span>
-                )}
-              </button>
-              {isRecordingAudio ? (
                 <button
                   type="button"
-                  onClick={cancelCurrentRecording}
-                  className="mb-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
-                  aria-label="Cancelar gravação"
-                  title="Cancelar gravação sem enviar"
+                  disabled={selectedMessageIds.size <= 0}
+                  onClick={() => {
+                    setForwardModalOpen(true);
+                  }}
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-[#00a884] text-white shadow-sm transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:bg-[#8696a0]/40 disabled:text-white/70 dark:disabled:bg-[#2a3942]"
+                  aria-label="Encaminhar mensagens selecionadas"
+                  title="Encaminhar"
                 >
-                  <span className="text-lg leading-none" aria-hidden>
-                    ✕
-                  </span>
+                  <ForwardIcon className="h-5 w-5" />
                 </button>
-              ) : null}
-              <EmojiInput value={draft} onChange={setDraft} onSubmit={handleSend} disabled={sendMut.isPending} />
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={sendMut.isPending || !draft.trim()}
-                className="mb-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white shadow-sm transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:bg-[#8696a0]/40 disabled:text-white/70 dark:disabled:bg-[#2a3942]"
-                aria-label="Enviar"
+              </div>
+            ) : (
+              <footer className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef]/90 bg-[#f0f2f5] px-3 py-2 dark:border-[#2a3942]/50 dark:bg-[#161717]">
+                {(sendMediaMut.isPending && !pendingMediaList.length) || batchUploadProgress ? (
+                  <div
+                    className="flex items-center gap-2 rounded-lg border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-[13px] font-medium text-[#075e54] dark:border-[#00a884]/40 dark:bg-[#00a884]/15 dark:text-[#5ee8a2]"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                    {batchUploadProgress && batchUploadProgress.total > 1 ? (
+                      <span>
+                        Enviando lote {batchUploadProgress.current}/{batchUploadProgress.total}…
+                      </span>
+                    ) : (
+                      <span>Enviando arquivo…</span>
+                    )}
+                  </div>
+                ) : null}
+                {replyToMessage ? (
+                  <div className="flex items-stretch justify-between gap-2 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 dark:border-[#2a3942] dark:bg-[#161717]">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-[#00a884]">
+                        Respondendo a {replyToMessage.fromMe ? 'você' : headerPrimary || title || 'contato'}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 text-[12px] text-[#54656f] dark:text-[#a9b4ba]">
+                        {(replyToMessage.content || '').trim() ||
+                          repairUtf8Mojibake(replyToMessage.mediaFilename || replyToMessage.fileName || 'Mensagem')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyToMessage(null)}
+                      className="shrink-0 rounded-md px-2 text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/10"
+                      aria-label="Cancelar resposta"
+                      title="Cancelar resposta"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : null}
+                <div className="flex min-h-[52px] flex-col gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept={MEDIA_ACCEPT}
+                    className="hidden"
+                    onChange={handleFileSelected}
+                  />
+                  <input
+                    ref={stickerInputRef}
+                    type="file"
+                    accept="image/webp,image/png,image/jpeg"
+                    className="hidden"
+                    onChange={handleStickerSelected}
+                  />
+                  <input
+                    ref={gifInputRef}
+                    type="file"
+                    accept="image/gif"
+                    className="hidden"
+                    onChange={handleGifSelected}
+                  />
+                  <input
+                    ref={photosVideosInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={handlePhotosVideosSelected}
+                  />
+                  {isRecordingAudio ? (
+                    <div className="flex w-full items-center gap-2 rounded-full border border-[#e9edef] bg-white px-2 py-1.5 dark:border-[#2a3942] dark:bg-[#2a3942]">
+                      <div className="inline-flex min-w-0 flex-1 items-center gap-2 rounded-full bg-red-100 px-3 py-2 text-[12px] font-medium text-red-800 dark:bg-red-900/35 dark:text-red-200">
+                        <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+                        <span className="truncate">Gravando {formatRecordingElapsed(recordingElapsedSec)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={cancelCurrentRecording}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-black/5 dark:text-[#e9edef] dark:hover:bg-white/10"
+                        aria-label="Cancelar gravação"
+                        title="Cancelar gravação sem enviar"
+                      >
+                        <span className="text-lg leading-none" aria-hidden>
+                          ✕
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleAudioRecording}
+                        disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition hover:bg-[#008f6f] disabled:opacity-40"
+                        aria-label="Parar e enviar áudio"
+                        title="Parar e enviar áudio"
+                      >
+                        {sendAudioMut.isPending ? (
+                          <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                        ) : (
+                          <span className="text-base font-bold leading-none" aria-hidden>
+                            ■
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative flex w-full items-center gap-0.5 rounded-full border border-[#d1d7db] bg-white px-1.5 py-1 shadow-sm dark:border-transparent dark:bg-[#2a3942] dark:shadow-none">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
+                            aria-label="Anexar"
+                            title="Anexar"
+                          >
+                            <Plus className="h-6 w-6" strokeWidth={1.9} aria-hidden />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          sideOffset={8}
+                          align="start"
+                          className="min-w-[240px] rounded-xl border border-[#e9edef] bg-white p-1 shadow-xl dark:border-[#2a3942] dark:bg-[#202c33]"
+                        >
+                          <DropdownMenuItem
+                            onSelect={(ev) => {
+                              ev.preventDefault();
+                              fileInputRef.current?.click();
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                          >
+                            <FileText className="h-[18px] w-[18px] shrink-0 text-[#a67bf0]" strokeWidth={1.75} />
+                            Documento
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(ev) => {
+                              ev.preventDefault();
+                              photosVideosInputRef.current?.click();
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                          >
+                            <Images className="h-[18px] w-[18px] shrink-0 text-[#0386f0]" strokeWidth={1.75} />
+                            Fotos e vídeos
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(ev) => {
+                              ev.preventDefault();
+                              if (isWhatsappGroupChatId(chatId)) return;
+                              setSendContactStep('pick');
+                              setSendContactSearch('');
+                              setSendContactSelectedIds([]);
+                              setSendContactConfirmRows([]);
+                            }}
+                            disabled={isWhatsappGroupChatId(chatId)}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                          >
+                            <UserRound className="h-[18px] w-[18px] shrink-0 text-[#0aabfe]" strokeWidth={1.75} />
+                            Contato
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(ev) => {
+                              ev.preventDefault();
+                              toast.message('Envio de evento em breve.');
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                          >
+                            <CalendarFold className="h-[18px] w-[18px] shrink-0 text-[#f04154]" strokeWidth={1.75} />
+                            Evento
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="my-1 bg-[#e9edef] dark:bg-[#2a3942]" />
+                          <DropdownMenuItem
+                            onSelect={async (ev) => {
+                              ev.preventDefault();
+                              try {
+                                const r = await deleteWhatsappContactCacheAll();
+                                if (r.success) {
+                                  const deleted = r.data?.deleted ?? 0;
+                                  const rebuilt = r.data?.rebuilt ?? 0;
+                                  toast.success(
+                                    rebuilt > 0
+                                      ? `Cache limpo (${deleted} apagados). ${rebuilt} entradas regravadas a partir do CRM (Cliente/Lead).`
+                                      : `Cache do WhatsApp apagado (${deleted} registros). Nada foi regravado na hora — se o nome continuar errado, verifique o cadastro Cliente/Lead ou o nome que o WhatsApp envia ao chegar mensagem.`
+                                  );
+                                  void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
+                                  if (chatId) {
+                                    void queryClient.invalidateQueries({ queryKey: ['whatsapp-contact-meta', chatId] });
+                                  }
+                                  queryClient.removeQueries({ queryKey: ['whatsapp-contact-meta'] });
+                                } else {
+                                  toast.error('Erro ao limpar cache');
+                                }
+                              } catch {
+                                toast.error('Erro ao limpar cache de nomes');
+                              }
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] text-[#111b21] focus:bg-[#f7f5f3] dark:text-[#e9edef] dark:focus:bg-[#2a3942]"
+                          >
+                            <Trash2 className="h-[18px] w-[18px] shrink-0 text-[#54656f] dark:text-[#8696a0]" strokeWidth={1.75} />
+                            Limpar cache de nomes
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
+                      <button
+                        ref={composerPickerTriggerRef}
+                        type="button"
+                        onClick={() => {
+                          setComposerPickerTab('emoji');
+                          setComposerPickerOpen((o) => !o);
+                        }}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
+                        aria-label="Emojis, GIFs e figurinhas"
+                        title="Emojis, GIFs e figurinhas"
+                        aria-expanded={composerPickerOpen}
+                      >
+                        <span className="relative inline-flex h-[24px] w-[24px] items-center justify-center" aria-hidden>
+                          <Sticker className="h-[20px] w-[20px]" strokeWidth={1.85} />
+                          <Smile
+                            className="absolute -bottom-0.5 -right-0.5 h-[12px] w-[12px] rounded-[3px] bg-white stroke-[#54656f] dark:bg-[#2a3942] dark:stroke-[#8696a0]"
+                            strokeWidth={2.2}
+                          />
+                        </span>
+                      </button>
+
+                      <ComposerEmojiGifStickerModal
+                        open={composerPickerOpen}
+                        onClose={() => setComposerPickerOpen(false)}
+                        panelRef={composerPickerPanelRef}
+                        tab={composerPickerTab}
+                        onTabChange={setComposerPickerTab}
+                        darkMode={
+                          typeof document !== 'undefined' &&
+                          document.documentElement.classList.contains('dark')
+                        }
+                        onEmojiSelect={(emoji) => {
+                          composerDraftInputRef.current?.insertAtCursor(emoji);
+                          setComposerPickerOpen(false);
+                        }}
+                        onChooseGif={() => {
+                          gifInputRef.current?.click();
+                          setComposerPickerOpen(false);
+                        }}
+                        onChooseSticker={() => {
+                          stickerInputRef.current?.click();
+                          setComposerPickerOpen(false);
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setLocationComposerOpen((v) => !v)}
+                        disabled={sendLocationMut.isPending || isWhatsappGroupChatId(chatId)}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 disabled:opacity-40 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
+                        aria-label="Enviar localização"
+                        title="Enviar localização (sendLocation)"
+                      >
+                        <LocationPinIcon className="h-6 w-6" />
+                      </button>
+                      <EmojiInput
+                        ref={composerDraftInputRef}
+                        value={draft}
+                        onChange={setDraft}
+                        onSubmit={handleSend}
+                        disabled={sendMut.isPending}
+                        embeddedInPill
+                        showOpener={false}
+                        hideEmojiMenu
+                      />
+                      {draft.trim() ? (
+                        <button
+                          type="button"
+                          onClick={handleSend}
+                          disabled={sendMut.isPending || !draft.trim()}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Enviar"
+                        >
+                          {sendMut.isPending ? (
+                            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          ) : (
+                            <SendPlaneIcon className="ml-0.5 h-5 w-5" />
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={toggleAudioRecording}
+                          disabled={sendAudioMut.isPending || isWhatsappGroupChatId(chatId)}
+                          className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition-colors hover:bg-[#00a884] hover:text-white hover:[&_svg]:stroke-[2.5] disabled:opacity-40 dark:text-[#8696a0] dark:hover:bg-[#00a884] dark:hover:text-white"
+                          aria-label="Gravar áudio WhatsApp"
+                          title="Gravar áudio (sendWhatsAppAudio)"
+                        >
+                          {sendAudioMut.isPending ? (
+                            <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent dark:border-[#e9edef]" />
+                          ) : (
+                            <Mic
+                              className="pointer-events-none h-6 w-6 shrink-0 text-inherit"
+                              strokeWidth={1.85}
+                              aria-hidden
+                            />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </footer>
+            )}
+
+            {isDraggingFileOverChat && sendContactStep === 'idle' && !deleteConfirm ? (
+              <div
+                className="pointer-events-none absolute inset-0 z-[100] m-3 flex items-center justify-center rounded-2xl border-[3px] border-dashed border-[#16a34a]/70 bg-[rgba(74,222,128,0.22)] dark:border-[#22c55e]/80 dark:bg-[rgba(34,197,94,0.18)]"
+                aria-hidden
               >
-                {sendMut.isPending ? (
-                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <p className="text-[15px] font-medium text-[#166534] dark:text-[#bbf7d0]">Arraste arquivo aqui</p>
+              </div>
+            ) : null}
+            </div>
+
+            {sendContactStep !== 'idle' ? (
+              <div className="absolute inset-0 z-[200] flex items-end justify-center bg-black/35 p-3 backdrop-blur-[2px] sm:items-center">
+                {sendContactStep === 'pick' ? (
+                  <div className="flex h-[min(560px,88vh)] w-full max-w-[440px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]">
+                    <div className="flex shrink-0 items-center gap-1 border-b border-[#e9edef] px-1 py-1 dark:border-[#2a3942]">
+                      <button
+                        type="button"
+                        onClick={closeSendContactFlow}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#e9edef] dark:hover:bg-white/10"
+                        aria-label="Fechar"
+                      >
+                        ✕
+                      </button>
+                      <div className="flex-1 text-center">
+                        <p className="text-[16px] font-semibold text-[#111b21] dark:text-[#e9edef]">Enviar contatos</p>
+                        <p className="text-[11px] font-medium text-[#667781] dark:text-[#8696a0]">Agenda S3E</p>
+                      </div>
+                      <span className="w-10 shrink-0" aria-hidden />
+                    </div>
+                    <div className="shrink-0 px-3 pb-2 pt-2">
+                      <div className="flex items-center gap-2 rounded-full border-2 border-[#00a884] bg-white px-3 py-1.5 dark:bg-[#2a3942]">
+                        <Search className="h-[18px] w-[18px] shrink-0 text-[#8696a0]" strokeWidth={2} aria-hidden />
+                        <input
+                          value={sendContactSearch}
+                          onChange={(e) => setSendContactSearch(e.target.value)}
+                          placeholder="Pesquisar nome, empresa ou número"
+                          className="min-w-0 flex-1 bg-transparent text-[15px] text-[#111b21] outline-none placeholder:text-[#8696a0] dark:text-[#e9edef]"
+                        />
+                      </div>
+                      <p className="mt-1.5 px-1 text-[11px] text-[#667781] dark:text-[#8696a0]">
+                        Até {WA_SEND_CONTACT_MAX} contatos · intervalo de {WA_SEND_CONTACT_API_GAP_MS} ms entre envios na API
+                        {sendPickerLayout.hiddenCount > 0 ? (
+                          <span className="mt-1 block text-amber-800 dark:text-amber-200">
+                            Mostrando {sendContactYouRows.length + sendContactOtherRows.length} de {sendPickerLayout.total}. Use a
+                            busca para achar quem não aparece na lista.
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto wa-scroll">
+                      {sendContactPickerLoading ? (
+                        <div className="flex justify-center py-16">
+                          <div className="h-9 w-9 animate-spin rounded-full border-2 border-[#00a884] border-t-transparent" />
+                        </div>
+                      ) : !sendContactFilteredRows.length ? (
+                        <p className="px-4 py-10 text-center text-[14px] text-[#667781] dark:text-[#8696a0]">Nenhum contato encontrado.</p>
+                      ) : (
+                        <>
+                          {sendContactOtherRows.length ? (
+                            <div>
+                              <p className="sticky top-0 z-[1] bg-[#f0f2f5] px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-[#667781] dark:bg-[#1e2a31] dark:text-[#8696a0]">
+                                Agenda S3E
+                              </p>
+                              {sendContactOtherRows.map((row) => {
+                                const sendable = contactRowIsEvolutionSendable(row);
+                                const checked = sendContactSelectedIds.includes(row.id);
+                                const primary = whatsappContactDisplayName(row) || formatPhoneForDisplay(row.id);
+                                // Sub-linha hierárquica: prioriza empresa (quando há) +
+                                // telefone formatado; cai em pushName se nada disso houver.
+                                const empresa = (row.s3eEmpresa || '').trim();
+                                const phonePretty = sendable ? buildEvolutionPhoneStylizedFromRow(row) : '';
+                                const pn = (row.pushname || '').trim();
+                                const subLine = sendable
+                                  ? empresa
+                                    ? `${empresa} · ${phonePretty}`
+                                    : phonePretty
+                                  : pn && pn !== primary
+                                    ? pn
+                                    : 'Número indisponível para envio';
+                                const showNovoBadge = !row.s3eRevisado;
+                                return (
+                                  <label
+                                    key={row.id}
+                                    className={`flex cursor-pointer items-center gap-3 border-b border-[#f0f2f5] px-2 py-2.5 transition hover:bg-[#f7f5f3] dark:border-[#2a3942] dark:hover:bg-[#2a3942]/50 ${
+                                      !sendable ? 'cursor-not-allowed opacity-55' : ''
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only"
+                                      checked={checked}
+                                      disabled={!sendable}
+                                      onChange={() => toggleSendContactSelected(row.id, sendable)}
+                                    />
+                                    <span
+                                      className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded border-2 ${
+                                        checked
+                                          ? 'border-[#00a884] bg-[#00a884] text-white'
+                                          : 'border-[#cfd4d8] bg-white dark:border-[#536471] dark:bg-[#202c33]'
+                                      }`}
+                                      aria-hidden
+                                    >
+                                      {checked ? <CheckIcon className="h-3.5 w-3.5" /> : null}
+                                    </span>
+                                    <ContactAvatar
+                                      imageUrl={sendFlowPicByContactId.get(row.id) ?? undefined}
+                                      label={primary}
+                                      size="list"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <p className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">
+                                          {primary}
+                                        </p>
+                                        {showNovoBadge ? (
+                                          <span
+                                            className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+                                            title="Contato ainda não revisado pelo operador"
+                                          >
+                                            Novo
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      {subLine ? (
+                                        <p className="truncate text-[13px] text-[#667781] dark:text-[#8696a0]">{subLine}</p>
+                                      ) : null}
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-3 py-2.5 dark:border-[#2a3942] dark:bg-[#1e2a31]">
+                      <div className="min-w-0 flex-1 truncate text-[14px] text-[#111b21] dark:text-[#e9edef]">
+                        {sendContactSelectedIds.length ? sendContactSelectedSummary || 'Selecionado(s)' : 'Nenhum selecionado'}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!sendContactSelectedIds.length}
+                        onClick={openSendContactConfirmStep}
+                        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white shadow-md transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-35"
+                        aria-label="Continuar"
+                        title="Continuar"
+                      >
+                        <SendPlaneIcon className="ml-0.5 h-5 w-5" />
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  <SendPlaneIcon className="ml-0.5 h-6 w-6" />
+                  <div className="relative flex h-[min(520px,86vh)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-[#e9edef] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]">
+                    <div className="flex shrink-0 items-start gap-2 border-b border-[#e9edef] px-2 py-2 dark:border-[#2a3942]">
+                      <button
+                        type="button"
+                        onClick={() => setSendContactStep('pick')}
+                        className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-[#f7f5f3] dark:text-[#e9edef] dark:hover:bg-white/10"
+                        aria-label="Voltar"
+                      >
+                        <ArrowLeft className="h-5 w-5" strokeWidth={2} />
+                      </button>
+                      <p className="flex-1 pt-1.5 text-[15px] font-medium leading-snug text-[#111b21] dark:text-[#e9edef]">
+                        Deseja enviar {sendContactConfirmRows.length}{' '}
+                        {sendContactConfirmRows.length === 1 ? 'contato' : 'contatos'} para {sendContactRecipientPretty}?
+                      </p>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto wa-scroll px-3 pb-24 pt-2">
+                      {sendContactConfirmRows.map((row) => {
+                        const primary = whatsappContactDisplayName(row) || formatPhoneForDisplay(row.id);
+                        const phoneLabel = buildEvolutionPhoneStylizedFromRow(row);
+                        return (
+                          <div
+                            key={row.id}
+                            className="flex gap-3 border-b border-[#e9edef] py-3 last:border-b-0 dark:border-[#2a3942]"
+                          >
+                            <ContactAvatar
+                              imageUrl={sendFlowPicByContactId.get(row.id) ?? undefined}
+                              label={primary}
+                              size="list"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[16px] font-semibold text-[#111b21] dark:text-[#e9edef]">{primary}</p>
+                              <div className="mt-1 flex items-start gap-2">
+                                <span className="mt-0.5 rounded bg-[#00a884]/12 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#008069] dark:bg-[#00a884]/25 dark:text-[#53d4b0]">
+                                  Tel
+                                </span>
+                                <p className="text-[14px] text-[#111b21] dark:text-[#e9edef]">{phoneLabel}</p>
+                              </div>
+                            </div>
+                            <MessageCircle className="mt-1 h-5 w-5 shrink-0 text-[#aebac1]" strokeWidth={1.75} aria-hidden />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={sendContactConfirmMut.isPending || !sendContactConfirmRows.length}
+                      onClick={() => sendContactConfirmMut.mutate(sendContactConfirmRows)}
+                      className="absolute bottom-5 right-5 flex h-14 w-14 items-center justify-center rounded-full bg-[#00a884] text-white shadow-lg transition enabled:hover:bg-[#008f6f] disabled:opacity-45"
+                      aria-label="Enviar contatos"
+                      title="Enviar"
+                    >
+                      {sendContactConfirmMut.isPending ? (
+                        <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      ) : (
+                        <SendPlaneIcon className="ml-0.5 h-6 w-6" />
+                      )}
+                    </button>
+                  </div>
                 )}
-              </button>
-            </footer>
+              </div>
+            ) : null}
+
+            <WhatsAppForwardModal
+              open={forwardModalOpen}
+              onClose={() => {
+                setForwardModalOpen(false);
+                setForwardTargetChatId(null);
+              }}
+              recentChats={(chatList || []).filter((c) => canonicalWhatsappChatId(c.chatId) !== canonicalWhatsappChatId(chatId))}
+              selectedCount={selectedMessageIds.size}
+              selectedChatId={forwardTargetChatId}
+              onSelectChatId={setForwardTargetChatId}
+              confirming={forwardingNow}
+              onConfirm={async () => {
+                if (forwardingNow) return;
+                if (!forwardTargetChatId) return;
+                const ids = [...selectedMessageIds.values()];
+                if (ids.length <= 0) return;
+                setForwardingNow(true);
+                try {
+                  const r = await postWhatsappForwardMessages({
+                    targetChatId: forwardTargetChatId,
+                    messageIds: ids,
+                  });
+                  if (!r.success) {
+                    toastWhatsappApiError(r);
+                    return;
+                  }
+                  toast.success('Mensagem(ns) encaminhada(s)');
+                  setForwardModalOpen(false);
+                  setForwardTargetChatId(null);
+                  exitForwardSelectionMode();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Erro ao encaminhar');
+                } finally {
+                  setForwardingNow(false);
+                }
+              }}
+            />
+
+            <ImagePreviewModal
+              open={Boolean(selectedImageUrl)}
+              imageUrl={selectedImageUrl}
+              onClose={() => setSelectedImageUrl(null)}
+            />
           </>
         )}
       </div>
 
+      {deleteConfirm ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wa-delete-conv-title"
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deleteConversationMut.isPending) {
+              setDeleteConfirm(null);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !deleteConversationMut.isPending) {
+              setDeleteConfirm(null);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-[440px] rounded-2xl bg-white p-6 shadow-2xl dark:bg-[#202c33]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="wa-delete-conv-title"
+              className="text-[18px] font-medium leading-snug text-[#111b21] dark:text-[#e9edef]"
+            >
+              {`Tem certeza que deseja excluir a conversa${
+                firstNameOnly(deleteConfirm.label) ? ` com ${firstNameOnly(deleteConfirm.label)}` : ''
+              }?`}
+            </h2>
+            <p className="mt-3 text-[14px] leading-relaxed text-[#54656f] dark:text-[#aebac1]">
+              As mensagens serão removidas do CRM e do WhatsApp. Esta ação não pode ser desfeita.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleteConversationMut.isPending}
+                onClick={() => setDeleteConfirm(null)}
+                className="rounded-full px-5 py-2 text-[14px] font-semibold uppercase tracking-wide text-[#00a884] transition hover:bg-[#00a884]/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-[#00a884]/15"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleteConversationMut.isPending}
+                onClick={() => {
+                  const target = deleteConfirm;
+                  if (!target) return;
+                  const canon = canonicalWhatsappChatId(target.chatId);
+                  if (canonicalWhatsappChatId(chatId) !== canon) {
+                    onNavigateChat?.(canon, target.label);
+                  }
+                  deleteConversationMut.mutate({ targetChatId: canon, label: target.label });
+                  setDeleteConfirm(null);
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-[#f15c6d] px-5 py-2 text-[14px] font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-[#dd4f5f] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleteConversationMut.isPending ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" aria-hidden />
+                    Apagando…
+                  </>
+                ) : (
+                  'Apagar'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <style>{`
-        .wa-scroll::-webkit-scrollbar { width: 6px; }
-        .wa-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        /* Scrollbar estilo WhatsApp Web (fino, sem trilho, thumb translúcido) */
+        .wa-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+        }
+        .dark .wa-scroll {
+          scrollbar-color: rgba(255, 255, 255, 0.20) transparent;
+        }
+        .wa-scroll::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+          background: transparent;
+        }
+        .wa-scroll::-webkit-scrollbar-track,
+        .wa-scroll::-webkit-scrollbar-corner {
+          background: transparent;
+          border: none;
+          box-shadow: none;
+        }
+        .wa-scroll::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.18);
+          border-radius: 999px;
+          border: none;
+          min-height: 32px;
+        }
+        .wa-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.30);
+        }
+        .dark .wa-scroll::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.18);
+        }
+        .dark .wa-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.30);
+        }
         .wa-wave-bar {
           width: 3px;
           border-radius: 999px;
@@ -5387,3 +8342,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     </div>
   );
 };
+
+const CheckIcon = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M20 6L9 17l-5-5" />
+  </svg>
+);
+
+const CloseXIcon = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+
+const ForwardIcon = (p: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M14 9l6 6-6 6" />
+    <path d="M20 15H9a5 5 0 0 1-5-5V4" />
+  </svg>
+);

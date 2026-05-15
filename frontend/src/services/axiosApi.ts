@@ -223,16 +223,17 @@ class AxiosApiService {
   async post<T>(endpoint: string, data?: any, config?: any): Promise<ApiResponse<T>> {
     try {
       const response = await this.axiosInstance.post(endpoint, data, config);
-      
+
       // Se o backend já retorna { success, data }, retornar direto
       if (response.data && typeof response.data === 'object' && 'success' in response.data) {
-        return response.data as ApiResponse<T>;
+        return { ...(response.data as ApiResponse<T>), status: response.status };
       }
-      
+
       // Caso contrário, envolver na estrutura padrão
       return {
         success: true,
         data: response.data,
+        status: response.status,
       };
     } catch (error: unknown) {
       const { message, status } = axiosErrorPayload(error);

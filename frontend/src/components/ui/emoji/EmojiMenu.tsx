@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 
-const LazyEmojiMartPicker = lazy(() => import('./EmojiMartPicker'));
+const LazyEmojiPickerReact = lazy(() => import('./EmojiPickerReact'));
 
 interface EmojiMenuProps {
   open: boolean;
@@ -41,7 +41,7 @@ export function EmojiMenu({ open, onClose, onSelect, darkMode }: EmojiMenuProps)
             </button>
           </div>
           <Suspense fallback={<div className="p-4 text-sm text-[#667781]">Carregando emojis...</div>}>
-            <LazyEmojiMartPicker theme={theme} onSelect={onSelect} />
+            <LazyEmojiPickerReact theme={theme} onSelect={onSelect} />
           </Suspense>
         </div>
       </div>
@@ -51,7 +51,7 @@ export function EmojiMenu({ open, onClose, onSelect, darkMode }: EmojiMenuProps)
   return (
     <div className="absolute bottom-[calc(100%+8px)] left-0 z-[120] overflow-hidden rounded-xl border border-[#d1d7db] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]">
       <Suspense fallback={<div className="p-4 text-sm text-[#667781]">Carregando emojis...</div>}>
-        <LazyEmojiMartPicker theme={theme} onSelect={onSelect} />
+        <LazyEmojiPickerReact theme={theme} onSelect={onSelect} />
       </Suspense>
     </div>
   );

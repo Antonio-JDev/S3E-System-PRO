@@ -5,6 +5,11 @@ interface PrintRendererProps {
   folhaTimbradaUrl?: string;
   opacidade?: number;
   className?: string;
+  /** Numeração de páginas integrada com o documento completo (ex.: orçamento). */
+  pageNumberStartFrom?: number;
+  totalPages?: number;
+  /** Callback disparado sempre que o número de páginas internas do PrintRenderer muda. */
+  onPagesComputed?: (count: number) => void;
 }
 
 // === Mesmas constantes do TechnicalEditor ===
@@ -20,7 +25,15 @@ const PRINT_MARGIN_RIGHT_PX = 20;
 
 const PRINT_CONTENT_HEIGHT_PX = PAGE_HEIGHT_PX - PRINT_MARGIN_TOP_PX - PRINT_MARGIN_BOTTOM_PX;
 
-const PrintRenderer: React.FC<PrintRendererProps> = ({ content, folhaTimbradaUrl, opacidade = 0.05, className = '' }) => {
+const PrintRenderer: React.FC<PrintRendererProps> = ({
+  content,
+  folhaTimbradaUrl,
+  opacidade = 0.05,
+  className = '',
+  pageNumberStartFrom,
+  totalPages,
+  onPagesComputed,
+}) => {
   const sanitizedContent = useMemo(() => {
     if (!content) return '';
     return content
@@ -171,6 +184,15 @@ const PrintRenderer: React.FC<PrintRendererProps> = ({ content, folhaTimbradaUrl
       document.body.removeChild(offscreen);
     }
   }, [sanitizedContent]);
+
+  // Notificar o container sempre que a contagem de paginas internas mudar (para totalizacao no documento).
+  const lastReportedRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!onPagesComputed) return;
+    if (lastReportedRef.current === pages.length) return;
+    lastReportedRef.current = pages.length;
+    onPagesComputed(pages.length);
+  }, [pages.length, onPagesComputed]);
 
   if (!sanitizedContent) {
     return (
@@ -459,6 +481,24 @@ const PrintRenderer: React.FC<PrintRendererProps> = ({ content, folhaTimbradaUrl
           font-weight: 600;
         }
 
+        /* Numeração de páginas centralizada na parte inferior de cada folha A4 */
+        .print-renderer .printable-page > .page-number {
+          position: absolute;
+          bottom: 30.5px;
+          left: 50%;
+          transform: translateX(-50%);
+          font-size: 12px;
+          font-weight: 700;
+          color: #000000;
+          z-index: 2;
+          background: transparent;
+          font-family: Arial, Helvetica, sans-serif;
+        }
+        .dark .print-renderer .printable-page > .page-number {
+          color: #000000 !important;
+          opacity: 1 !important;
+        }
+
         /* Dark mode: preview do PDF sempre como documento legível (fundo branco, texto opaco) */
         .dark .print-renderer .printable-page {
           background: #fff !important;
@@ -475,18 +515,26 @@ const PrintRenderer: React.FC<PrintRendererProps> = ({ content, folhaTimbradaUrl
         }
       `}</style>
 
-      {pages.map((pageHTML, idx) => (
-        <div
-          key={`page-${idx}`}
-          className={`printable-page${idx === 0 ? ' technical-first-page' : ''}`}
-          style={timbreStyle}
-        >
+      {pages.map((pageHTML, idx) => {
+        const showPageNumber = totalPages != null && totalPages > 0 && pageNumberStartFrom != null;
+        return (
           <div
-            className="printable-page-content"
-            dangerouslySetInnerHTML={{ __html: pageHTML }}
-          />
-        </div>
-      ))}
+            key={`page-${idx}`}
+            className={`printable-page${idx === 0 ? ' technical-first-page' : ''}`}
+            style={timbreStyle}
+          >
+            <div
+              className="printable-page-content"
+              dangerouslySetInnerHTML={{ __html: pageHTML }}
+            />
+            {showPageNumber && (
+              <div className="page-number">
+                {pageNumberStartFrom! + idx} / {totalPages}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 };

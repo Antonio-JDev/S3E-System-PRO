@@ -14,6 +14,7 @@ import {
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { notificationsService, type Notificacao } from '../services/notificationsService';
+import { useNotificationsSocket } from '../hooks/useNotificationsSocket';
 
 export interface NotificationBellProps {
   onNotificationIr?: (n: Notificacao) => void;
@@ -47,10 +48,57 @@ export function NotificationBell({ onNotificationIr, collapsed = false }: Notifi
     if (open) carregarNotificacoes();
   }, [open, carregarNotificacoes]);
 
+  // Carrega a contagem inicial uma vez no mount (depois o socket cuida do
+  // realtime e o polling de fallback corre 5 min só por seguraça).
+  useEffect(() => {
+    notificationsService.contagemNaoLidas().then(setContagem).catch(() => undefined);
+  }, []);
+
+  // Realtime: o backend emite `notificacao:nova` etc. para a room privada
+  // do usuário. Cada handler atualiza estado local sem precisar refetch.
+  useNotificationsSocket({
+    onNew: (n) => {
+      setNotificacoes((prev) => {
+        if (prev.some((x) => x.id === n.id)) return prev;
+        return [n, ...prev].slice(0, 50);
+      });
+      if (!n.lida) setContagem((prev) => prev + 1);
+    },
+    onUpdated: ({ id, lida }) => {
+      setNotificacoes((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, lida } : x))
+      );
+      // Recalibra a contagem buscando no servidor — evita drift quando
+      // a aba ficou pausada e perdeu mensagens.
+      notificationsService.contagemNaoLidas().then(setContagem).catch(() => undefined);
+    },
+    onAllRead: () => {
+      setNotificacoes((prev) => prev.map((x) => ({ ...x, lida: true })));
+      setContagem(0);
+    },
+    onCleared: () => {
+      setNotificacoes([]);
+      setContagem(0);
+    },
+    onRemoved: ({ id }) => {
+      setNotificacoes((prev) => {
+        const target = prev.find((x) => x.id === id);
+        if (target && !target.lida) {
+          setContagem((c) => Math.max(0, c - 1));
+        }
+        return prev.filter((x) => x.id !== id);
+      });
+    }
+  });
+
+  // Fallback de polling MUITO espaçado (5 min). Roda só quando o sino
+  // está fechado — a ideia é cobrir o caso raro do socket ficar pendurado
+  // sem se desconectar formalmente (proxy/NAT). Com o realtime ligado a
+  // diferença entre 60s e 5 min é imperceptível para o usuário.
   useEffect(() => {
     const t = setInterval(() => {
-      if (!open) notificationsService.contagemNaoLidas().then(setContagem);
-    }, 60000);
+      if (!open) notificationsService.contagemNaoLidas().then(setContagem).catch(() => undefined);
+    }, 5 * 60_000);
     return () => clearInterval(t);
   }, [open]);
 

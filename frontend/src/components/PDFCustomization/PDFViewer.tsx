@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import OrcamentoPrintable from './OrcamentoPrintable';
 import { OrcamentoPDFData } from '../../types/pdfCustomization';
 
@@ -11,6 +11,25 @@ interface PDFViewerProps {
 
 const PDFViewer: React.FC<PDFViewerProps> = ({ orcamento, folhaTimbradaUrl, opacidade, printableRef }) => {
     const [zoom, setZoom] = useState(100);
+    const [pageCount, setPageCount] = useState<number>(1);
+
+    // Contagem dinâmica das páginas renderizadas (pdf-page + printable-page do PrintRenderer)
+    useEffect(() => {
+        const target = printableRef.current;
+        if (!target || typeof MutationObserver === 'undefined') return;
+
+        const recompute = () => {
+            const count = target.querySelectorAll('.pdf-page, .printable-page').length;
+            setPageCount(count > 0 ? count : 1);
+        };
+
+        recompute();
+        const observer = new MutationObserver(() => recompute());
+        observer.observe(target, { childList: true, subtree: true });
+        return () => observer.disconnect();
+    }, [printableRef, orcamento, folhaTimbradaUrl, opacidade]);
+
+    const pageCountLabel = `${pageCount} ${pageCount === 1 ? 'página' : 'páginas'}`;
 
     const handleZoomIn = () => {
         if (zoom < 200) setZoom(prev => prev + 10);
@@ -31,7 +50,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ orcamento, folhaTimbradaUrl, opac
                 <div className="flex items-center gap-4">
                     <span className="text-white text-sm font-semibold">Preview do PDF</span>
                     <div className="h-6 w-px bg-gray-600"></div>
-                    <span className="text-gray-400 text-xs">1 página</span>
+                    <span className="text-gray-400 text-xs">{pageCountLabel}</span>
                 </div>
 
                 {/* Controles de Zoom */}

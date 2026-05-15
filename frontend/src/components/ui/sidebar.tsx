@@ -77,7 +77,15 @@ SidebarHeader.displayName = 'SidebarHeader';
 
 export const SidebarContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} data-sidebar="content" className={cn('flex-1 overflow-auto py-3', className)} {...props} />
+    <div
+      ref={ref}
+      data-sidebar="content"
+      className={cn(
+        'flex-1 overflow-auto py-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        className
+      )}
+      {...props}
+    />
   )
 );
 SidebarContent.displayName = 'SidebarContent';

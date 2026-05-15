@@ -40,15 +40,13 @@ function isLidJid(jid: string): boolean {
 
 /**
  * Em alguns eventos o provedor envia JID "principal" em LID e o alternativo em PN/s.whatsapp.
- * Preferimos o JID não-LID para manter o mesmo chat estável no CRM.
+ * Para evitar colisões e vazamento de cache entre contatos, preferimos manter o JID primário
+ * quando ele existe (mesmo sendo @lid). Só usamos o secundário quando o primário não veio.
  */
 function pickPreferredJid(primary: unknown, secondary: unknown): string {
   const p = asTrimmedString(primary);
   const s = asTrimmedString(secondary);
   if (!p) return s;
-  if (!s) return p;
-  if (!isLidJid(p)) return p;
-  if (!isLidJid(s)) return s;
   return p;
 }
 
@@ -60,6 +58,107 @@ function isNoiseEvolutionMessage(m: Record<string, unknown>): boolean {
   return false;
 }
 
+/**
+ * Payload normalizado de reação extraído de um `messages.upsert` (ou
+ * `messages.reaction`) da Evolution API v2 / Evolution Go.
+ *
+ *  - `targetProviderMessageId`: id da MENSAGEM ORIGINAL que recebeu o emoji
+ *    (chave para localizar a `ChatMessage` no banco).
+ *  - `reaction`: emoji aplicado; string vazia = REMOVER reação anterior.
+ *  - `targetChatId`: JID do chat onde a mensagem original existe.
+ *  - `targetFromMe`: `true` se a mensagem original foi enviada por nós (debug).
+ *  - `reactorJid`: quem reagiu (cliente, ou nós mesmos quando reagimos pelo app).
+ */
+export interface EvolutionReactionWebhookPayload {
+  targetProviderMessageId: string;
+  reaction: string;
+  targetChatId: string | null;
+  targetFromMe: boolean;
+  reactorJid: string | null;
+}
+
+/**
+ * Detecta se o payload de `messages.upsert` representa uma reação (Baileys
+ * envia reactions como uma mensagem normal contendo `message.reactionMessage`).
+ *
+ * Retorna `null` quando o payload não é uma reação — o caller deve seguir o
+ * fluxo normal de mensagem.
+ */
+export function evolutionExtractReactionFromUpsert(
+  m: Record<string, unknown>
+): EvolutionReactionWebhookPayload | null {
+  const inner = m.message as Record<string, unknown> | undefined;
+  if (!inner || typeof inner !== 'object') return null;
+  const reactionNode = inner.reactionMessage as Record<string, unknown> | undefined;
+  if (!reactionNode || typeof reactionNode !== 'object') return null;
+  const targetKey = reactionNode.key as Record<string, unknown> | undefined;
+  if (!targetKey || typeof targetKey !== 'object') return null;
+
+  const targetProviderMessageId =
+    typeof targetKey.id === 'string' && targetKey.id.trim() ? targetKey.id.trim() : '';
+  if (!targetProviderMessageId) return null;
+
+  const targetChatId = asTrimmedString(targetKey.remoteJid) || null;
+  const targetFromMe = targetKey.fromMe === true;
+
+  const reaction =
+    typeof reactionNode.text === 'string' ? reactionNode.text : '';
+
+  const outerKey = m.key as Record<string, unknown> | undefined;
+  const reactorJid =
+    outerKey && typeof outerKey === 'object'
+      ? asTrimmedString((outerKey as Record<string, unknown>).participant) ||
+        asTrimmedString((outerKey as Record<string, unknown>).remoteJid) ||
+        null
+      : null;
+
+  return {
+    targetProviderMessageId,
+    reaction,
+    targetChatId,
+    targetFromMe,
+    reactorJid
+  };
+}
+
+/**
+ * Alguns provedores emitem um evento dedicado `messages.reaction` em vez de
+ * embutir o `reactionMessage` em `messages.upsert`. Aceitamos ambos os formatos.
+ */
+export function evolutionExtractReactionFromReactionEvent(
+  data: unknown
+): EvolutionReactionWebhookPayload | null {
+  if (!data || typeof data !== 'object') return null;
+  const root = data as Record<string, unknown>;
+
+  // Variante "achatada" (campos top-level).
+  const flatTargetId =
+    typeof root.messageId === 'string' && root.messageId.trim()
+      ? root.messageId.trim()
+      : typeof root.id === 'string' && root.id.trim()
+        ? root.id.trim()
+        : '';
+  const flatChatId = asTrimmedString(root.remoteJid) || asTrimmedString(root.chatId) || null;
+  const flatReaction =
+    typeof root.reaction === 'string'
+      ? root.reaction
+      : typeof root.text === 'string'
+        ? root.text
+        : '';
+  if (flatTargetId) {
+    return {
+      targetProviderMessageId: flatTargetId,
+      reaction: flatReaction,
+      targetChatId: flatChatId,
+      targetFromMe: root.fromMe === true,
+      reactorJid: asTrimmedString(root.reactorJid) || null
+    };
+  }
+
+  // Variante aninhada (compat com messages.upsert).
+  return evolutionExtractReactionFromUpsert(root);
+}
+
 function asFiniteNumber(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -67,6 +166,23 @@ function asFiniteNumber(v: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function extractVcardFromContactEntry(entry: unknown): string | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const o = entry as Record<string, unknown>;
+  if (typeof o.vcard === 'string' && o.vcard.trim()) return o.vcard.trim();
+  const nested = o.contactMessage;
+  if (nested && typeof nested === 'object') {
+    const v = (nested as Record<string, unknown>).vcard;
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function buildMinimalVcard(displayName: string): string {
+  const safe = displayName.replace(/\r|\n/g, ' ').trim() || 'Contato';
+  return `BEGIN:VCARD\nVERSION:3.0\nFN:${safe}\nEND:VCARD`;
 }
 
 function formatLocationBody(raw: Record<string, unknown>): string {
@@ -208,6 +324,39 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
       if (typeof dm.fileName === 'string') mediaFilename = dm.fileName;
       if (typeof dm.url === 'string') mediaUrl = dm.url;
       if (typeof dm.directPath === 'string') providerMediaId = dm.directPath;
+    } else if (inner.contactMessage && typeof inner.contactMessage === 'object') {
+      type = 'contact';
+      hasMedia = false;
+      const cm = inner.contactMessage as Record<string, unknown>;
+      const vcard = typeof cm.vcard === 'string' ? cm.vcard.trim() : '';
+      const displayName = typeof cm.displayName === 'string' ? cm.displayName.trim() : '';
+      if (vcard && /BEGIN:VCARD/i.test(vcard)) {
+        bodyText = vcard;
+      } else if (displayName) {
+        bodyText = buildMinimalVcard(displayName);
+      } else {
+        bodyText = buildMinimalVcard('Contato');
+      }
+    } else if (inner.contactsArrayMessage && typeof inner.contactsArrayMessage === 'object') {
+      type = 'contact';
+      hasMedia = false;
+      const cam = inner.contactsArrayMessage as Record<string, unknown>;
+      const arr = cam.contacts;
+      let picked: string | null = null;
+      if (Array.isArray(arr)) {
+        for (const entry of arr) {
+          picked = extractVcardFromContactEntry(entry);
+          if (picked && /BEGIN:VCARD/i.test(picked)) break;
+        }
+      }
+      const displayName = typeof cam.displayName === 'string' ? cam.displayName.trim() : '';
+      if (picked && /BEGIN:VCARD/i.test(picked)) {
+        bodyText = picked;
+      } else if (displayName) {
+        bodyText = buildMinimalVcard(displayName);
+      } else {
+        bodyText = buildMinimalVcard('Contato');
+      }
     } else if (inner.stickerMessage) {
       type = 'sticker';
       hasMedia = true;
@@ -245,7 +394,14 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
     participant,
     timestamp,
     ack,
-    hasMedia: hasMedia || Boolean(type && type !== 'conversation'),
+    hasMedia:
+      hasMedia ||
+      Boolean(
+        type &&
+          type !== 'conversation' &&
+          type !== 'location' &&
+          type !== 'contact'
+      ),
     type,
     mediaMimetype,
     mediaFilename,

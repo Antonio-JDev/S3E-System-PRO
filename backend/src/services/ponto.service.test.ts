@@ -1,5 +1,5 @@
 import { StatusConsistenciaPonto } from '@prisma/client';
-import { calcularMinutosLiquidos } from './ponto.service';
+import { calcularMinutosLiquidos, calcularMetricasRegistro } from './ponto.service';
 
 describe('ponto.service calcularMinutosLiquidos', () => {
   it('0 batidas: consistente e 0 minutos', () => {
@@ -79,5 +79,49 @@ describe('ponto.service calcularMinutosLiquidos', () => {
     const r = calcularMinutosLiquidos(['08:00', '', '12:00', '  ']);
     expect(r.status).toBe(StatusConsistenciaPonto.CONSISTENTE);
     expect(r.minutos).toBe(4 * 60);
+  });
+});
+
+describe('ponto.service calcularMetricasRegistro (compensação atraso x extra)', () => {
+  it('compensa atraso na entrada com extra na saída (mesmo dia)', () => {
+    const r = calcularMetricasRegistro({
+      batidas: ['08:06', '17:36'],
+      ano: 2026,
+      mes: 5,
+      dia: 6,
+      tipoContrato: 'REGISTRADO',
+      toleranciaMinutos: 5,
+      workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
+    });
+    // Atraso bruto 6 min, extra bruto 6 min => atraso líquido 0
+    expect(r.minutosAtraso).toBe(0);
+    expect(r.minutosHorasDevidas).toBe(0);
+  });
+
+  it('não compensa quando não há extra suficiente', () => {
+    const r = calcularMetricasRegistro({
+      // Saída 17:33 ainda está dentro da tolerância (até 17:35) → zero extra; atraso bruto 10 permanece.
+      batidas: ['08:10', '17:33'],
+      ano: 2026,
+      mes: 5,
+      dia: 6,
+      tipoContrato: 'REGISTRADO',
+      toleranciaMinutos: 5,
+      workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
+    });
+    expect(r.minutosAtraso).toBe(10);
+
+    const r2 = calcularMetricasRegistro({
+      // Extra na saída é medido a partir do horário nominal (17:30), não do fim da tolerância.
+      // 17:38 → 8 min extra; atraso bruto na entrada 10 min → sobram 2 min de atraso líquido.
+      batidas: ['08:10', '17:38'],
+      ano: 2026,
+      mes: 5,
+      dia: 6,
+      tipoContrato: 'REGISTRADO',
+      toleranciaMinutos: 5,
+      workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
+    });
+    expect(r2.minutosAtraso).toBe(2);
   });
 });

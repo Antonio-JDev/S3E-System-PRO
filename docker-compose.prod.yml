@@ -1,20 +1,47 @@
 # ============================================
-# S3E System PRO - Docker Compose (PRODUÇÃO)
+# S3E System PRO - Docker Compose (PRODUÇÃO + Traefik — rede interna)
 # ============================================
-# Credenciais ficam fora do Git: use um arquivo .env na mesma pasta deste compose.
+# Credenciais: arquivo `.env` na mesma pasta (modelo em `.env.prod.md`).
 #
-# No servidor (TrueNAS Scale / VPS):
-# 1. Copie o modelo: cp docker-compose.prod.env.example .env
-# 2. Edite .env (DB_*, JWT_SECRET, URLs, WHATSAPP_PROVIDER_API_KEY, SMTP, etc.)
-# 3. Crie os volumes externos listados no rodapé de docker-compose.prod.env.example
-# 4. Execute: docker compose -f docker-compose.prod.yml --env-file .env up -d
+# Topologia (LAN 192.168.100.228 + Tailscale 100.74.201.62 + hosts app.s3eengenharia.com.br):
+#   Operadores ──HTTP:80──> Traefik (só nos IPs internos abaixo) ──> containers
+#     /           → frontend
+#     /api        → backend (+ /socket.io, /uploads no mesmo router)
+#     /manager    → Evolution Go (stripPrefix /manager)
 #
-# WhatsApp: apenas Evolution API (serviço whatsapp-provider). WAHA não é mais usado.
-# Desenvolvimento local: docker-compose.yml
+# WhatsApp webhook (sempre interno, não passa pelo Traefik):
+#   EvoGo ──> http://backend:3001/api/webhooks/whatsapp
+#
+# No servidor TrueNAS:
+# 1. cp .env.prod.md → .env (ajuste JWT_SECRET e senhas reais)
+# 2. Em cada PC: hosts → 192.168.100.228  app.s3eengenharia.com.br
+# 3. Fora da LAN: Tailscale (IP 100.74.201.62) — NÃO use Funnel público
+# 4. docker compose -f docker-compose.prod.yml --env-file .env up -d
+# 5. Frontend: rebuild se mudar URL (--build-arg VITE_API_URL=http://app.s3eengenharia.com.br)
+# 6. EvoGo DB (volume postgres antigo): CREATE DATABASE evogo_auth; evogo_users;
 # ============================================
 
 services:
-  # PostgreSQL Database - PRODUÇÃO
+  traefik:
+    image: traefik:v2.10.7
+    container_name: s3e-traefik-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik"
+      - "--entrypoints.web.address=:80"
+    ports:
+      # Só LAN + Tailscale privado (não publica 0.0.0.0 — evita exposição na internet)
+      - "${S3E_TRAEFIK_BIND_LAN:-192.168.100.228}:80:80"
+      - "${S3E_TRAEFIK_BIND_TAILSCALE:-100.74.201.62}:80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik
+
   postgres:
     image: postgres:16-alpine
     container_name: s3e-postgres-prod
@@ -26,85 +53,102 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups # Pasta para backups manuais
+      - ./backups:/backups
       - ./docker/postgres/02-evolution-database.sql:/docker-entrypoint-initdb.d/02-evolution-database.sql:ro
+      - ./docker/postgres/03-evolution-go-databases.sql:/docker-entrypoint-initdb.d/03-evolution-go-databases.sql:ro
     networks:
-      - s3e-network-prod
+      - traefik
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Evolution API v2 — serviço nomeado `whatsapp-provider` (backend: WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080)
+  redis:
+    image: redis:7-alpine
+    container_name: s3e-redis-prod
+    restart: unless-stopped
+    command: [ "redis-server", "--appendonly", "yes" ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - traefik
+
+  # Evolution Go — serviço `whatsapp-provider` (backend: WHATSAPP_PROVIDER_BASE_URL=http://whatsapp-provider:8080)
   whatsapp-provider:
-    image: evoapicloud/evolution-api:v2.3.5
+    image: evoapicloud/evolution-go:0.7.1
     container_name: s3e-whatsapp-provider-prod
     restart: unless-stopped
-    stop_grace_period: 60s
     shm_size: "2gb"
+    stop_grace_period: 60s
     dns:
       - 8.8.8.8
       - 8.8.4.4
-    depends_on:
-      postgres:
-        condition: service_healthy
     env_file:
       - .env
     environment:
       TZ: America/Sao_Paulo
-      SERVER_TYPE: http
-      SERVER_PORT: 8080
-      SERVER_URL: http://whatsapp-provider:8080
-      DATABASE_ENABLED: "true"
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${EVOLUTION_DATABASE_NAME:-evolution}?schema=public
-      DATABASE_CONNECTION_CLIENT_NAME: ${EVOLUTION_DATABASE_CLIENT_NAME:-s3e_evolution_prod}
-      AUTHENTICATION_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
-      LANGUAGE: pt-BR
-      CORS_ORIGIN: "*"
-      CORS_METHODS: POST,GET,PUT,DELETE
-      CORS_CREDENTIALS: "true"
-      CACHE_REDIS_ENABLED: "false"
-      CACHE_LOCAL_ENABLED: "true"
-      # Evolution: aumenta janela de leitura do QR antes de gerar outro
-      QRCODE_LIMIT: ${WHATSAPP_PROVIDER_QRCODE_LIMIT:-60}
-      WEBHOOK_GLOBAL_ENABLED: "true"
-      WEBHOOK_GLOBAL_URL: http://backend:3001/api/webhooks/whatsapp
-      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
-      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
-      WEBHOOK_EVENTS_MESSAGES_UPDATE: "true"
-      WEBHOOK_EVENTS_PRESENCE_UPDATE: "true"
-      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+      SERVER_PORT: "8080"
+      CLIENT_NAME: ${EVOLUTION_GO_CLIENT_NAME:-s3e}
+      GLOBAL_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
+      POSTGRES_AUTH_DB: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/evogo_auth?sslmode=disable
+      POSTGRES_USERS_DB: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/evogo_users?sslmode=disable
+      DATABASE_SAVE_MESSAGES: "false"
+      WADEBUG: ${EVOLUTION_GO_WADEBUG:-INFO}
+      LOGTYPE: console
+      CONNECT_ON_STARTUP: "false"
+      WEBHOOK_FILES: "true"
+      WEBHOOK_URL: http://backend:3001/api/webhooks/whatsapp
+      OS_NAME: Linux
+      QRCODE_MAX_COUNT: ${WHATSAPP_PROVIDER_QRCODE_LIMIT:-60}
     ports:
+      # Manager direto (QR) — mesmo padrão da infra antiga (:3333)
       - "${WHATSAPP_PROVIDER_HTTP_PORT:-3333}:8080"
     volumes:
-      - apps_whatsapp_provider_sessions:/evolution/instances
+      - evolution_go_dbdata:/app/dbdata
+      - evolution_go_logs:/app/logs
+      - "/etc/localtime:/etc/localtime:ro"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
-      - s3e-network-prod
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.s3e-evogo.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/manager`)"
+      - "traefik.http.routers.s3e-evogo.entrypoints=web"
+      - "traefik.http.routers.s3e-evogo.priority=100"
+      - "traefik.http.routers.s3e-evogo.middlewares=s3e-evogo-strip@docker"
+      - "traefik.http.middlewares.s3e-evogo-strip.stripprefix.prefixes=/manager"
+      - "traefik.http.services.s3e-evogo.loadbalancer.server.port=8080"
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1" ]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 90s
 
-  # Backend API - PRODUÇÃO
   backend:
-    image: odev10antonio/s3e-backend:1.3.1
+    image: odev10antonio/s3e-backend:2.1.0
     container_name: s3e-backend-prod
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    dns_search: []
+    extra_hosts:
+      - "sefaz.sc.gov.br:200.146.71.70"
+      - "nfe.sefaz.sc.gov.br:200.146.71.70"
+      - "www.sefazvirtual.fazenda.gov.br:200.198.239.34"
     env_file:
       - .env
     environment:
       TZ: America/Sao_Paulo
       NODE_ENV: production
       PORT: 3001
-      # connection_limit evita "too many clients" no PostgreSQL (singleton Prisma usa um pool só)
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?connection_limit=10
       ENABLE_PRISMA_AUDIT: "true"
       JWT_SECRET: ${JWT_SECRET}
@@ -127,30 +171,39 @@ services:
       SMTP_FISCAL_PASS: ${SMTP_FISCAL_PASS}
       SMTP_FISCAL_FROM: ${SMTP_FISCAL_FROM}
       NFSE_XSD_PATH: /app/nfse-xsd
-      # WhatsApp Evolution — URL interna Docker; API key = AUTHENTICATION_API_KEY da Evolution
-      WHATSAPP_PROVIDER_KIND: ${WHATSAPP_PROVIDER_KIND:-evolution}
+      WHATSAPP_PROVIDER_KIND: ${WHATSAPP_PROVIDER_KIND:-evolution-go}
       WHATSAPP_PROVIDER_BASE_URL: http://whatsapp-provider:8080
-      WHATSAPP_PROVIDER_SESSION: ${WHATSAPP_PROVIDER_SESSION:-testeCellJR}
+      WHATSAPP_PROVIDER_SESSION: ${WHATSAPP_PROVIDER_SESSION:-s3e_session_prod}
       WHATSAPP_PROVIDER_INTEGRATION: ${WHATSAPP_PROVIDER_INTEGRATION:-WHATSAPP-BAILEYS}
       WHATSAPP_PROVIDER_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
-      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-http://localhost:3333/manager}
+      WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN: ${WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN:-}
+      WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL: ${WHATSAPP_PROVIDER_DASHBOARD_PUBLIC_URL:-http://192.168.100.228:3333/manager}
+      WHATSAPP_PROVIDER_PUBLIC_URL: ${WHATSAPP_PROVIDER_PUBLIC_URL:-http://192.168.100.228:3333}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:-}
-    ports:
-      - "3001:3001"
+      WHATSAPP_MEDIA_ALLOWED_HOSTS: ${WHATSAPP_MEDIA_ALLOWED_HOSTS:-mmg.whatsapp.net,pps.whatsapp.net}
+      WHATSAPP_PROVIDER_SEND_PRESENCE: ${WHATSAPP_PROVIDER_SEND_PRESENCE:-composing}
+      WHATSAPP_PROVIDER_SEND_DELAY_MS: ${WHATSAPP_PROVIDER_SEND_DELAY_MS:-1500}
+      WHATSAPP_SEND_JITTER_MS_MIN: ${WHATSAPP_SEND_JITTER_MS_MIN:-2000}
+      WHATSAPP_SEND_JITTER_MS_MAX: ${WHATSAPP_SEND_JITTER_MS_MAX:-5000}
+      WHATSAPP_SEND_LOCK_TIMEOUT_MS: ${WHATSAPP_SEND_LOCK_TIMEOUT_MS:-120000}
+      WHATSAPP_SEND_LOCK_DISABLE: ${WHATSAPP_SEND_LOCK_DISABLE:-}
+      WHATSAPP_SEND_DEBUG: ${WHATSAPP_SEND_DEBUG:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     volumes:
-      - backend_uploads:/app/uploads # Uploads persistentes (logos, imagens, etc)
-      - backend_logs:/app/logs # Logs da aplicação
-      - backend_certificados:/app/data/certificados # Certificados digitais NF-e
-      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro # XSDs de validação NF-e (read-only)
-      - ./nfse-xsd:/app/nfse-xsd:ro # XSDs NFS-e Pública/Itajaí v7.4 (opcional; mesmo nível do docker-compose.prod.yml)
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+      - backend_certificados:/app/data/certificados
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro
+      - ./nfse-xsd:/app/nfse-xsd:ro
+      - ./backend/certs:/app/certs:ro
+      - "/etc/localtime:/etc/localtime:ro"
     depends_on:
       postgres:
         condition: service_healthy
       whatsapp-provider:
         condition: service_started
     networks:
-      - s3e-network-prod
-    # ✅ Comando de produção: aplica migrations, seed e inicia a aplicação. (Prisma Client já vem gerado na imagem.)
+      - traefik
     command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/app.js"
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
@@ -158,16 +211,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.s3e-api.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && (PathPrefix(`/api`) || PathPrefix(`/socket.io`) || PathPrefix(`/uploads`))"
+      - "traefik.http.routers.s3e-api.entrypoints=web"
+      - "traefik.http.routers.s3e-api.priority=100"
+      - "traefik.http.routers.s3e-uploads.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/uploads`)"
+      - "traefik.http.routers.s3e-uploads.entrypoints=web"
+      - "traefik.http.routers.s3e-uploads.priority=110"
+      - "traefik.http.routers.s3e-uploads.service=s3e-api"
+      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.dialTimeout=60s"
+      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.responseHeaderTimeout=60s"
+      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.idleTimeout=60s"
+      - "traefik.http.routers.s3e-api.middlewares=s3e-api-timeout"
+      # stripprefix /api NÃO ligar — Express monta rotas em /api/*
+      - "traefik.http.middlewares.s3e-api-strip.stripprefix.prefixes=/api"
+      - "traefik.http.services.s3e-api.loadbalancer.server.port=3001"
 
-  # Frontend React App - PRODUÇÃO
   frontend:
-    image: odev10antonio/s3e-frontend:1.3.1
+    image: odev10antonio/s3e-frontend:2.1.2
     container_name: s3e-frontend-prod
     restart: unless-stopped
-    ports:
-      - "8080:80" # Porta 8080 no host (TrueNAS) para porta 80 do container
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     networks:
-      - s3e-network-prod
+      - traefik
     depends_on:
       - backend
     healthcheck:
@@ -175,8 +245,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.s3e-app.rule=Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)"
+      - "traefik.http.routers.s3e-app.entrypoints=web"
+      - "traefik.http.routers.s3e-app.priority=10"
+      - "traefik.http.services.s3e-app.loadbalancer.server.port=80"
 
-  # PgAdmin - PRODUÇÃO (Opcional)
   pgadmin:
     image: dpage/pgadmin4:8.11
     container_name: s3e-pgadmin-prod
@@ -186,15 +262,13 @@ services:
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "5050:80" # Acesse em http://192.168.100.228:5050
+      PGADMIN_CONFIG_SERVER_MODE: "False"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     depends_on:
       - postgres
     networks:
-      - s3e-network-prod
+      - traefik
 
 volumes:
   postgres_data:
@@ -211,10 +285,13 @@ volumes:
     external: true
   pgadmin_data:
     driver: local
-  apps_whatsapp_provider_sessions:
-    name: apps_whatsapp_provider_sessions
-    external: true
+  evolution_go_dbdata:
+    driver: local
+  evolution_go_logs:
+    driver: local
+  redis_data:
+    driver: local
 
 networks:
-  s3e-network-prod:
+  traefik:
     driver: bridge

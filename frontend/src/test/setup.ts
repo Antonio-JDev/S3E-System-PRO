@@ -25,14 +25,24 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 
-// Mock do localStorage
+// Mock do localStorage (JSDOM moderno torna window.localStorage somente-leitura,
+// então usamos defineProperty em vez de atribuição direta)
 const localStorageMock = {
   getItem: vi.fn(),
   setItem: vi.fn(),
   removeItem: vi.fn(),
   clear: vi.fn(),
 };
-global.localStorage = localStorageMock as any;
+Object.defineProperty(window, 'localStorage', {
+  configurable: true,
+  writable: true,
+  value: localStorageMock,
+});
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  writable: true,
+  value: localStorageMock,
+});
 
 // Mock do ResizeObserver (necessário para alguns componentes)
 global.ResizeObserver = vi.fn().mockImplementation(() => ({

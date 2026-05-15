@@ -5,14 +5,20 @@ import { Response } from 'express';
 import type { AuthRequest } from '../middlewares/auth';
 import * as EvoChat from '../services/whatsappEvolutionChat.service';
 import { isEvolutionProviderKind } from '../services/whatsappProvider.evolution';
-import { canonicalWhatsappChatId } from '../utils/whatsappChat.util';
+import { canonicalWhatsappChatId, waJidToDigits } from '../utils/whatsappChat.util';
 import { persistWhatsappContactCache } from '../services/whatsappChat.service';
+import {
+  normalizePhoneDigitsKey,
+  recordWhatsappChatIdentity,
+  resolvePreferredChatIdForOutbound
+} from '../services/whatsappIdentity.service';
+import { chatIdToEvolutionNumber } from '../services/whatsappProvider.evolution';
 
 function denyIfNotEvolution(res: Response): boolean {
   if (!isEvolutionProviderKind()) {
     res.status(400).json({
       success: false,
-      error: 'Estes endpoints só se aplicam ao provedor Evolution API (WHATSAPP_PROVIDER_KIND=evolution).'
+      error: 'Estes endpoints só se aplicam ao provedor Evolution / Evolution Go (WHATSAPP_PROVIDER_KIND=evolution ou evolution-go).'
     });
     return false;
   }
@@ -232,10 +238,18 @@ export async function postEvolutionFetchProfilePicture(req: AuthRequest, res: Re
     return;
   }
   try {
-    const data = await EvoChat.evolutionFetchProfilePictureUrl(number);
+    let forEvo = number;
+    try {
+      const resolved = await resolvePreferredChatIdForOutbound(number);
+      forEvo = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
+    } catch {
+      forEvo = chatIdToEvolutionNumber(canonicalWhatsappChatId(number));
+    }
+    const data = await EvoChat.evolutionFetchProfilePictureUrl(forEvo);
     res.json({ success: true, data });
   } catch (e) {
-    res.status(500).json({ success: false, error: e instanceof Error ? e.message : 'Erro' });
+    console.warn('postEvolutionFetchProfilePicture (best-effort null)', e);
+    res.json({ success: true, data: { profilePictureUrl: null as string | null } });
   }
 }
 
@@ -258,7 +272,37 @@ export async function postEvolutionFetchContactProfile(req: AuthRequest, res: Re
     return;
   }
   try {
-    const raw = await EvoChat.evolutionFetchProfile(number);
+    let forEvolution = number;
+    try {
+      const resolved = await resolvePreferredChatIdForOutbound(number);
+      forEvolution = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
+    } catch {
+      forEvolution = chatIdToEvolutionNumber(canonicalWhatsappChatId(number));
+    }
+
+    // Resiliente: o /user/info da EvoGo costuma falhar para contatos com
+    // privacidade habilitada ou recém-adicionados (`HTTP 500 {"error":"info
+    // query timed out"}`). Esse endpoint é decorativo (alimenta o header/drawer
+    // do chat com nome + foto extras), então em vez de devolver 500 para o
+    // frontend (e quebrar a UI), retornamos `data: null` e deixamos a tela
+    // cair no cache local + iniciais.
+    let raw: unknown = null;
+    try {
+      raw = await EvoChat.evolutionFetchProfile(forEvolution);
+    } catch (fetchErr) {
+      console.warn(
+        'postEvolutionFetchContactProfile: evolutionFetchProfile falhou (ignorando)',
+        fetchErr instanceof Error ? fetchErr.message : fetchErr
+      );
+      // Mesmo sem `/user/info`, tentamos a foto separadamente (pode estar
+      // em cache positivo) para enriquecer a resposta.
+      const onlyPic = await EvoChat.evolutionFetchProfilePictureUrl(forEvolution).catch(() => ({ profilePictureUrl: null as string | null }));
+      res.json({
+        success: true,
+        data: { displayName: null, profilePictureUrl: onlyPic.profilePictureUrl ?? null, raw: null }
+      });
+      return;
+    }
 
     const top = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
     const nested =
@@ -279,16 +323,65 @@ export async function postEvolutionFetchContactProfile(req: AuthRequest, res: Re
     };
 
     const displayName = pick(['name', 'pushName', 'pushname', 'notify', 'verifiedName', 'shortName']);
-    const profilePictureUrl = pick(['picture', 'pictureUrl', 'profilePictureUrl', 'profilePicUrl', 'photoUrl']);
+    // EvoGo `/user/info` NÃO devolve a URL da foto (apenas `PictureID`).
+    // Buscamos a foto via `/chat/fetchProfilePictureUrl` (que mapeia para
+    // `/user/avatar` da EvoGo). Best-effort: erros/timeout viram null.
+    let profilePictureUrl = pick(['picture', 'pictureUrl', 'profilePictureUrl', 'profilePicUrl', 'photoUrl']);
+    if (!profilePictureUrl) {
+      try {
+        const pic = await EvoChat.evolutionFetchProfilePictureUrl(forEvolution);
+        if (pic.profilePictureUrl) profilePictureUrl = pic.profilePictureUrl;
+      } catch {
+        /* mantém null */
+      }
+    }
 
-    // Best-effort: se o front chamar o endpoint diretamente, já deixa persistido.
+    // Mapping PN ↔ LID: `/user/info` retorna o `LID` correspondente. Se
+    // existir, registra na tabela WhatsappChatIdentity para que envios e
+    // listagens consolidem o contato (evita o "chat duplicado": um pelo PN
+    // sem ACK/foto e outro pelo LID com tudo). O LID vira o `primaryChatId`
+    // — é nele que o WhatsApp moderno entrega receipts (ACK) e fotos.
+    const lidRaw = pick(['lid', 'LID']);
     const cid = canonicalWhatsappChatId(number);
+    if (lidRaw && lidRaw.toLowerCase().endsWith('@lid')) {
+      try {
+        const phoneKey = normalizePhoneDigitsKey(waJidToDigits(cid));
+        if (phoneKey) {
+          await recordWhatsappChatIdentity({
+            phoneDigitsKey: phoneKey,
+            primaryChatId: lidRaw,
+            source: 'fetch_contact',
+            extraJids: [cid]
+          });
+        }
+      } catch (identityErr) {
+        console.warn(
+          'postEvolutionFetchContactProfile: recordWhatsappChatIdentity falhou (ignorando)',
+          identityErr instanceof Error ? identityErr.message : identityErr
+        );
+      }
+    }
+
     if (displayName || profilePictureUrl) {
-      await persistWhatsappContactCache({
-        chatId: cid,
-        displayName: displayName ?? null,
-        profilePictureUrl: profilePictureUrl ?? null
-      });
+      try {
+        await persistWhatsappContactCache({
+          chatId: cid,
+          displayName: displayName ?? null,
+          profilePictureUrl: profilePictureUrl ?? null
+        });
+        // Também persiste no chatId do LID (se houver) — assim a listagem
+        // consolidada exibe foto/nome em ambas as variantes até que o
+        // merge das identidades aconteça por completo no front.
+        if (lidRaw && lidRaw.toLowerCase().endsWith('@lid')) {
+          await persistWhatsappContactCache({
+            chatId: canonicalWhatsappChatId(lidRaw),
+            displayName: displayName ?? null,
+            profilePictureUrl: profilePictureUrl ?? null
+          });
+        }
+      } catch (persistErr) {
+        console.error('persistWhatsappContactCache (fetch-contact)', persistErr);
+      }
     }
 
     res.json({ success: true, data: { displayName, profilePictureUrl, raw } });

@@ -197,6 +197,29 @@ describe('RhService.calcularFolhaMes', () => {
     expect(r.registrado?.saldoBancoHorasProjetado).toBe(5);
   });
 
+  it('REGISTRADO 40h (carga 160): horas negativas do mês somam 160h quando sem registros', async () => {
+    mockFindUnique.mockResolvedValue(
+      baseFuncionario({
+        tipoContrato: TipoContratoFuncionario.REGISTRADO,
+        cargaHorariaMensal: 160,
+        registrosPonto: [],
+        configuracaoPonto: {
+          toleranciaMinutos: 5,
+          workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:00', nome: '40h - 08:00/12:00/17:00', id: 'ws40' },
+        },
+      }),
+    );
+
+    const r = await RhService.calcularFolhaMes({
+      funcionarioId: 'func-1',
+      dataReferencia: new Date(Date.UTC(2026, 3, 15)), // abril/2026
+    });
+
+    // Deve bater a meta mensal independentemente de feriados (distribuição por dias úteis).
+    expect(r.registrado?.cargaHorariaMensal).toBe(160);
+    expect(r.registrado?.horasNegativas).toBeCloseTo(160, 6);
+  });
+
   it('soma lançamentos de desconto e acréscimo no total', async () => {
     mockFindMany.mockResolvedValue([
       {

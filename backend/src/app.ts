@@ -79,6 +79,7 @@ import atendimentoCrmRoutes from './routes/atendimentoCrm.routes';
 import brasilApiNcmRoutes from './routes/brasilApiNcm.routes';
 import webhooksRoutes from './routes/webhooks.routes';
 import whatsappRoutes from './routes/whatsapp.routes';
+import contatosS3eRoutes from './routes/contatosS3e.routes';
 import { healthCheck } from './controllers/logsController';
 import { setSocketServer } from './lib/socket';
 import { verifyToken } from './services/jwt.service';
@@ -461,6 +462,7 @@ app.use('/api/configuracoes', configuracaoRoutes);
 app.use('/api/notificacoes', notificacoesRoutes);
 app.use('/api/atendimento-crm', atendimentoCrmRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/contatos-s3e', contatosS3eRoutes);
 app.use('/api/obras', tarefasObraRoutes); // Rotas de tarefas (prefixo /api/obras) - DEVE VIR ANTES!
 app.use('/api/obras', obrasRoutes); // Rotas de materiais e compras avulsas (getMateriaisObra, getComprasAvulsasObra)
 app.use('/api/obras', obraRoutes);
@@ -510,7 +512,11 @@ const io = new Server(httpServer, {
     origin: (origin, callback) => allowOriginForBrowser(origin, callback),
     credentials: true,
     methods: ['GET', 'POST']
-  }
+  },
+  // Mantém conexões vivas através de NAT/LB e reduz quedas silenciosas.
+  // Valores conservadores (boa compatibilidade com proxies).
+  pingInterval: 25_000,
+  pingTimeout: 20_000
 });
 
 io.use((socket, next) => {
@@ -519,10 +525,23 @@ io.use((socket, next) => {
     if (!token || typeof token !== 'string') {
       return next(new Error('unauthorized'));
     }
-    verifyToken(token);
+    const payload = verifyToken(token);
+    // Anexa o `userId` decodificado no socket para usar no `connection`.
+    (socket.data as Record<string, unknown>).userId = payload.userId;
     return next();
   } catch {
     return next(new Error('unauthorized'));
+  }
+});
+
+io.on('connection', (socket) => {
+  // Coloca o socket em uma room dedicada ao usuário. Permite emitir
+  // notificações 1-para-1 (sino, mensagens privadas) sem broadcast.
+  // Eventos públicos do WhatsApp CRM continuam usando `io.emit(...)` para
+  // alcançar todos os operadores conectados.
+  const userId = (socket.data as Record<string, unknown> | undefined)?.userId;
+  if (typeof userId === 'string' && userId.trim()) {
+    socket.join(`user:${userId.trim()}`);
   }
 });
 
@@ -542,6 +561,22 @@ httpServer.listen(PORT, () => {
   };
   setTimeout(runContasVencendoHoje, 8000); // primeira execução 8s após subir
   setInterval(runContasVencendoHoje, 24 * 60 * 60 * 1000); // depois a cada 24h
+
+  // Backfill leve de metadata de grupos: nomes e fotos para conversas
+  // antigas que nunca passaram pelo `contact-meta`. Roda 1× após 15s e
+  // depois a cada 6h, com throttle interno (até 30 grupos por ciclo).
+  const runGroupMetadataBackfill = () => {
+    import('./services/whatsappChat.service')
+      .then((m) => m.backfillGroupMetadataCache(30))
+      .then(({ processed }) => {
+        if (processed > 0) {
+          console.log(`✅ Group metadata backfill: ${processed} grupos sincronizados`);
+        }
+      })
+      .catch((err) => console.warn('⚠ Group metadata backfill falhou:', err));
+  };
+  setTimeout(runGroupMetadataBackfill, 15_000);
+  setInterval(runGroupMetadataBackfill, 6 * 60 * 60 * 1000);
 });
 
 export default app;

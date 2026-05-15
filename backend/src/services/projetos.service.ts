@@ -202,13 +202,16 @@ export class ProjetosService {
 
             // Verificar materiais reais do kit
             for (const kitItem of kit.items) {
+              // Narrowing explícito para satisfazer o TS (relation pode vir como `Material | null`)
+              const mat = kitItem.material;
+              if (!mat) continue;
               const necessario = kitItem.quantidade * item.quantidade;
-              if (kitItem.material.estoque < necessario) {
+              if (mat.estoque < necessario) {
                 materiaisFaltantes.push({
-                  nome: `${kitItem.material.nome} (do kit ${kit.nome})`,
+                  nome: `${mat.nome} (do kit ${kit.nome})`,
                   necessario,
-                  disponivel: kitItem.material.estoque,
-                  falta: necessario - kitItem.material.estoque
+                  disponivel: mat.estoque,
+                  falta: necessario - mat.estoque
                 });
               }
             }

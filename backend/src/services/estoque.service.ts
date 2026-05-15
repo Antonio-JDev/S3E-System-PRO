@@ -104,7 +104,9 @@ export class EstoqueService {
     /**
      * Expande um kit e retorna lista de materiais componentes
      */
-    static async expandirKit(kitId: string) {
+    static async expandirKit(
+        kitId: string
+    ): Promise<Array<{ materialId: string; materialNome: string; materialSku: string; quantidade: number; estoqueAtual: number }>> {
         const kit = await prisma.kit.findUnique({
             where: { id: kitId },
             include: {
@@ -120,13 +122,15 @@ export class EstoqueService {
             throw new Error(`Kit ${kitId} não encontrado`);
         }
 
-        return kit.items.map(item => ({
-            materialId: item.materialId,
-            materialNome: item.material.nome,
-            materialSku: item.material.sku,
-            quantidade: item.quantidade,
-            estoqueAtual: item.material.estoque
-        }));
+        return kit.items
+            .filter((item) => item.material != null && item.materialId != null)
+            .map((item) => ({
+                materialId: String(item.materialId),
+                materialNome: item.material!.nome,
+                materialSku: item.material!.sku,
+                quantidade: item.quantidade,
+                estoqueAtual: item.material!.estoque
+            }));
     }
 
     /**

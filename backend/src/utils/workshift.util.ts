@@ -24,6 +24,8 @@ export const WORK_SHIFT_TEMPLATES_44H: WorkShiftTemplate[] = [
   { nome: '44h - 07:42/12:00/18:00', entrada1: '07:42', saida1: '12:00', entrada2: '13:30', saida2: '18:00' },
   { nome: '44h - 08:00/12:00/17:48', entrada1: '08:00', saida1: '12:00', entrada2: '13:30', saida2: '17:48' },
   { nome: '44h - 08:00/12:00/18:00', entrada1: '08:00', saida1: '12:00', entrada2: '13:12', saida2: '18:00' },
+  // 40h semanais (seg–sex): 08:00–12:00 / 13:00–17:00 (8h/dia)
+  { nome: '40h - 08:00/12:00/17:00', entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:00' },
 ];
 
 function dateFromHm(base: Date, hhmm: string): Date {

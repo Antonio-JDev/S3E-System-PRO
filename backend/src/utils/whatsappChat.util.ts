@@ -8,13 +8,16 @@ export function waJidToDigits(jid: string): string {
 
 /**
  * DM: sempre `55...` + `@c.us` (alinha com o front / funil). O provedor pode mandar `@s.whatsapp.net`.
- * Grupos / newsletter / lid: mantém o jid como veio.
+ * Grupos / newsletter / lid: mantém o jid como veio (evita colisão de cache entre contatos).
  */
 export function canonicalWhatsappChatId(jid: string): string {
   const raw = (jid || '').trim();
   if (!raw) return jid;
   const lower = raw.toLowerCase();
   if (lower.endsWith('@g.us') || lower.endsWith('@newsletter')) {
+    return raw;
+  }
+  if (lower.endsWith('@lid')) {
     return raw;
   }
   const localPart = raw.split('@')[0] || '';
@@ -35,22 +38,25 @@ export function storageChatIdVariants(chatId: string): string[] {
   if (lower.endsWith('@g.us') || lower.endsWith('@newsletter')) {
     return [raw];
   }
+  if (lower.endsWith('@lid')) {
+    // Para LID, não inventar variantes "55...@c.us" — isso pode colidir com chats reais por número.
+    // Mantemos apenas o raw e um canônico idêntico (por segurança).
+    return [raw];
+  }
   const canonical = canonicalWhatsappChatId(raw);
   const digits = waJidToDigits(canonical);
   const out = new Set<string>([raw, canonical]);
   if (digits) {
     out.add(`${digits}@c.us`);
     out.add(`${digits}@s.whatsapp.net`);
-    out.add(`${digits}@lid`);
+    // LID não é derivável de forma confiável a partir de dígitos de telefone.
     if (digits.startsWith('55') && digits.length > 2) {
       const rest = digits.slice(2);
       out.add(`${rest}@c.us`);
       out.add(`${rest}@s.whatsapp.net`);
-      out.add(`${rest}@lid`);
     } else if (!digits.startsWith('55')) {
       out.add(`55${digits}@c.us`);
       out.add(`55${digits}@s.whatsapp.net`);
-      out.add(`55${digits}@lid`);
     }
   }
   return [...out].filter(Boolean);

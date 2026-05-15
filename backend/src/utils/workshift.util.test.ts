@@ -1,4 +1,4 @@
-import { calculateMonthlyTotal, calculateTimeDifference, jornadaMinutosPorDia } from './workshift.util';
+import { WORK_SHIFT_TEMPLATES_44H, calculateMonthlyTotal, calculateTimeDifference, jornadaMinutosPorDia } from './workshift.util';
 
 describe('workshift.util', () => {
   it('calcula minutos de jornada diária corretamente', () => {
@@ -50,5 +50,14 @@ describe('workshift.util', () => {
     expect(diff.minutosExtraEntrada).toBe(6);
     expect(diff.minutosExtraSaida).toBe(8);
     expect(diff.minutosExtraTotal).toBe(14);
+  });
+
+  it('inclui template de jornada 40h (08:00–12:00 / 13:00–17:00)', () => {
+    const t = WORK_SHIFT_TEMPLATES_44H.find((x) => x.nome.startsWith('40h'));
+    expect(t).toBeTruthy();
+    expect(t?.entrada1).toBe('08:00');
+    expect(t?.saida1).toBe('12:00');
+    expect(t?.entrada2).toBe('13:00');
+    expect(t?.saida2).toBe('17:00');
   });
 });

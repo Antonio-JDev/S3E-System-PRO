@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../lib/prisma';
+import { buildContentDisposition, normalizeUserFilename } from '../utils/filename.util';
 
 // Configuração do multer para uploads de documentos
 const storage = multer.diskStorage({
@@ -81,7 +82,7 @@ export const criarDocumento = async (req: Request, res: Response): Promise<void>
       data: {
         projetoId,
         tipo: tipo || 'OUTRO',
-        nome: req.file.originalname,
+        nome: normalizeUserFilename(req.file.originalname) || req.file.originalname,
         nomeArquivo: req.file.filename,
         url: `/uploads/projetos-documentos/${req.file.filename}`,
         observacoes: observacoes || null,
@@ -171,7 +172,7 @@ export const visualizarDocumento = async (req: Request, res: Response): Promise<
 
     // Configurar headers para visualização
     res.setHeader('Content-Type', documento.mimeType || 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(documento.nome)}"`);
+    res.setHeader('Content-Disposition', buildContentDisposition('inline', documento.nome, 'documento'));
     res.setHeader('Content-Length', documento.tamanho || fs.statSync(filePath).size);
 
     // Enviar arquivo

@@ -92,10 +92,22 @@ export interface WhatsappChatPreview {
   lastAck?: number | null;
   /** Mensagens do cliente não lidas por este usuário (persistido no backend). */
   unreadCount: number;
+  /** Conversa fixada no topo (persistida no backend por usuário). */
+  pinned?: boolean;
+  /** Conversa favoritada (persistida no backend por usuário). */
+  favorite?: boolean;
   /** Nome no CRM (lead ou cliente), quando houver cadastro com o mesmo número. */
   contactName?: string | null;
   /** Nome WhatsApp (pushname / agenda) persistido no servidor após abrir a conversa. */
   providerCachedName?: string | null;
+  /** Nome da agenda S3E (`contatos_s3e.nome_agenda`) — fonte de máxima prioridade. */
+  agendaS3eName?: string | null;
+  /**
+   * Telefone real do contato vindo da agenda S3E / mapa de identidades.
+   * Crítico para conversas em `@lid` (cujo JID não carrega o telefone) —
+   * sem este campo o frontend fica sem saber qual número exibir.
+   */
+  phoneNumberFromS3e?: string | null;
   /** Foto de perfil (última URL obtida no provedor), persistida no servidor. */
   cachedProfilePictureUrl?: string | null;
 }
@@ -173,6 +185,12 @@ export interface WhatsappMessageDto {
   fileName?: string | null;
   fileSize?: number | null;
   providerMediaId?: string | null;
+  /**
+   * Emoji da reação ativa nesta mensagem (ex.: '👍', '❤️'). `null`/ausente
+   * quando não há reação. Atualizado em tempo real pelo socket
+   * `whatsapp:message:reaction`.
+   */
+  reaction?: string | null;
 }
 
 export function fetchWhatsappChats() {
@@ -218,7 +236,10 @@ export function postWhatsappProviderLogout() {
   return axiosApiService.post<void>(`${BASE}/logout-session`, {});
 }
 
-export function fetchWhatsappProviderContacts(params?: FetchWhatsappProviderContactsQuery) {
+export function fetchWhatsappProviderContacts(
+  params?: FetchWhatsappProviderContactsQuery,
+  requestConfig?: { timeout?: number }
+) {
   const q: Record<string, string | number> = {};
   if (params?.limit != null) q.limit = params.limit;
   if (params?.offset != null) q.offset = params.offset;
@@ -227,7 +248,18 @@ export function fetchWhatsappProviderContacts(params?: FetchWhatsappProviderCont
   if (params?.refresh) q.refresh = '1';
   return axiosApiService.get<WhatsappProviderContactRow[]>(
     `${BASE}/provider-contacts`,
-    Object.keys(q).length ? q : undefined
+    Object.keys(q).length ? q : undefined,
+    requestConfig
+  );
+}
+
+/** Busca contatos salvos na agenda do WhatsApp (nome, pushname, número, JID). Parâmetro `query` ou `q`. */
+export function fetchWhatsappProviderContactsSearch(search: string) {
+  const q = (search || '').trim();
+  return axiosApiService.get<WhatsappProviderContactRow[]>(
+    `${BASE}/provider-contacts/search`,
+    { query: q },
+    { timeout: 120_000 }
   );
 }
 
@@ -238,8 +270,14 @@ export function checkWhatsappProviderPhoneExists(phone: string) {
   });
 }
 
-export function fetchWhatsappProviderGroups() {
-  return axiosApiService.get<WhatsappProviderGroupRow[]>(`${BASE}/provider-groups`, undefined, { timeout: 60_000 });
+export function fetchWhatsappProviderGroups(params?: { refresh?: boolean }) {
+  const q: Record<string, string> = {};
+  if (params?.refresh) q.refresh = '1';
+  return axiosApiService.get<WhatsappProviderGroupRow[]>(
+    `${BASE}/provider-groups`,
+    Object.keys(q).length ? q : undefined,
+    { timeout: 60_000 }
+  );
 }
 
 export function fetchWhatsappProviderProfilePicture(chatId: string) {
@@ -251,7 +289,32 @@ export function fetchWhatsappProviderContactMeta(chatId: string) {
     contact: WhatsappProviderContactRow | null;
     group?: WhatsappProviderGroupRow | null;
     profilePictureUrl: string | null;
+    /** Nome da agenda S3E (`contatos_s3e.nome_agenda`), prioridade sobre pushname do provedor. */
+    nomeAgendaS3e?: string | null;
+    /**
+     * Telefone real do contato salvo (`contatos_s3e.numero` ou
+     * `whatsapp_chat_identities.phone_digits`). Backend usa esse valor para
+     * exibir o número correto quando o `chatId` é um `@lid`.
+     */
+    numeroContatoS3e?: string | null;
   }>(`${BASE}/contact-meta`, { chatId });
+}
+
+/**
+ * Resolve nomes dos participantes de um grupo via cache local do backend
+ * (sem hit no provider). Alimentado organicamente pelo webhook a cada
+ * nova mensagem do grupo. Idempotente e barato.
+ */
+export interface WhatsappGroupParticipantCacheRow {
+  jid: string;
+  canonicalJid: string;
+  digits: string;
+  displayName: string | null;
+}
+export function fetchWhatsappGroupParticipantCache(chatId: string) {
+  return axiosApiService.get<WhatsappGroupParticipantCacheRow[]>(`${BASE}/group-participants-cache`, {
+    chatId
+  });
 }
 
 /** Atualiza o cache (nome/foto) persistido no backend para a lista do CRM. */
@@ -263,9 +326,29 @@ export function postWhatsappUpsertContactCache(params: {
   return axiosApiService.post<void>(`${BASE}/contact-cache`, params);
 }
 
-/** Limpa todo o cache de nomes/fotos de contatos WhatsApp. */
-export function deleteWhatsappContactCacheAll() {
-  return axiosApiService.delete<{ deleted: number }>(`${BASE}/contact-cache`);
+/**
+ * Apaga todas as linhas de `whatsapp_contact_cache` (nomes/fotos persistidos do WhatsApp).
+ * Por padrão **não** regrava o CRM na mesma tabela — isso evita o nome “errado” voltar na hora.
+ * Use `rebuildFromCrm: true` só se quiser popular o cache de novo a partir de Cliente/Lead.
+ */
+export function deleteWhatsappContactCacheAll(opts?: { rebuildFromCrm?: boolean }) {
+  const params = opts?.rebuildFromCrm ? { rebuild: '1' } : undefined;
+  return axiosApiService.delete<{ deleted: number; rebuilt: number }>(`${BASE}/contact-cache`, { params });
+}
+
+/** Resolve JID ativo (LID vs número) para abrir conversa a partir do telefone (Funil). */
+export function fetchWhatsappResolveOpenChat(phone: string) {
+  return axiosApiService.get<{ chatId: string; numberExists: boolean; titleHint: string | null }>(
+    `${BASE}/chats/resolve-open`,
+    { phone }
+  );
+}
+
+/** JID/número a passar nas rotas Evolution fetch-profile (evita @lid inválido). */
+export function fetchWhatsappProfileFetchTarget(chatId: string) {
+  return axiosApiService.get<{ target: string; resolvedChatId: string }>(`${BASE}/profile-fetch-target`, {
+    chatId
+  });
 }
 
 export function fetchWhatsappMessages(chatId: string) {
@@ -361,8 +444,16 @@ export function deleteWhatsappMessage(messageId: string) {
   return axiosApiService.delete<{ chatId: string; id: string }>(`${BASE}/messages/${encodeURIComponent(messageId)}`);
 }
 
+export function deleteWhatsappMessageForMe(messageId: string) {
+  return axiosApiService.delete<{ chatId: string; id: string }>(`${BASE}/messages/${encodeURIComponent(messageId)}/for-me`);
+}
+
 export function editWhatsappMessage(messageId: string, text: string) {
   return axiosApiService.put<WhatsappMessageDto>(`${BASE}/messages/${encodeURIComponent(messageId)}`, { text });
+}
+
+export function postWhatsappForwardMessages(params: { targetChatId: string; messageIds: string[] }) {
+  return axiosApiService.post<{ forwardedCount: number }>(`${BASE}/messages/forward`, params);
 }
 
 /**
@@ -417,12 +508,37 @@ export function postWhatsappMarkRead(chatId: string) {
   return axiosApiService.post<void>(`${BASE}/mark-read`, { chatId });
 }
 
+/**
+ * Reage a uma mensagem com um emoji (ex.: ✅, 👍, ❤️).
+ *
+ *  - Passe uma string vazia em `emoji` para REMOVER a reação enviada antes.
+ *  - O backend resolve `chatId` e `providerMessageId` a partir do `messageId`
+ *    interno (UUID em `chat_messages.id`) — você só precisa do id que já vem
+ *    em `WhatsappMessageDto.id`.
+ *  - Envio passa pela fila global (anti-ban), serializado com `sendText`/
+ *    `sendMedia` mas sem o jitter de 2-5s (reaction é interação leve).
+ */
+export function reactToWhatsappMessage(messageId: string, emoji: string) {
+  return axiosApiService.post<void>(
+    `${BASE}/messages/${encodeURIComponent(messageId)}/react`,
+    { emoji }
+  );
+}
+
 export function deleteWhatsappConversation(chatId: string) {
   return axiosApiService.delete<void>(`${BASE}/conversations`, { params: { chatId } });
 }
 
 export function archiveWhatsappConversation(chatId: string) {
   return axiosApiService.post<void>(`${BASE}/conversations/archive`, { chatId });
+}
+
+export function postWhatsappPinConversation(chatId: string, pinned: boolean) {
+  return axiosApiService.post<void>(`${BASE}/conversations/pin`, { chatId, pinned });
+}
+
+export function postWhatsappFavoriteConversation(chatId: string, favorite: boolean) {
+  return axiosApiService.post<void>(`${BASE}/conversations/favorite`, { chatId, favorite });
 }
 
 export function postWhatsappSubscribePresence(chatId: string) {
@@ -470,6 +586,10 @@ export function fetchWhatsappActionsContext(chatId: string) {
 
 export function postWhatsappLinkCliente(chatId: string, clienteId: string) {
   return axiosApiService.post<void>(`${BASE}/actions/link-cliente`, { chatId, clienteId });
+}
+
+export function postWhatsappUnlinkCliente(chatId: string) {
+  return axiosApiService.post<void>(`${BASE}/actions/unlink-cliente`, { chatId });
 }
 
 export function fetchWhatsappOrcamentoStatusMode() {

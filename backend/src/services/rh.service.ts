@@ -554,10 +554,28 @@ export const RhService = {
     const totalDias = diasNoMes(ano, mes);
     const conferenciaPonto: ConferenciaPontoDia[] = [];
     let minutosFaltaSemRegistro = 0;
-    const minutosPrevistosDia =
-      workShift != null
+    // Para RH, a "meta" do mês precisa seguir a cargaHorariaMensal do colaborador (ex.: 160h em jornada 40h),
+    // independentemente da quantidade de dias úteis no calendário. Distribuímos a carga pelos dias úteis do mês.
+    const diasUteisNoMes = (() => {
+      let uteis = 0;
+      for (let dia = 1; dia <= totalDias; dia++) {
+        const dow = diaSemanaCivil(ano, mes, dia);
+        const ehFds = dow === 0 || dow === 6;
+        const ehFer = ehFeriado(ano, mes, dia);
+        if (!ehFds && !ehFer) uteis += 1;
+      }
+      return uteis;
+    })();
+    const minutosPrevistosDia = (() => {
+      const carga = Number(cargaHorariaMensal ?? 0);
+      if (Number.isFinite(carga) && carga > 0 && diasUteisNoMes > 0) {
+        return Math.round(((carga * 60) / diasUteisNoMes));
+      }
+      // Fallback legado
+      return workShift != null
         ? Math.round((calculateMonthlyTotal(workShift, ano, mes) / Math.max(1, totalDias)) * 60)
-        : Math.round((cargaHorariaMensal / 22) * 60);
+        : Math.round((220 / 22) * 60);
+    })();
     for (let dia = 1; dia <= totalDias; dia++) {
       const chave = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
       const dow = diaSemanaCivil(ano, mes, dia);

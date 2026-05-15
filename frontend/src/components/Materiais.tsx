@@ -1791,7 +1791,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Foto</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Material</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">SKU</th>
-                                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Categoria</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Preço Compra</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor Venda</th>
@@ -1833,11 +1832,6 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
                                     <td className="px-6 py-4">
                                         <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-card text-gray-600 dark:text-gray-300 rounded font-mono">
                                             {material.sku || 'N/A'}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300">
-                                            {getCategoryIcon((material.category as MaterialCategory) ?? MaterialCategory.OUTRO)} {material.category ?? 'N/A'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 text-right">

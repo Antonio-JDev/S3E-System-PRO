@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OrcamentoPDFData } from '../../types/pdfCustomization';
 import PrintRenderer from '../PrintRenderer';
 import { ensureHtml, normalizeEmptyParagraphsForPdf, normalizeListItemsForPdf } from '../../utils/tipTapUtils';
@@ -9,10 +9,33 @@ interface OrcamentoPrintableProps {
     opacidade?: number;
 }
 
+// === Constantes de página A4 (compatíveis com PrintRenderer) ===
+const PX_PER_MM = 3.78;
+const PAGE_HEIGHT_PX = Math.round(297 * PX_PER_MM); // ~1123px
+const PAGE_WIDTH_PX = Math.round(210 * PX_PER_MM);   // ~794px
+const MARGIN_TOP_PX = 95;
+const MARGIN_BOTTOM_PX = 100;
+const MARGIN_LEFT_PX = 20;
+const MARGIN_RIGHT_PX = 20;
+const CONTENT_HEIGHT_PX = PAGE_HEIGHT_PX - MARGIN_TOP_PX - MARGIN_BOTTOM_PX; // ~928px
+const CONTENT_WIDTH_PX = PAGE_WIDTH_PX - MARGIN_LEFT_PX - MARGIN_RIGHT_PX;     // ~754px
+const RESERVE_PADDING_PX = 16;
+
+// SSR-safe layout effect (mantém compatibilidade com testes Vitest/JSDOM)
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+interface PaginationState {
+    pages: number[][];
+    totalsFitOnLast: boolean;
+}
+
+const formatCurrencyBR = (value: number) =>
+    `R$ ${(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintableProps>(
     ({ orcamento, folhaTimbradaUrl, opacidade = 0.05 }, ref) => {
-        
-        // Preparar conteúdo combinado para o PrintRenderer
+
+        // Preparar conteúdo combinado para o PrintRenderer (descrições/observações)
         const conteudoCombinado = useMemo(() => {
             const partes: string[] = [];
 
@@ -23,8 +46,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                 // 2) preservar ENTER ENTER (parágrafos vazios)
                 return normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(html));
             };
-            
-            // Adicionar descrição geral se existir
+
             if (orcamento.descricaoGeral) {
                 partes.push(`
                     <div class="section">
@@ -33,8 +55,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                     </div>
                 `);
             }
-            
-            // Adicionar descrição técnica se existir
+
             if (orcamento.descricaoTecnica) {
                 partes.push(`
                     <div class="section">
@@ -43,8 +64,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                     </div>
                 `);
             }
-            
-            // Adicionar observações se existir
+
             if (orcamento.observacoes) {
                 partes.push(`
                     <div class="section">
@@ -53,9 +73,353 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                     </div>
                 `);
             }
-            
+
             return partes.join('\n');
         }, [orcamento.descricaoGeral, orcamento.descricaoTecnica, orcamento.observacoes]);
+
+        const items = orcamento.items || [];
+
+        const hasEnderecos = Boolean(
+            orcamento.enderecos?.obra ||
+            orcamento.enderecos?.cobranca ||
+            orcamento.cliente?.endereco ||
+            (orcamento as any).enderecoObra ||
+            orcamento.projeto?.enderecoObra
+        );
+
+        const hasPagamento = Boolean(orcamento.pagamento || orcamento.financeiro?.condicaoPagamento);
+
+        // Chave estável para invalidar a medição quando os dados relevantes mudarem.
+        const measureKey = useMemo(() => {
+            try {
+                return JSON.stringify({
+                    items: items.map(i => ({
+                        n: i.nome ?? '',
+                        d: i.descricao ?? '',
+                        u: i.unidade ?? '',
+                        q: i.quantidade ?? 0,
+                        vu: i.valorUnitario ?? 0,
+                        vt: i.valorTotal ?? 0,
+                    })),
+                    cliente: orcamento.cliente,
+                    enderecos: orcamento.enderecos,
+                    enderecoObra: (orcamento as any).enderecoObra,
+                    numeroObra: (orcamento as any).numeroObra,
+                    clienteNumero: (orcamento.cliente as any)?.numero,
+                    projetoEnderecoObra: orcamento.projeto?.enderecoObra,
+                    financeiro: orcamento.financeiro,
+                    pagamento: orcamento.pagamento,
+                    numero: orcamento.numero,
+                    numeroSequencial: orcamento.numeroSequencial,
+                    titulo: orcamento.projeto?.titulo,
+                    emissao: orcamento.emissao,
+                    data: orcamento.data,
+                    validade: orcamento.validade,
+                    orcamentistaNome: orcamento.orcamentistaNome,
+                });
+            } catch {
+                return String(items.length);
+            }
+        }, [orcamento, items]);
+
+        // Estado de paginação. Fallback inicial: tudo na pg 1 (mesmo comportamento antigo até o useLayoutEffect rodar).
+        const [pagination, setPagination] = useState<PaginationState>(() => ({
+            pages: [items.map((_, i) => i)],
+            totalsFitOnLast: true,
+        }));
+
+        // Quantas páginas o PrintRenderer da descrição técnica gerou (0 se não houver descrição).
+        const [printRendererPagesCount, setPrintRendererPagesCount] = useState<number>(0);
+        // Recebemos pelo menos uma contagem do PrintRenderer? (ou não há PrintRenderer)
+        const [pageCountReceived, setPageCountReceived] = useState<boolean>(!conteudoCombinado);
+
+        useEffect(() => {
+            // Quando o conteúdo técnico muda: aguardar nova contagem antes de exibir page-numbers.
+            if (!conteudoCombinado) {
+                setPrintRendererPagesCount(0);
+                setPageCountReceived(true);
+            } else {
+                setPageCountReceived(false);
+            }
+        }, [conteudoCombinado]);
+
+        const handlePrintRendererPagesComputed = useCallback((count: number) => {
+            setPrintRendererPagesCount(count);
+            setPageCountReceived(true);
+        }, []);
+
+        const measureRef = useRef<HTMLDivElement>(null);
+        const lastKeyRef = useRef<string>('');
+
+        useIsomorphicLayoutEffect(() => {
+            const root = measureRef.current;
+            if (!root) return;
+
+            // Em StrictMode o effect roda 2x; evita recomputar para a mesma chave.
+            if (lastKeyRef.current === measureKey) return;
+            lastKeyRef.current = measureKey;
+
+            const headerPg1 = root.querySelector<HTMLElement>('[data-measure="header-pg1"]');
+            const headerPgN = root.querySelector<HTMLElement>('[data-measure="header-pgn"]');
+            const totaisEl = root.querySelector<HTMLElement>('[data-measure="totais"]');
+            const pagamentoEl = root.querySelector<HTMLElement>('[data-measure="pagamento"]');
+            const itemRows = root.querySelectorAll<HTMLTableRowElement>('tr[data-measure="item-row"]');
+
+            const measure = (el: Element | null) => (el ? el.getBoundingClientRect().height : 0);
+
+            const H_HEADER_PG1 = measure(headerPg1);
+            const H_HEADER_PGN = measure(headerPgN);
+            const H_TOTAIS = measure(totaisEl);
+            const H_PAGAMENTO = measure(pagamentoEl);
+            const trHeights = Array.from(itemRows).map(tr => tr.getBoundingClientRect().height || 24);
+
+            const RESERVE_END = H_TOTAIS + H_PAGAMENTO + RESERVE_PADDING_PX;
+
+            // Algoritmo de paginação por altura medida.
+            const newPages: number[][] = [[]];
+            let cur = H_HEADER_PG1 || 0;
+
+            for (let i = 0; i < trHeights.length; i++) {
+                const trH = trHeights[i] || 24;
+                const currentArr = newPages[newPages.length - 1];
+                if (cur + trH > CONTENT_HEIGHT_PX && currentArr.length > 0) {
+                    newPages.push([]);
+                    cur = H_HEADER_PGN || 0;
+                }
+                newPages[newPages.length - 1].push(i);
+                cur += trH;
+            }
+
+            const totalsFitOnLast = cur + RESERVE_END <= CONTENT_HEIGHT_PX;
+
+            setPagination(prev => {
+                const same =
+                    prev.pages.length === newPages.length &&
+                    prev.totalsFitOnLast === totalsFitOnLast &&
+                    prev.pages.every((p, idx) =>
+                        p.length === (newPages[idx]?.length ?? -1) &&
+                        p.every((v, j) => v === newPages[idx][j])
+                    );
+                if (same) return prev;
+                return { pages: newPages, totalsFitOnLast };
+            });
+        }, [measureKey]);
+
+        // === Blocos reutilizáveis (mesmos no medidor offscreen e nas páginas visíveis) ===
+
+        const renderWatermark = () => (
+            <div
+                className={`watermark-background${folhaTimbradaUrl ? ' custom-letterhead' : ''}`}
+                style={folhaTimbradaUrl ? { backgroundImage: `url('${folhaTimbradaUrl}')` } : undefined}
+            >
+                {!folhaTimbradaUrl && (
+                    <div className="watermark-center">
+                        S3E
+                        <div className="watermark-subtitle">ENGENHARIA ELÉTRICA</div>
+                    </div>
+                )}
+            </div>
+        );
+
+        const renderTitleBlock = () => (
+            <div className="orcamento-title">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                    <h1 style={{ margin: 0 }}>{orcamento.projeto?.titulo || `ORÇAMENTO DE VENDA #${orcamento.numero}`}</h1>
+                    <strong style={{ fontSize: '14px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ORÇAMENTO: {orcamento.numeroSequencial ?? orcamento.numero}</strong>
+                </div>
+                <div className="orcamento-details">
+                    <div className="detail-item">
+                        <label>Cliente:</label>
+                        <strong>{orcamento.cliente?.nome || 'Cliente'}</strong>
+                    </div>
+                    <div className="detail-item">
+                        <label>Emissão:</label>
+                        <strong>{orcamento.emissao || orcamento.data || new Date().toLocaleDateString('pt-BR')}</strong>
+                    </div>
+                    <div className="detail-item">
+                        <label>Validade:</label>
+                        <strong>{orcamento.validade || '-'}</strong>
+                    </div>
+                    <div className="detail-item">
+                        <label>Orçamentista:</label>
+                        <strong>{orcamento.orcamentistaNome || 'Não identificado'}</strong>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const renderClienteBlock = () => (
+            <div className="cliente-section">
+                <div className="section-title">Dados do Cliente</div>
+                <div className="cliente-info-grid">
+                    <div className="cliente-info-item">
+                        <div className="cliente-info-label">Nome:</div>
+                        <div className="cliente-info-value">{orcamento.cliente.nome}</div>
+                    </div>
+                    {orcamento.cliente.cpfCnpj && (
+                        <div className="cliente-info-item">
+                            <div className="cliente-info-label">CPF/CNPJ:</div>
+                            <div className="cliente-info-value">{orcamento.cliente.cpfCnpj}</div>
+                        </div>
+                    )}
+                    {orcamento.cliente.email && (
+                        <div className="cliente-info-item">
+                            <div className="cliente-info-label">Email:</div>
+                            <div className="cliente-info-value">{orcamento.cliente.email}</div>
+                        </div>
+                    )}
+                    {orcamento.cliente.telefone && (
+                        <div className="cliente-info-item">
+                            <div className="cliente-info-label">Telefone:</div>
+                            <div className="cliente-info-value">{orcamento.cliente.telefone}</div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const renderEnderecosBlock = () => (
+            <div className="addresses-row">
+                {(orcamento.enderecos?.cobranca || orcamento.cliente?.endereco) && (
+                    <div className="address-box">
+                        <div className="section-title">Endereço de Cobrança</div>
+                        <div style={{ fontSize: '11px', lineHeight: '1.4' }}>
+                            {orcamento.enderecos?.cobranca || (orcamento.cliente?.endereco && (orcamento.cliente as any)?.numero
+                                ? `${orcamento.cliente.endereco}, ${(orcamento.cliente as any).numero}`
+                                : orcamento.cliente?.endereco)}
+                        </div>
+                    </div>
+                )}
+                {(orcamento.enderecos?.obra || (orcamento as any).enderecoObra || orcamento.projeto?.enderecoObra) && (
+                    <div className="address-box">
+                        <div className="section-title">Endereço da Obra</div>
+                        <div style={{ fontSize: '11px', lineHeight: '1.4' }}>
+                            {orcamento.enderecos?.obra || (() => {
+                                const logradouro = (orcamento as any).enderecoObra || orcamento.projeto?.enderecoObra || '';
+                                return logradouro + ((orcamento as any).numeroObra ? `, ${(orcamento as any).numeroObra}` : '');
+                            })()}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+
+        const renderItensSectionTitle = (continuacao: boolean) => (
+            <div style={{ fontSize: '10px', color: '#1e293b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                {continuacao ? 'Itens do Orçamento (continuação)' : 'Itens do Orçamento'}
+            </div>
+        );
+
+        const renderItensTableHeader = () => (
+            <thead>
+                <tr>
+                    <th>Descrição</th>
+                    <th>Unid.</th>
+                    <th>Qtd</th>
+                    <th>Valor Unit.</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+        );
+
+        const renderItensTableRow = (
+            item: OrcamentoPDFData['items'][number],
+            key: React.Key,
+            opts?: { measure?: boolean }
+        ) => (
+            <tr key={key} {...(opts?.measure ? { 'data-measure': 'item-row' } : {})}>
+                <td>
+                    <div>{item.nome || 'Item'}</div>
+                </td>
+                <td>{item.unidade || 'UN'}</td>
+                <td>{(item.quantidade || 0).toFixed(2)}</td>
+                <td>{formatCurrencyBR(item.valorUnitario || 0)}</td>
+                <td><strong>{formatCurrencyBR(item.valorTotal || 0)}</strong></td>
+            </tr>
+        );
+
+        const renderItensTable = (pageItems: OrcamentoPDFData['items']) => (
+            <div className="itens-section">
+                <table className="itens-table">
+                    {renderItensTableHeader()}
+                    <tbody>
+                        {pageItems.map((item, idx) => renderItensTableRow(item, `row-${idx}`))}
+                    </tbody>
+                </table>
+            </div>
+        );
+
+        const renderTotaisBlock = () => {
+            const qtdItens = items.length;
+            const valorTotalItens = items.reduce((s, i) => s + (i.valorTotal || 0), 0);
+            return (
+                <div className="totais-section">
+                    <div className="totais-row" style={{ marginBottom: '4px' }}>
+                        <span>Quantidade: {qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
+                        <span>Valor total dos itens R$ {valorTotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    {(orcamento.financeiro?.desconto ?? 0) > 0 && (
+                        <div className="totais-row">
+                            <span>Desconto:</span>
+                            <strong>- {formatCurrencyBR(orcamento.financeiro?.desconto || 0)}</strong>
+                        </div>
+                    )}
+                    {(orcamento.financeiro?.impostos || 0) > 0 && (
+                        <div className="totais-row">
+                            <span>Impostos:</span>
+                            <strong>{formatCurrencyBR(orcamento.financeiro?.impostos || 0)}</strong>
+                        </div>
+                    )}
+                    <div className="totais-row total-final">
+                        <span>VALOR TOTAL DO ORÇAMENTO:</span>
+                        <span>{formatCurrencyBR(orcamento.financeiro?.valorTotal || 0)}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const renderPagamentoBlock = () => (
+            <div className="pagamento-section">
+                <div className="section-title">Forma / Condições de Pagamento</div>
+                <table className="pagamento-table">
+                    <thead>
+                        <tr>
+                            <th>Condição</th>
+                            <th>Observação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>{orcamento.pagamento || orcamento.financeiro?.condicaoPagamento}</strong></td>
+                            <td>Pagamento conforme condições acordadas</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        );
+
+        // === Cálculo do total de páginas do documento inteiro ===
+        const itemsPagesCount = pagination.pages.length;
+        const extraTotalsPageCount = pagination.totalsFitOnLast ? 0 : 1;
+        const totalPages = itemsPagesCount + extraTotalsPageCount + (conteudoCombinado ? printRendererPagesCount : 0);
+        const printRendererStartPageNumber = itemsPagesCount + extraTotalsPageCount + 1;
+        const showPageNumbers = pageCountReceived && totalPages > 0;
+
+        const renderPdfPage = (key: React.Key, content: React.ReactNode, pageNumber?: number) => (
+            <div className="pdf-page" key={key}>
+                {renderWatermark()}
+                <div className="page-content">
+                    <div className="page">
+                        {content}
+                    </div>
+                </div>
+                {showPageNumbers && pageNumber != null && (
+                    <div className="page-number">
+                        {pageNumber} / {totalPages}
+                    </div>
+                )}
+            </div>
+        );
 
         return (
             <div ref={ref}>
@@ -503,16 +867,29 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
 
                     .page-number {
                         position: absolute;
-                        bottom: 30px;
-                        right: 30px;
-                        font-size: 9px;
-                        color: #64748b;
+                        bottom: 30.5px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: #000000;
                         z-index: 2;
                     }
 
                     .page-footer-space {
                         height: 80px;
                         flex-shrink: 0;
+                    }
+
+                    /* Host invisível usado apenas para medir alturas dos blocos. */
+                    .measure-host {
+                        position: fixed;
+                        left: -99999px;
+                        top: 0;
+                        width: ${CONTENT_WIDTH_PX}px;
+                        visibility: hidden;
+                        pointer-events: none;
+                        z-index: -1;
                     }
 
                     /* Dark mode: preview do PDF sempre como documento legível (fundo branco, texto opaco) */
@@ -540,204 +917,82 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                     }
                 `}</style>
 
-                <div className="print-container">
-                    {/* PÁGINA 1: Dados do Orçamento */}
-                    <div className="pdf-page">
-                        {/* Folha Timbrada */}
-                        <div 
-                            className={`watermark-background${folhaTimbradaUrl ? ' custom-letterhead' : ''}`}
-                            style={folhaTimbradaUrl ? {
-                                backgroundImage: `url('${folhaTimbradaUrl}')`
-                            } : undefined}
-                        >
-                            {!folhaTimbradaUrl && (
-                                <div className="watermark-center">
-                                    S3E
-                                    <div className="watermark-subtitle">ENGENHARIA ELÉTRICA</div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="page-content">
-                            <div className="page">
-                    {/* Renderizar conteúdo do orçamento aqui: título e número na mesma linha; ORÇAMENTO: [número] em 14px negrito */}
-                    <div className="orcamento-title no-break">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                            <h1 style={{ margin: 0 }}>{orcamento.projeto?.titulo || `ORÇAMENTO DE VENDA #${orcamento.numero}`}</h1>
-                            <strong style={{ fontSize: '14px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>ORÇAMENTO: {orcamento.numeroSequencial ?? orcamento.numero}</strong>
-                        </div>
-                        <div className="orcamento-details">
-                            <div className="detail-item">
-                                <label>Cliente:</label>
-                                <strong>{orcamento.cliente?.nome || 'Cliente'}</strong>
-                            </div>
-                            <div className="detail-item">
-                                <label>Emissão:</label>
-                                <strong>{orcamento.emissao || orcamento.data || new Date().toLocaleDateString('pt-BR')}</strong>
-                            </div>
-                            <div className="detail-item">
-                                <label>Validade:</label>
-                                <strong>{orcamento.validade || '-'}</strong>
-                            </div>
-                            <div className="detail-item">
-                                <label>Orçamentista:</label>
-                                <strong>{orcamento.orcamentistaNome || 'Não identificado'}</strong>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Cliente */}
-                    <div className="cliente-section no-break">
-                        <div className="section-title">Dados do Cliente</div>
-                        <div className="cliente-info-grid">
-                            <div className="cliente-info-item">
-                                <div className="cliente-info-label">Nome:</div>
-                                <div className="cliente-info-value">{orcamento.cliente.nome}</div>
-                            </div>
-                            {orcamento.cliente.cpfCnpj && (
-                                <div className="cliente-info-item">
-                                    <div className="cliente-info-label">CPF/CNPJ:</div>
-                                    <div className="cliente-info-value">{orcamento.cliente.cpfCnpj}</div>
-                                </div>
-                            )}
-                            {orcamento.cliente.email && (
-                                <div className="cliente-info-item">
-                                    <div className="cliente-info-label">Email:</div>
-                                    <div className="cliente-info-value">{orcamento.cliente.email}</div>
-                                </div>
-                            )}
-                            {orcamento.cliente.telefone && (
-                                <div className="cliente-info-item">
-                                    <div className="cliente-info-label">Telefone:</div>
-                                    <div className="cliente-info-value">{orcamento.cliente.telefone}</div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Endereços (logradouro + número) */}
-                    {(orcamento.enderecos?.obra || orcamento.enderecos?.cobranca || orcamento.cliente?.endereco || orcamento.enderecoObra || orcamento.projeto?.enderecoObra) && (
-                        <div className="addresses-row no-break">
-                            {(orcamento.enderecos?.cobranca || orcamento.cliente?.endereco) && (
-                                <div className="address-box">
-                                    <div className="section-title">Endereço de Cobrança</div>
-                                    <div style={{ fontSize: '11px', lineHeight: '1.4' }}>
-                                        {orcamento.enderecos?.cobranca || (orcamento.cliente?.endereco && orcamento.cliente?.numero
-                                            ? `${orcamento.cliente.endereco}, ${orcamento.cliente.numero}`
-                                            : orcamento.cliente?.endereco)}
-                                    </div>
-                                </div>
-                            )}
-                            {(orcamento.enderecos?.obra || orcamento.enderecoObra || orcamento.projeto?.enderecoObra) && (
-                                <div className="address-box">
-                                    <div className="section-title">Endereço da Obra</div>
-                                    <div style={{ fontSize: '11px', lineHeight: '1.4' }}>
-                                        {orcamento.enderecos?.obra || (() => {
-                                            const logradouro = orcamento.enderecoObra || orcamento.projeto?.enderecoObra || '';
-                                            return logradouro + (orcamento.numeroObra ? `, ${orcamento.numeroObra}` : '');
-                                        })()}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Linha separadora */}
-                    <hr style={{ margin: '12px 0', border: 'none', borderTop: '1px solid #000000' }} />
-
-                    {/* Itens do Orçamento */}
-                    <div className="itens-section">
-                        <div style={{ fontSize: '10px', color: '#1e293b', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                            Itens do Orçamento
-                        </div>
-                        <table className="itens-table no-break">
-                            <thead>
-                                <tr>
-                                    <th>Descrição</th>
-                                    <th>Unid.</th>
-                                    <th>Qtd</th>
-                                    <th>Valor Unit.</th>
-                                    <th>Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(orcamento.items || []).map((item, index) => (
-                                    <tr key={index}>
-                                        <td>
-                                            <div>{item.nome || 'Item'}</div>
-                                        </td>
-                                        <td>{item.unidade || 'UN'}</td>
-                                        <td>{(item.quantidade || 0).toFixed(2)}</td>
-                                        <td>R$ {(item.valorUnitario || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                        <td><strong>R$ {(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {/* Totais */}
-                    <div className="totais-section no-break">
-                        {(() => {
-                            const qtdItens = (orcamento.items || []).length;
-                            const valorTotalItens = (orcamento.items || []).reduce((s, i) => s + (i.valorTotal || 0), 0);
-                            return (
-                                <div className="totais-row" style={{ marginBottom: '4px' }}>
-                                    <span>Quantidade: {qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
-                                    <span>Valor total dos itens R$ {valorTotalItens.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                            );
-                        })()}
-                        {(orcamento.financeiro?.desconto ?? 0) > 0 && (
-                            <div className="totais-row">
-                                <span>Desconto:</span>
-                                <strong>- R$ {(orcamento.financeiro?.desconto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                            </div>
-                        )}
-                        {(orcamento.financeiro?.impostos || 0) > 0 && (
-                            <div className="totais-row">
-                                <span>Impostos:</span>
-                                <strong>R$ {(orcamento.financeiro?.impostos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                            </div>
-                        )}
-                        <div className="totais-row total-final">
-                            <span>VALOR TOTAL DO ORÇAMENTO:</span>
-                            <span>R$ {(orcamento.financeiro?.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                    </div>
-
-                    {/* Forma de Pagamento */}
-                    {(orcamento.pagamento || orcamento.financeiro?.condicaoPagamento) && (
-                        <div className="pagamento-section no-break">
-                            <div className="section-title">Forma / Condições de Pagamento</div>
-                            <table className="pagamento-table">
-                                <thead>
-                                    <tr>
-                                        <th>Condição</th>
-                                        <th>Observação</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td><strong>{orcamento.pagamento || orcamento.financeiro?.condicaoPagamento}</strong></td>
-                                        <td>Pagamento conforme condições acordadas</td>
-                                    </tr>
-                                </tbody>
+                {/* Host invisível para medir alturas reais dos blocos (header pg1, header pgN, totais, pagamento, cada <tr>) */}
+                <div className="measure-host" aria-hidden="true" ref={measureRef}>
+                    <div className="page" style={{ width: '100%', maxWidth: '100%' }}>
+                        <div data-measure="header-pg1">
+                            {renderTitleBlock()}
+                            {renderClienteBlock()}
+                            {hasEnderecos && renderEnderecosBlock()}
+                            <hr style={{ margin: '12px 0', border: 'none', borderTop: '1px solid #000000' }} />
+                            {renderItensSectionTitle(false)}
+                            <table className="itens-table">
+                                {renderItensTableHeader()}
                             </table>
                         </div>
-                    )}
-
-                            </div>
+                        <div data-measure="header-pgn">
+                            {renderItensSectionTitle(true)}
+                            <table className="itens-table">
+                                {renderItensTableHeader()}
+                            </table>
                         </div>
+                        <table className="itens-table">
+                            <tbody>
+                                {items.map((item, i) =>
+                                    renderItensTableRow(item, `measure-row-${i}`, { measure: true })
+                                )}
+                            </tbody>
+                        </table>
+                        <div data-measure="totais">{renderTotaisBlock()}</div>
+                        {hasPagamento && <div data-measure="pagamento">{renderPagamentoBlock()}</div>}
                     </div>
+                </div>
 
-                    {/* PÁGINAS SEGUINTES: Descrições Técnicas com PrintRenderer */}
+                <div className="print-container">
+                    {pagination.pages.map((indices, pageIdx) => {
+                        const isLastItemsPage = pageIdx === pagination.pages.length - 1;
+                        const pageItems = indices.map(i => items[i]).filter(Boolean);
+                        const pageNumber = pageIdx + 1;
+                        return renderPdfPage(`items-pg-${pageIdx}`, (
+                            <>
+                                {pageIdx === 0 ? (
+                                    <>
+                                        {renderTitleBlock()}
+                                        {renderClienteBlock()}
+                                        {hasEnderecos && renderEnderecosBlock()}
+                                        <hr style={{ margin: '12px 0', border: 'none', borderTop: '1px solid #000000' }} />
+                                        {renderItensSectionTitle(false)}
+                                    </>
+                                ) : (
+                                    renderItensSectionTitle(true)
+                                )}
+                                {renderItensTable(pageItems)}
+                                {isLastItemsPage && pagination.totalsFitOnLast && (
+                                    <>
+                                        {renderTotaisBlock()}
+                                        {hasPagamento && renderPagamentoBlock()}
+                                    </>
+                                )}
+                            </>
+                        ), pageNumber);
+                    })}
+
+                    {!pagination.totalsFitOnLast && renderPdfPage('totais-pgto-extra', (
+                        <>
+                            {renderTotaisBlock()}
+                            {hasPagamento && renderPagamentoBlock()}
+                        </>
+                    ), itemsPagesCount + 1)}
+
                     {conteudoCombinado && (
                         <PrintRenderer
                             content={conteudoCombinado}
                             folhaTimbradaUrl={folhaTimbradaUrl}
                             opacidade={opacidade}
                             className="technical-content-pages"
+                            pageNumberStartFrom={showPageNumbers ? printRendererStartPageNumber : undefined}
+                            totalPages={showPageNumbers ? totalPages : undefined}
+                            onPagesComputed={handlePrintRendererPagesComputed}
                         />
                     )}
                 </div>

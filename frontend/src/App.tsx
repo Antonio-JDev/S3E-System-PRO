@@ -55,6 +55,7 @@ const TarefasInternasKanban = lazy(() => import('./pages/TarefasInternasKanban')
 const DetalhesTarefaInterna = lazy(() => import('./pages/DetalhesTarefaInterna'));
 const FunilAtendimentoPage = lazy(() => import('./pages/FunilAtendimentoPage'));
 const WhatsAppChatPage = lazy(() => import('./pages/WhatsAppChatPage'));
+const ContatosS3ePage = lazy(() => import('./pages/ContatosS3ePage'));
 
 /** Error boundary para a área principal: evita tela branca se um módulo lazy quebrar */
 class MainContentErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -314,6 +315,8 @@ const MainApp: React.FC = () => {
             onClearInitialWhatsappChat={clearInitialWhatsappChat}
           />
         );
+      case 'Contatos S3E':
+        return <ContatosS3ePage toggleSidebar={toggleSidebar} onNavigate={handleNavigate} />;
       case 'Clientes':
         return (
           <ClientesModerno

@@ -1,12 +1,24 @@
-import { canonicalWhatsappChatId, waJidToDigits } from '../utils/whatsappChat.util';
+import { canonicalWhatsappChatId, digitsOnly, waJidToDigits } from '../utils/whatsappChat.util';
+import { normalizeUserFilename } from '../utils/filename.util';
 import { resolveWhatsappProviderInternalFetchUrl } from '../utils/whatsappMediaUrl.util';
 import {
   chatIdToEvolutionNumber,
   evolutionMediaType,
   isEvolutionProviderKind,
+  isEvolutionGoKind,
   parseEvolutionMessageId
 } from './whatsappProvider.evolution';
 import * as EvoChat from './whatsappEvolutionChat.service';
+import {
+  evolutionGoCreateInstance,
+  evolutionGoInstanceQr,
+  evolutionGoInstanceReconnect,
+  evolutionGoInstanceStatus,
+  evolutionGoProxyRequest
+} from './whatsappEvolutionGoBridge';
+import { recordWhatsappChatIdentity, resolvePreferredChatIdForOutbound } from './whatsappIdentity.service';
+import { persistContatoS3eJidAndInteraction, refreshContatoS3eFromWhatsappNumbers } from './contatosS3e.service';
+import { withWhatsappSendLock } from './whatsappSendQueue.service';
 
 const baseUrl = (): string =>
   (process.env.WHATSAPP_PROVIDER_BASE_URL || 'http://whatsapp-provider:8080').replace(/\/$/, '');
@@ -18,6 +30,60 @@ const evolutionAutoRetryCooldownMs = (): number => {
   return Math.trunc(raw);
 };
 const evolutionLastAutoRetryAt = new Map<string, number>();
+
+/**
+ * Cooldown global para auto-reconexão do provedor (Evolution Go). Evita loop
+ * quando o webhook reporta `Disconnected` em cascata ou quando o whatsmeow
+ * dispara várias notificações próximas.
+ */
+const EVO_GO_RECONNECT_COOLDOWN_MS = 60_000;
+let lastEvoGoReconnectAt = 0;
+let evoGoReconnectInFlight: Promise<boolean> | null = null;
+
+/**
+ * Pede à Evolution Go para refazer o link WebSocket com o WhatsApp sem
+ * invalidar a sessão. Idempotente e com cooldown — chama no máximo 1x por
+ * minuto e nunca em paralelo. Retorna `true` se a chamada foi feita (não
+ * indica sucesso do reconnect — o webhook `Connected` virá depois).
+ *
+ * Usado em dois pontos:
+ *  1. Quando recebemos o webhook `connection.update` com `state=close`
+ *     (vindo de `Disconnected`/`LoggedOut`/`StreamReplaced` da EvoGo).
+ *  2. Como ferramenta manual exposta via rota interna (debug/CRM).
+ */
+export async function requestEvoGoReconnect(reason: string): Promise<boolean> {
+  if (!isEvolutionGoKind()) return false;
+  if (evoGoReconnectInFlight) {
+    await evoGoReconnectInFlight;
+    return false;
+  }
+  const now = Date.now();
+  if (now - lastEvoGoReconnectAt < EVO_GO_RECONNECT_COOLDOWN_MS) {
+    return false;
+  }
+  lastEvoGoReconnectAt = now;
+  evoGoReconnectInFlight = (async (): Promise<boolean> => {
+    try {
+      console.warn('[WA-RECONNECT] disparando /instance/reconnect (motivo:', reason, ')');
+      const res = await evolutionGoInstanceReconnect();
+      const t = await res.text().catch(() => '');
+      console.warn('[WA-RECONNECT] status=%d body=%s', res.status, t.slice(0, 200));
+      if (res.ok) {
+        // Após reconexão, limpa o cache negativo de fotos para dar uma
+        // nova chance — fotos que falharam por IQ-timeout passam a vir.
+        profilePictureNullCache.clear();
+        console.warn('[WA-RECONNECT] cache negativo de fotos limpo (%d entradas zeradas)', 0);
+      }
+      return res.ok;
+    } catch (e) {
+      console.warn('[WA-RECONNECT] falhou:', e);
+      return false;
+    } finally {
+      evoGoReconnectInFlight = null;
+    }
+  })();
+  return evoGoReconnectInFlight;
+}
 
 /**
  * Evolution v2 pode validar presença e delay como obrigatórios em envios.
@@ -144,6 +210,33 @@ function providerJsonHeaders(): Record<string, string> {
 }
 
 /**
+ * Helper: dispara um POST em rota da Evolution.
+ *
+ * Quando `WHATSAPP_PROVIDER_KIND=evolution-go`, roteia pelo `evolutionGoProxyRequest`,
+ * que traduz o path estilo v2 (`/message/sendText/{inst}`, `/message/sendMedia/{inst}`,
+ * etc.) para o endpoint correto da Evolution Go (`/send/text`, `/send/media`). Sem isso,
+ * a EvoGo devolve 404 porque os paths v2 não existem nela.
+ *
+ * Para Evolution v2 (Node/Baileys), faz `fetch` direto.
+ *
+ * O caller passa o body como objeto (Record), NÃO pré-serializado, porque o bridge
+ * precisa inspecionar campos para mapear o payload.
+ */
+async function evolutionApiPost(
+  path: string,
+  body: Record<string, unknown>
+): Promise<Response> {
+  if (isEvolutionGoKind()) {
+    return evolutionGoProxyRequest('POST', path, body);
+  }
+  return fetch(`${baseUrl()}${path}`, {
+    method: 'POST',
+    headers: providerJsonHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
+/**
  * Evolution exige base64 cru (sem prefixo data:*;base64,). Aceita MIME com charset, ex.:
  * data:application/pdf;base64,... ou data:application/pdf;charset=UTF-8;base64,...
  */
@@ -159,7 +252,7 @@ function stripDataUrlBase64(b64: string): string {
   return trimmed.replace(/\s/g, '');
 }
 
-/** GET /instance/connectionState/{instance} — Evolution API v2. */
+/** GET /instance/connectionState/{instance} — Evolution API v2. Evolution Go: GET /instance/status. */
 export async function checkConnectionState(instance: string): Promise<{
   reachable: boolean;
   state: string | null;
@@ -170,6 +263,30 @@ export async function checkConnectionState(instance: string): Promise<{
   if (!name) {
     return { reachable: false, state: null, notFound: false };
   }
+
+  if (isEvolutionGoKind()) {
+    try {
+      const res = await evolutionGoInstanceStatus();
+      const text = await res.text().catch(() => '');
+      if (res.status === 401 || res.status === 404) {
+        return { reachable: true, state: null, notFound: true, raw: text };
+      }
+      if (!res.ok) {
+        return { reachable: true, state: null, notFound: false, raw: text };
+      }
+      let data: unknown = null;
+      try {
+        data = text ? (JSON.parse(text) as unknown) : null;
+      } catch {
+        data = null;
+      }
+      const st = parseEvolutionGoConnectionStateFromBody(data);
+      return { reachable: true, state: st, notFound: false, raw: data };
+    } catch {
+      return { reachable: false, state: null, notFound: false };
+    }
+  }
+
   const url = `${baseUrl()}/instance/connectionState/${encodeURIComponent(name)}`;
   try {
     const res = await fetch(url, { headers: providerApiHeaders() });
@@ -197,6 +314,20 @@ export async function checkConnectionState(instance: string): Promise<{
   }
 }
 
+function parseEvolutionGoConnectionStateFromBody(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  const d =
+    o.data && typeof o.data === 'object' && !Array.isArray(o.data) ? (o.data as Record<string, unknown>) : o;
+  const loggedIn = d.loggedIn === true || d.LoggedIn === true;
+  const connected = d.connected === true || d.Connected === true;
+  if (loggedIn) return 'open';
+  if (connected) return 'connecting';
+  const st = typeof d.state === 'string' ? d.state : typeof d.State === 'string' ? d.State : '';
+  if (st.trim()) return st.trim();
+  return 'close';
+}
+
 function parseEvolutionConnectionStateFromBody(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
   const o = data as Record<string, unknown>;
@@ -210,6 +341,18 @@ function parseEvolutionConnectionStateFromBody(data: unknown): string | null {
 }
 
 async function createEvolutionInstance(instanceName: string): Promise<void> {
+  if (isEvolutionGoKind()) {
+    const res = await evolutionGoCreateInstance();
+    if (res.status === 403 || res.status === 409) {
+      return;
+    }
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error(`Evolution Go: criar instância falhou: HTTP ${res.status} ${t || res.statusText}`);
+    }
+    return;
+  }
+
   const integration =
     process.env.WHATSAPP_PROVIDER_INTEGRATION?.trim() || 'WHATSAPP-BAILEYS';
   const url = `${baseUrl()}/instance/create`;
@@ -319,7 +462,7 @@ export interface WhatsappProviderConnectionQr {
   statusCode: number | null;
 }
 
-/** Gera/obtém QR da sessão atual no provedor (Evolution API v2). */
+/** Gera/obtém QR da sessão atual no provedor (Evolution API v2 ou Evolution Go). */
 export async function fetchWhatsappProviderConnectionQr(): Promise<WhatsappProviderConnectionQr> {
   if (!isEvolutionProviderKind()) {
     return {
@@ -327,13 +470,53 @@ export async function fetchWhatsappProviderConnectionQr(): Promise<WhatsappProvi
       code: null,
       pairingCode: null,
       count: null,
-      message: 'Exibição de QR inline disponível apenas para WHATSAPP_PROVIDER_KIND=evolution.',
+      message: 'Exibição de QR inline disponível apenas para provedor Evolution (não WAHA).',
       statusCode: 400
     };
   }
 
   await ensureEvolutionInstanceReady();
   const inst = session().trim();
+
+  if (isEvolutionGoKind()) {
+    const res = await evolutionGoInstanceQr();
+    const text = await res.text().catch(() => '');
+    let data: unknown = null;
+    try {
+      data = text ? (JSON.parse(text) as unknown) : null;
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      const details = text || res.statusText || 'falha ao obter QR';
+      throw new Error(`Provedor WhatsApp (Evolution Go): QR falhou: HTTP ${res.status} ${details}`);
+    }
+    const root = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+    const inner =
+      root.data && typeof root.data === 'object' && !Array.isArray(root.data)
+        ? (root.data as Record<string, unknown>)
+        : root;
+    const qrcode =
+      typeof inner.qrcode === 'string'
+        ? inner.qrcode
+        : typeof inner.Qrcode === 'string'
+          ? inner.Qrcode
+          : '';
+    const code =
+      typeof inner.code === 'string' ? inner.code : typeof inner.Code === 'string' ? inner.Code : '';
+    const parts = qrcode.includes('|') ? qrcode.split('|') : [qrcode, code].filter(Boolean);
+    const b64 = parts[0]?.trim() || null;
+    const codePart = parts[1]?.trim() || (code || null);
+    return {
+      base64: b64,
+      code: codePart,
+      pairingCode: null,
+      count: null,
+      message: null,
+      statusCode: res.status
+    };
+  }
+
   const url = `${baseUrl()}/instance/connect/${encodeURIComponent(inst)}`;
   const res = await fetch(url, { headers: providerApiHeaders() });
   const text = await res.text().catch(() => '');
@@ -370,6 +553,11 @@ export async function fetchWhatsappProviderConnectionQr(): Promise<WhatsappProvi
   };
 }
 
+/** Tamanho máximo de cada página na API WAHA; totais maiores são agregados em loop. */
+const WAHA_CONTACTS_PAGE_SIZE = 5000;
+/** Teto de segurança para agenda / busca (evita loop infinito ou payloads absurdos). */
+export const WHATSAPP_AGENDA_CONTACTS_HARD_CAP = 150_000;
+
 /** Lista de contatos da sessão (agenda WhatsApp no provedor). */
 export async function fetchWhatsappProviderContactsAll(
   params?: FetchWhatsappProviderContactsParams
@@ -378,19 +566,77 @@ export async function fetchWhatsappProviderContactsAll(
     return EvoChat.evolutionFetchContactsForCrm(params);
   }
   const s = session();
-  const limit = Math.min(Math.max(1, params?.limit ?? 500), 2000);
-  const offset = Math.max(0, params?.offset ?? 0);
+  const requested = params?.limit ?? 500;
+  const maxTotal = Math.min(Math.max(1, requested), WHATSAPP_AGENDA_CONTACTS_HARD_CAP);
+  const startOffset = Math.max(0, params?.offset ?? 0);
   const sortBy = params?.sortBy === 'id' ? 'id' : 'name';
   const sortOrder = params?.sortOrder === 'desc' ? 'desc' : 'asc';
-  const url = `${baseUrl()}/api/contacts/all?session=${encodeURIComponent(s)}&limit=${limit}&offset=${offset}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
-  try {
-    const res = await fetch(url, { headers: providerApiHeaders() });
-    if (!res.ok) return [];
-    const data = (await res.json()) as unknown;
-    return Array.isArray(data) ? (data as WhatsappProviderContactRow[]) : [];
-  } catch {
-    return [];
+
+  const fetchPage = async (lim: number, off: number): Promise<WhatsappProviderContactRow[]> => {
+    const url = `${baseUrl()}/api/contacts/all?session=${encodeURIComponent(s)}&limit=${lim}&offset=${off}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+    try {
+      const res = await fetch(url, { headers: providerApiHeaders() });
+      if (!res.ok) return [];
+      const data = (await res.json()) as unknown;
+      return Array.isArray(data) ? (data as WhatsappProviderContactRow[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const aggregated: WhatsappProviderContactRow[] = [];
+  let off = startOffset;
+  while (aggregated.length < maxTotal) {
+    const chunk = Math.min(WAHA_CONTACTS_PAGE_SIZE, maxTotal - aggregated.length);
+    const batch = await fetchPage(chunk, off);
+    if (!batch.length) break;
+    aggregated.push(...batch);
+    if (batch.length < chunk) break;
+    off += batch.length;
   }
+  return aggregated;
+}
+
+function normalizeAgendaSearchText(input: string): string {
+  return input
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function whatsappAgendaContactMatchesQuery(row: WhatsappProviderContactRow, normText: string, queryDigits: string): boolean {
+  const blob = normalizeAgendaSearchText(
+    [row.name, row.pushname, row.shortName, row.number, row.id].filter(Boolean).join(' ')
+  );
+  if (normText.length > 0 && blob.includes(normText)) return true;
+  if (queryDigits.length >= 2) {
+    const rowDigits = digitsOnly(`${row.number || ''}${row.id || ''}`);
+    if (rowDigits.includes(queryDigits)) return true;
+  }
+  return false;
+}
+
+const WHATSAPP_AGENDA_SEARCH_MAX_RESULTS = 8000;
+
+/** Busca na agenda do aparelho (nome / pushname / número / JID), via lista completa em memória. */
+export async function searchWhatsappProviderContactsAgenda(queryRaw: string): Promise<WhatsappProviderContactRow[]> {
+  const t = (queryRaw || '').trim();
+  if (!t) return [];
+  const normText = normalizeAgendaSearchText(t);
+  const queryDigits = digitsOnly(t);
+  const all = await fetchWhatsappProviderContactsAll({
+    limit: WHATSAPP_AGENDA_CONTACTS_HARD_CAP,
+    offset: 0,
+    sortBy: 'name',
+    sortOrder: 'asc'
+  });
+  const out: WhatsappProviderContactRow[] = [];
+  for (const row of all) {
+    if (whatsappAgendaContactMatchesQuery(row, normText, queryDigits)) out.push(row);
+    if (out.length >= WHATSAPP_AGENDA_SEARCH_MAX_RESULTS) break;
+  }
+  return out;
 }
 
 /** GET /api/contacts/check-exists — útil antes de enviar para número novo (ex.: BR e dígito 9). */
@@ -514,7 +760,12 @@ export async function fetchWhatsappProviderGroupPictureUrl(groupId: string): Pro
   const g = groupId.trim();
   if (!g.toLowerCase().endsWith('@g.us')) return null;
   if (isEvolutionProviderKind()) {
-    return EvoChat.evolutionGroupPictureUrl(g);
+    // Primeiro tenta `/group/info` (campos `PictureURL`/`pictureUrl`).
+    // No EvoGo (whatsmeow) esse endpoint não retorna a foto — caímos no
+    // `/chat/fetchProfilePictureUrl` que aceita qualquer JID, incluindo `@g.us`.
+    const fromInfo = await EvoChat.evolutionGroupPictureUrl(g);
+    if (fromInfo) return fromInfo;
+    return fetchWhatsappProviderProfilePictureUrl(g);
   }
   const s = session();
   const url = `${baseUrl()}/api/${encodeURIComponent(s)}/groups/${encodeURIComponent(g)}/picture?refresh=false`;
@@ -558,31 +809,118 @@ export async function resolveWhatsappProviderGroupForChat(
   return fetchWhatsappProviderGroupById(canon);
 }
 
+/**
+ * Cache em memória de "este chat não tem foto disponível" para reduzir carga
+ * na EvoGo. Muitos contatos têm privacidade ligada (foto não visível para
+ * desconhecidos) — sem o cache, cada abertura de chat dispara 3 tentativas de
+ * `fetchProfilePictureUrl` e cada uma pode levar até 4s (timeout local), o
+ * que somado dá 12s por hover e bloqueia o frontend (timeout 10s).
+ *
+ * TTL: 5 minutos — suficiente para uma sessão de uso, e curto o bastante para
+ * pegar fotos que foram disponibilizadas depois.
+ */
+/**
+ * TTL do cache negativo. Aumentado de 5min → 10min após migração para EvoGo
+ * porque o IQ `GetProfilePictureInfo` pode demorar até 75s quando o WhatsApp
+ * não responde (foto privada, contato fora da rede, link degradado). Cache
+ * mais longo reduz a carga sobre a EvoGo e mantém a UI responsiva.
+ */
+const PROFILE_PICTURE_NULL_TTL_MS = 10 * 60 * 1000;
+const profilePictureNullCache = new Map<string, number>();
+
+function profilePictureNullCacheGet(chatId: string): boolean {
+  const k = chatId.trim().toLowerCase();
+  const exp = profilePictureNullCache.get(k);
+  if (!exp) return false;
+  if (Date.now() > exp) {
+    profilePictureNullCache.delete(k);
+    return false;
+  }
+  return true;
+}
+
+function profilePictureNullCacheSet(chatId: string): void {
+  const k = chatId.trim().toLowerCase();
+  profilePictureNullCache.set(k, Date.now() + PROFILE_PICTURE_NULL_TTL_MS);
+}
+
+/**
+ * TTL do cache positivo persistente (em ms). Quando há uma foto já no
+ * `whatsapp_contact_cache`, devolvemos sem chamar a EvoGo se a entrada
+ * estiver "fresca" — evita um round-trip e blindagem contra o IQ travado
+ * (que dispara o cache negativo de 10min). Após 24h tentamos novamente
+ * (foto pode ter mudado).
+ */
+const PROFILE_PICTURE_POSITIVE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Lookup no cache persistente (banco) para uma `chatId`. Retorna a URL/data
+ * URI guardada apenas se for recente (TTL 24h) — datas mais antigas caem no
+ * fluxo normal de busca para revalidar.
+ */
+async function loadCachedProfilePictureUrlForChat(chatId: string): Promise<string | null> {
+  try {
+    // import lazy para evitar ciclo (whatsappChat.service.ts ↔ whatsappProvider.service.ts)
+    const { prisma } = await import('../lib/prisma');
+    const canon = canonicalWhatsappChatId(chatId);
+    const row = await prisma.whatsappContactCache.findFirst({
+      where: { chatId: canon, profilePictureUrl: { not: null } },
+      select: { profilePictureUrl: true, updatedAt: true }
+    });
+    if (!row?.profilePictureUrl) return null;
+    const age = Date.now() - new Date(row.updatedAt).getTime();
+    if (age > PROFILE_PICTURE_POSITIVE_TTL_MS) return null;
+    return row.profilePictureUrl;
+  } catch {
+    return null;
+  }
+}
+
 /** Foto: grupo usa endpoint /groups/.../picture; DM usa contatos. */
 export async function fetchWhatsappProviderProfilePictureUrlForChat(
   chatId: string
 ): Promise<string | null> {
   const canon = canonicalWhatsappChatId(chatId);
   if (canon.toLowerCase().endsWith('@g.us')) {
+    // Grupos também se beneficiam do cache positivo de 24h: a foto raramente
+    // muda, mas cada `/group/info` no EvoGo custa um round-trip + risco de
+    // rate-limit quando vários operadores abrem o mesmo grupo.
+    const cachedGroup = await loadCachedProfilePictureUrlForChat(canon);
+    if (cachedGroup) return cachedGroup;
     return fetchWhatsappProviderGroupPictureUrl(canon);
   }
-  if (canon.toLowerCase().endsWith('@lid')) {
-    for (const id of [canon, chatId.trim()]) {
-      if (!id) continue;
-      const u = await fetchWhatsappProviderProfilePictureUrl(id);
-      if (u) return u;
-    }
+
+  // Cache positivo persistente (banco) — protege contra o IQ travado da
+  // EvoGo (até 75s). Se já temos uma foto recente, devolvemos sem chamar
+  // o provedor. O `contact-meta` continua persistindo o resultado.
+  const cached = await loadCachedProfilePictureUrlForChat(canon);
+  if (cached) return cached;
+
+  // Cache negativo em memória: se já tentamos buscar nos últimos 10 minutos
+  // e falhou (foto privada / contato sem foto / EvoGo timeout), economiza
+  // ~3s por hover e mantém a UI fluida.
+  if (profilePictureNullCacheGet(canon)) {
     return null;
   }
-  const digits = waJidToDigits(canon);
-  const tried = new Set<string>();
-  for (const id of [digits, canon, chatId.trim()]) {
-    if (!id || tried.has(id)) continue;
-    tried.add(id);
-    const u = await fetchWhatsappProviderProfilePictureUrl(id);
-    if (u) return u;
+
+  // Antes (Evolution v2) tentávamos múltiplas variações (digits/canon/raw)
+  // porque cada motor aceita um formato. Com a EvoGo `/user/avatar` aceita
+  // tanto `@s.whatsapp.net`/`@lid` quanto número puro, e cada tentativa
+  // adiciona ~3s no pior caso (timeout do bridge). Mantemos UMA chamada por
+  // chat — se falhar, cache negativo evita retry por 10min.
+  let preferredId: string;
+  if (canon.toLowerCase().endsWith('@lid')) {
+    preferredId = canon;
+  } else {
+    // Para DMs, usar o JID canonical (EvoGo normaliza internamente).
+    preferredId = canon || chatId.trim();
   }
-  return null;
+  const found = preferredId ? await fetchWhatsappProviderProfilePictureUrl(preferredId) : null;
+
+  if (!found) {
+    profilePictureNullCacheSet(canon);
+  }
+  return found;
 }
 
 /** Localiza contato na lista /api/contacts/all pelo mesmo número (55… / DDD). */
@@ -650,26 +988,73 @@ export interface WhatsappProviderSendMediaResult {
   mediaUrl: string | null;
 }
 
-/** Envia texto; retorna o id da mensagem no provedor quando a API informar. */
-export async function sendWhatsappProviderText(chatId: string, text: string): Promise<string | null> {
+function evolutionSendFailureMayBeInvalidRecipient(status: number, body: string): boolean {
+  if (status < 400 || status >= 500) return false;
+  const t = (body || '').toLowerCase();
+  if (t.includes('"exists":false') || t.includes('"exists": false')) return true;
+  if (t.includes('exists') && t.includes('false')) return true;
+  if (t.includes('is not on whatsapp') || t.includes('not registered')) return true;
+  return false;
+}
+
+/** Tenta obter JID ativo via Evolution whatsappNumbers e persiste mapa local. */
+async function evolutionRecoverRecipientNumberForSend(firstNumber: string): Promise<string | null> {
+  const d = firstNumber.includes('@')
+    ? waJidToDigits(firstNumber)
+    : String(firstNumber || '').replace(/\D/g, '');
+  if (!d || d.length < 10) return null;
+  try {
+    const { numberExists, chatId, pushName } = await EvoChat.evolutionCheckPhoneExists(d);
+    if (numberExists && chatId) {
+      await recordWhatsappChatIdentity({
+        phoneDigitsKey: d,
+        primaryChatId: chatId,
+        source: 'send_retry',
+        extraJids: [firstNumber]
+      });
+      await persistContatoS3eJidAndInteraction(d, chatId, pushName);
+      return chatIdToEvolutionNumber(canonicalWhatsappChatId(chatId));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Implementação "crua" do envio de texto.
+ * NÃO chamar diretamente — use `sendWhatsappProviderText`, que serializa esta
+ * função na fila global (whatsappSendQueue) para evitar burst de envios
+ * paralelos contra a Evolution Go e race condition na resolução de @lid.
+ */
+async function sendWhatsappProviderTextRaw(chatId: string, text: string): Promise<string | null> {
   if (isEvolutionProviderKind()) {
     await ensureEvolutionInstanceReady();
     const inst = session();
-    const url = `${baseUrl()}/message/sendText/${encodeURIComponent(inst)}`;
-    const number = chatIdToEvolutionNumber(canonicalWhatsappChatId(chatId));
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: providerJsonHeaders(),
-      body: JSON.stringify({
-        number,
-        text,
-        presence: evolutionSendPresence(),
-        delay: evolutionSendDelayMs()
-      })
+    const path = `/message/sendText/${encodeURIComponent(inst)}`;
+    await refreshContatoS3eFromWhatsappNumbers(chatId);
+    const resolved = await resolvePreferredChatIdForOutbound(chatId);
+    let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
+    const buildBody = (n: string): Record<string, unknown> => ({
+      number: n,
+      text,
+      presence: evolutionSendPresence(),
+      delay: evolutionSendDelayMs()
     });
+    let res = await evolutionApiPost(path, buildBody(number));
     if (!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error(`Provedor WhatsApp (Evolution): sendText falhou: HTTP ${res.status} ${t || res.statusText}`);
+      let t = await res.text().catch(() => '');
+      if (evolutionSendFailureMayBeInvalidRecipient(res.status, t)) {
+        const recovered = await evolutionRecoverRecipientNumberForSend(number);
+        if (recovered) {
+          number = recovered;
+          res = await evolutionApiPost(path, buildBody(number));
+        }
+      }
+      if (!res.ok) {
+        t = await res.text().catch(() => t);
+        throw new Error(`Provedor WhatsApp (Evolution): sendText falhou: HTTP ${res.status} ${t || res.statusText}`);
+      }
     }
     const data = (await res.json().catch(() => null)) as unknown;
     return parseEvolutionMessageId(data) ?? parseProviderSendTextResponse(data);
@@ -720,50 +1105,81 @@ function providerEndpointForMediaType(type: WhatsappProviderMediaType): string {
 }
 
 /**
- * Envia mídia (sendImage/sendVoice/sendVideo/sendFile).
+ * Implementação "crua" do envio de mídia (sendImage/sendVoice/sendVideo/sendFile).
+ * NÃO chamar diretamente — use `sendWhatsappProviderMedia`, que serializa na
+ * fila global (whatsappSendQueue) para humanizar o ritmo dos envios.
+ *
  * Opcional: WHATSAPP_PROVIDER_SEND_ANY_FILE_PATH (ex. /api/sendAnyFile) — mesmo JSON que sendFile.
  */
-export async function sendWhatsappProviderMedia(
+async function sendWhatsappProviderMediaRaw(
   payload: WhatsappProviderSendMediaPayload
 ): Promise<WhatsappProviderSendMediaResult> {
   if (isEvolutionProviderKind()) {
     await ensureEvolutionInstanceReady();
     const inst = session();
-    const url = `${baseUrl()}/message/sendMedia/${encodeURIComponent(inst)}`;
-    const number = chatIdToEvolutionNumber(canonicalWhatsappChatId(payload.chatId));
+    const path = `/message/sendMedia/${encodeURIComponent(inst)}`;
+    await refreshContatoS3eFromWhatsappNumbers(payload.chatId);
+    const resolved = await resolvePreferredChatIdForOutbound(payload.chatId);
+    let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
     const base = evolutionMediaType(payload.type);
-    const mimetype =
-      (payload.mimetype && payload.mimetype.trim()) || base.mimetype;
+    const isVoice = payload.type === 'voice';
+    let mimetype = (payload.mimetype && payload.mimetype.trim()) || base.mimetype;
+    // Voice (PTT) exige `audio/ogg; codecs=opus` para o iOS exibir o player
+    // inline. Se o caller passou só `audio/ogg`, anexa `codecs=opus` automaticamente.
+    if (isVoice) {
+      const mt = mimetype.toLowerCase();
+      if (mt.includes('ogg') && !mt.includes('codecs=opus')) {
+        mimetype = 'audio/ogg; codecs=opus';
+      }
+    }
     const rawName = (payload.filename && payload.filename.trim()) || base.fileName;
-    const fileName = rawName.replace(/[/\\]/g, '_');
+    const fileName =
+      normalizeUserFilename(rawName, 220) || String(rawName).replace(/[/\\]/g, '_') || base.fileName;
     let mediatype = base.mediatype;
     if (payload.type === 'file' && mimetype.toLowerCase().includes('pdf')) {
       mediatype = 'document';
     }
     const caption = (payload.caption && payload.caption.trim()) || '';
-    const mediaBody: Record<string, unknown> = {
-      number,
-      mediatype,
-      mimetype,
-      caption,
-      media: stripDataUrlBase64(payload.base64Data),
-      fileName,
-      presence: evolutionSendPresence(),
-      delay: evolutionSendDelayMs()
+    const buildBody = (n: string): Record<string, unknown> => {
+      // Voice = nota de voz (PTT). Marcamos explicitamente para que o WhatsApp do
+      // destinatário exiba a barra de progresso + foto do perfil (estilo "áudio
+      // gravado no celular") em vez do ícone de arquivo .ogg. A presença
+      // `recording` faz a EvoGo mostrar "gravando áudio…" durante o `delay`,
+      // simulando o operador segurando o botão de gravar.
+      const body: Record<string, unknown> = {
+        number: n,
+        mediatype,
+        mimetype,
+        caption,
+        media: stripDataUrlBase64(payload.base64Data),
+        fileName,
+        presence: isVoice ? 'recording' : evolutionSendPresence(),
+        delay: evolutionSendDelayMs()
+      };
+      if (isVoice) {
+        body.ptt = true;
+      }
+      return body;
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: providerJsonHeaders(),
-      body: JSON.stringify(mediaBody)
-    });
+    let res = await evolutionApiPost(path, buildBody(number));
     if (!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error(
-        appendProviderSendDoc(
-          `Provedor WhatsApp (Evolution): sendMedia falhou: HTTP ${res.status} ${t || res.statusText}`
-        )
-      );
+      let t = await res.text().catch(() => '');
+      if (evolutionSendFailureMayBeInvalidRecipient(res.status, t)) {
+        const recovered = await evolutionRecoverRecipientNumberForSend(number);
+        if (recovered) {
+          number = recovered;
+          res = await evolutionApiPost(path, buildBody(number));
+        }
+      }
+      if (!res.ok) {
+        t = await res.text().catch(() => t);
+        throw new Error(
+          appendProviderSendDoc(
+            `Provedor WhatsApp (Evolution): sendMedia falhou: HTTP ${res.status} ${t || res.statusText}`
+          )
+        );
+      }
     }
     const data = (await res.json().catch(() => null)) as unknown;
     return {
@@ -783,7 +1199,13 @@ export async function sendWhatsappProviderMedia(
     file: {
       mimetype: payload.mimetype,
       data: payload.base64Data,
-      ...(payload.filename ? { filename: payload.filename } : {})
+      ...(payload.filename
+        ? {
+            filename:
+              normalizeUserFilename(payload.filename, 220) ||
+              String(payload.filename).replace(/[/\\]/g, '_')
+          }
+        : {})
     }
   };
 
@@ -863,6 +1285,81 @@ export async function sendWhatsappProviderMedia(
     providerMessageId: parseProviderSendTextResponse(data),
     mediaUrl: parseProviderMediaUrlFromResponse(data)
   };
+}
+
+/**
+ * Envia texto pelo provedor (Evolution Go) DENTRO da fila global.
+ *
+ * A fila garante:
+ *  - Apenas 1 envio rodando por vez no processo (mesmo com 7 operadores
+ *    clicando "Enviar" simultaneamente);
+ *  - Resolução de @lid (refreshContatoS3eFromWhatsappNumbers + whatsappNumbers)
+ *    sem race condition entre threads;
+ *  - Jitter aleatório (WHATSAPP_SEND_JITTER_MS_MIN/MAX, default 2-5s) APÓS o
+ *    envio — espalha o ritmo para parecer humano;
+ *  - O "composing" (digitando) de 1.5s é entregue pelo próprio Evolution Go
+ *    via `presence: composing` + `delay` no body (ver evolutionSendPresence/
+ *    evolutionSendDelayMs e WHATSAPP_PROVIDER_SEND_DELAY_MS no .env).
+ *
+ * Retorna o id da mensagem no provedor quando a API informar.
+ */
+export async function sendWhatsappProviderText(chatId: string, text: string): Promise<string | null> {
+  return withWhatsappSendLock({ label: 'sendText' }, () => sendWhatsappProviderTextRaw(chatId, text));
+}
+
+/**
+ * Envia mídia pelo provedor (Evolution Go) DENTRO da fila global.
+ * Mesma fila/jitter/lock que `sendWhatsappProviderText` — atende texto, mídia,
+ * arquivos genéricos e PDFs de orçamento (todos passam por aqui ou por sendText).
+ */
+export async function sendWhatsappProviderMedia(
+  payload: WhatsappProviderSendMediaPayload
+): Promise<WhatsappProviderSendMediaResult> {
+  return withWhatsappSendLock({ label: 'sendMedia' }, () => sendWhatsappProviderMediaRaw(payload));
+}
+
+export interface WhatsappProviderSendReactionPayload {
+  /** Chat onde a mensagem original existe (JID canônico, ex.: `5547...@s.whatsapp.net`). */
+  chatId: string;
+  /** ID da mensagem no provedor a ser reagida (ChatMessage.providerMessageId). */
+  providerMessageId: string;
+  /** `true` se a mensagem original foi enviada por nós (afeta o `key.fromMe` da API v2). */
+  fromMe: boolean;
+  /**
+   * Emoji da reação. Use string vazia `''` para REMOVER a reação anteriormente
+   * enviada (semântica oficial do WhatsApp).
+   */
+  emoji: string;
+}
+
+/**
+ * Reage a uma mensagem no WhatsApp (✅, ❤️, 👍, etc.) — endpoint
+ * `POST /message/react` da Evolution Go.
+ *
+ * Por que isso entra na fila global (`withWhatsappSendLock`)?
+ *  - Reaction não dispara notificação ruidosa no cliente e é considerada
+ *    "interação leve" pelo anti-spam, mas SE rodar em paralelo com um
+ *    `sendText`/`sendMedia` pode criar race condition na resolução de @lid
+ *    (`refreshContatoS3eFromWhatsappNumbers`). A fila resolve isso.
+ *  - `skipJitter: true`: NÃO precisa do delay 2-5s pós-job — reaction é
+ *    naturalmente esparsa e instantânea. Mas continua serializada.
+ *
+ * Para REMOVER uma reação enviada anteriormente, passe `emoji: ''`.
+ */
+export async function sendWhatsappProviderReaction(
+  payload: WhatsappProviderSendReactionPayload
+): Promise<unknown> {
+  const remoteJid = canonicalWhatsappChatId(payload.chatId);
+  const messageId = payload.providerMessageId.trim();
+  if (!remoteJid || !messageId) {
+    throw new Error('sendWhatsappProviderReaction: chatId e providerMessageId são obrigatórios');
+  }
+  return withWhatsappSendLock({ label: 'sendReaction', skipJitter: true }, async () => {
+    return EvoChat.evolutionSendReaction({
+      key: { remoteJid, fromMe: !!payload.fromMe, id: messageId },
+      reaction: payload.emoji
+    });
+  });
 }
 
 /** URL pública do provedor → URL interna (Docker) para fetch no backend. */

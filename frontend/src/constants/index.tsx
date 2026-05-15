@@ -200,6 +200,15 @@ export const WhatsAppChatNavIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+// Ícone Agenda / Contatos S3E
+export const ContatosAgendaIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+    <path d="M2 7h2M2 11h2M2 15h2M2 19h2" />
+  </svg>
+);
+
 // Ícone de Documento/Arquivo
 export const DocumentIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -314,6 +323,7 @@ export const navLinks: NavLink[] = [
     // Todas as páginas comerciais precisam de permissões (eletricista não vê)
     { name: 'Funil de Atendimento', icon: FunnelAtendimentoIcon, requiredPermission: 'view_projetos' },
     { name: 'Chat WhatsApp', icon: WhatsAppChatNavIcon, requiredPermission: 'view_projetos' },
+    { name: 'Contatos S3E', icon: ContatosAgendaIcon, requiredPermission: 'view_projetos' },
     { name: 'Clientes', icon: ClientsIcon, requiredPermission: 'view_projetos' },
     { name: 'Orçamentos', icon: BudgetIcon, requiredPermission: 'view_projetos' },
     { name: 'Vendas', icon: SalesIcon, requiredPermission: 'view_vendas' },

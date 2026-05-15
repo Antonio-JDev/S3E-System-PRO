@@ -56,6 +56,73 @@ export function addDaysToYmd(ymd: string, days: number): string {
   return localYmdFromDate(dt);
 }
 
+export const SAO_PAULO_TZ = 'America/Sao_Paulo' as const;
+
+function ymdPartsInTimeZone(date: Date, timeZone: string): { y: number; m: number; d: number } {
+  const dtf = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = dtf.formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const y = Number(get('year'));
+  const m = Number(get('month'));
+  const d = Number(get('day'));
+  return {
+    y: Number.isFinite(y) ? y : date.getUTCFullYear(),
+    m: Number.isFinite(m) ? m : date.getUTCMonth() + 1,
+    d: Number.isFinite(d) ? d : date.getUTCDate(),
+  };
+}
+
+/** YYYY-MM-DD do calendário do timezone informado (padrão SP). */
+export function ymdInTimeZone(date: Date, timeZone: string = SAO_PAULO_TZ): string {
+  const p = ymdPartsInTimeZone(date, timeZone);
+  const mm = String(p.m).padStart(2, '0');
+  const dd = String(p.d).padStart(2, '0');
+  return `${p.y}-${mm}-${dd}`;
+}
+
+/** Hoje (YYYY-MM-DD) no timezone de São Paulo, evitando shift por UTC. */
+export function nowYmdInSaoPaulo(): string {
+  return ymdInTimeZone(new Date(), SAO_PAULO_TZ);
+}
+
+/** Formata "data" (sem hora) para pt-BR respeitando timezone SP quando input contém hora/offset. */
+export function formatDatePtBrInSaoPaulo(input: string | Date | null | undefined): string {
+  if (!input) return '—';
+  const s = typeof input === 'string' ? input.trim() : '';
+  // Se já for date-only, não criar Date (evita o bug do JS: YYYY-MM-DD => UTC)
+  if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return formatDateDisplay(s);
+  }
+  if (typeof input === 'string' && s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s) && !s.includes('T')) {
+    return formatDateDisplay(s.slice(0, 10));
+  }
+  const d = typeof input === 'string' ? new Date(input) : input;
+  if (!Number.isFinite(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: SAO_PAULO_TZ,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(d);
+}
+
+/** Formata data/hora pt-BR (exibição de histórico) em `America/Sao_Paulo`. */
+export function formatDateTimePtBrInSaoPaulo(input: string | Date | null | undefined): string {
+  if (!input) return '—';
+  const d = typeof input === 'string' ? new Date(input) : input;
+  if (!Number.isFinite(d.getTime())) return '—';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: SAO_PAULO_TZ,
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(d);
+}
+
 /** Compara data-only (YYYY-MM-DD ou ISO) com hoje no calendário local. */
 export function isDateStrBeforeLocalToday(dateStr?: string | null): boolean {
   const x = serverDateToInput(dateStr);

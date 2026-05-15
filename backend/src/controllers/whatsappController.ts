@@ -6,14 +6,18 @@ import { prisma } from '../lib/prisma';
 import {
   archiveWhatsappConversation,
   clearAllWhatsappContactCache,
+  rebuildWhatsappContactCacheFromCrm,
   deleteChatMessageById,
+  deleteChatMessageForMe,
   deleteWhatsappConversation,
   editChatMessageById,
+  forwardWhatsappMessagesFromUser,
   getWhatsappActionsContext,
   listArchivedChatPreviews,
   listChatPreviews,
   listMessagesForChat,
   linkWhatsappChatToCliente,
+  unlinkWhatsappChatFromCliente,
   getWhatsappOrcamentoStatusUpdateMode,
   setWhatsappOrcamentoStatusUpdateMode,
   getMessageMediaDiagnostics,
@@ -23,16 +27,22 @@ import {
   sendOrcamentoPdfToWhatsappChat,
   sendChatMessageFromUser,
   sendMediaMessageFromUser,
+  setWhatsappConversationFavorite,
+  setWhatsappConversationPinned,
   toSocketDto,
   unarchiveWhatsappConversation,
   type WhatsappOrcamentoStatusMode
 } from '../services/whatsappChat.service';
+import { resolveOpenWhatsappChatFromPhone, resolvePreferredChatIdForOutbound } from '../services/whatsappIdentity.service';
+import { findContatoS3eNomeAgendaForChat } from '../services/contatosS3e.service';
+import { chatIdToEvolutionNumber } from '../services/whatsappProvider.evolution';
 import {
   fetchWhatsappProviderSessionStatus,
   fetchWhatsappProviderConnectionQr,
   fetchWhatsappProviderSessionMe,
   fetchWhatsappProviderProfilePictureUrl,
   fetchWhatsappProviderContactsAll,
+  searchWhatsappProviderContactsAgenda,
   fetchWhatsappProviderGroupsAll,
   fetchWhatsappProviderGroupById,
   findWhatsappProviderContactInList,
@@ -45,6 +55,7 @@ import {
   fetchWhatsappProviderMessageDownloadMedia,
   logoutWhatsappProviderSession,
   checkWhatsappProviderPhoneExists,
+  sendWhatsappProviderReaction,
   type WhatsappProviderContactRow,
   type WhatsappProviderGroupRow,
   type WhatsappProviderMediaType
@@ -52,13 +63,21 @@ import {
 import {
   canonicalWhatsappChatId,
   normalizeAudioContentType,
-  storageChatIdVariants
+  storageChatIdVariants,
+  waJidToDigits
 } from '../utils/whatsappChat.util';
 import {
   parseFilenameFromMediaUrl,
   resolveWhatsappProviderInternalFetchUrl,
   sanitizeDownloadFilename
 } from '../utils/whatsappMediaUrl.util';
+import { buildContentDisposition } from '../utils/filename.util';
+import {
+  isLocalInboundMediaUrl,
+  resolveLocalInboundMediaPath
+} from '../services/whatsappInboundMedia.service';
+import { createReadStream } from 'node:fs';
+import { stat as fsStat } from 'node:fs/promises';
 
 function providerContactRowDisplayName(c: WhatsappProviderContactRow | null): string | null {
   if (!c) return null;
@@ -73,9 +92,15 @@ function providerGroupRowDisplayName(g: WhatsappProviderGroupRow | null): string
   return t || null;
 }
 
-let providerContactsCache: { at: number; rows: WhatsappProviderContactRow[] } | null = null;
-let providerGroupsCache: { at: number; rows: WhatsappProviderGroupRow[] } | null = null;
-const PROVIDER_CONTACTS_TTL_MS = 90_000;
+type ProviderCache<T> = { at: number; rows: T[]; refreshPromise?: Promise<void> | null };
+let providerContactsCache: ProviderCache<WhatsappProviderContactRow> | null = null;
+let providerGroupsCache: ProviderCache<WhatsappProviderGroupRow> | null = null;
+/**
+ * TTL alto para reduzir tráfego no provedor (Evolution).
+ * O frontend pode forçar refresh com `?refresh=1` quando o usuário pedir.
+ */
+const PROVIDER_CONTACTS_TTL_MS = 10 * 60_000; // 10 min
+const PROVIDER_GROUPS_TTL_MS = 10 * 60_000; // 10 min
 
 const CHAT_MESSAGE_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -98,24 +123,71 @@ function isTruthyQueryFlag(v: unknown): boolean {
   return typeof v === 'string' && (v === '1' || v.toLowerCase() === 'true');
 }
 
-async function getCachedProviderContacts(): Promise<WhatsappProviderContactRow[]> {
+async function refreshProviderContactsCache(): Promise<void> {
   const now = Date.now();
-  if (providerContactsCache && now - providerContactsCache.at < PROVIDER_CONTACTS_TTL_MS) {
-    return providerContactsCache.rows;
-  }
   const rows = await fetchWhatsappProviderContactsAll({ limit: 500, sortBy: 'name', sortOrder: 'asc' });
-  providerContactsCache = { at: now, rows };
-  return rows;
+  providerContactsCache = { at: now, rows, refreshPromise: null };
 }
 
-async function getCachedProviderGroups(): Promise<WhatsappProviderGroupRow[]> {
+async function getCachedProviderContacts(params?: { refresh?: boolean }): Promise<WhatsappProviderContactRow[]> {
   const now = Date.now();
-  if (providerGroupsCache && now - providerGroupsCache.at < PROVIDER_CONTACTS_TTL_MS) {
+  const forceRefresh = Boolean(params?.refresh);
+
+  if (!providerContactsCache) {
+    await refreshProviderContactsCache();
+  }
+  if (!providerContactsCache) return [];
+
+  if (forceRefresh) {
+    await refreshProviderContactsCache();
+    if (!providerContactsCache) return [];
+    return providerContactsCache.rows;
+  }
+
+  const age = now - providerContactsCache.at;
+  if (age < PROVIDER_CONTACTS_TTL_MS) return providerContactsCache.rows;
+
+  // stale-while-revalidate: devolve stale e atualiza em background
+  if (!providerContactsCache.refreshPromise) {
+    providerContactsCache.refreshPromise = refreshProviderContactsCache().catch((e) => {
+      console.error('refreshProviderContactsCache', e);
+      if (providerContactsCache) providerContactsCache.refreshPromise = null;
+    });
+  }
+  return providerContactsCache.rows;
+}
+
+async function refreshProviderGroupsCache(): Promise<void> {
+  const now = Date.now();
+  const rows = await fetchWhatsappProviderGroupsAll();
+  providerGroupsCache = { at: now, rows, refreshPromise: null };
+}
+
+async function getCachedProviderGroups(params?: { refresh?: boolean }): Promise<WhatsappProviderGroupRow[]> {
+  const now = Date.now();
+  const forceRefresh = Boolean(params?.refresh);
+
+  if (!providerGroupsCache) {
+    await refreshProviderGroupsCache();
+  }
+  if (!providerGroupsCache) return [];
+
+  if (forceRefresh) {
+    await refreshProviderGroupsCache();
+    if (!providerGroupsCache) return [];
     return providerGroupsCache.rows;
   }
-  const rows = await fetchWhatsappProviderGroupsAll();
-  providerGroupsCache = { at: now, rows };
-  return rows;
+
+  const age = now - providerGroupsCache.at;
+  if (age < PROVIDER_GROUPS_TTL_MS) return providerGroupsCache.rows;
+
+  if (!providerGroupsCache.refreshPromise) {
+    providerGroupsCache.refreshPromise = refreshProviderGroupsCache().catch((e) => {
+      console.error('refreshProviderGroupsCache', e);
+      if (providerGroupsCache) providerGroupsCache.refreshPromise = null;
+    });
+  }
+  return providerGroupsCache.rows;
 }
 
 export async function getWhatsappChats(req: AuthRequest, res: Response): Promise<void> {
@@ -172,6 +244,26 @@ export async function postWhatsappLinkCliente(req: AuthRequest, res: Response): 
     const message = e instanceof Error ? e.message : 'Erro ao vincular contato ao cliente';
     const status = message.includes('não encontrado') ? 404 : 400;
     res.status(status).json({ success: false, error: message });
+  }
+}
+
+export async function postWhatsappUnlinkCliente(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId.trim() : '';
+    if (!chatId) {
+      res.status(400).json({ success: false, error: 'chatId é obrigatório' });
+      return;
+    }
+    await unlinkWhatsappChatFromCliente(chatId);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('postWhatsappUnlinkCliente', e);
+    const message = e instanceof Error ? e.message : 'Erro ao desvincular contato do cliente';
+    res.status(400).json({ success: false, error: message });
   }
 }
 
@@ -252,7 +344,7 @@ export async function postWhatsappSendOrcamentoPdf(req: AuthRequest, res: Respon
       pdfBase64: typeof (req.body as any)?.pdfBase64 === 'string' ? String((req.body as any).pdfBase64) : undefined,
       pdfFilename: typeof (req.body as any)?.pdfFilename === 'string' ? String((req.body as any).pdfFilename) : undefined
     });
-    res.status(201).json({
+    res.status(200).json({
       success: true,
       data: {
         message: toSocketDto(result.message),
@@ -490,25 +582,51 @@ export async function getWhatsappProviderContactsIndex(req: AuthRequest, res: Re
       res.status(401).json({ success: false, error: 'Não autenticado' });
       return;
     }
-    const limit = Math.min(Math.max(1, Number(req.query.limit) || 500), 2000);
+    const limit = Math.min(Math.max(1, Number(req.query.limit) || 500), 150_000);
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const sortBy = req.query.sortBy === 'id' ? 'id' : 'name';
     const sortOrder = req.query.sortOrder === 'desc' ? 'desc' : 'asc';
+    const refresh = isTruthyQueryFlag(req.query.refresh);
     const useCache =
       limit === 500 &&
       offset === 0 &&
       sortBy === 'name' &&
       sortOrder === 'asc' &&
-      req.query.refresh !== '1' &&
-      req.query.refresh !== 'true';
+      !refresh;
 
     const rows = useCache
-      ? await getCachedProviderContacts()
+      ? await getCachedProviderContacts({ refresh })
       : await fetchWhatsappProviderContactsAll({ limit, offset, sortBy, sortOrder });
     res.json({ success: true, data: rows });
   } catch (e) {
     console.error('getWhatsappProviderContactsIndex', e);
     res.status(500).json({ success: false, error: 'Erro ao listar contatos do provedor' });
+  }
+}
+
+/** Busca na agenda do WhatsApp (contatos salvos no aparelho) por nome ou número. */
+export async function getWhatsappProviderContactsSearch(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const raw =
+      typeof req.query.query === 'string'
+        ? req.query.query
+        : typeof req.query.q === 'string'
+          ? req.query.q
+          : '';
+    const q = raw.trim();
+    if (!q) {
+      res.status(400).json({ success: false, error: 'Informe query ou q (nome ou número)' });
+      return;
+    }
+    const rows = await searchWhatsappProviderContactsAgenda(q);
+    res.json({ success: true, data: rows });
+  } catch (e) {
+    console.error('getWhatsappProviderContactsSearch', e);
+    res.status(500).json({ success: false, error: 'Erro ao buscar contatos na agenda do WhatsApp' });
   }
 }
 
@@ -538,7 +656,8 @@ export async function getWhatsappProviderGroupsIndex(req: AuthRequest, res: Resp
       res.status(401).json({ success: false, error: 'Não autenticado' });
       return;
     }
-    const rows = await getCachedProviderGroups();
+    const refresh = isTruthyQueryFlag(req.query.refresh);
+    const rows = await getCachedProviderGroups({ refresh });
     res.json({ success: true, data: rows });
   } catch (e) {
     console.error('getWhatsappProviderGroupsIndex', e);
@@ -606,6 +725,7 @@ export async function getWhatsappProviderContactMeta(req: AuthRequest, res: Resp
       contact = await resolveWhatsappProviderContactForChat(chatId);
     }
     const profilePictureUrl = await fetchWhatsappProviderProfilePictureUrlForChat(chatId);
+    const s3eHit = await findContatoS3eNomeAgendaForChat(chatId);
     try {
       await persistWhatsappContactCache({
         chatId,
@@ -617,11 +737,103 @@ export async function getWhatsappProviderContactMeta(req: AuthRequest, res: Resp
     }
     res.json({
       success: true,
-      data: { contact, group: null, profilePictureUrl }
+      data: {
+        contact,
+        group: null,
+        profilePictureUrl,
+        nomeAgendaS3e: s3eHit.nomeAgenda,
+        numeroContatoS3e: s3eHit.numero
+      }
     });
   } catch (e) {
     console.error('getWhatsappProviderContactMeta', e);
     res.status(500).json({ success: false, error: 'Erro ao obter dados do contato' });
+  }
+}
+
+/**
+ * Resolve nomes de participantes de um grupo a partir do **cache local**.
+ *
+ * Fontes (em ordem de prioridade):
+ *  1. `whatsapp_contact_cache.displayName` por JID exato do participante
+ *     (alimentado organicamente pelo webhook quando alguém manda mensagem).
+ *  2. `contatos_s3e.nomeAgenda` (cruzando por `phone_digits`).
+ *  3. Sem hit: fallback `null` (frontend mostra `+digits`).
+ *
+ * Por que NÃO chamamos o provider aqui:
+ *  - `/group/participants` está rate-limited na EvoGo;
+ *  - `/group/info` retorna a lista mas é pesado e gera 429 facilmente.
+ *  Esta rota é "barata": só leitura no banco. O frontend pode chamá-la em
+ *  toda abertura de grupo sem medo de derrubar o provedor.
+ */
+export async function getWhatsappGroupParticipantNames(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof req.query.chatId === 'string' ? req.query.chatId.trim() : '';
+    if (!chatId || !chatId.toLowerCase().endsWith('@g.us')) {
+      res.status(400).json({ success: false, error: 'chatId de grupo inválido' });
+      return;
+    }
+    const canon = canonicalWhatsappChatId(chatId);
+    const variants = storageChatIdVariants(canon);
+
+    const distinctRows = await prisma.chatMessage.findMany({
+      where: {
+        chatId: { in: variants },
+        participant: { not: null }
+      },
+      distinct: ['participant'],
+      select: { participant: true }
+    });
+    const participantJids = [
+      ...new Set(
+        distinctRows
+          .map((r) => (r.participant ? r.participant.trim() : ''))
+          .filter((j) => j.length > 0)
+      )
+    ];
+    if (participantJids.length === 0) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+    const canonJids = participantJids.map((j) => canonicalWhatsappChatId(j));
+    const cacheRows = await prisma.whatsappContactCache.findMany({
+      where: { chatId: { in: canonJids } },
+      select: { chatId: true, displayName: true }
+    });
+    const cacheByJid = new Map(cacheRows.map((r) => [r.chatId, r.displayName?.trim() || null]));
+
+    // Cruzamento adicional com agenda S3E pelos dígitos (fonte máxima de prioridade).
+    const phoneDigitsList = canonJids
+      .map((j) => waJidToDigits(j))
+      .filter((d) => d.length >= 10);
+    const s3eRows = phoneDigitsList.length
+      ? await prisma.contatoS3e.findMany({
+          where: { numero: { in: phoneDigitsList } },
+          select: { numero: true, nomeAgenda: true }
+        })
+      : [];
+    const s3eByPhone = new Map(s3eRows.map((r) => [r.numero, r.nomeAgenda?.trim() || null]));
+
+    const data = canonJids.map((jid, idx) => {
+      const digits = waJidToDigits(jid);
+      const agendaName = digits ? s3eByPhone.get(digits) : null;
+      const cacheName = cacheByJid.get(jid) ?? null;
+      return {
+        jid: participantJids[idx],
+        canonicalJid: jid,
+        digits,
+        displayName: (agendaName || cacheName || '').trim() || null
+      };
+    });
+
+    res.json({ success: true, data });
+  } catch (e) {
+    console.error('getWhatsappGroupParticipantNames', e);
+    res.status(500).json({ success: false, error: 'Erro ao listar participantes' });
   }
 }
 
@@ -661,11 +873,66 @@ export async function deleteWhatsappContactCacheAll(req: AuthRequest, res: Respo
       res.status(401).json({ success: false, error: 'Não autenticado' });
       return;
     }
-    const count = await clearAllWhatsappContactCache();
-    res.json({ success: true, data: { deleted: count } });
+    const rebuildRaw = req.query.rebuild;
+    const rebuildFromCrm =
+      rebuildRaw === '1' ||
+      rebuildRaw === 'true' ||
+      (typeof rebuildRaw === 'string' && rebuildRaw.toLowerCase() === 'yes');
+    const deleted = await clearAllWhatsappContactCache();
+    let rebuilt = 0;
+    if (rebuildFromCrm) {
+      try {
+        rebuilt = await rebuildWhatsappContactCacheFromCrm();
+      } catch (rebuildErr) {
+        console.error('rebuildWhatsappContactCacheFromCrm após limpar cache', rebuildErr);
+      }
+    }
+    res.json({ success: true, data: { deleted, rebuilt } });
   } catch (e) {
     console.error('deleteWhatsappContactCacheAll', e);
     res.status(500).json({ success: false, error: 'Erro ao limpar cache de contatos' });
+  }
+}
+
+/** Resolve JID ativo (LID vs PN) a partir do telefone — abrir chat pelo Funil/agenda. */
+export async function getWhatsappResolveOpenChat(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const phone = typeof req.query.phone === 'string' ? req.query.phone.trim() : '';
+    if (!phone.replace(/\D/g, '').length) {
+      res.status(400).json({ success: false, error: 'Informe o telefone' });
+      return;
+    }
+    const data = await resolveOpenWhatsappChatFromPhone(phone);
+    res.json({ success: true, data });
+  } catch (e) {
+    console.error('getWhatsappResolveOpenChat', e);
+    const msg = e instanceof Error ? e.message : 'Erro ao resolver conversa';
+    res.status(400).json({ success: false, error: msg });
+  }
+}
+
+/** JID/número a usar nas rotas Evolution fetch-profile (evita Bad Request com @lid cru). */
+export async function getWhatsappProfileFetchTarget(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof req.query.chatId === 'string' ? req.query.chatId.trim() : '';
+    if (!chatId) {
+      res.status(400).json({ success: false, error: 'chatId é obrigatório' });
+      return;
+    }
+    const resolved = await resolvePreferredChatIdForOutbound(chatId);
+    const target = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
+    res.json({ success: true, data: { target, resolvedChatId: canonicalWhatsappChatId(resolved) } });
+  } catch (e) {
+    console.error('getWhatsappProfileFetchTarget', e);
+    res.status(500).json({ success: false, error: 'Erro ao resolver JID para perfil' });
   }
 }
 
@@ -686,6 +953,26 @@ export async function deleteWhatsappMessage(req: AuthRequest, res: Response): Pr
     console.error('deleteWhatsappMessage', e);
     const msg = e instanceof Error ? e.message : 'Erro ao excluir mensagem';
     res.status(400).json({ success: false, error: msg });
+  }
+}
+
+export async function deleteWhatsappMessageForMe(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const messageId = typeof req.params?.messageId === 'string' ? req.params.messageId.trim() : '';
+    if (!messageId) {
+      res.status(400).json({ success: false, error: 'messageId é obrigatório' });
+      return;
+    }
+    const data = await deleteChatMessageForMe(messageId);
+    res.json({ success: true, data });
+  } catch (e) {
+    console.error('deleteWhatsappMessageForMe', e);
+    const message = e instanceof Error ? e.message : 'Erro ao apagar mensagem';
+    res.status(message.includes('não encontrada') ? 404 : 400).json({ success: false, error: message });
   }
 }
 
@@ -717,6 +1004,105 @@ export async function putWhatsappMessage(req: AuthRequest, res: Response): Promi
 }
 
 /**
+ * `POST /api/whatsapp/messages/:messageId/react`
+ *
+ * Body: `{ emoji: string }` — passe `""` para REMOVER a reação enviada antes.
+ *
+ * Recebe um `messageId` interno (UUID em `chat_messages.id`) para evitar que o
+ * frontend precise lidar com IDs do provedor. O backend resolve `chatId` e
+ * `providerMessageId` no DB, e despacha para o `sendWhatsappProviderReaction`
+ * — que serializa pelo lock global (anti-ban) com `skipJitter: true`.
+ *
+ * Limita o emoji a no máx. 16 chars (alguns combos com modificadores tipo
+ * `👨‍👩‍👧` ficam grandes em UTF-16; 16 é folgado e não trava bug).
+ */
+export async function postWhatsappReactToMessage(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const messageId = typeof req.params.messageId === 'string' ? req.params.messageId.trim() : '';
+    if (!messageId || !CHAT_MESSAGE_UUID_RE.test(messageId)) {
+      res.status(400).json({ success: false, error: 'messageId inválido' });
+      return;
+    }
+    const rawEmoji = typeof req.body?.emoji === 'string' ? req.body.emoji : '';
+    const emoji = rawEmoji.trim();
+    if (emoji.length > 16) {
+      res.status(400).json({ success: false, error: 'emoji muito longo' });
+      return;
+    }
+    const message = await prisma.chatMessage.findUnique({
+      where: { id: messageId },
+      select: { id: true, chatId: true, providerMessageId: true, fromMe: true }
+    });
+    if (!message) {
+      res.status(404).json({ success: false, error: 'Mensagem não encontrada' });
+      return;
+    }
+    if (!message.providerMessageId) {
+      res.status(409).json({
+        success: false,
+        error: 'Mensagem ainda não foi entregue ao provedor (sem providerMessageId)'
+      });
+      return;
+    }
+    await sendWhatsappProviderReaction({
+      chatId: message.chatId,
+      providerMessageId: message.providerMessageId,
+      fromMe: message.fromMe,
+      emoji
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('postWhatsappReactToMessage', e);
+    const msg = e instanceof Error ? e.message : 'Erro ao reagir à mensagem';
+    res.status(500).json({ success: false, error: msg });
+  }
+}
+
+export async function postWhatsappForwardMessages(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const targetChatId = typeof (req.body as any)?.targetChatId === 'string' ? String((req.body as any).targetChatId).trim() : '';
+    const messageIdsRaw = (req.body as any)?.messageIds as unknown;
+    const messageIds =
+      Array.isArray(messageIdsRaw) ? messageIdsRaw.filter((x) => typeof x === 'string').map((x) => String(x).trim()).filter(Boolean) : [];
+
+    if (!targetChatId) {
+      res.status(400).json({ success: false, error: 'targetChatId é obrigatório' });
+      return;
+    }
+    if (!messageIds.length) {
+      res.status(400).json({ success: false, error: 'messageIds é obrigatório (array não vazio)' });
+      return;
+    }
+    if (messageIds.length > 50) {
+      res.status(400).json({ success: false, error: 'Limite: no máximo 50 mensagens por encaminhamento' });
+      return;
+    }
+
+    const result = await forwardWhatsappMessagesFromUser({
+      userId,
+      userName: req.user?.name || null,
+      targetChatId,
+      messageIds,
+    });
+    res.status(201).json({ success: true, data: { forwardedCount: result.forwardedCount } });
+  } catch (e) {
+    console.error('postWhatsappForwardMessages', e);
+    const msg = e instanceof Error ? e.message : 'Erro ao encaminhar mensagens';
+    res.status(400).json({ success: false, error: msg });
+  }
+}
+
+/**
  * Proxy autenticado por id da linha `chat_messages` (param :mediaId).
  * Encaminha Range para o provedor quando houver mídia por URL ou por download da mensagem.
  */
@@ -738,6 +1124,56 @@ export async function getWhatsappMediaById(req: AuthRequest, res: Response): Pro
     }
     const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : undefined;
     const forceDownload = isTruthyQueryFlag(req.query.download);
+
+    // Mídia recebida da Evolution Go (WEBHOOK_FILES=true) foi persistida em
+    // disco no momento do webhook. Servimos direto do disco sem chamar o
+    // provedor — mais rápido e o provedor não tem mais como recuperar.
+    if (row.mediaUrl && isLocalInboundMediaUrl(row.mediaUrl)) {
+      const abs = resolveLocalInboundMediaPath(row.mediaUrl);
+      if (!abs) {
+        res.status(404).json({ success: false, error: 'Mídia local inválida' });
+        return;
+      }
+      let st;
+      try {
+        st = await fsStat(abs);
+      } catch {
+        res.status(404).json({ success: false, error: 'Arquivo de mídia não encontrado em disco' });
+        return;
+      }
+      const ct = normalizeAudioContentType(row.mediaMimetype || 'application/octet-stream', row.mediaFilename);
+      const docName =
+        (row.mediaFilename && row.mediaFilename.trim()) ||
+        parseFilenameFromMediaUrl(row.mediaUrl || '') ||
+        'arquivo';
+      const dispName = sanitizeDownloadFilename(docName, 'arquivo');
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Content-Length', String(st.size));
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      if (forceDownload) {
+        res.setHeader('Content-Disposition', buildContentDisposition('attachment', dispName, 'arquivo'));
+      } else {
+        res.setHeader('Content-Disposition', buildContentDisposition('inline', dispName, 'arquivo'));
+      }
+      // Range simples: serve apenas se solicitado (HTML5 audio/video tags).
+      if (rangeHeader) {
+        const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+        if (m) {
+          const start = m[1] ? parseInt(m[1], 10) : 0;
+          const end = m[2] ? parseInt(m[2], 10) : st.size - 1;
+          if (start <= end && end < st.size) {
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${st.size}`);
+            res.setHeader('Content-Length', String(end - start + 1));
+            createReadStream(abs, { start, end }).pipe(res);
+            return;
+          }
+        }
+      }
+      createReadStream(abs).pipe(res);
+      return;
+    }
 
     let providerFetchRes: globalThis.Response | null = null;
     if (row.mediaUrl?.trim()) {
@@ -775,16 +1211,11 @@ export async function getWhatsappMediaById(req: AuthRequest, res: Response): Pro
       (row.mediaFilename && row.mediaFilename.trim()) ||
       parseFilenameFromMediaUrl(row.mediaUrl || '') ||
       'arquivo';
+    const dispName = sanitizeDownloadFilename(docName, 'arquivo');
     if (forceDownload) {
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${sanitizeDownloadFilename(docName, 'arquivo')}"`
-      );
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', dispName, 'arquivo'));
     } else {
-      res.setHeader(
-        'Content-Disposition',
-        `inline; filename="${sanitizeDownloadFilename(docName, 'arquivo')}"`
-      );
+      res.setHeader('Content-Disposition', buildContentDisposition('inline', dispName, 'arquivo'));
     }
     res.setHeader('Cache-Control', 'private, max-age=86400');
     const cr = providerFetchRes.headers.get('content-range');
@@ -908,7 +1339,7 @@ export async function getWhatsappProviderMediaProxy(req: AuthRequest, res: Respo
         'arquivo';
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${sanitizeDownloadFilename(name, 'arquivo')}"`
+        buildContentDisposition('attachment', sanitizeDownloadFilename(name, 'arquivo'), 'arquivo')
       );
     } else {
       const inlineName =
@@ -918,7 +1349,7 @@ export async function getWhatsappProviderMediaProxy(req: AuthRequest, res: Respo
         'arquivo';
       res.setHeader(
         'Content-Disposition',
-        `inline; filename="${sanitizeDownloadFilename(inlineName, 'arquivo')}"`
+        buildContentDisposition('inline', sanitizeDownloadFilename(inlineName, 'arquivo'), 'arquivo')
       );
     }
     res.setHeader('Cache-Control', 'private, max-age=86400');
@@ -1090,5 +1521,55 @@ export async function postWhatsappArchiveConversation(req: AuthRequest, res: Res
   } catch (e) {
     console.error('postWhatsappArchiveConversation', e);
     res.status(500).json({ success: false, error: 'Erro ao arquivar conversa' });
+  }
+}
+
+export async function postWhatsappPinConversation(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof (req.body as any)?.chatId === 'string' ? String((req.body as any).chatId).trim() : '';
+    const pinned = (req.body as any)?.pinned;
+    if (!chatId) {
+      res.status(400).json({ success: false, error: 'chatId é obrigatório' });
+      return;
+    }
+    if (typeof pinned !== 'boolean') {
+      res.status(400).json({ success: false, error: 'pinned deve ser boolean' });
+      return;
+    }
+    await setWhatsappConversationPinned(userId, chatId, pinned);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('postWhatsappPinConversation', e);
+    res.status(500).json({ success: false, error: 'Erro ao fixar conversa' });
+  }
+}
+
+export async function postWhatsappFavoriteConversation(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof (req.body as any)?.chatId === 'string' ? String((req.body as any).chatId).trim() : '';
+    const favorite = (req.body as any)?.favorite;
+    if (!chatId) {
+      res.status(400).json({ success: false, error: 'chatId é obrigatório' });
+      return;
+    }
+    if (typeof favorite !== 'boolean') {
+      res.status(400).json({ success: false, error: 'favorite deve ser boolean' });
+      return;
+    }
+    await setWhatsappConversationFavorite(userId, chatId, favorite);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('postWhatsappFavoriteConversation', e);
+    res.status(500).json({ success: false, error: 'Erro ao favoritar conversa' });
   }
 }

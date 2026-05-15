@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import type { FolhaMesResumo } from './rh.service';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/time-format.util';
+import { calculateTimeDifference } from '../utils/workshift.util';
 
 /**
  * Gera PDF buffer da conferência de ponto (todas as batidas por dia).
@@ -34,6 +35,7 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       const COLOR_MUTED = '#6b7280';
       const COLOR_LIGHT_BG = '#f3f4f6';
       const COLOR_VIOLET = '#7c3aed';
+      const COLOR_GREEN = '#15803d';
 
       // ===== Cabeçalho =====
       doc.font('Helvetica-Bold').fontSize(16).fillColor('black')
@@ -94,8 +96,9 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       const colHorasW = 60;
       const colAtrasoW = 56;
       const colSitW = 70;
+      const colCompW = 48;
       const colBatW =
-        widthAvailable - (colDiaW + colSemW + colFerW + colAlmW + colHorasW + colAtrasoW + colSitW);
+        widthAvailable - (colDiaW + colSemW + colFerW + colAlmW + colHorasW + colAtrasoW + colCompW + colSitW);
 
       const colDia = tableLeft;
       const colSem = colDia + colDiaW;
@@ -104,7 +107,8 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       const colAlm = colBat + colBatW;
       const colHoras = colAlm + colAlmW;
       const colAtraso = colHoras + colHorasW;
-      const colSit = colAtraso + colAtrasoW;
+      const colComp = colAtraso + colAtrasoW;
+      const colSit = colComp + colCompW;
 
       const drawHeader = (yStart: number): number => {
         doc.font('Helvetica-Bold').fontSize(8.5).fillColor('black');
@@ -122,6 +126,10 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         });
         doc.text('Atraso /\nSaída ant.', colAtraso + 2, yStart + 2, {
           width: colAtrasoW - 2,
+          align: 'center',
+        });
+        doc.text('Comp.\n(HH:mm)', colComp + 2, yStart + 2, {
+          width: colCompW - 2,
           align: 'center',
         });
         doc.text('Sit.', colSit + 2, yStart + 6, { width: colSitW - 2, align: 'center' });
@@ -160,6 +168,48 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         const temAtraso = minAtraso > 0 || minSaidaAnt > 0;
         const inconsistente = row.situacao === 'Inconsistente';
         const ehDomFer = (row.ehFimDeSemana && row.diaSemana === 0) || row.ehFeriado;
+        const temJornada =
+          !!folha.jornada?.entrada1 &&
+          !!folha.jornada?.saida2 &&
+          Number.isFinite(Number(folha.jornada?.toleranciaMinutos));
+
+        const compensadoMin = (() => {
+          if (folha.tipoContrato !== 'REGISTRADO') return 0;
+          if (!temJornada) return 0;
+          const bat0 = row.batidas?.[0] ?? row.entrada ?? '';
+          const batN = row.batidas?.[row.batidas.length - 1] ?? row.saida ?? '';
+          if (!/^\d{1,2}:\d{2}$/.test(bat0) || !/^\d{1,2}:\d{2}$/.test(batN)) return 0;
+
+          const toDate = (hhmm: string): Date => {
+            const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10));
+            return new Date(ref.ano, ref.mes - 1, row.dia, h, m, 0, 0);
+          };
+
+          try {
+            const diff = calculateTimeDifference({
+              batidaEntrada: toDate(bat0),
+              batidaSaida: toDate(batN),
+              shiftEntrada: folha.jornada!.entrada1!,
+              shiftSaida: folha.jornada!.saida2!,
+              toleranceMin: folha.jornada!.toleranciaMinutos ?? 5,
+            });
+
+            let atrasoBruto = Math.max(0, diff.minutosAtrasoEntrada);
+            let saidaAntBruto = Math.max(0, diff.minutosSaidaAntecipada);
+            let pool = Math.max(0, diff.minutosExtraTotal);
+
+            const abatEntrada = Math.min(atrasoBruto, pool);
+            atrasoBruto -= abatEntrada;
+            pool -= abatEntrada;
+
+            const abatSaida = Math.min(saidaAntBruto, pool);
+            // saidaAntBruto -= abatSaida; // não usado
+
+            return abatEntrada + abatSaida;
+          } catch {
+            return 0;
+          }
+        })();
 
         // Calcula altura da linha com base no maior conteúdo (precisa setar fontSize antes)
         doc.fontSize(8.5).font('Helvetica');
@@ -216,6 +266,16 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
           doc.font('Helvetica-Bold').fillColor(COLOR_RED);
         }
         doc.text(atrasoTxt, colAtraso + 2, y + 2, { width: colAtrasoW - 2, align: 'center' });
+        doc.font('Helvetica').fillColor('black');
+
+        // Compensação diária (minutos extras que abateram atraso/saída antecipada)
+        const compTxt = compensadoMin > 0 ? minutesToHHmm(compensadoMin) : '—';
+        if (compensadoMin > 0) {
+          doc.font('Helvetica-Bold').fillColor(COLOR_GREEN);
+        } else {
+          doc.font('Helvetica').fillColor(COLOR_MUTED);
+        }
+        doc.text(compTxt, colComp + 2, y + 2, { width: colCompW - 2, align: 'center' });
         doc.font('Helvetica').fillColor('black');
 
         // Situação

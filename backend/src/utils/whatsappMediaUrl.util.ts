@@ -1,3 +1,5 @@
+import { normalizeUserFilename } from './filename.util';
+
 /**
  * Converte URLs de mídia do provedor WhatsApp (públicas, localhost, path /api/files/…) em URL interna do backend → provedor.
  * Evita bloquear o proxy quando o webhook manda http://localhost:3333/… e WHATSAPP_PROVIDER_BASE_URL é http://whatsapp-provider:8080.
@@ -87,8 +89,10 @@ export function resolveWhatsappProviderInternalFetchUrl(rawUrl: string): string 
 }
 
 export function sanitizeDownloadFilename(name: string | undefined, fallback: string): string {
-  const base = (name || fallback || 'arquivo').trim() || 'arquivo';
-  return base.replace(/[/\\?%*:|"<>]/g, '_').slice(0, 180);
+  const raw = ((name && name.trim()) || (fallback && fallback.trim()) || 'arquivo').trim() || 'arquivo';
+  let s = normalizeUserFilename(raw, 200);
+  if (!s) s = normalizeUserFilename(fallback, 200) || 'arquivo';
+  return s.replace(/[/\\?%*:|"<>]/g, '_').slice(0, 180);
 }
 
 /** PDF, planilhas e documentos Office: melhor como download do que abrir JSON de erro no navegador. */

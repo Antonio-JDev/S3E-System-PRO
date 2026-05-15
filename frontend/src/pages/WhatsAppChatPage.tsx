@@ -57,27 +57,9 @@ const WhatsAppChatPage: React.FC<WhatsAppChatPageProps> = ({
   }, []);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col bg-gray-50 dark:bg-dark-bg p-4 sm:p-6">
-      <header className="mb-4 flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="lg:hidden rounded-xl p-2 text-gray-600 hover:bg-white dark:text-dark-text-secondary dark:hover:bg-dark-card"
-            aria-label="Abrir menu"
-          >
-            <Bars3Icon className="h-6 w-6" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-dark-text sm:text-3xl">WhatsApp</h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-dark-text-secondary">
-              Conversas integradas ao CRM — use o funil para abrir um lead direto aqui.
-            </p>
-          </div>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-dark-border dark:bg-[#111b21]">
+    <div className="flex flex-1 min-h-0 flex-col bg-gray-50 dark:bg-dark-bg">
+      {/* Header removido para o chat ocupar toda a área útil (estilo WhatsApp Web). */}
+      <div className="min-h-0 flex-1 overflow-hidden">
         <WhatsAppChatPanel
           chatId={chatId}
           title={title}

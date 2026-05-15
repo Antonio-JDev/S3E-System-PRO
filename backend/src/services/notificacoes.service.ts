@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { emitToUser } from '../lib/socket';
 
 export type TipoNotificacao = 'kanban_ordem_servico' | 'kanban_obras' | 'financeiro' | 'tarefas_internas';
 
@@ -13,7 +14,11 @@ export interface CriarNotificacaoInput {
 }
 
 /**
- * Cria uma notificação para um usuário e opcionalmente envia por e-mail
+ * Cria uma notificação para um usuário e opcionalmente envia por e-mail.
+ *
+ * Push em tempo real: após salvar, emite `notificacao:nova` (payload =
+ * notificação criada) na room privada do usuário via Socket.io. O sino
+ * do frontend ouve esse evento e atualiza badge/lista sem polling.
  */
 export async function criarNotificacao(input: CriarNotificacaoInput) {
   const { userId, tipo, titulo, mensagem, metadata, enviarEmail = true } = input;
@@ -27,6 +32,17 @@ export async function criarNotificacao(input: CriarNotificacaoInput) {
       metadata: metadata ? (metadata as Prisma.InputJsonValue) : undefined,
       emailEnviado: false,
     },
+  });
+
+  // Push em tempo real para o sino do dono da notificação.
+  emitToUser(userId, 'notificacao:nova', {
+    id: notificacao.id,
+    tipo: notificacao.tipo,
+    titulo: notificacao.titulo,
+    mensagem: notificacao.mensagem,
+    metadata: notificacao.metadata ?? null,
+    lida: notificacao.lida,
+    createdAt: notificacao.createdAt.toISOString()
   });
 
   if (enviarEmail) {
@@ -72,17 +88,23 @@ export async function contarNaoLidas(userId: string) {
 }
 
 /**
- * Marca uma notificação como lida
+ * Marca uma notificação como lida.
+ *
+ * Emite `notificacao:atualizada` para o dono — útil quando o usuário tem
+ * a aplicação aberta em mais de uma aba (o badge de uma aba diminui
+ * sozinho quando a outra marca como lida).
  */
 export async function marcarComoLida(id: string, userId: string) {
   const n = await prisma.notificacao.findFirst({
     where: { id, userId },
   });
   if (!n) return null;
-  return prisma.notificacao.update({
+  const updated = await prisma.notificacao.update({
     where: { id },
     data: { lida: true },
   });
+  emitToUser(userId, 'notificacao:atualizada', { id: updated.id, lida: updated.lida });
+  return updated;
 }
 
 /**
@@ -93,6 +115,7 @@ export async function marcarTodasComoLidas(userId: string) {
     where: { userId },
     data: { lida: true },
   });
+  emitToUser(userId, 'notificacao:todas-lidas', { at: Date.now() });
 }
 
 /**
@@ -102,6 +125,7 @@ export async function excluirTodas(userId: string) {
   await prisma.notificacao.deleteMany({
     where: { userId },
   });
+  emitToUser(userId, 'notificacao:limpa', { at: Date.now() });
 }
 
 /**
@@ -113,6 +137,7 @@ export async function excluirUma(id: string, userId: string): Promise<boolean> {
   });
   if (!n) return false;
   await prisma.notificacao.delete({ where: { id } });
+  emitToUser(userId, 'notificacao:removida', { id });
   return true;
 }
 

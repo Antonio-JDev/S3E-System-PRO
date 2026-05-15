@@ -15,6 +15,7 @@ import { financeiroService } from '../services/financeiroService';
 import { axiosApiService } from '../services/axiosApi';
 import { maskCpf, maskTelefoneBr, onlyDigits } from '../utils/masks';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/timeFormat';
+import { formatDatePtBrInSaoPaulo, formatDateTimePtBrInSaoPaulo, nowYmdInSaoPaulo } from '../utils/date';
 import BIDashboard from './BIDashboard';
 import ResumoAdministrativo from './ResumoAdministrativo';
 import { DollarSign, Minus, Plus } from 'lucide-react';
@@ -740,8 +741,8 @@ const RHView: React.FC = () => {
         }
     };
 
-    const handleSalvarBatidasDia = async (dia: number, registroPontoId: string) => {
-        const bat = batidasEdicao[dia];
+    const handleSalvarBatidasDia = async (dia: number, registroPontoId: string, batidasOverride?: string[]) => {
+        const bat = batidasOverride ?? batidasEdicao[dia];
         if (!registroPontoId || !bat) return;
         const filtradas = bat.map((s) => String(s).trim()).filter(Boolean);
         if (filtradas.length === 0) {
@@ -2408,7 +2409,24 @@ const RHView: React.FC = () => {
                           <label className="block text-xs font-medium text-gray-600 mb-1">Jornada padrão (WorkShift)</label>
                           <select
                             value={funcionarioForm.workShiftId}
-                            onChange={(e) => setFuncionarioForm({ ...funcionarioForm, workShiftId: e.target.value })}
+                            onChange={(e) => {
+                              const workShiftId = e.target.value;
+                              const picked = workShifts.find((s) => String(s.id) === String(workShiftId));
+                              const is40h =
+                                picked &&
+                                (String(picked.nome ?? '').toLowerCase().startsWith('40h') ||
+                                  (picked.entrada1 === '08:00' &&
+                                    picked.saida1 === '12:00' &&
+                                    picked.entrada2 === '13:00' &&
+                                    picked.saida2 === '17:00'));
+
+                              setFuncionarioForm((prev) => ({
+                                ...prev,
+                                workShiftId,
+                                // 40h semanais => meta mensal 160h (para banco/negativas)
+                                ...(is40h && prev.tipoContrato !== 'AUTONOMO' ? { cargaHorariaMensal: '160' } : null),
+                              }));
+                            }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-blue-500 bg-white dark:bg-dark-card"
                           >
                             <option value="">Sem jornada vinculada</option>
@@ -3665,25 +3683,37 @@ const RHView: React.FC = () => {
                                                                                     type="button"
                                                                                     className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline"
                                                                                     onClick={async () => {
+                                                                                        const atualInicio = (d.intervaloAlmocoInicio ?? '').trim();
+                                                                                        const atualFim = (d.intervaloAlmocoFim ?? '').trim();
+                                                                                        const jaTemIntervalo = !!atualInicio || !!atualFim;
+                                                                                        const jaEhPadrao =
+                                                                                            atualInicio === '12:00' && atualFim === '13:00';
+                                                                                        if (jaTemIntervalo && !jaEhPadrao) {
+                                                                                            toast.message('Intervalo de almoço já definido', {
+                                                                                                description: `Este dia já possui intervalo ${atualInicio || '??:??'}–${atualFim || '??:??'}. Remova/ajuste o intervalo antes de aplicar o padrão 12:00–13:00.`,
+                                                                                            });
+                                                                                            return;
+                                                                                        }
+
                                                                                         const inserir = ['12:00', '13:00'];
-                                                                                        setBatidasEdicao((prev) => {
-                                                                                            const cur = [...(prev[d.dia] ?? listaBat)];
+                                                                                        const toMin = (hhmm: string) => {
+                                                                                            const m = String(hhmm).trim().match(/^(\d{1,2}):(\d{2})$/);
+                                                                                            if (!m) return Number.POSITIVE_INFINITY;
+                                                                                            return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+                                                                                        };
+                                                                                        const nextBatidas = (() => {
+                                                                                            const cur = [...(batidasEdicao[d.dia] ?? listaBat)];
                                                                                             for (const h of inserir) {
                                                                                                 if (!cur.includes(h)) cur.push(h);
                                                                                             }
-                                                                                            // Ordena por minuto (HH:mm)
-                                                                                            const toMin = (hhmm: string) => {
-                                                                                                const m = String(hhmm).trim().match(/^(\d{1,2}):(\d{2})$/);
-                                                                                                if (!m) return Number.POSITIVE_INFINITY;
-                                                                                                return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-                                                                                            };
                                                                                             cur.sort((a, b) => toMin(a) - toMin(b));
-                                                                                            return { ...prev, [d.dia]: cur };
-                                                                                        });
+                                                                                            return cur;
+                                                                                        })();
+                                                                                        setBatidasEdicao((prev) => ({ ...prev, [d.dia]: nextBatidas }));
                                                                                         try {
                                                                                             await rhService.salvarIntervaloAlmoco(regId!, { inicio: '12:00', fim: '13:00' });
                                                                                             toast.success('Intervalo de almoço registrado (12:00–13:00)');
-                                                                                            await handleSalvarBatidasDia(d.dia, regId!);
+                                                                                            await handleSalvarBatidasDia(d.dia, regId!, nextBatidas);
                                                                                         } catch (e) {
                                                                                             console.error(e);
                                                                                             toast.error('Erro ao salvar intervalo de almoço');
@@ -4037,7 +4067,10 @@ const RHView: React.FC = () => {
                                         <p className="text-sm text-gray-800 dark:text-gray-200">
                                             Horas negativas atuais:{' '}
                                             <strong className="font-mono">
-                                                {Number(folhaDetalhada?.dividaHoras?.horasNegativas ?? funcionarioVerDados.saldoHorasNegativas ?? 0).toFixed(2)} h
+                                                {(() => {
+                                                    const h = Number(folhaDetalhada?.dividaHoras?.horasNegativas ?? funcionarioVerDados.saldoHorasNegativas ?? 0);
+                                                    return `${decimalHoursToHHmm(h)} (${Number(h).toFixed(2)} h)`;
+                                                })()}
                                             </strong>
                                         </p>
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -4439,7 +4472,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
     const [funcionariosSelecionados, setFuncionariosSelecionados] = useState<string[]>([]);
     const [quantidadeVinculacao, setQuantidadeVinculacao] = useState<string>('1');
     const [dataEntregaVinculacao, setDataEntregaVinculacao] = useState<string>(
-        new Date().toISOString().split('T')[0]
+        nowYmdInSaoPaulo()
     );
     const [observacoesEntrega, setObservacoesEntrega] = useState<string>('');
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -4474,10 +4507,24 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                 funcionariosService.listar(),
                 axiosApiService.get('/api/kits-ferramenta')
             ]);
-            setRecursos(Array.isArray(recursosResp?.data) ? (recursosResp.data as any[]) : (recursosResp?.data ?? []) as any[]);
-            setFuncionarios(Array.isArray(funcionariosResp?.data) ? (funcionariosResp.data as any[]) : (funcionariosResp?.data ?? []) as any[]);
-            // A resposta pode vir como { success: true, data: [...] } ou diretamente como array
-            const kitsData = (kitsResp as any)?.data?.data ?? (kitsResp as any)?.data ?? [];
+            if (!recursosResp?.success) {
+                toast.error('Erro ao carregar estoque', { description: recursosResp?.error || 'Falha ao listar recursos de RH' });
+            }
+            const recursosData = recursosResp?.success ? (recursosResp.data as any) : [];
+            setRecursos(Array.isArray(recursosData) ? (recursosData as any[]) : []);
+
+            const funcData = (funcionariosResp as any)?.data ?? funcionariosResp;
+            setFuncionarios(Array.isArray(funcData) ? (funcData as any[]) : []);
+
+            if (!kitsResp?.success) {
+                toast.error('Erro ao carregar kits', { description: kitsResp?.error || 'Falha ao listar kits de ferramenta' });
+            }
+            const rawKits = kitsResp?.success ? (kitsResp.data as any) : [];
+            const kitsData =
+                Array.isArray(rawKits) ? rawKits :
+                Array.isArray(rawKits?.data) ? rawKits.data :
+                Array.isArray(rawKits?.data?.data) ? rawKits.data.data :
+                [];
             setKitsFerramentas(Array.isArray(kitsData) ? kitsData.filter((kit: any) => kit.ativo) : []);
         } catch (error) {
             console.error('Erro ao carregar estoque de recursos humanos:', error);
@@ -4538,10 +4585,12 @@ const EstoqueRecursosHumanosView: React.FC = () => {
             };
 
             if (editandoRecurso) {
-                await axiosApiService.put(`/api/recursos-humanos/${editandoRecurso}`, data);
+                const res = await axiosApiService.put(`/api/recursos-humanos/${editandoRecurso}`, data);
+                if (!res?.success) throw new Error(res?.error || 'Falha ao atualizar recurso');
                 toast.success('Recurso atualizado com sucesso!');
             } else {
-                await axiosApiService.post('/api/recursos-humanos', data);
+                const res = await axiosApiService.post('/api/recursos-humanos', data);
+                if (!res?.success) throw new Error(res?.error || 'Falha ao criar recurso');
                 toast.success('Recurso adicionado ao estoque com sucesso!');
             }
             setIsModalOpen(false);
@@ -4549,7 +4598,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
         } catch (error: any) {
             console.error('Erro ao salvar recurso:', error);
             toast.error('Erro ao salvar recurso', {
-                description: error.response?.data?.message || 'Tente novamente'
+                description: error?.message || error.response?.data?.message || 'Tente novamente'
             });
         }
     };
@@ -4593,7 +4642,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
         setBuscaFuncionario('');
         setFuncionariosSelecionados([]);
         setQuantidadeVinculacao('1');
-        setDataEntregaVinculacao(new Date().toISOString().split('T')[0]);
+        setDataEntregaVinculacao(nowYmdInSaoPaulo());
         setObservacoesEntrega('');
         setIsModalVinculacaoOpen(true);
     };
@@ -4795,7 +4844,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                     </span>
                                 </div>
                                 <div className="text-xs text-gray-500">
-                                    Entregue em: {new Date(kit.dataEntrega).toLocaleDateString('pt-BR')}
+                                    Entregue em: {formatDatePtBrInSaoPaulo(kit.dataEntrega)}
                                 </div>
                                 {kit.descricao && (
                                     <p className="text-sm text-gray-600 mt-2 line-clamp-2">{kit.descricao}</p>
@@ -4844,8 +4893,6 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                     <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor Unitário</th>
                                     <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor Total</th>
                                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Data da Compra</th>
-                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Data de Entrega</th>
-                                    <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Eletricista</th>
                                     <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
                                 </tr>
                             </thead>
@@ -4861,37 +4908,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                             R$ {recurso.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </td>
                                         <td className="px-6 py-4 text-gray-600 text-sm">
-                                            {recurso.compra?.dataCompra ? (() => {
-                                                const s = recurso.compra.dataCompra;
-                                                if (typeof s === 'string' && s.includes('T')) {
-                                                    const [d] = s.split('T');
-                                                    const [a, m, dia] = d.split('-');
-                                                    return `${dia}/${m}/${a}`;
-                                                }
-                                                const d = new Date(s);
-                                                return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
-                                            })() : '—'}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600 text-sm">
-                                            {recurso.compra?.dataRecebimento ? (() => {
-                                                const s = recurso.compra.dataRecebimento;
-                                                if (typeof s === 'string' && s.includes('T')) {
-                                                    const [d] = s.split('T');
-                                                    const [a, m, dia] = d.split('-');
-                                                    return `${dia}/${m}/${a}`;
-                                                }
-                                                const d = new Date(s);
-                                                return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
-                                            })() : '—'}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600">
-                                            {recurso.funcionario ? (
-                                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium">
-                                                    {recurso.funcionario.nome}
-                                                </span>
-                                            ) : (
-                                                <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-lg text-sm">Sem vinculação</span>
-                                            )}
+                                            {recurso.compra?.dataCompra ? formatDatePtBrInSaoPaulo(recurso.compra.dataCompra) : '—'}
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <div className="flex items-center justify-center gap-2">
@@ -4946,15 +4963,27 @@ const EstoqueRecursosHumanosView: React.FC = () => {
             {/* Modal Adicionar/Editar Recurso */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-                            <h3 className="text-2xl font-bold text-gray-900">
-                                {editandoRecurso ? 'Editar Recurso' : 'Adicionar Recurso'}
-                            </h3>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-[calc(42rem+40px)] w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-5 sm:p-6 flex items-center justify-between bg-gradient-to-r from-blue-600 to-blue-500">
+                            <div className="flex items-center gap-3">
+                                <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center ring-1 ring-white/20">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-lg sm:text-2xl font-bold text-white leading-tight">
+                                        {editandoRecurso ? 'Editar Recurso' : 'Adicionar Recurso'}
+                                    </h3>
+                                    <p className="text-xs sm:text-sm text-blue-100">
+                                        {editandoRecurso ? 'Atualize os dados do item no estoque' : 'Cadastre um novo item no estoque de RH'}
+                                    </p>
+                                </div>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => setIsModalOpen(false)}
-                                className="text-gray-400 hover:text-gray-600 transition-colors"
+                                className="text-white/80 hover:text-white transition-colors"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -5069,11 +5098,23 @@ const EstoqueRecursosHumanosView: React.FC = () => {
             {/* Modal de Vinculação com Pesquisa */}
             {isModalVinculacaoOpen && recursoParaVincular && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full">
-                        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-                            <h3 className="text-2xl font-bold text-gray-900">
-                                Registrar Entrega para Funcionários
-                            </h3>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-[calc(42rem+40px)] w-full">
+                        <div className="p-5 sm:p-6 flex items-center justify-between bg-gradient-to-r from-blue-600 to-blue-500">
+                            <div className="flex items-center gap-3">
+                                <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center ring-1 ring-white/20">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c1.657 0 3-1.343 3-3S13.657 2 12 2 9 3.343 9 5s1.343 3 3 3zm0 0c-3.866 0-7 1.79-7 4v2h14v-2c0-2.21-3.134-4-7-4z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-lg sm:text-2xl font-bold text-white leading-tight">
+                                        Registrar Entrega
+                                    </h3>
+                                    <p className="text-xs sm:text-sm text-blue-100">
+                                        Selecione colaborador(es), quantidade e data para baixar do estoque
+                                    </p>
+                                </div>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => {
@@ -5082,7 +5123,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                     setFuncionariosSelecionados([]);
                                     setBuscaFuncionario('');
                                 }}
-                                className="text-gray-400 hover:text-gray-600 transition-colors"
+                                className="text-white/80 hover:text-white transition-colors"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -5257,7 +5298,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                 <div className="bg-emerald-50 p-5 rounded-xl border-2 border-emerald-200 shadow-sm">
                                     <p className="text-sm text-emerald-700 font-semibold mb-1">📅 Data de entrega do kit (criação)</p>
                                     <p className="font-bold text-gray-900 text-lg">
-                                        {new Date(kitDetalhesSelecionado.dataEntrega).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                        {formatDatePtBrInSaoPaulo(kitDetalhesSelecionado.dataEntrega)}
                                     </p>
                                     <p className="text-xs text-emerald-600 mt-0.5">Data em que o kit foi entregue ao colaborador</p>
                                 </div>
@@ -5322,11 +5363,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                                                 <div className="flex items-center gap-2">
                                                                     <span className="text-gray-600 font-medium">Adicionado em:</span>
                                                                     <span className="font-semibold text-gray-900">
-                                                                        {new Date(item.dataAdicao).toLocaleDateString('pt-BR', {
-                                                                            day: '2-digit',
-                                                                            month: '2-digit',
-                                                                            year: 'numeric'
-                                                                        })}
+                                                                        {formatDatePtBrInSaoPaulo(item.dataAdicao)}
                                                                     </span>
                                                                 </div>
                                                             )}
@@ -5356,7 +5393,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                                     <p className="text-sm text-gray-600">
                                                         Quantidade: <span className="font-semibold">{mov.quantidade}</span>
                                                         <span className="mx-2">|</span>
-                                                        Entregue em: {new Date(mov.dataMovimentacao).toLocaleDateString('pt-BR')}
+                                                        Entregue em: {formatDatePtBrInSaoPaulo(mov.dataMovimentacao)}
                                                     </p>
                                                     {mov.descricao && <p className="text-sm text-gray-700 mt-1">{mov.descricao}</p>}
                                                 </div>
@@ -5414,13 +5451,23 @@ const EstoqueRecursosHumanosView: React.FC = () => {
             {/* Modal de Histórico */}
             {isModalHistoricoOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
-                            <h3 className="text-2xl font-bold text-gray-900">Histórico de Movimentações</h3>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-[calc(56rem+40px)] w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-5 sm:p-6 flex items-center justify-between sticky top-0 bg-gradient-to-r from-blue-600 to-blue-500">
+                            <div className="flex items-center gap-3">
+                                <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center ring-1 ring-white/20">
+                                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-lg sm:text-2xl font-bold text-white leading-tight">Histórico de Movimentações</h3>
+                                    <p className="text-xs sm:text-sm text-blue-100">Entregas, recebimentos e desvinculações do item</p>
+                                </div>
+                            </div>
                             <button
                                 type="button"
                                 onClick={() => setIsModalHistoricoOpen(false)}
-                                className="text-gray-400 hover:text-gray-600 transition-colors"
+                                className="text-white/80 hover:text-white transition-colors"
                             >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -5454,7 +5501,7 @@ const EstoqueRecursosHumanosView: React.FC = () => {
                                                              item.tipoMovimentacao}
                                                         </span>
                                                         <span className="text-sm text-gray-600">
-                                                            {new Date(item.dataMovimentacao).toLocaleString('pt-BR')}
+                                                            {formatDateTimePtBrInSaoPaulo(item.dataMovimentacao)}
                                                         </span>
                                                     </div>
                                                     {item.funcionario && (

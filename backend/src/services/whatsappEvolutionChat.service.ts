@@ -4,6 +4,8 @@
  */
 import { canonicalWhatsappChatId, waJidToDigits } from '../utils/whatsappChat.util';
 import type { WhatsappProviderContactRow, WhatsappProviderGroupRow } from './whatsappProvider.service';
+import { isEvolutionGoKind } from './whatsappProvider.evolution';
+import { evolutionGoProxyRequest, evolutionGoLogout } from './whatsappEvolutionGoBridge';
 
 const baseUrl = (): string =>
   (process.env.WHATSAPP_PROVIDER_BASE_URL || 'http://whatsapp-provider:8080').replace(/\/$/, '');
@@ -34,6 +36,9 @@ async function ensureInstance(): Promise<void> {
 
 async function evPost(path: string, body?: unknown): Promise<Response> {
   await ensureInstance();
+  if (isEvolutionGoKind()) {
+    return evolutionGoProxyRequest('POST', path, body);
+  }
   return fetch(`${baseUrl()}${path}`, {
     method: 'POST',
     headers: jsonHeaders(),
@@ -43,6 +48,9 @@ async function evPost(path: string, body?: unknown): Promise<Response> {
 
 async function evDeleteWithBody(path: string, body: unknown): Promise<Response> {
   await ensureInstance();
+  if (isEvolutionGoKind()) {
+    return evolutionGoProxyRequest('DELETE', path, body);
+  }
   return fetch(`${baseUrl()}${path}`, {
     method: 'DELETE',
     headers: jsonHeaders(),
@@ -52,6 +60,9 @@ async function evDeleteWithBody(path: string, body: unknown): Promise<Response> 
 
 async function evGet(path: string): Promise<Response> {
   await ensureInstance();
+  if (isEvolutionGoKind()) {
+    return evolutionGoProxyRequest('GET', path, undefined);
+  }
   return fetch(`${baseUrl()}${path}`, { headers: getHeaders() });
 }
 
@@ -111,9 +122,13 @@ export function mapEvolutionContactRow(raw: unknown): WhatsappProviderContactRow
 export function mapEvolutionGroupRow(raw: unknown): WhatsappProviderGroupRow | null {
   const o = unwrapObject(raw);
   if (!o) return null;
+  // EvoGo (whatsmeow) usa PascalCase: `JID`, `Name`. Evolution v2 (Baileys)
+  // usa camelCase: `id`/`jid`, `subject`/`name`. Aceitar ambos para que o
+  // mesmo mapper sirva para os dois motores.
   const idRaw =
     (typeof o.id === 'string' && o.id.trim()) ||
     (typeof o.jid === 'string' && o.jid.trim()) ||
+    (typeof o.JID === 'string' && (o.JID as string).trim()) ||
     (typeof o.groupJid === 'string' && o.groupJid.trim()) ||
     (typeof o.remoteJid === 'string' && o.remoteJid.trim()) ||
     '';
@@ -129,6 +144,8 @@ export function mapEvolutionGroupRow(raw: unknown): WhatsappProviderGroupRow | n
     (typeof o.subject === 'string' && o.subject.trim()) ||
     (typeof o.name === 'string' && o.name.trim()) ||
     (typeof o.title === 'string' && o.title.trim()) ||
+    (typeof o.Name === 'string' && (o.Name as string).trim()) ||
+    (typeof o.Subject === 'string' && (o.Subject as string).trim()) ||
     gmSub ||
     undefined;
   return {
@@ -323,15 +340,49 @@ export async function evolutionUpdateBlockStatus(body: { number: string; status:
   }
 }
 
-/** POST /chat/fetchProfilePictureUrl/{instance} */
+/**
+ * POST /chat/fetchProfilePictureUrl/{instance}
+ *
+ * Resiliente E com teto de tempo: foto de perfil é decorativa, não pode travar
+ * a UI do CRM. Política:
+ *  - Timeout local de 4s via Promise.race. Quando o Baileys interno da EvoGo
+ *    demora para resolver info do contato (caso típico: número com privacidade
+ *    de foto, contato inexistente, ou WhatsApp lento), ele acaba devolvendo
+ *    `HTTP 500 {"error":"info query timed out"}` depois de 30s. Sem teto local
+ *    isso bloqueia a chamada `/contact-meta` por minutos (loop de 3 tentativas
+ *    com IDs alternativos), e o frontend (timeout 10s) cai antes — mostrando
+ *    erro de conexão para o operador. Com teto de 4s o pior caso é ~12s,
+ *    ainda dá margem para o frontend cair limpo na fallback de iniciais.
+ *  - Qualquer falha (timeout, exception, !ok, JSON inválido) retorna `null`.
+ */
 export async function evolutionFetchProfilePictureUrl(numberJid: string): Promise<{ profilePictureUrl?: string | null }> {
   const inst = encodeURIComponent(instanceName());
-  const res = await evPost(`/chat/fetchProfilePictureUrl/${inst}`, { number: numberJid.trim() });
-  const t = await res.text();
-  if (!res.ok) throw new Error(`Evolution fetchProfilePictureUrl: HTTP ${res.status} ${t}`);
-  const data = JSON.parse(t) as Record<string, unknown>;
-  const u = data.profilePictureUrl ?? data.profilePictureURL;
-  return { profilePictureUrl: typeof u === 'string' ? u : null };
+  // Margem de 500ms acima do timeout do bridge (3000ms) — quando o bridge
+  // aborta, a resposta `{profilePictureUrl: null}` ainda chega antes deste
+  // timeout disparar. Evita race condition em que o caller veria timeout
+  // antes do bridge formatar a resposta.
+  const PROFILE_PICTURE_TIMEOUT_MS = 3500;
+
+  const timeoutPromise = new Promise<{ profilePictureUrl: null }>((resolve) => {
+    setTimeout(() => resolve({ profilePictureUrl: null }), PROFILE_PICTURE_TIMEOUT_MS);
+  });
+
+  const fetchPromise = (async (): Promise<{ profilePictureUrl: string | null }> => {
+    try {
+      const res = await evPost(`/chat/fetchProfilePictureUrl/${inst}`, { number: numberJid.trim() });
+      const t = await res.text().catch(() => '');
+      if (!res.ok) return { profilePictureUrl: null };
+      const data = JSON.parse(t) as Record<string, unknown>;
+      // Em EvoGo a resposta vem como data URI inline (`data:image/png;base64,…`)
+      // do bridge; em Evolution v2 vem como URL pública do servidor.
+      const u = data.profilePictureUrl ?? data.profilePictureURL;
+      return { profilePictureUrl: typeof u === 'string' && u.length > 0 ? u : null };
+    } catch {
+      return { profilePictureUrl: null };
+    }
+  })();
+
+  return Promise.race([fetchPromise, timeoutPromise]);
 }
 
 /** POST /chat/getBase64FromMediaMessage/{instance} */
@@ -376,11 +427,13 @@ export async function evolutionFindGroupByJid(groupJid: string): Promise<unknown
 
 /** DELETE /instance/logout/{instance} */
 export async function evolutionLogoutInstance(): Promise<void> {
-  const inst = encodeURIComponent(instanceName());
-  const res = await fetch(`${baseUrl()}/instance/logout/${inst}`, {
-    method: 'DELETE',
-    headers: getHeaders()
-  });
+  await ensureInstance();
+  const res = isEvolutionGoKind()
+    ? await evolutionGoLogout()
+    : await fetch(`${baseUrl()}/instance/logout/${encodeURIComponent(instanceName())}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
     throw new Error(`Evolution logout: HTTP ${res.status} ${t || res.statusText}`);
@@ -400,7 +453,7 @@ export async function evolutionSetInstancePresence(
 
 export async function evolutionCheckPhoneExists(
   phoneRaw: string
-): Promise<{ numberExists: boolean; chatId: string | null }> {
+): Promise<{ numberExists: boolean; chatId: string | null; pushName?: string | null }> {
   const digits = phoneRaw.replace(/\D/g, '');
   if (!digits) {
     throw new Error('Informe o telefone com DDD (e DDI 55 se aplicável).');
@@ -409,16 +462,23 @@ export async function evolutionCheckPhoneExists(
   const arr = unwrapArray(data);
   const first = arr[0] as Record<string, unknown> | undefined;
   if (!first) {
-    return { numberExists: false, chatId: null };
+    return { numberExists: false, chatId: null, pushName: null };
   }
   const exists = first.exists === true;
   const jid =
     (typeof first.jid === 'string' && first.jid) ||
     (typeof first.remoteJid === 'string' && first.remoteJid) ||
     null;
+  const pushRaw =
+    (typeof first.pushName === 'string' && first.pushName) ||
+    (typeof first.pushname === 'string' && first.pushname) ||
+    (typeof first.name === 'string' && first.name) ||
+    '';
+  const pushName = pushRaw.trim() ? pushRaw.trim() : null;
   return {
     numberExists: exists,
-    chatId: jid && jid.length > 0 ? jid : null
+    chatId: jid && jid.length > 0 ? jid : null,
+    pushName
   };
 }
 
@@ -434,8 +494,12 @@ export async function evolutionFetchContactsForCrm(params?: {
     if (row) out.push(row);
   }
   const offset = Math.max(0, params?.offset ?? 0);
-  const limit = Math.min(Math.max(1, params?.limit ?? 500), 2000);
-  return out.slice(offset, offset + limit);
+  const lim = params?.limit;
+  if (lim == null || lim <= 0) {
+    return out.slice(offset);
+  }
+  const capped = Math.min(Math.max(1, lim), 1_000_000);
+  return out.slice(offset, offset + capped);
 }
 
 export async function evolutionFetchContactById(contactId: string): Promise<WhatsappProviderContactRow | null> {
@@ -479,8 +543,15 @@ export async function evolutionFetchGroupById(groupId: string): Promise<Whatsapp
 export async function evolutionGroupPictureUrl(groupId: string): Promise<string | null> {
   const raw = await evolutionFindGroupByJid(groupId.trim());
   if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  const u = o.pictureUrl ?? o.profilePictureUrl;
+  // Desempacota `{ data: ... }` quando o EvoGo encapsula a resposta.
+  const o = unwrapObject(raw) ?? (raw as Record<string, unknown>);
+  // Aceita ambos os formatos: EvoGo (`PictureURL`/`Avatar`) e Evolution v2 (`pictureUrl`).
+  const u =
+    o.pictureUrl ??
+    o.profilePictureUrl ??
+    (o as Record<string, unknown>).PictureURL ??
+    (o as Record<string, unknown>).pictureURL ??
+    (o as Record<string, unknown>).Avatar;
   return typeof u === 'string' && u.length > 0 ? u : null;
 }
 
@@ -513,19 +584,12 @@ export async function evolutionSubscribePresenceTyping(chatId: string): Promise<
   if (lower.endsWith('@g.us') || lower.endsWith('@newsletter') || lower.endsWith('@lid')) {
     return;
   }
-  const digits = waJidToDigits(canonical);
-  const num = digits || chatId.replace(/\D/g, '');
-  if (!num || num.length < 8) {
-    return;
-  }
-  await evolutionSendPresence({
-    number: num,
-    options: {
-      delay: 1200,
-      presence: 'composing',
-      number: num
-    }
-  });
+  // IMPORTANTE:
+  // Algumas builds da Evolution v2 validam o endpoint /chat/sendPresence com um schema diferente
+  // (erros do tipo: 'instance requires property "presence"/"delay"').
+  // Como presença/digitando é apenas melhoria de UX e não deve gerar ruído/erros no provider,
+  // mantemos este subscribe como NO-OP por padrão para Evolution.
+  return;
 }
 
 export async function evolutionEditMessageForCrm(
@@ -637,10 +701,12 @@ export async function evolutionUpdateSessionProfilePicture(picture: string): Pro
 export async function evolutionRemoveSessionProfilePicture(): Promise<unknown> {
   await ensureInstance();
   const inst = encodeURIComponent(instanceName());
-  const res = await fetch(`${baseUrl()}/chat/removeProfilePicture/${inst}`, {
-    method: 'DELETE',
-    headers: getHeaders()
-  });
+  const res = isEvolutionGoKind()
+    ? await evolutionGoProxyRequest('DELETE', `/chat/removeProfilePicture/${inst}`, {})
+    : await fetch(`${baseUrl()}/chat/removeProfilePicture/${inst}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
   return parseEvolutionJson(res, 'removeProfilePicture');
 }
 
@@ -648,7 +714,7 @@ export async function evolutionRemoveSessionProfilePicture(): Promise<unknown> {
 export async function evolutionFetchPrivacySettings(): Promise<unknown> {
   await ensureInstance();
   const inst = encodeURIComponent(instanceName());
-  const res = await fetch(`${baseUrl()}/chat/fetchPrivacySettings/${inst}`, { headers: getHeaders() });
+  const res = await evGet(`/chat/fetchPrivacySettings/${inst}`);
   return parseEvolutionJson(res, 'fetchPrivacySettings');
 }
 
@@ -838,9 +904,11 @@ export async function evolutionGroupToggleEphemeral(groupJid: string, expiration
 export async function evolutionGroupLeave(groupJid: string): Promise<unknown> {
   await ensureInstance();
   const q = encodeURIComponent(groupJid.trim());
-  const res = await fetch(`${baseUrl()}/group/leaveGroup/${inst()}?groupJid=${q}`, {
-    method: 'DELETE',
-    headers: getHeaders()
-  });
+  const res = isEvolutionGoKind()
+    ? await evolutionGoProxyRequest('DELETE', `/group/leaveGroup/${inst()}?groupJid=${q}`, {})
+    : await fetch(`${baseUrl()}/group/leaveGroup/${inst()}?groupJid=${q}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
   return parseEvolutionJson(res, 'group/leaveGroup');
 }

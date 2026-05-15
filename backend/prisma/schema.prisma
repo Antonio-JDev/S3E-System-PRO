@@ -50,6 +50,10 @@ model WhatsappChatReadState {
   lastReadAt DateTime @map("last_read_at")
   /** Oculta a conversa na lista do CRM (sincroniza com arquivar no provedor). */
   archived   Boolean  @default(false) @map("archived")
+  /** Conversa fixada no topo (por usuário). */
+  pinned     Boolean  @default(false) @map("pinned")
+  /** Conversa favoritada (por usuário). */
+  favorite   Boolean  @default(false) @map("favorite")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -65,10 +69,94 @@ model WhatsappContactCache {
   chatId            String   @unique @map("chat_id")
   displayName       String?  @map("display_name")
   profilePictureUrl String?  @map("profile_picture_url")
+  /** Dígitos normalizados (ex. DDI 55) para cruzar conversa ↔ telefone sem reutilizar o mesmo nome entre JIDs diferentes. */
+  phoneDigits       String?  @map("phone_digits")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
 
+  @@index([phoneDigits])
   @@map("whatsapp_contact_cache")
+}
+
+/// Lista/etiqueta de conversas do WhatsApp por usuário (estilo "Listas" do WhatsApp Business).
+///
+/// Cada operador tem suas próprias listas — o filtro de conversas na sidebar do CRM
+/// alterna entre `Tudo / Não lidas / Favoritas / Grupos` (built-in) e as listas
+/// criadas aqui. Os chats pertencentes à lista vivem em `WhatsappChatLabelMembership`.
+model WhatsappChatLabel {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  /** Nome curto exibido como chip (ex.: "Vendas", "Atendimento"). Único por usuário. */
+  nome       String   @map("nome")
+  /** Cor HEX opcional para diferenciar o chip (ex.: "#00a884"). */
+  cor        String?  @map("cor")
+  /** Emoji/ícone opcional pré-pendido no chip (ex.: "📌"). */
+  emoji      String?  @map("emoji")
+  /** Ordem manual na barra de filtros (ascendente). */
+  ordem      Int      @default(0) @map("ordem")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  memberships WhatsappChatLabelMembership[]
+
+  @@unique([userId, nome])
+  @@index([userId])
+  @@map("whatsapp_chat_labels")
+}
+
+/// Pertinência conversa ↔ lista (N:N). Cada `WhatsappChatLabel` agrupa um conjunto de `chatId`s.
+model WhatsappChatLabelMembership {
+  id         String   @id @default(uuid())
+  labelId    String   @map("label_id")
+  chatId     String   @map("chat_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  label WhatsappChatLabel @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([labelId, chatId])
+  @@index([chatId])
+  @@map("whatsapp_chat_label_memberships")
+}
+
+/// Mapeia telefone (dígitos BR) para o JID preferido da Evolution (@lid ou @s.whatsapp.net / @c.us), evitando conversas duplicadas.
+model WhatsappChatIdentity {
+  id            String   @id @default(uuid())
+  phoneDigits   String   @unique @map("phone_digits")
+  primaryChatId String   @map("primary_chat_id")
+  /** Outros JIDs já vistos para o mesmo contato (ex.: 55...@c.us + @lid). */
+  aliases       Json     @default("[]") @map("aliases")
+  source        String?  @map("source")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([primaryChatId])
+  @@map("whatsapp_chat_identities")
+}
+
+/// Agenda S3E (CSV / importação): prioridade de exibição sobre cache do provedor quando `nome_agenda` estiver preenchido.
+///
+/// Quando uma mensagem chega de um número novo (via webhook EvoGo), o backend cria
+/// automaticamente um registro com `revisado = false` e o `pushName` informado, para o
+/// operador revisar/ajustar o `nome_agenda` depois pela tela de "Contatos S3E".
+model ContatoS3e {
+  id              String    @id @default(uuid())
+  numero          String    @map("numero")
+  jid             String?   @map("jid")
+  nomeAgenda      String?   @map("nome_agenda")
+  pushName        String?   @map("push_name")
+  empresa         String?   @map("empresa")
+  ultimaInteracao DateTime? @map("ultima_interacao")
+  /** false = criado automaticamente por mensagem recebida; aguarda revisão humana. */
+  revisado        Boolean   @default(true) @map("revisado")
+  /** Origem do registro: 'import_csv', 'manual', 'inbound_message', 'pre_send', etc. */
+  origem          String?   @map("origem")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([numero])
+  @@index([jid])
+  @@index([revisado])
+  @@map("contatos_s3e")
 }
 
 // Notificações por usuário (Kanban ordem de serviço, Kanban obras, financeiro)
@@ -259,6 +347,24 @@ model ChatMessage {
   participant   String?  @map("participant")
   /** Provedor: -1 erro, 0 pendente, 1 servidor, 2 dispositivo, 3 lida, 4 reproduzida */
   ack           Int?     @map("ack")
+  /**
+   * Timestamp em que a mensagem inbound foi marcada como lida no provedor (✓✓ azul
+   * no celular do cliente). NULL = ainda não enviamos `markread` para o provedor.
+   * Usado pelo `acknowledgeInboundReadsOnProvider` para idempotência global —
+   * evita re-marcar a mesma mensagem cada vez que um dos 7 operadores abre o chat.
+   */
+  providerReadAt DateTime? @map("provider_read_at")
+  /**
+   * Emoji da reação ATIVA aplicada à mensagem (ex.: '👍', '❤️'). `null` quando
+   * não há reação OU quando o cliente removeu a reação anterior. Atualizado pelo
+   * webhook `messages.upsert` (reactionMessage) e propagado em tempo real pelo
+   * socket `whatsapp:message:reaction`.
+   *
+   * Modelo simples (1 reação ativa por mensagem) que cobre 99% dos casos de
+   * WhatsApp 1:1. Se no futuro precisarmos de múltiplas reações de participantes
+   * diferentes em grupos, migrar para uma tabela `ChatMessageReaction` separada.
+   */
+  reaction      String?  @map("reaction")
   session       String?
   hasMedia      Boolean  @default(false) @map("has_media")
   mediaUrl      String?  @map("media_url")
