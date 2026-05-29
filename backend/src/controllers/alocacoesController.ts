@@ -285,7 +285,7 @@ export class AlocacoesController {
    */
   async verificarConflitos(req: Request, res: Response) {
     try {
-      const { equipeId, dataInicio, dataFim } = req.query;
+      const { equipeId, dataInicio, dataFim, obraId, tarefaId } = req.query;
 
       if (!equipeId || !dataInicio || !dataFim) {
         return res.status(400).json({
@@ -294,16 +294,32 @@ export class AlocacoesController {
         });
       }
 
-      // Buscar alocações que se sobrepõem
+      const where: {
+        equipeId: string;
+        status: { not: 'CANCELADA' };
+        AND: Array<Record<string, unknown>>;
+        obraId?: { not: string };
+        tarefaId?: { not: string };
+      } = {
+        equipeId: equipeId as string,
+        status: { not: 'CANCELADA' },
+        AND: [
+          { dataInicio: { lte: new Date(dataFim as string) } },
+          { dataFim: { gte: new Date(dataInicio as string) } }
+        ]
+      };
+
+      // Mesma equipe pode ter várias tarefas na mesma obra (mesmo card do kanban)
+      if (obraId && typeof obraId === 'string') {
+        where.obraId = { not: obraId };
+      }
+
+      if (tarefaId && typeof tarefaId === 'string') {
+        where.tarefaId = { not: tarefaId };
+      }
+
       const alocacoesConflitantes = await prisma.alocacaoEquipe.findMany({
-        where: {
-          equipeId: equipeId as string,
-          status: { not: 'CANCELADA' },
-          AND: [
-            { dataInicio: { lte: new Date(dataFim as string) } },
-            { dataFim: { gte: new Date(dataInicio as string) } }
-          ]
-        },
+        where,
         include: {
           equipe: true
         }

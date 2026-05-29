@@ -1,6 +1,8 @@
 import { prisma } from '../lib/prisma';
+import type { DestinoCompraAvulsa } from '@prisma/client';
 import { EstoqueService } from './estoque.service';
 import { ContasPagarService } from './contasPagar.service';
+import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
 import { normalizarNomeProduto, compararNomesProdutos } from '../utils/stringUtils';
@@ -16,6 +18,8 @@ export interface CompraItemPayload {
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
     unidadeEmbalagem?: string; // "cx", "pct", etc.
+    /** false = item segue destinoTipo da compra (obra/OS); true = apenas estoque */
+    destinoEstoque?: boolean;
 }
 
 export interface CompraPayload {
@@ -46,6 +50,8 @@ export interface CompraPayload {
     dataPrimeiroVencimento?: Date;
     // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
     obraId?: string;
+    destinoTipo?: DestinoCompraAvulsa | null;
+    projetoId?: string;
     // ✅ NOVO: Empresa compradora (para identificar qual CNPJ está sendo usado)
     empresaCompradoraNome?: string;
     empresaCompradoraCNPJ?: string;
@@ -69,6 +75,105 @@ export class ComprasService {
         if (cls === 'DESPESAS_VARIADAS') return 'despesas_variadas';
         // LIMPEZA_INSUMOS e ESCRITORIO_INSUMOS seguem fluxo de estoque
         return 'estoque';
+    }
+
+    /**
+     * Entrada no estoque + destino por item (obra / OS com reserva / estoque).
+     */
+    private static async aplicarDestinoItemRecebimento(
+        tx: any,
+        params: {
+            compra: {
+                id: string;
+                numeroNF: string | number;
+                obraId?: string | null;
+                projetoId?: string | null;
+                destinoTipo?: DestinoCompraAvulsa | string | null;
+            };
+            item: { id: string; destinoEstoque?: boolean | null };
+            materialId: string;
+            quantidadeParaEstoque: number;
+            observacoesEntrada: string;
+        },
+    ): Promise<void> {
+        const { compra, item, materialId, quantidadeParaEstoque, observacoesEntrada } = params;
+        const legacyObraAvulsa = !!(compra.obraId && !compra.destinoTipo);
+        const segueDestino = legacyObraAvulsa || item.destinoEstoque === false;
+
+        await tx.material.update({
+            where: { id: materialId },
+            data: { estoque: { increment: quantidadeParaEstoque } },
+        });
+        await tx.movimentacaoEstoque.create({
+            data: {
+                materialId,
+                tipo: 'ENTRADA',
+                quantidade: quantidadeParaEstoque,
+                motivo: 'COMPRA',
+                referencia: compra.id,
+                observacoes: observacoesEntrada,
+            },
+        });
+
+        if (!segueDestino) return;
+
+        const destinoTipo =
+            (compra.destinoTipo as DestinoCompraAvulsa | null) ||
+            (compra.obraId ? 'OBRA' : compra.projetoId ? 'PROJETO' : null);
+
+        if (destinoTipo === 'OBRA' || (legacyObraAvulsa && compra.obraId)) {
+            const obraIdDestino = compra.obraId!;
+            await tx.material.update({
+                where: { id: materialId },
+                data: { estoque: { decrement: quantidadeParaEstoque } },
+            });
+            await tx.movimentacaoEstoque.create({
+                data: {
+                    materialId,
+                    tipo: 'SAIDA',
+                    quantidade: quantidadeParaEstoque,
+                    motivo: 'OBRA',
+                    referencia: obraIdDestino,
+                    observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF}`,
+                },
+            });
+            return;
+        }
+
+        if (destinoTipo === 'PROJETO' && compra.projetoId) {
+            const obra = await tx.obra.findUnique({
+                where: { projetoId: compra.projetoId },
+                select: { id: true },
+            });
+            if (obra?.id) {
+                await tx.material.update({
+                    where: { id: materialId },
+                    data: { estoque: { decrement: quantidadeParaEstoque } },
+                });
+                await tx.movimentacaoEstoque.create({
+                    data: {
+                        materialId,
+                        tipo: 'SAIDA',
+                        quantidade: quantidadeParaEstoque,
+                        motivo: 'OBRA',
+                        referencia: obra.id,
+                        observacoes: `Material alocado para obra (OS) via Compra Avulsa NF: ${compra.numeroNF}`,
+                    },
+                });
+                return;
+            }
+
+            await tx.reservaMaterialProjeto.create({
+                data: {
+                    projetoId: compra.projetoId,
+                    materialId,
+                    quantidade: quantidadeParaEstoque,
+                    compraId: compra.id,
+                    compraItemId: item.id,
+                    observacoes: `Reserva OS — NF ${compra.numeroNF}`,
+                },
+            });
+        }
     }
 
     /**
@@ -99,12 +204,37 @@ export class ComprasService {
             condicoesPagamento,
             parcelas,
             dataPrimeiroVencimento,
-            obraId
+            obraId,
+            destinoTipo,
+            projetoId,
         } = data;
 
         // Validações
         if (!items || items.length === 0) {
             throw new Error('Compra deve ter pelo menos um item');
+        }
+
+        if (destinoTipo === 'OBRA' && !obraId) {
+            throw new Error('Compra avulsa para obra exige obraId');
+        }
+        if (destinoTipo === 'PROJETO' && !projetoId) {
+            throw new Error('Compra avulsa para OS exige projetoId');
+        }
+        if (obraId && projetoId && destinoTipo !== 'PROJETO') {
+            throw new Error('Informe apenas obraId ou projetoId conforme o destino');
+        }
+
+        let obraIdPersistir: string | null = obraId || null;
+        const projetoIdPersistir: string | null = projetoId || null;
+        if (destinoTipo === 'PROJETO' && projetoIdPersistir) {
+            const resolved = await ReservaMaterialProjetoService.resolverObraIdParaDestino(
+                'PROJETO',
+                null,
+                projetoIdPersistir,
+            );
+            if (resolved.obraId) {
+                obraIdPersistir = resolved.obraId;
+            }
         }
 
         if (!numeroNF) {
@@ -705,7 +835,9 @@ export class ComprasService {
                     classificacao, // ✅ NOVO: Classificação da compra
                     observacoes,
                     xmlData: JSON.stringify(xmlMeta),
-                    obraId: obraId || null, // ✅ NOVO: Vincular obra se fornecida
+                    obraId: obraIdPersistir,
+                    destinoTipo: destinoTipo || null,
+                    projetoId: projetoIdPersistir,
                     empresaCompradoraNome: data.empresaCompradoraNome || null, // ✅ NOVO: Nome da empresa compradora
                     empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null, // ✅ NOVO: CNPJ da empresa compradora
                     items: {
@@ -716,6 +848,7 @@ export class ComprasService {
                             quantidade: item.quantidade,
                             valorUnit: item.valorUnit,
                             valorTotal: item.valorTotal,
+                            destinoEstoque: (item as CompraItemPayload).destinoEstoque !== false,
                             // ✅ Campos de fracionamento
                             quantidadeFracionada: (item as any).quantidadeFracionada || null,
                             tipoEmbalagem: (item as any).tipoEmbalagem || null,
@@ -1214,61 +1347,19 @@ export class ComprasService {
                             ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - Recebimento confirmado`
                             : `Compra NF: ${compra.numeroNF} - Recebimento confirmado`;
 
-                        // ✅ COMPRA AVULSA PARA OBRA - Fluxo especial: entrada (auditoria) + baixa imediata para a obra
-                        const isCompraAvulsa = !!(compra as any).obraId;
-                        if (isCompraAvulsa) {
-                            console.log(`🏗️ COMPRA AVULSA para obra ${(compra as any).obraId}`);
-                            // 1. Registrar entrada no estoque (auditoria)
-                            await tx.material.update({
-                                where: { id: materialIdFinal },
-                                data: { estoque: { increment: quantidadeParaEstoque } }
-                            });
-                            await tx.movimentacaoEstoque.create({
-                                data: {
-                                    materialId: materialIdFinal,
-                                    tipo: 'ENTRADA',
-                                    quantidade: quantidadeParaEstoque,
-                                    motivo: 'COMPRA',
-                                    referencia: id,
-                                    observacoes: `Compra Avulsa NF: ${compra.numeroNF} - Material destinado à obra ${(compra as any).obraId}`
-                                }
-                            });
-                            // 2. Baixa imediata para a obra
-                            await tx.material.update({
-                                where: { id: materialIdFinal },
-                                data: { estoque: { decrement: quantidadeParaEstoque } }
-                            });
-                            await tx.movimentacaoEstoque.create({
-                                data: {
-                                    materialId: materialIdFinal,
-                                    tipo: 'SAIDA',
-                                    quantidade: quantidadeParaEstoque,
-                                    motivo: 'OBRA',
-                                    referencia: (compra as any).obraId,
-                                    observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF} - Item novo adicionado`
-                                }
-                            });
-                        } else {
-                            // Compra normal - apenas incrementar estoque
-                            await tx.material.update({
-                                where: { id: materialIdFinal },
-                                data: {
-                                    estoque: {
-                                        increment: quantidadeParaEstoque
-                                    }
-                                }
-                            });
-                            await tx.movimentacaoEstoque.create({
-                                data: {
-                                    materialId: materialIdFinal,
-                                    tipo: 'ENTRADA',
-                                    quantidade: quantidadeParaEstoque,
-                                    motivo: 'COMPRA',
-                                    referencia: id,
-                                    observacoes: observacoesEstoque
-                                }
-                            });
-                        }
+                        await ComprasService.aplicarDestinoItemRecebimento(tx, {
+                            compra: {
+                                id,
+                                numeroNF: compra.numeroNF,
+                                obraId: (compra as any).obraId,
+                                projetoId: (compra as any).projetoId,
+                                destinoTipo: (compra as any).destinoTipo,
+                            },
+                            item: item as any,
+                            materialId: materialIdFinal,
+                            quantidadeParaEstoque,
+                            observacoesEntrada: observacoesEstoque,
+                        });
                         
                         // ✅ Marcar fracionamento como aplicado se houver
                         if (temFracionamento) {
@@ -1516,62 +1607,33 @@ export class ComprasService {
                         } else {
                             console.log(`📦 Estoque anterior: ${estoqueAnterior}, Quantidade a adicionar: ${quantidadeParaEstoque}`);
                         }
-                        
-                        // Incrementar estoque diretamente na transação (em unidades individuais)
-                        const materialAtualizado = await tx.material.update({
-                            where: { id: materialIdFinal },
-                            data: {
-                                estoque: {
-                                    increment: quantidadeParaEstoque
-                                }
-                            },
-                            select: { estoque: true, nome: true }
-                        });
-                        
-                        console.log(`✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado.estoque} (adicionado ${quantidadeParaEstoque} unidades)`);
-                        
-                        // ✅ COMPRA AVULSA PARA OBRA (remessa parcial): entrada (auditoria) + baixa imediata para a obra
-                        const obraIdVinculada = (compra as any).obraId as (string | null | undefined);
-                        const isCompraAvulsa = !!obraIdVinculada;
 
-                        // Registrar movimentação de ENTRADA (auditoria)
-                        // Observação: se todos os itens foram recebidos por este endpoint, não deve aparecer como "parcial".
                         const sufixoRecebimento = todosRecebidos ? 'Recebimento confirmado' : 'Recebimento parcial confirmado';
-                        const observacoesMovimentacao = isCompraAvulsa
-                          ? `Compra Avulsa NF: ${compra.numeroNF} - Material destinado à obra ${obraIdVinculada}`
-                          : (temFracionamento
-                              ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - ${sufixoRecebimento}`
-                              : `Compra NF: ${compra.numeroNF} - ${sufixoRecebimento}`);
+                        const observacoesMovimentacao = temFracionamento
+                            ? `Compra NF: ${compra.numeroNF} - ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} (${quantidadeParaEstoque} unidades) - ${sufixoRecebimento}`
+                            : `Compra NF: ${compra.numeroNF} - ${sufixoRecebimento}`;
 
-                        await tx.movimentacaoEstoque.create({
-                            data: {
-                                materialId: materialIdFinal,
-                                tipo: 'ENTRADA',
-                                quantidade: quantidadeParaEstoque, // Quantidade em unidades individuais
-                                motivo: 'COMPRA',
-                                referencia: id,
-                                observacoes: observacoesMovimentacao
-                            }
+                        await ComprasService.aplicarDestinoItemRecebimento(tx, {
+                            compra: {
+                                id,
+                                numeroNF: compra.numeroNF,
+                                obraId: (compra as any).obraId,
+                                projetoId: (compra as any).projetoId,
+                                destinoTipo: (compra as any).destinoTipo,
+                            },
+                            item: item as any,
+                            materialId: materialIdFinal,
+                            quantidadeParaEstoque,
+                            observacoesEntrada: observacoesMovimentacao,
                         });
 
-                        // Se for compra avulsa, dar baixa imediata e registrar SAÍDA para OBRA
-                        if (isCompraAvulsa) {
-                            await tx.material.update({
-                                where: { id: materialIdFinal },
-                                data: { estoque: { decrement: quantidadeParaEstoque } }
-                            });
-
-                            await tx.movimentacaoEstoque.create({
-                                data: {
-                                    materialId: materialIdFinal,
-                                    tipo: 'SAIDA',
-                                    quantidade: quantidadeParaEstoque,
-                                    motivo: 'OBRA',
-                                    referencia: obraIdVinculada!,
-                                    observacoes: `Material alocado para obra via Compra Avulsa NF: ${compra.numeroNF} - Item novo adicionado`
-                                }
-                            });
-                        }
+                        const materialAtualizado = await tx.material.findUnique({
+                            where: { id: materialIdFinal },
+                            select: { estoque: true, nome: true },
+                        });
+                        console.log(
+                            `✅ Estoque atualizado: ${estoqueAnterior} → ${materialAtualizado?.estoque} (processado ${quantidadeParaEstoque} unidades)`,
+                        );
                         
                         // ✅ Marcar fracionamento como aplicado se houver
                         if (temFracionamento) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
 import { axiosApiService } from '../services/axiosApi';
+import { configuracoesService } from '../services/configuracoesService';
 import { useWhatsAppRealtimeStatus, useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
 
 // Icons
@@ -85,6 +86,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [entityFilter, setEntityFilter] = useState<string>('Todos');
     const [activeTab, setActiveTab] = useState<'logs' | 'analytics' | 'health' | 'manutencao'>('logs');
     const [backfillLoading, setBackfillLoading] = useState(false);
+    const [portfolioUrl, setPortfolioUrl] = useState('https://antonio-jdev.github.io/portfolio-01/');
+    const [portfolioSaving, setPortfolioSaving] = useState(false);
 
     // Probe Socket.io somente na aba Health (DEV)
     useWhatsAppSocket(
@@ -130,19 +133,6 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
         }
     }, []);
 
-    // Carregar dados e atualizar em intervalo curto (auditoria em tempo quase real)
-    useEffect(() => {
-        if (user?.role?.toLowerCase() === 'desenvolvedor') {
-            loadData();
-            checkBackendHealth();
-            const interval = setInterval(() => {
-                loadData({ silent: true });
-                checkBackendHealth();
-            }, 10000);
-            return () => clearInterval(interval);
-        }
-    }, [user, loadData]);
-
     const checkBackendHealth = async () => {
         try {
             const response = await axiosApiService.get('/api/health');
@@ -187,6 +177,60 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
             });
         } finally {
             setBackfillLoading(false);
+        }
+    };
+
+    const loadPortfolioUrl = useCallback(async () => {
+        try {
+            const response = await configuracoesService.getConfiguracoes();
+            const url = (response as any)?.data?.portfolioUrl;
+            if (typeof url === 'string' && url.trim()) {
+                setPortfolioUrl(url.trim());
+            }
+        } catch (error) {
+            console.error('Erro ao carregar URL do portfólio:', error);
+        }
+    }, []);
+
+    // Carregar dados e atualizar em intervalo curto (auditoria em tempo quase real)
+    useEffect(() => {
+        if (user?.role?.toLowerCase() === 'desenvolvedor') {
+            loadData();
+            checkBackendHealth();
+            loadPortfolioUrl();
+            const interval = setInterval(() => {
+                loadData({ silent: true });
+                checkBackendHealth();
+            }, 10000);
+            return () => clearInterval(interval);
+        }
+    }, [user, loadData, loadPortfolioUrl]);
+
+    const handleAlterarPortfolioUrl = async () => {
+        const normalized = portfolioUrl.trim();
+        if (!normalized) {
+            toast.error('Informe uma URL para salvar');
+            return;
+        }
+        if (!/^https?:\/\//i.test(normalized)) {
+            toast.error('A URL deve começar com http:// ou https://');
+            return;
+        }
+
+        try {
+            setPortfolioSaving(true);
+            const response = await configuracoesService.atualizarPortfolioUrl(normalized);
+            if (response.success) {
+                toast.success('URL do portfólio atualizada com sucesso');
+                setPortfolioUrl(normalized);
+                return;
+            }
+            toast.error((response as any).error || 'Não foi possível atualizar a URL');
+        } catch (error: any) {
+            console.error('Erro ao atualizar URL do portfólio:', error);
+            toast.error(error?.response?.data?.message || 'Erro ao atualizar URL do portfólio');
+        } finally {
+            setPortfolioSaving(false);
         }
     };
 
@@ -713,6 +757,33 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                     {activeTab === 'manutencao' && (
                         <div className="space-y-6">
                             <h3 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-6">🔧 Manutenção (apenas desenvolvedor)</h3>
+                            <div className="card-secondary border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
+                                <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">🔗 URL do portfólio (página de login)</h4>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">
+                                    Altere aqui o link do botão de portfólio exibido no login. Não precisa rebuildar para trocar só essa URL.
+                                </p>
+                                <div className="flex flex-col md:flex-row gap-3">
+                                    <input
+                                        type="url"
+                                        value={portfolioUrl}
+                                        onChange={(e) => setPortfolioUrl(e.target.value)}
+                                        placeholder="https://seu-portfolio.com"
+                                        className="input-field flex-1"
+                                        disabled={portfolioSaving}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleAlterarPortfolioUrl}
+                                        disabled={portfolioSaving}
+                                        className="btn-primary min-w-[140px] disabled:opacity-60"
+                                    >
+                                        {portfolioSaving ? 'Alterando...' : 'Alterar'}
+                                    </button>
+                                </div>
+                                <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-3">
+                                    Apenas usuários com role <strong>desenvolvedor</strong> podem alterar esta URL.
+                                </p>
+                            </div>
                             <div className="card-secondary border-2 border-amber-200 dark:border-amber-800 rounded-2xl p-6">
                                 <h4 className="font-bold text-gray-900 dark:text-dark-text mb-2">Preencher nomes de orçamentistas</h4>
                                 <p className="text-sm text-gray-600 dark:text-dark-text-secondary mb-4">

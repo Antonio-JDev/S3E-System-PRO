@@ -67,6 +67,12 @@ class AxiosApiService {
           config.headers = {} as any;
         }
         
+        if (config.data instanceof FormData) {
+          const headers = config.headers as Record<string, unknown>;
+          delete headers['Content-Type'];
+          delete headers['content-type'];
+        }
+
         if (currentToken && currentToken !== 'null' && currentToken !== 'undefined' && currentToken.trim() !== '') {
           config.headers['Authorization'] = `Bearer ${currentToken}`;
           console.log('🔐 [AxiosApi] Token enviado para:', config.url, '| Token:', currentToken.substring(0, 20) + '...');
@@ -116,7 +122,11 @@ class AxiosApiService {
             new Error(data?.error || data?.message || `HTTP error! status: ${status}`)
           );
         } else if (error.request) {
-          // Erro de rede
+          // Erro de rede / timeout (sem resposta HTTP).
+          const low = (error.message || '').toLowerCase();
+          if (error.code === 'ECONNABORTED' || low.includes('timeout')) {
+            return Promise.reject(new Error('Timeout de conexão: o servidor demorou para responder.'));
+          }
           return Promise.reject(new Error('Erro de conexão. Verifique sua internet.'));
         } else {
           // Outros erros
@@ -320,14 +330,10 @@ class AxiosApiService {
     }
   }
 
-  // Upload de arquivos
+  // Upload de arquivos (POST)
   async upload<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
     try {
-      const response = await this.axiosInstance.post(endpoint, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const response = await this.axiosInstance.post(endpoint, formData);
       
       // Se o backend já retorna { success, data }, retornar direto
       if (response.data && typeof response.data === 'object' && 'success' in response.data) {
@@ -335,6 +341,33 @@ class AxiosApiService {
       }
       
       // Caso contrário, envolver na estrutura padrão
+      return {
+        success: true,
+        data: response.data,
+      };
+    } catch (error: unknown) {
+      const { message, status } = axiosErrorPayload(error);
+      return {
+        success: false,
+        error: message,
+        status,
+      };
+    }
+  }
+
+  /** Upload com PUT (atualização de recurso com arquivo) */
+  async uploadPut<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.axiosInstance.put(endpoint, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response.data && typeof response.data === 'object' && 'success' in response.data) {
+        return response.data as ApiResponse<T>;
+      }
+
       return {
         success: true,
         data: response.data,

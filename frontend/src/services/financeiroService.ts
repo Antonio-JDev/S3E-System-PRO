@@ -175,6 +175,8 @@ class FinanceiroService {
     pagadorNome?: string;
     descricao: string;
     valorParcela: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     dataVencimento: string;
     observacoes?: string;
   }): Promise<{ success: boolean; data?: any; error?: string }> {
@@ -189,6 +191,44 @@ class FinanceiroService {
       return { success: false, error: response.error || 'Erro ao criar conta a receber' };
     } catch (error) {
       console.error('❌ Erro ao criar conta a receber:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async atualizarContaReceber(
+    id: string,
+    data: {
+      tipo?: 'ENTRADA' | 'OUTRAS_RECEITAS';
+      pagadorNome?: string;
+      descricao?: string;
+      valorParcela?: number;
+      valorJuros?: number;
+      valorDesconto?: number;
+      dataVencimento?: string;
+      observacoes?: string;
+    }
+  ): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const response = await axiosApiService.put<any>(`/api/contas-receber/${id}`, data);
+      if (response.success) {
+        return { success: true, data: response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao atualizar conta a receber' };
+    } catch (error) {
+      console.error('❌ Erro ao atualizar conta a receber:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  async excluirContaReceber(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.delete<any>(`/api/contas-receber/${id}`);
+      if (response.success) {
+        return { success: true };
+      }
+      return { success: false, error: response.error || 'Erro ao excluir conta a receber' };
+    } catch (error) {
+      console.error('❌ Erro ao excluir conta a receber:', error);
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }
@@ -225,7 +265,14 @@ class FinanceiroService {
   /**
    * Pagar conta a pagar
    */
-  async pagarContaPagar(id: string, data: { dataPagamento: string; valorPago: number; observacoes?: string; meioPagamento?: string }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
+  async pagarContaPagar(id: string, data: {
+    dataPagamento: string;
+    valorPago: number;
+    valorJuros?: number;
+    valorDesconto?: number;
+    observacoes?: string;
+    meioPagamento?: string;
+  }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
     try {
       console.log(`💳 Pagando conta a pagar ${id}...`, data);
       
@@ -261,6 +308,8 @@ class FinanceiroService {
     descontoFolhaReferenciaMes?: number;
     descricao: string;
     valor: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     dataVencimento: string;
     observacoes?: string;
     classificacao?: string; // Impostos, TRT-ART, Serviço mão de obra eletricista, Brindes, etc.
@@ -335,6 +384,8 @@ class FinanceiroService {
   async darBaixaRecebimento(contaId: string, data: {
     dataPagamento: string;
     valorRecebido: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     observacoes?: string;
     meioPagamento?: string;
   }): Promise<{ success: boolean; data?: ContaReceber; error?: string }> {

@@ -5,6 +5,7 @@ import fs from 'fs';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
 import configuracaoService from '../services/configuracao.service';
+import { isProtectedAccount, isProtectedAccountBlockedForEditor } from '../utils/userProtection.util';
 
 // Configuração do multer para upload de imagem
 const storage = multer.diskStorage({
@@ -60,6 +61,7 @@ const upload = multer({
 
 export const uploadLogo = upload.single('logo');
 const MAX_SETOR_LENGTH = 80;
+const DEV_ROLE = 'desenvolvedor';
 
 function sanitizeSetorInput(raw: unknown): string | null | undefined {
   if (raw === undefined) return undefined;
@@ -67,6 +69,19 @@ function sanitizeSetorInput(raw: unknown): string | null | undefined {
   const setor = String(raw).trim();
   if (!setor) return null;
   return setor;
+}
+
+function isDeveloperRole(role?: string | null): boolean {
+  return String(role || '').toLowerCase() === DEV_ROLE;
+}
+
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 export class ConfiguracaoController {
@@ -84,6 +99,51 @@ export class ConfiguracaoController {
         success: false, 
         message: 'Erro ao buscar configurações', 
         error: error.message 
+      });
+    }
+  }
+
+  /**
+   * PUT /api/configuracoes/portfolio-url
+   * Atualiza a URL pública do portfólio exibida no login.
+   * Requer: desenvolvedor
+   */
+  static async salvarPortfolioUrl(req: Request, res: Response): Promise<void> {
+    try {
+      const { portfolioUrl } = req.body as { portfolioUrl?: string };
+      const sanitized = String(portfolioUrl || '').trim();
+
+      if (!sanitized) {
+        res.status(400).json({
+          success: false,
+          message: 'URL do portfólio é obrigatória'
+        });
+        return;
+      }
+
+      if (!isValidHttpUrl(sanitized)) {
+        res.status(400).json({
+          success: false,
+          message: 'Informe uma URL válida (http/https)'
+        });
+        return;
+      }
+
+      const configuracoes = await configuracaoService.salvarConfiguracoes({
+        portfolioUrl: sanitized
+      });
+
+      res.status(200).json({
+        success: true,
+        data: { portfolioUrl: (configuracoes as any).portfolioUrl },
+        message: 'URL do portfólio atualizada com sucesso'
+      });
+    } catch (error: any) {
+      console.error('Erro ao salvar URL do portfólio:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao salvar URL do portfólio',
+        error: error.message
       });
     }
   }
@@ -150,6 +210,7 @@ export class ConfiguracaoController {
         nomeEmpresa,
         emailContato,
         telefoneContato,
+        portfolioUrl,
         multiplicadorVenda,
         percentualImpostoPadrao,
         aliquotaImpostoPadrao,
@@ -166,6 +227,18 @@ export class ConfiguracaoController {
         return;
       }
 
+      // Segurança: URL de portfólio só pode ser alterada por rota específica de DEV.
+      if (portfolioUrl !== undefined) {
+        const userRole = String((req as any).user?.role || '').toLowerCase();
+        if (userRole !== DEV_ROLE) {
+          res.status(403).json({
+            success: false,
+            message: 'Somente desenvolvedor pode alterar a URL de portfólio'
+          });
+          return;
+        }
+      }
+
       const configuracoes = await configuracaoService.salvarConfiguracoes({
         temaPreferido,
         logoUrl,
@@ -174,6 +247,7 @@ export class ConfiguracaoController {
         nomeEmpresa,
         emailContato,
         telefoneContato,
+        portfolioUrl,
         multiplicadorVenda: multiplicadorVenda != null ? Number(multiplicadorVenda) : undefined,
         percentualImpostoPadrao: percentualImpostoPadrao != null ? Number(percentualImpostoPadrao) : undefined,
         aliquotaImpostoPadrao: aliquotaImpostoPadrao != null ? Number(aliquotaImpostoPadrao) : undefined,
@@ -719,6 +793,23 @@ export class ConfiguracaoController {
         return;
       }
 
+      const usuarioAtual = await prisma.user.findUnique({ where: { id } });
+      if (!usuarioAtual) {
+        res.status(404).json({
+          success: false,
+          message: 'Usuário não encontrado'
+        });
+        return;
+      }
+
+      if (isProtectedAccount(usuarioAtual)) {
+        res.status(403).json({
+          success: false,
+          message: 'Conta protegida do sistema — função não pode ser alterada'
+        });
+        return;
+      }
+
       const usuario = await configuracaoService.atualizarUsuarioRole(id, role);
       
       res.status(200).json({ 
@@ -749,6 +840,23 @@ export class ConfiguracaoController {
         res.status(400).json({ 
           success: false, 
           message: 'Status (active) é obrigatório' 
+        });
+        return;
+      }
+
+      const usuarioAtual = await prisma.user.findUnique({ where: { id } });
+      if (!usuarioAtual) {
+        res.status(404).json({
+          success: false,
+          message: 'Usuário não encontrado'
+        });
+        return;
+      }
+
+      if (isProtectedAccount(usuarioAtual)) {
+        res.status(403).json({
+          success: false,
+          message: 'Conta protegida do sistema — status não pode ser alterado por terceiros'
         });
         return;
       }
@@ -876,6 +984,23 @@ export class ConfiguracaoController {
         return;
       }
 
+      const alvo = await prisma.user.findUnique({ where: { id } });
+      if (!alvo) {
+        res.status(404).json({
+          success: false,
+          message: 'Usuário não encontrado'
+        });
+        return;
+      }
+
+      if (isProtectedAccount(alvo)) {
+        res.status(403).json({
+          success: false,
+          message: 'Conta protegida do sistema — não pode ser excluída'
+        });
+        return;
+      }
+
       const result = await configuracaoService.excluirUsuario(id);
 
       res.status(200).json({
@@ -910,10 +1035,9 @@ export class ConfiguracaoController {
       const { id } = req.params;
       const { name, senhaAtual, senhaNova } = req.body;
       const userId = (req as any).user?.userId;
-      const userRole = (req as any).user?.role?.toLowerCase();
       
-      // Verificar se está atualizando o próprio perfil (ou se é desenvolvedor)
-      if (userRole !== 'desenvolvedor' && userId !== id) {
+      // Apenas o próprio usuário pode atualizar o próprio perfil
+      if (userId !== id) {
         res.status(403).json({
           success: false,
           error: '🚫 Você só pode atualizar seu próprio perfil'
@@ -1022,17 +1146,9 @@ export class ConfiguracaoController {
       const { id } = req.params;
       const { email, senhaNova, name, isAdmin, setor } = req.body;
       const userRole = (req as any).user?.role?.toLowerCase();
-      
-      // Verificar permissão: apenas gerente, admin ou desenvolvedor
-      const rolesPermitidos = ['gerente', 'admin', 'desenvolvedor'];
-      if (!rolesPermitidos.includes(userRole)) {
-        res.status(403).json({
-          success: false,
-          error: '🚫 Você não tem permissão para editar usuários'
-        });
-        return;
-      }
-      
+      const editorUserId = (req as any).user?.userId as string | undefined;
+      const isSelfEdit = editorUserId === id;
+
       const usuario = await prisma.user.findUnique({
         where: { id }
       });
@@ -1041,6 +1157,24 @@ export class ConfiguracaoController {
         res.status(404).json({
           success: false,
           error: 'Usuário não encontrado'
+        });
+        return;
+      }
+
+      // Verificar permissão: gerente, admin ou desenvolvedor — ou titular editando conta protegida
+      const rolesPermitidos = ['gerente', 'admin', 'desenvolvedor'];
+      if (!rolesPermitidos.includes(userRole) && !(isSelfEdit && isProtectedAccount(usuario))) {
+        res.status(403).json({
+          success: false,
+          error: '🚫 Você não tem permissão para editar usuários'
+        });
+        return;
+      }
+
+      if (isProtectedAccountBlockedForEditor(usuario, editorUserId)) {
+        res.status(403).json({
+          success: false,
+          error: '🚫 Conta protegida do sistema — cadastro não pode ser editado por terceiros'
         });
         return;
       }
@@ -1084,14 +1218,12 @@ export class ConfiguracaoController {
         }
       }
       
-      // Atualizar isAdmin: apenas se o alvo NÃO for desenvolvedor, OU se quem está editando for desenvolvedor
-      // Somente outro desenvolvedor pode alterar isAdmin de um usuário com role desenvolvedor
+      // Conta protegida: isAdmin nunca pode ser alterado (nem pelo titular)
       if (typeof isAdmin === 'boolean') {
-        const alvoEhDesenvolvedor = usuario.role?.toLowerCase() === 'desenvolvedor';
-        if (alvoEhDesenvolvedor && userRole !== 'desenvolvedor') {
+        if (isProtectedAccount(usuario)) {
           res.status(403).json({
             success: false,
-            error: '🚫 Apenas um usuário Desenvolvedor pode alterar a permissão de administrador de outro Desenvolvedor.'
+            error: '🚫 Conta protegida do sistema — permissão de admin não pode ser alterada'
           });
           return;
         }

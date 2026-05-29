@@ -1,0 +1,68 @@
+.whatsapp-composer-shell {
+  overflow: hidden;
+}
+
+.whatsapp-composer-editor .ProseMirror {
+  min-height: 40px;
+  max-height: calc(1.35em * 8);
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding: 8px 4px;
+  font-size: 15px;
+  line-height: 1.35;
+  color: #111b21;
+  outline: none;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.dark .whatsapp-composer-editor .ProseMirror {
+  color: #e9edef;
+}
+
+.whatsapp-composer-editor .ProseMirror:focus {
+  outline: none;
+}
+
+.whatsapp-composer-editor .ProseMirror p {
+  margin: 0;
+}
+
+.whatsapp-composer-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #8696a0;
+  pointer-events: none;
+  height: 0;
+}
+
+.whatsapp-composer-editor .ProseMirror ul,
+.whatsapp-composer-editor .ProseMirror ol {
+  margin: 0;
+  padding-left: 1.35rem;
+}
+
+.whatsapp-composer-editor .ProseMirror li p {
+  margin: 0;
+}
+
+/* Scroll só quando passar de 8 linhas (comportamento WhatsApp Web). */
+.whatsapp-composer-editor .ProseMirror.is-scrollable {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.whatsapp-composer-format-bubble {
+  animation: wa-composer-bubble-in 0.12s ease-out;
+}
+
+@keyframes wa-composer-bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% + 4px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%);
+  }
+}

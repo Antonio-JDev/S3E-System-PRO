@@ -284,6 +284,75 @@ export function expandedStorageChatIdVariants(
   return [...out].filter(Boolean);
 }
 
+/**
+ * Telefones reais (chaves BR) para cruzar lead/cliente quando o chatId é `@lid`
+ * ou PN legado — mesma lógica da lista de chats (`enrichPreviewsWithProviderCache`).
+ */
+export async function resolvePhoneDigitKeysForChat(chatIdRaw: string): Promise<string[]> {
+  const canon = canonicalWhatsappChatId((chatIdRaw || '').trim());
+  if (!canon) return [];
+
+  const lower = canon.toLowerCase();
+  if (lower.endsWith('@g.us') || lower.endsWith('@newsletter')) {
+    return [];
+  }
+
+  const out = new Set<string>();
+  const addKey = (raw: string) => {
+    const k = normalizePhoneDigitsKey(raw);
+    if (!k || !isPlausibleBrPhoneDigits(k)) return;
+    out.add(k);
+    if (k.length === 12 && k.startsWith('55')) {
+      out.add(`${k.slice(0, 4)}9${k.slice(4)}`);
+    }
+    if (k.length === 13 && k.startsWith('55') && k[4] === '9') {
+      out.add(`${k.slice(0, 4)}${k.slice(5)}`);
+    }
+  };
+
+  const identities = await loadWhatsappChatIdentities();
+  const isLid = lower.endsWith('@lid');
+
+  if (!isLid) {
+    addKey(waJidToDigits(canon));
+  }
+
+  for (const m of collectMatchingIdentities(canon, identities)) {
+    addKey(m.phoneDigits);
+    const primary = canonicalWhatsappChatId(m.primaryChatId);
+    if (!primary.toLowerCase().endsWith('@lid')) {
+      addKey(waJidToDigits(primary));
+    }
+    for (const a of parseAliasesJson(m.aliases)) {
+      const ac = canonicalWhatsappChatId(a);
+      if (!ac.toLowerCase().endsWith('@lid')) {
+        addKey(waJidToDigits(ac));
+      }
+    }
+  }
+
+  const variantChatIds = expandedStorageChatIdVariants(canon, identities);
+  if (variantChatIds.length > 0) {
+    const caches = await prisma.whatsappContactCache.findMany({
+      where: { chatId: { in: variantChatIds } },
+      select: { phoneDigits: true }
+    });
+    for (const c of caches) {
+      if (c.phoneDigits) addKey(c.phoneDigits);
+    }
+
+    const s3eRows = await prisma.contatoS3e.findMany({
+      where: { jid: { in: variantChatIds } },
+      select: { numero: true }
+    });
+    for (const s of s3eRows) {
+      if (s.numero) addKey(s.numero);
+    }
+  }
+
+  return [...out];
+}
+
 export function mergeKeyForChatPreviewRow(
   chatId: string,
   identities: IdentityRow[]

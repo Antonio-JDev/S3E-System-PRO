@@ -18,6 +18,7 @@ import UnitDisplay from '../components/UnitDisplay';
 import { identificarTipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento, normalizarUnidadeMedidaOrcamento } from '../utils/unitConverter';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { roundMoney } from '../utils/currency';
+import { mapItensOrcamentoParaCopia } from '../utils/orcamentoCopy';
 import { getUploadUrl } from '../config/api';
 import ClienteCombobox from '../components/ui/ClienteCombobox';
 import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
@@ -2696,6 +2697,8 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             return;
         }
 
+        const itemsMapeados = mapItensOrcamentoParaCopia(items || []);
+
         // Salvar dados do orçamento no localStorage (exceto cliente)
         const orcamentoCopia = {
             empresaCNPJ: formState.empresaCNPJ,
@@ -2712,7 +2715,7 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
             previsaoInicio: formState.previsaoInicio,
             previsaoTermino: formState.previsaoTermino,
             condicaoPagamento: formState.condicaoPagamento,
-            items: items
+            items: itemsMapeados
         };
 
         localStorage.setItem('orcamentoCopia', JSON.stringify(orcamentoCopia));

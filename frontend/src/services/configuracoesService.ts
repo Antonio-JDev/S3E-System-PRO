@@ -8,6 +8,7 @@ export interface ConfiguracaoSistema {
   nomeEmpresa: string;
   emailContato?: string;
   telefoneContato?: string;
+  portfolioUrl?: string;
   multiplicadorVenda?: number | null;
   percentualImpostoPadrao?: number | null;
   aliquotaImpostoPadrao?: number | null; // Alíquota % sobre valor de venda (DAS Simples Nacional), default 8
@@ -23,6 +24,7 @@ export interface UpdateConfiguracaoData {
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
+  portfolioUrl?: string;
   multiplicadorVenda?: number;
   percentualImpostoPadrao?: number;
   aliquotaImpostoPadrao?: number;
@@ -37,6 +39,7 @@ export interface Usuario {
   email: string;
   role: string;
   isAdmin?: boolean;
+  contaProtegida?: boolean;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +92,13 @@ class ConfiguracoesService {
    */
   async salvarConfiguracoes(data: UpdateConfiguracaoData) {
     return axiosApiService.put<ConfiguracaoSistema>('/api/configuracoes', data);
+  }
+
+  /**
+   * Atualiza URL pública do portfólio (apenas desenvolvedor)
+   */
+  async atualizarPortfolioUrl(portfolioUrl: string) {
+    return axiosApiService.put<{ portfolioUrl: string }>('/api/configuracoes/portfolio-url', { portfolioUrl });
   }
 
   /**

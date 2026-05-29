@@ -13,6 +13,7 @@ import { empresaFiscalService } from '../services/empresaFiscalService';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
 import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
+import { itemParaDraft, aplicarDraftNoItem, atualizarCampoNumericoItem } from '../utils/compraItemList.util';
 
 // ==================== ICONS ====================
 const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -24,6 +25,12 @@ const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+    </svg>
+);
+
+const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
     </svg>
 );
 
@@ -161,6 +168,9 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         totalCost: number;
         unidadeMedida?: string;
     } | null>(null);
+
+    /** Índice do item sendo editado no formulário "Adicionar Item" */
+    const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
 
     // Carregar materiais do estoque
     useEffect(() => {
@@ -410,7 +420,77 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
         toast.info('💡 Item marcado como NOVO - será criado do zero no estoque');
     };
     
-    // Handler para quando o nome do produto muda (detecção automática)
+    const limparFormularioAdicao = () => {
+        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
+        setMaterialSelecionado(null);
+        setBuscaMaterial('');
+        setIsItemNovo(false);
+        setShowMaterialSearch(false);
+        setFracionamentoAtivo(false);
+        setQuantidadeFracionada('');
+        setTipoEmbalagem('CAIXA');
+        setUnidadeEmbalagem('cx');
+        setEditingItemIndex(null);
+    };
+
+    const carregarItemParaEdicao = (index: number) => {
+        const item = purchaseItems[index];
+        if (!item) return;
+
+        setEditingItemIndex(index);
+        setProductToAdd({
+            name: item.productName,
+            quantity: String(item.quantity),
+            cost: String(item.unitCost),
+            ncm: item.ncm || '',
+            sku: item.sku || '',
+            unidadeMedida: item.unidadeMedida || 'un'
+        });
+
+        if (item.materialVinculado) {
+            setMaterialSelecionado(item.materialVinculado);
+            setBuscaMaterial(item.materialVinculado.nome || item.productName);
+            setIsItemNovo(false);
+        } else if (item.materialId) {
+            setMaterialSelecionado(materiais.find((m) => m.id === item.materialId) || null);
+            setBuscaMaterial(item.productName);
+            setIsItemNovo(false);
+        } else {
+            setMaterialSelecionado(null);
+            setBuscaMaterial(item.productName);
+            setIsItemNovo(!item.productId);
+        }
+
+        if (item.quantidadeFracionada) {
+            setFracionamentoAtivo(true);
+            setQuantidadeFracionada(String(item.quantidadeFracionada));
+            setTipoEmbalagem(item.tipoEmbalagem || 'CAIXA');
+            setUnidadeEmbalagem(item.unidadeEmbalagem || 'cx');
+        } else {
+            setFracionamentoAtivo(false);
+            setQuantidadeFracionada('');
+        }
+
+        document.getElementById('compra-adicionar-item')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const handleUpdateItemNumericField = (
+        index: number,
+        field: 'quantity' | 'unitCost',
+        value: string
+    ) => {
+        setPurchaseItems((prev) =>
+            prev.map((item, i) => {
+                if (i !== index) return item;
+                const updated = atualizarCampoNumericoItem(item, field, value);
+                return updated ?? item;
+            })
+        );
+        if (editingItemIndex === index) {
+            setProductToAdd((prev) => ({ ...prev, [field === 'quantity' ? 'quantity' : 'cost']: value }));
+        }
+    };
+
     const handleNomeProdutoChange = (nome: string) => {
         setProductToAdd(prev => ({ ...prev, name: nome }));
         // Tentar detectar fracionamento automaticamente
@@ -440,7 +520,7 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             ? quantity * parseFloat(quantidadeFracionada)
             : quantity;
 
-        const newItem: ExtendedItem = {
+        const baseItem: ExtendedItem = {
             productId: materialSelecionado ? materialSelecionado.id : '',
             productName: productToAdd.name,
             quantity,
@@ -449,23 +529,36 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             ncm: productToAdd.ncm,
             sku: productToAdd.sku,
             unidadeMedida: productToAdd.unidadeMedida || (materialSelecionado?.unidadeMedida) || 'un',
-            // Campos de fracionamento
             quantidadeFracionada: fracionamentoAtivo && quantidadeFracionada ? parseFloat(quantidadeFracionada) : undefined,
             tipoEmbalagem: fracionamentoAtivo ? tipoEmbalagem : undefined,
-            unidadeEmbalagem: fracionamentoAtivo ? unidadeEmbalagem : undefined
+            unidadeEmbalagem: fracionamentoAtivo ? unidadeEmbalagem : undefined,
+            materialId: materialSelecionado?.id,
+            materialVinculado: materialSelecionado || undefined,
+            matchAutomatico: false
         };
 
-        setPurchaseItems(prev => [...prev, newItem]);
-        
-        // Limpar campos
-        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
-        setMaterialSelecionado(null);
-        setBuscaMaterial('');
-        setIsItemNovo(false);
-        setFracionamentoAtivo(false);
-        setQuantidadeFracionada('');
-        setTipoEmbalagem('CAIXA');
-        setUnidadeEmbalagem('cx');
+        if (editingItemIndex !== null) {
+            const existente = purchaseItems[editingItemIndex];
+            setPurchaseItems((prev) =>
+                prev.map((item, i) =>
+                    i === editingItemIndex
+                        ? {
+                              ...existente,
+                              ...baseItem,
+                              materialId: materialSelecionado?.id ?? existente.materialId,
+                              materialVinculado: materialSelecionado ?? existente.materialVinculado,
+                              matchAutomatico: materialSelecionado ? false : existente.matchAutomatico
+                          }
+                        : item
+                )
+            );
+            limparFormularioAdicao();
+            toast.success('✅ Item atualizado na listagem');
+            return;
+        }
+
+        setPurchaseItems((prev) => [...prev, baseItem]);
+        limparFormularioAdicao();
         
         // Mensagem de sucesso com informações de fracionamento
         let mensagem = '';
@@ -485,6 +578,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     };
 
     const handleRemoveProduct = (index: number) => {
+        if (editingItemIndex === index) {
+            limparFormularioAdicao();
+        } else if (editingItemIndex !== null && index < editingItemIndex) {
+            setEditingItemIndex(editingItemIndex - 1);
+        }
         setPurchaseItems(prev => prev.filter((_, i) => i !== index));
     };
 
@@ -1230,8 +1328,28 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Itens da Compra</h3>
 
                     {/* Adicionar Produto */}
-                    <div className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl mb-4">
-                        <h4 className="font-medium text-gray-800 dark:text-white mb-3">Adicionar Item</h4>
+                    <div
+                        id="compra-adicionar-item"
+                        className={`bg-gray-50 dark:bg-dark-bg border p-4 rounded-xl mb-4 ${
+                            editingItemIndex !== null
+                                ? 'border-amber-400 dark:border-amber-600 ring-2 ring-amber-200 dark:ring-amber-900/40'
+                                : 'border-gray-200 dark:border-dark-border'
+                        }`}
+                    >
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <h4 className="font-medium text-gray-800 dark:text-white">
+                                {editingItemIndex !== null ? 'Editar item da listagem' : 'Adicionar Item'}
+                            </h4>
+                            {editingItemIndex !== null && (
+                                <button
+                                    type="button"
+                                    onClick={limparFormularioAdicao}
+                                    className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white underline"
+                                >
+                                    Cancelar edição
+                                </button>
+                            )}
+                        </div>
                         <div className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
                             <div className="relative md:col-span-2">
@@ -1389,9 +1507,13 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 <button
                                     type="button"
                                     onClick={handleAddProduct}
-                                    className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-semibold"
+                                    className={`w-full px-4 py-2 text-white rounded-lg transition-all font-semibold ${
+                                        editingItemIndex !== null
+                                            ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600'
+                                            : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600'
+                                    }`}
                                 >
-                                    Adicionar
+                                    {editingItemIndex !== null ? 'Salvar alterações' : 'Adicionar'}
                                 </button>
                             </div>
                         </div>
@@ -1501,7 +1623,14 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 const mostraBusca = buscaMaterialPorItem[index] !== undefined;
                                 
                                 return (
-                                    <div key={index} className="bg-white dark:bg-dark-bg border border-gray-200 dark:border-dark-border p-4 rounded-xl">
+                                    <div
+                                        key={index}
+                                        className={`bg-white dark:bg-dark-bg border p-4 rounded-xl ${
+                                            editingItemIndex === index
+                                                ? 'border-amber-400 dark:border-amber-600 ring-2 ring-amber-100 dark:ring-amber-900/30'
+                                                : 'border-gray-200 dark:border-dark-border'
+                                        }`}
+                                    >
                                         <div className="flex justify-between items-start gap-4">
                                             <div className="flex-1">
                                                 <div className="flex items-start gap-3 mb-2">
@@ -1527,14 +1656,40 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                     </div>
                                                     <div className="flex-1">
                                                         <p className="font-semibold text-gray-900 dark:text-white">{item.productName}</p>
-                                                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                                                            {item.quantity} {item.unidadeMedida || 'un'} × R$ {item.unitCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                            {item.quantidadeFracionada && (
-                                                                <span className="ml-2 text-blue-600 dark:text-blue-400 font-medium">
-                                                                    ({item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades)
-                                                                </span>
-                                                            )}
-                                                        </p>
+                                                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                                            <label className="flex items-center gap-1">
+                                                                <span>Qtd:</span>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0.01"
+                                                                    step="0.01"
+                                                                    value={item.quantity}
+                                                                    onChange={(e) => handleUpdateItemNumericField(index, 'quantity', e.target.value)}
+                                                                    className="w-20 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm dark:bg-dark-bg dark:text-white"
+                                                                />
+                                                                <span>{item.unidadeMedida || 'un'}</span>
+                                                            </label>
+                                                            <span>×</span>
+                                                            <label className="flex items-center gap-1">
+                                                                <span>R$</span>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    value={item.unitCost}
+                                                                    onChange={(e) => handleUpdateItemNumericField(index, 'unitCost', e.target.value)}
+                                                                    className="w-24 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm dark:bg-dark-bg dark:text-white"
+                                                                />
+                                                            </label>
+                                                            <span className="font-semibold text-gray-800 dark:text-gray-200">
+                                                                = R$ {item.totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                            </span>
+                                                        </div>
+                                                        {item.quantidadeFracionada && (
+                                                            <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                                                📦 {item.quantity} {item.tipoEmbalagem?.toLowerCase() || 'embalagens'} = {item.quantity * item.quantidadeFracionada} unidades
+                                                            </p>
+                                                        )}
                                                         <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                                             {item.ncm && <span className="mr-3">NCM: {item.ncm}</span>}
                                                             {item.sku && <span className="mr-3">SKU: {item.sku}</span>}
@@ -1639,6 +1794,15 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 title="Editar fracionamento"
                                                             >
                                                                 📦 Editar
+                                                            </button>
+                                                            
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => carregarItemParaEdicao(index)}
+                                                                className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
+                                                                title="Editar item completo"
+                                                            >
+                                                                <PencilIcon className="w-4 h-4" />
                                                             </button>
                                                             
                                                             <button

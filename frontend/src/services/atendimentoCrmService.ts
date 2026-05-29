@@ -36,6 +36,8 @@ export interface ContatoLead {
   updatedAt: string;
   /** Preenchido na listagem do CRM: quantidade de orçamentos vinculados ao lead */
   _count?: { orcamentos?: number };
+  /** Orçamento mais recente (número sequencial para exibição no funil) */
+  orcamentos?: Array<{ numeroSequencial: number }>;
 }
 
 export interface CreateContatoLeadInput {
@@ -90,18 +92,27 @@ export const atendimentoCrmService = {
   },
 
   async getById(id: string): Promise<{ success: boolean; data: ContatoLead }> {
-    const res = await axiosApiService.get<{ success: boolean; data: ContatoLead }>(`${base}/${id}`);
-    return res.data as { success: boolean; data: ContatoLead };
+    const res = await axiosApiService.get<ContatoLead>(`${base}/${id}`);
+    if (!res.success || !res.data) {
+      return { success: false, data: undefined as unknown as ContatoLead };
+    }
+    return { success: true, data: res.data };
   },
 
   async criar(data: CreateContatoLeadInput): Promise<{ success: boolean; data: ContatoLead }> {
-    const res = await axiosApiService.post<{ success: boolean; data: ContatoLead }>(base, data);
-    return res.data as { success: boolean; data: ContatoLead };
+    const res = await axiosApiService.post<ContatoLead>(base, data);
+    if (!res.success || !res.data) {
+      return { success: false, data: undefined as unknown as ContatoLead };
+    }
+    return { success: true, data: res.data };
   },
 
   async atualizar(id: string, data: UpdateContatoLeadInput): Promise<{ success: boolean; data: ContatoLead }> {
-    const res = await axiosApiService.put<{ success: boolean; data: ContatoLead }>(`${base}/${id}`, data);
-    return res.data as { success: boolean; data: ContatoLead };
+    const res = await axiosApiService.put<ContatoLead>(`${base}/${id}`, data);
+    if (!res.success || !res.data) {
+      return { success: false, data: undefined as unknown as ContatoLead };
+    }
+    return { success: true, data: res.data };
   },
 
   async uploadContaEnergia(id: string, files: File[]): Promise<{ success: boolean; data?: ContatoLead; error?: string }> {
@@ -112,9 +123,9 @@ export const atendimentoCrmService = {
     for (const f of files) {
       form.append('contaEnergia', f);
     }
-    const res = await axiosApiService.post<ContatoLead>(`${base}/${id}/upload-conta`, form);
+    const res = await axiosApiService.upload<ContatoLead>(`${base}/${id}/upload-conta`, form);
     if (!res.success) {
-      return { success: false, error: res.error || res.message };
+      return { success: false, error: res.error || res.message || 'Nenhum arquivo enviado' };
     }
     return { success: true, data: res.data as ContatoLead };
   },

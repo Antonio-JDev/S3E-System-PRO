@@ -28,6 +28,20 @@ export interface WhatsAppChatLabelEditDrawerProps {
    * incluídas. Se não vier, mostra o próprio chatId.
    */
   resolveChatTitle?: (chatId: string) => string;
+  /** ID do usuário logado — usado para aviso de edição admin em listas de terceiros. */
+  currentUserId?: string | null;
+  /** Administrador do CRM pode editar/excluir listas globais de outros usuários. */
+  isCrmAdmin?: boolean;
+}
+
+function labelMutationErrorMessage(
+  resp: { error?: string; status?: number },
+  fallback: string
+): string {
+  if (resp.status === 404 || resp.status === 403) {
+    return 'Lista não encontrada ou você não tem permissão para alterá-la.';
+  }
+  return resp.error || fallback;
 }
 
 const PALETTE = ['#00a884', '#f59e0b', '#ef4444', '#8b5cf6', '#3b82f6', '#10b981', '#ec4899'];
@@ -38,13 +52,23 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
   initialLabel,
   onSaved,
   onPickChats,
-  resolveChatTitle
+  resolveChatTitle,
+  currentUserId = null,
+  isCrmAdmin = false
 }) => {
   const isEdit = !!initialLabel;
+  const editingAsAdmin =
+    isEdit &&
+    isCrmAdmin &&
+    Boolean(initialLabel?.isGlobal) &&
+    Boolean(currentUserId) &&
+    Boolean(initialLabel?.userId) &&
+    initialLabel!.userId !== currentUserId;
   const [nome, setNome] = useState('');
   const [cor, setCor] = useState<string | null>('#00a884');
   const [emoji, setEmoji] = useState<string | null>(null);
   const [chatIds, setChatIds] = useState<string[]>([]);
+  const [scope, setScope] = useState<'personal' | 'global'>('personal');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -54,6 +78,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
     setCor(initialLabel?.cor ?? '#00a884');
     setEmoji(initialLabel?.emoji ?? null);
     setChatIds(initialLabel?.chatIds ?? []);
+    setScope(initialLabel?.isGlobal ? 'global' : 'personal');
   }, [open, initialLabel]);
 
   const canSave = nome.trim().length > 0 && !saving;
@@ -88,7 +113,8 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
           nome: nome.trim(),
           cor: cor || null,
           emoji: emoji || null,
-          chatIds
+          chatIds,
+          isGlobal: scope === 'global'
         });
       }
       if (resp.success && resp.data) {
@@ -96,7 +122,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
         onSaved(resp.data);
         onClose();
       } else {
-        toast.error(resp.error || 'Erro ao salvar lista.');
+        toast.error(labelMutationErrorMessage(resp, 'Erro ao salvar lista.'));
       }
     } finally {
       setSaving(false);
@@ -114,7 +140,7 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
         onSaved({ ...initialLabel, id: '__deleted__' });
         onClose();
       } else {
-        toast.error(resp.error || 'Falha ao remover.');
+        toast.error(labelMutationErrorMessage(resp, 'Falha ao remover.'));
       }
     } finally {
       setDeleting(false);
@@ -151,6 +177,11 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-white px-4 py-4 dark:bg-[#161717]">
+        {editingAsAdmin ? (
+          <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+            Editando como administrador — esta lista global foi criada por outro usuário.
+          </p>
+        ) : null}
         <label className="block">
           <span className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">Nome da lista</span>
           <div className="mt-1 flex items-center gap-2 border-b-2 border-[#e9edef] py-1 focus-within:border-[#00a884] dark:border-[#2a3942]">
@@ -177,6 +208,38 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
             </button>
           </div>
         </label>
+
+        {!isEdit ? (
+          <div className="mt-4">
+            <span className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">Quem pode ver este filtro?</span>
+            <div className="mt-2 flex flex-col gap-2">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#00a884] has-[:checked]:bg-[#00a884]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#00a884]/15">
+                <input
+                  type="radio"
+                  name="label-scope"
+                  checked={scope === 'personal'}
+                  onChange={() => setScope('personal')}
+                  className="h-4 w-4 accent-[#00a884]"
+                />
+                <span className="text-[14px] text-[#111b21] dark:text-[#e9edef]">Só pra mim</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-[#e9edef] px-3 py-2.5 transition has-[:checked]:border-[#00a884] has-[:checked]:bg-[#00a884]/8 dark:border-[#2a3942] dark:has-[:checked]:bg-[#00a884]/15">
+                <input
+                  type="radio"
+                  name="label-scope"
+                  checked={scope === 'global'}
+                  onChange={() => setScope('global')}
+                  className="h-4 w-4 accent-[#00a884]"
+                />
+                <span className="text-[14px] text-[#111b21] dark:text-[#e9edef]">Para todos usuários</span>
+              </label>
+            </div>
+          </div>
+        ) : initialLabel?.isGlobal && !editingAsAdmin ? (
+          <p className="mt-4 rounded-lg bg-[#00a884]/10 px-3 py-2 text-[12px] text-[#008069] dark:text-[#53d4b0]">
+            Lista compartilhada com todos os usuários do sistema.
+          </p>
+        ) : null}
 
         <div className="mt-4">
           <span className="text-[12px] font-medium text-[#667781] dark:text-[#8696a0]">Cor</span>

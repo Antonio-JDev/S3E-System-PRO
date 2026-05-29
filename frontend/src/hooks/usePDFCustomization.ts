@@ -11,37 +11,35 @@ import {
 
 export const PDF_CUSTOMIZATION_STORAGE_KEY = 'pdf_customization_temp';
 
-export const usePDFCustomization = () => {
-    const [customization, setCustomization] = useState<PDFCustomization>(() => {
-        // Tentar carregar do localStorage (último estado)
-        try {
-            const saved = localStorage.getItem(PDF_CUSTOMIZATION_STORAGE_KEY);
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                
-                // Validar se corners.design é um valor válido
-                if (parsed.design?.corners?.design && 
-                    !['geometric', 'curves', 'lines', 'custom', 'none'].includes(parsed.design.corners.design)) {
-                    console.warn('Design de canto inválido detectado, resetando para padrão');
-                    parsed.design.corners.design = 'none';
-                }
-                
-                // Converter strings de data para Date
-                if (parsed.metadata?.createdAt) {
-                    parsed.metadata.createdAt = new Date(parsed.metadata.createdAt);
-                }
-                if (parsed.metadata?.updatedAt) {
-                    parsed.metadata.updatedAt = new Date(parsed.metadata.updatedAt);
-                }
-                return parsed;
+/** Lê a mesma personalização do modal de PDF (localStorage). */
+export function loadPdfCustomizationFromStorage(): PDFCustomization {
+    try {
+        const saved = localStorage.getItem(PDF_CUSTOMIZATION_STORAGE_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved) as PDFCustomization;
+            if (
+                parsed.design?.corners?.design &&
+                !['geometric', 'curves', 'lines', 'custom', 'none'].includes(parsed.design.corners.design)
+            ) {
+                parsed.design.corners.design = 'none';
             }
-        } catch (error) {
-            console.warn('Erro ao carregar customização do localStorage:', error);
-            // Se der erro, limpar localStorage e usar padrão
-            localStorage.removeItem(PDF_CUSTOMIZATION_STORAGE_KEY);
+            if (parsed.metadata?.createdAt) {
+                parsed.metadata.createdAt = new Date(parsed.metadata.createdAt as unknown as string);
+            }
+            if (parsed.metadata?.updatedAt) {
+                parsed.metadata.updatedAt = new Date(parsed.metadata.updatedAt as unknown as string);
+            }
+            return parsed;
         }
-        return DEFAULT_PDF_CUSTOMIZATION;
-    });
+    } catch (error) {
+        console.warn('Erro ao carregar customização do localStorage:', error);
+        localStorage.removeItem(PDF_CUSTOMIZATION_STORAGE_KEY);
+    }
+    return DEFAULT_PDF_CUSTOMIZATION;
+}
+
+export const usePDFCustomization = () => {
+    const [customization, setCustomization] = useState<PDFCustomization>(() => loadPdfCustomizationFromStorage());
 
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 

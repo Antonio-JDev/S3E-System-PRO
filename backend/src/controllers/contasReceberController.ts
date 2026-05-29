@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
-import { ContasReceberService, CriarContaReceberManualPayload } from '../services/contasReceber.service';
+import {
+  ContasReceberService,
+  CriarContaReceberManualPayload,
+  AtualizarContaReceberPayload
+} from '../services/contasReceber.service';
 
 export class ContasReceberController {
   /**
@@ -29,6 +33,8 @@ export class ContasReceberController {
         pagadorNome: body.pagadorNome || body.pagador || undefined,
         descricao: body.descricao,
         valorParcela: typeof valorParcela === 'number' ? valorParcela : parseFloat(valorParcela),
+        valorJuros: body.valorJuros != null ? Number(body.valorJuros) : undefined,
+        valorDesconto: body.valorDesconto != null ? Number(body.valorDesconto) : undefined,
         dataVencimento: dataVencimento!,
         observacoes: body.observacoes
       };
@@ -94,6 +100,83 @@ export class ContasReceberController {
       console.error('Erro ao buscar histórico de recebimentos:', error);
       return res.status(500).json({
         error: 'Erro interno do servidor',
+        message: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  }
+
+  /**
+   * PUT /api/contas-receber/:id
+   * Atualiza conta a receber manual
+   */
+  static async atualizar(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ error: 'ID da conta a receber é obrigatório' });
+      }
+
+      const body = req.body || {};
+      let dataVencimento: Date | undefined;
+      if (body.dataVencimento) {
+        const raw = String(body.dataVencimento);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+          const [y, m, d] = raw.split('-').map(Number);
+          dataVencimento = new Date(y, m - 1, d, 12, 0, 0, 0);
+        } else {
+          dataVencimento = new Date(raw);
+        }
+      }
+
+      const payload: AtualizarContaReceberPayload = {
+        tipo: body.tipo,
+        pagadorNome: body.pagadorNome,
+        descricao: body.descricao,
+        valorParcela:
+          body.valorParcela !== undefined
+            ? (typeof body.valorParcela === 'number' ? body.valorParcela : parseFloat(body.valorParcela))
+            : undefined,
+        valorJuros: body.valorJuros !== undefined ? Number(body.valorJuros) : undefined,
+        valorDesconto: body.valorDesconto !== undefined ? Number(body.valorDesconto) : undefined,
+        dataVencimento,
+        observacoes: body.observacoes
+      };
+
+      const conta = await ContasReceberService.atualizarContaReceber(id, payload);
+      return res.json({
+        success: true,
+        message: 'Conta a receber atualizada com sucesso',
+        data: conta
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar conta a receber:', error);
+      return res.status(400).json({
+        error: 'Erro ao atualizar conta a receber',
+        message: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  }
+
+  /**
+   * DELETE /api/contas-receber/:id
+   * Exclui conta a receber manual
+   */
+  static async excluir(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        return res.status(400).json({ error: 'ID da conta a receber é obrigatório' });
+      }
+
+      await ContasReceberService.excluirContaReceber(id);
+      return res.json({
+        success: true,
+        message: 'Conta a receber excluída com sucesso'
+      });
+    } catch (error) {
+      console.error('Erro ao excluir conta a receber:', error);
+      return res.status(400).json({
+        error: 'Erro ao excluir conta a receber',
         message: error instanceof Error ? error.message : 'Erro desconhecido'
       });
     }

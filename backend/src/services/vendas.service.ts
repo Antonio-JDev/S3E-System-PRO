@@ -1,6 +1,12 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
 import { EstoqueService } from './estoque.service';
+import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import {
+  ORCAMENTO_STATUS_APROVADO,
+  ORCAMENTO_STATUS_CONCRETIZADO,
+  podeGerarPedidoVendaParaOrcamento
+} from '../utils/orcamentoStatus.util';
 
 export interface VendaPayload {
     orcamentoId: string; // ID do orçamento (deve estar com status Aprovado)
@@ -21,7 +27,10 @@ export interface VendaPayload {
 
 interface PagarContaPayload {
     dataPagamento?: string;
+    /** Valor base recebido (sem juros/desconto) */
     valorRecebido?: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     observacoes?: string;
     meioPagamento?: string; // PIX, Boleto, Cartão, etc.
 }
@@ -41,6 +50,40 @@ const validarFormaPagamento = (formaPagamento: string, parcelas: number) => {
 };
 
 export class VendasService {
+    /**
+     * Garante que orçamento com PV fique em Concretizado (reconciliação pós-commit).
+     */
+    static async ensureOrcamentoConcretizadoAposPedidoVenda(orcamentoId: string): Promise<string> {
+        const venda = await prisma.venda.findUnique({
+            where: { orcamentoId },
+            select: { id: true }
+        });
+        if (!venda) {
+            return ORCAMENTO_STATUS_APROVADO;
+        }
+
+        const orc = await prisma.orcamento.findUnique({
+            where: { id: orcamentoId },
+            select: { status: true, aprovedAt: true }
+        });
+        if (!orc) {
+            throw new Error('Orçamento não encontrado após gerar pedido de venda');
+        }
+
+        if (orc.status !== ORCAMENTO_STATUS_CONCRETIZADO) {
+            await prisma.orcamento.update({
+                where: { id: orcamentoId },
+                data: {
+                    status: ORCAMENTO_STATUS_CONCRETIZADO,
+                    aprovedAt: orc.aprovedAt ?? new Date()
+                }
+            });
+            return ORCAMENTO_STATUS_CONCRETIZADO;
+        }
+
+        return orc.status;
+    }
+
     /**
      * Realiza uma venda completa, criando a venda principal e suas contas a receber
      */
@@ -107,9 +150,7 @@ export class VendasService {
             }
 
             const statusOrc = String(orcamento.status || '').trim();
-            const orcamentoAprovado =
-                statusOrc === 'Aprovado' || statusOrc.toLowerCase() === 'aprovado';
-            if (!orcamentoAprovado) {
+            if (!podeGerarPedidoVendaParaOrcamento(statusOrc, false)) {
                 throw new Error(
                     `Pedido de venda só pode ser gerado com orçamento aprovado. Status atual: "${statusOrc || '—'}".`
                 );
@@ -143,16 +184,6 @@ export class VendasService {
                 }
             }
 
-            if (orcamento.status !== 'Aprovado') {
-                await tx.orcamento.update({
-                    where: { id: orcamentoId },
-                    data: {
-                        status: 'Aprovado',
-                        aprovedAt: new Date()
-                    }
-                });
-            }
-
             // Recalcular entrada e parcelas quando valor a receber difere do total (itens venda direta)
             const valorEntradaUsar = Math.min(valorEntrada, valorTotalUsar);
             const valorRestanteUsar = Math.round((valorTotalUsar - valorEntradaUsar) * 100) / 100;
@@ -180,7 +211,16 @@ export class VendasService {
                 }
             });
 
-            // 3. Gerar contas a receber (entrada + parcelas; apenas valor que a empresa recebe)
+            // 3. Orçamento → Concretizado somente após PV persistido (mesma transação)
+            await tx.orcamento.update({
+                where: { id: orcamentoId },
+                data: {
+                    status: ORCAMENTO_STATUS_CONCRETIZADO,
+                    aprovedAt: orcamento.aprovedAt ?? new Date()
+                }
+            });
+
+            // 4. Gerar contas a receber (entrada + parcelas; apenas valor que a empresa recebe)
             const contasReceber: any[] = [];
 
             if (valorEntradaUsar > 0) {
@@ -284,10 +324,13 @@ export class VendasService {
             }
         }
 
+        const orcamentoStatusFinal = await VendasService.ensureOrcamentoConcretizadoAposPedidoVenda(orcamentoId);
+
         return {
             venda,
             contasReceber,
-            baixaEstoque
+            baixaEstoque,
+            orcamentoStatus: orcamentoStatusFinal
         };
     }
 
@@ -618,15 +661,41 @@ export class VendasService {
 
         const valorRecebidoAtual = Number(conta.valorRecebido ?? 0);
         const saldoRestante = conta.valorParcela - valorRecebidoAtual;
-        const valorPago = payload?.valorRecebido != null
-            ? Number(payload.valorRecebido)
+
+        const valorBaseInformado = payload?.valorRecebido != null
+            ? parseMoney(payload.valorRecebido)
             : saldoRestante;
+        const jurosInformado = parseMoney(payload?.valorJuros);
+        const descontoInformado = parseMoney(payload?.valorDesconto);
+
+        let valorPago: number;
+        let valorJurosRegistro = 0;
+        let valorDescontoRegistro = 0;
+
+        if (payload?.valorJuros != null || payload?.valorDesconto != null) {
+            const validado = validarValoresFinanceiros(
+                valorBaseInformado,
+                jurosInformado,
+                descontoInformado,
+                { exigirBasePositivo: valorBaseInformado > 0 }
+            );
+            valorPago = validado.valorARegistrar;
+            valorJurosRegistro = validado.valorJuros;
+            valorDescontoRegistro = validado.valorDesconto;
+        } else {
+            valorPago = valorBaseInformado;
+            if (valorPago <= 0) {
+                throw new Error('Valor recebido deve ser maior que zero');
+            }
+        }
 
         if (valorPago <= 0) {
-            throw new Error('Valor recebido deve ser maior que zero');
+            throw new Error('Valor a registrar deve ser maior que zero');
         }
         if (valorPago > saldoRestante + 0.01) {
-            throw new Error(`Valor recebido (R$ ${valorPago.toFixed(2)}) não pode ser maior que o saldo restante (R$ ${saldoRestante.toFixed(2)})`);
+            throw new Error(
+                `Valor a registrar (R$ ${valorPago.toFixed(2)}) não pode ser maior que o saldo restante (R$ ${saldoRestante.toFixed(2)})`
+            );
         }
 
         // Parsear data
@@ -652,6 +721,8 @@ export class VendasService {
             data: {
                 contaReceberId: id,
                 valorPago,
+                valorJuros: valorJurosRegistro > 0 ? valorJurosRegistro : null,
+                valorDesconto: valorDescontoRegistro > 0 ? valorDescontoRegistro : null,
                 dataPagamento,
                 observacoes: payload?.observacoes ?? null,
                 meioPagamento: payload?.meioPagamento ?? null
@@ -670,6 +741,8 @@ export class VendasService {
                 dataPagamento: dataPagamento,
                 observacoes: payload?.observacoes ?? conta.observacoes,
                 meioPagamento: payload?.meioPagamento ?? undefined,
+                ...(valorJurosRegistro > 0 && { valorJuros: valorJurosRegistro }),
+                ...(valorDescontoRegistro > 0 && { valorDesconto: valorDescontoRegistro }),
                 updatedAt: new Date()
             }
         });

@@ -3,6 +3,11 @@ import type { FolhaMesResumo } from './rh.service';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/time-format.util';
 import { calculateTimeDifference } from '../utils/workshift.util';
 
+export type ConferenciaPontoLetterhead = {
+  imageBuffer: Buffer;
+  opacidade: number;
+};
+
 /**
  * Gera PDF buffer da conferência de ponto (todas as batidas por dia).
  *
@@ -18,7 +23,10 @@ import { calculateTimeDifference } from '../utils/workshift.util';
  *
  * Margens: top 71pt, bottom 75pt, lados 15pt (≈ 95px / 100px / 20px @ 96dpi).
  */
-export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<Buffer> {
+export function gerarBufferPdfConferenciaPonto(
+  folha: FolhaMesResumo,
+  letterhead?: ConferenciaPontoLetterhead | null
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
@@ -30,12 +38,29 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
+      const paintLetterhead = () => {
+        if (!letterhead?.imageBuffer?.length) return;
+        doc.save();
+        // Folha timbrada A4: opacidade total (não usar opacidade da marca d'água S3E ~0.05).
+        doc.opacity(1);
+        doc.image(letterhead.imageBuffer, 0, 0, {
+          width: doc.page.width,
+          height: doc.page.height,
+        });
+        doc.restore();
+      };
+      doc.on('pageAdded', paintLetterhead);
+      paintLetterhead();
+
       const ref = folha.referencia;
       const COLOR_RED = '#b91c1c';
       const COLOR_MUTED = '#6b7280';
       const COLOR_LIGHT_BG = '#f3f4f6';
       const COLOR_VIOLET = '#7c3aed';
       const COLOR_GREEN = '#15803d';
+      const COLOR_YELLOW_BG = '#fef9c3';
+      const COLOR_RED_BG = '#fee2e2';
+      const COLOR_VIOLET_BG = '#ede9fe';
 
       // ===== Cabeçalho =====
       doc.font('Helvetica-Bold').fontSize(16).fillColor('black')
@@ -57,25 +82,43 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
 
       // ===== Resumo (numérico, topo) =====
       const diasFaltados = folha.resumoPonto?.diasFaltados ?? 0;
+      const diasFaltadosDetalhe = folha.resumoPonto?.diasFaltadosDetalhe ?? [];
       const horasTrabalhadas = folha.resumoPonto?.horasTrabalhadas ?? folha.horas.total ?? 0;
       const folgasH = folha.folgas?.horasFolgaAcumuladas ?? 0;
       const saldoBancoTotal = folha.registrado?.saldoBancoHorasAtual ?? 0;
       const saldoBancoNormais = folha.registrado?.saldoBancoHorasNormaisAtual ?? 0;
       const saldoBanco100 = folha.registrado?.saldoBancoHorasExtras100Atual ?? 0;
+      const permitirHE = folha.permitirHorasExtras100 === true;
+      const mostrarBancoHoras = folha.tipoContrato === 'REGISTRADO' && !permitirHE;
+
+      const fmtBRL = (v: number): string =>
+        Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
       doc.font('Helvetica-Bold').fontSize(10).text('Resumo do mês');
       doc.moveDown(0.2);
       doc.font('Helvetica').fontSize(9);
       doc.text(
-        `Horas trabalhadas: ${decimalHoursToHHmm(horasTrabalhadas)} ` +
+        `Horas TOTAIS TRABALHADAS: ${decimalHoursToHHmm(horasTrabalhadas)} ` +
           `(${Number(horasTrabalhadas).toFixed(2)} h)`,
       );
       doc.text(`Dias faltados (úteis, sem registro): ${diasFaltados}`);
+      if (diasFaltadosDetalhe.length > 0) {
+        const listaFaltas = diasFaltadosDetalhe
+          .map(
+            (f) =>
+              `${String(f.dia).padStart(2, '0')}/${String(ref.mes).padStart(2, '0')} (${f.diaSemanaLabel})`,
+          )
+          .join(' · ');
+        doc.fontSize(8).fillColor(COLOR_MUTED).text(`   ${listaFaltas}`, {
+          width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+        });
+        doc.fillColor('black').fontSize(9);
+      }
       doc.text(
         `Folgas (crédito acumulado): ${decimalHoursToHHmm(folgasH)} ` +
           `(${Number(folgasH).toFixed(2)} h)`,
       );
-      if (folha.tipoContrato === 'REGISTRADO') {
+      if (mostrarBancoHoras) {
         doc.text(
           `Banco de horas: ${decimalHoursToHHmm(saldoBancoTotal)} ` +
             `(normais ${decimalHoursToHHmm(saldoBancoNormais)} · 100% ${decimalHoursToHHmm(saldoBanco100)})`,
@@ -160,14 +203,20 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
               ? 'Sim'
               : '—';
 
-        const minAtraso = row.minutosAtraso ?? 0;
-        const minSaidaAnt = row.minutosHorasDevidas ?? 0;
+        const minAtraso = row.ehFeriado ? 0 : row.minutosAtraso ?? 0;
+        const minSaidaAnt = row.ehFeriado ? 0 : row.minutosHorasDevidas ?? 0;
+        const minExtraDia = row.minutosExtra20 ?? 0;
         somaAtrasoMin += Math.max(0, minAtraso);
         somaSaidaAntMin += Math.max(0, minSaidaAnt);
 
         const temAtraso = minAtraso > 0 || minSaidaAnt > 0;
+        const temExtraDia = minExtraDia > 0;
         const inconsistente = row.situacao === 'Inconsistente';
-        const ehDomFer = (row.ehFimDeSemana && row.diaSemana === 0) || row.ehFeriado;
+        const okParcial = row.situacao === 'OK_PARCIAL';
+        const ehFaltaDia =
+          !row.temRegistro && !row.ehFimDeSemana && !row.ehFeriado && !row.faltaJustificada;
+        const ehFds = row.ehFimDeSemana;
+        const ehFeriadoUtil = row.ehFeriado && !ehFds;
         const temJornada =
           !!folha.jornada?.entrada1 &&
           !!folha.jornada?.saida2 &&
@@ -215,7 +264,10 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         doc.fontSize(8.5).font('Helvetica');
         const heightBat = doc.heightOfString(batidasTxt, { width: colBatW - 4 });
         const heightFer = doc.heightOfString(ferTxt, { width: colFerW - 4 });
-        const rowH = Math.max(lineHBase + 4, heightBat + 4, heightFer + 4);
+        const linhasAtrasoCol =
+          (minAtraso > 0 ? 1 : 0) + (minSaidaAnt > 0 ? 1 : 0) + (temExtraDia ? 1 : 0);
+        const heightAtrasoCol = linhasAtrasoCol > 0 ? linhasAtrasoCol * 9 + 4 : lineHBase + 4;
+        const rowH = Math.max(lineHBase + 4, heightBat + 4, heightFer + 4, heightAtrasoCol);
 
         // Quebra de página
         if (y + rowH > doc.page.height - doc.page.margins.bottom) {
@@ -224,11 +276,15 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
           y = drawHeader(y);
         }
 
-        // Fundo p/ domingo/feriado (informativo)
-        if (ehDomFer) {
-          doc.rect(tableLeft, y - 1, widthAvailable, rowH).fillColor(COLOR_LIGHT_BG).fill();
-          doc.fillColor('black');
+        // Fundo por tipo de dia (falta, fim de semana, feriado em dia útil)
+        if (ehFaltaDia) {
+          doc.rect(tableLeft, y - 1, widthAvailable, rowH).fillColor(COLOR_RED_BG).fill();
+        } else if (ehFds) {
+          doc.rect(tableLeft, y - 1, widthAvailable, rowH).fillColor(COLOR_YELLOW_BG).fill();
+        } else if (ehFeriadoUtil) {
+          doc.rect(tableLeft, y - 1, widthAvailable, rowH).fillColor(COLOR_VIOLET_BG).fill();
         }
+        doc.fillColor('black');
 
         doc.fontSize(8.5).font('Helvetica').fillColor('black');
         doc.text(String(row.dia).padStart(2, '0'), colDia + 2, y + 2, { width: colDiaW - 2 });
@@ -253,20 +309,32 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         doc.text(horasTxt, colHoras + 2, y + 2, { width: colHorasW - 2, align: 'center' });
         doc.font('Helvetica').fillColor('black');
 
-        // Coluna combinada Atraso / Saída ant.
-        let atrasoTxt = '—';
-        if (minAtraso > 0 && minSaidaAnt > 0) {
-          atrasoTxt = `${minutesToHHmm(minAtraso)}↓\n${minutesToHHmm(minSaidaAnt)}↑`;
-        } else if (minAtraso > 0) {
-          atrasoTxt = `${minutesToHHmm(minAtraso)}↓`;
-        } else if (minSaidaAnt > 0) {
-          atrasoTxt = `${minutesToHHmm(minSaidaAnt)}↑`;
-        }
+        // Coluna combinada Atraso / Saída ant. / Extra do dia
+        const partesAtraso: string[] = [];
+        if (minAtraso > 0) partesAtraso.push(`${minutesToHHmm(minAtraso)}↓`);
+        if (minSaidaAnt > 0) partesAtraso.push(`−${minutesToHHmm(minSaidaAnt)}`);
         if (temAtraso) {
           doc.font('Helvetica-Bold').fillColor(COLOR_RED);
+          doc.text(partesAtraso.join('\n'), colAtraso + 2, y + 2, {
+            width: colAtrasoW - 2,
+            align: 'center',
+          });
+          doc.font('Helvetica').fillColor('black');
         }
-        doc.text(atrasoTxt, colAtraso + 2, y + 2, { width: colAtrasoW - 2, align: 'center' });
-        doc.font('Helvetica').fillColor('black');
+        if (temExtraDia) {
+          const extraY = y + 2 + (temAtraso ? partesAtraso.length * 9 : 0);
+          doc.font('Helvetica-Bold').fillColor(COLOR_GREEN);
+          doc.text(`+${minutesToHHmm(minExtraDia)}`, colAtraso + 2, extraY, {
+            width: colAtrasoW - 2,
+            align: 'center',
+          });
+          doc.font('Helvetica').fillColor('black');
+        }
+        if (!temAtraso && !temExtraDia) {
+          doc.font('Helvetica').fillColor(COLOR_MUTED);
+          doc.text('—', colAtraso + 2, y + 2, { width: colAtrasoW - 2, align: 'center' });
+          doc.fillColor('black');
+        }
 
         // Compensação diária (minutos extras que abateram atraso/saída antecipada)
         const compTxt = compensadoMin > 0 ? minutesToHHmm(compensadoMin) : '—';
@@ -279,12 +347,18 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         doc.font('Helvetica').fillColor('black');
 
         // Situação
-        if (inconsistente) {
+        let sitTxt: string = row.situacao;
+        if (row.situacao === 'OK_PARCIAL') sitTxt = 'OK (abaixo meta)';
+        if (inconsistente || ehFaltaDia) {
           doc.fillColor(COLOR_RED).font('Helvetica-Bold');
+        } else if (okParcial) {
+          doc.fillColor('#b45309').font('Helvetica-Bold');
+        } else if (row.situacao === 'OK') {
+          doc.fillColor(COLOR_GREEN).font('Helvetica-Bold');
         } else if (temAtraso) {
           doc.fillColor(COLOR_RED);
         }
-        doc.text(row.situacao, colSit + 2, y + 2, { width: colSitW - 2, align: 'center' });
+        doc.text(sitTxt, colSit + 2, y + 2, { width: colSitW - 2, align: 'center' });
         doc.font('Helvetica').fillColor('black');
 
         // Linha separadora
@@ -319,9 +393,27 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       const valorAtrasoMes = somaAtrasoMin * valorMinuto;
       const valorSaidaAntMes = somaSaidaAntMin * valorMinuto;
       const valorFaltaMes = diasFaltados * (valorHoraBase * jornadaHorasDia);
+      const totalDescontosReferencia = valorAtrasoMes + valorSaidaAntMes + valorFaltaMes;
 
-      const fmtBRL = (v: number): string =>
-        Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      let horasUteis = 0;
+      let horasSabado = 0;
+      let horasFeriadoDomingo = 0;
+      let minutosExtraUteis = 0;
+      for (const row of folha.conferenciaPonto) {
+        if (!row.temRegistro) continue;
+        const h = row.horasLiquidas;
+        if (row.ehFeriado || row.diaSemana === 0) {
+          horasFeriadoDomingo += h;
+        } else if (row.diaSemana === 6) {
+          horasSabado += h;
+        } else {
+          horasUteis += h;
+          minutosExtraUteis += Math.max(0, Number(row.minutosExtra20 ?? 0));
+        }
+      }
+      const horasNoturnas = folha.autonomo?.horasNoturna ?? 0;
+      const horasExtraUteis = minutosExtraUteis / 60;
+      const valorHorasExtraUteis = horasExtraUteis * valorHoraBase;
 
       // Garante espaço (se não, nova página)
       if (y + 200 > doc.page.height - doc.page.margins.bottom) {
@@ -367,10 +459,53 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
         y += fontSize + 4;
       };
 
-      // ----- Bloco horas ganhas -----
-      linhaResumo('Horas Normais', decimalHoursToHHmm(folha.horas.normais), null, { bold: true });
-      linhaResumo('Horas Extras (50%)', decimalHoursToHHmm(folha.horas.extras50), null, { bold: true });
-      linhaResumo('Horas Extras (100%)', decimalHoursToHHmm(folha.horas.extras100), null, { bold: true });
+      // ----- Bloco horas ganhas (por tipo de dia) -----
+      linhaResumo(
+        'Horas Normais (dias úteis)',
+        decimalHoursToHHmm(horasUteis),
+        folha.tipoContrato === 'AUTONOMO'
+          ? fmtBRL(Number(folha.valores.valorHorasNormais ?? 0))
+          : fmtBRL(Number(folha.valores.salarioBase ?? 0)),
+        { bold: true },
+      );
+      linhaResumo(
+        'Horas Extras (dias úteis seg-sex)',
+        minutesToHHmm(minutosExtraUteis),
+        fmtBRL(valorHorasExtraUteis),
+        { bold: true },
+      );
+      linhaResumo(
+        'Horas Extras (50%) — Sábado',
+        decimalHoursToHHmm(horasSabado > 0 ? horasSabado : folha.horas.extras50),
+        folha.tipoContrato === 'AUTONOMO'
+          ? fmtBRL(Number(folha.valores.valorHorasExtras50 ?? 0))
+          : permitirHE
+            ? fmtBRL(Number(folha.valores.valorHorasExtras50 ?? 0))
+            : null,
+        { bold: true },
+      );
+      linhaResumo(
+        'Horas Extras (100%) — Domingo e feriados',
+        decimalHoursToHHmm(horasFeriadoDomingo > 0 ? horasFeriadoDomingo : folha.horas.extras100),
+        folha.tipoContrato === 'AUTONOMO'
+          ? fmtBRL(Number(folha.valores.valorHorasExtras100 ?? 0))
+          : permitirHE
+            ? fmtBRL(Number(folha.valores.valorHorasExtras100 ?? 0))
+            : null,
+        { bold: true },
+      );
+      linhaResumo(
+        'Horas Noturnas (+20%)',
+        decimalHoursToHHmm(horasNoturnas),
+        horasNoturnas > 0 ? fmtBRL(Number(folha.valores.valorHorasNoturnaAutonomo ?? 0)) : null,
+        { bold: true },
+      );
+      linhaResumo(
+        'Total horas do mês (soma)',
+        decimalHoursToHHmm(horasTrabalhadas),
+        null,
+        { color: COLOR_MUTED, sub: true },
+      );
 
       y += 4;
       doc.strokeColor('#e5e7eb').lineWidth(0.5)
@@ -417,6 +552,15 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
           sub: true,
         });
       }
+
+      const minDescontos =
+        somaAtrasoMin + somaSaidaAntMin + Math.round(diasFaltados * jornadaHorasDia * 60);
+      linhaResumo(
+        '   Total a descontar (referência)',
+        minutesToHHmm(minDescontos),
+        fmtBRL(totalDescontosReferencia),
+        { bold: true, color: COLOR_RED },
+      );
 
       linhaResumo(
         '   * Valores informativos. Aplicação efetiva via lançamentos manuais abaixo.',
@@ -478,17 +622,34 @@ export function gerarBufferPdfConferenciaPonto(folha: FolhaMesResumo): Promise<B
       y += 6;
 
       // ----- Totais finais -----
-      linhaResumo(
-        'Total bruto (sem lançamentos manuais)',
-        '',
-        fmtBRL(Number(folha.valores.totalSemBonusDescontos ?? 0)),
-        { bold: true, color: COLOR_MUTED, sub: true },
-      );
+      const creditosHoras =
+        folha.tipoContrato === 'AUTONOMO'
+          ? Number(folha.valores.valorHorasAutonomo ?? 0)
+          : Number(folha.valores.salarioBase ?? 0) +
+            (permitirHE
+              ? Number(folha.valores.valorHorasExtras50 ?? 0) +
+                Number(folha.valores.valorHorasExtras100 ?? 0) +
+                Number(folha.valores.valorHorasNoturnaAutonomo ?? 0)
+              : 0);
+
+      const totalBeneficios = Number(folha.valores.totalBeneficios ?? 0);
+      const acrescimosLanc = Number(folha.totaisLancamentos?.acrescimos ?? 0);
+      const subtracoesLanc = Number(folha.totaisLancamentos?.subtracoes ?? 0);
+
+      const totalAPagarPdf =
+        creditosHoras + totalBeneficios + acrescimosLanc - subtracoesLanc - totalDescontosReferencia;
+
       linhaResumo(
         'TOTAL A PAGAR (com lançamentos)',
         '',
-        fmtBRL(Number(folha.valores.totalAPagar ?? 0)),
+        fmtBRL(totalAPagarPdf),
         { bold: true },
+      );
+      linhaResumo(
+        '   Composição: horas + benefícios + lanç. manuais − descontos ref.',
+        '',
+        '',
+        { color: COLOR_MUTED, sub: true },
       );
 
       doc.end();

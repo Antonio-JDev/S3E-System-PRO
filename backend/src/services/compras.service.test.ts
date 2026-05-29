@@ -1,5 +1,6 @@
 /**
  * Testes unitários - Módulo de Compras (ComprasService)
+ * Inclui: listagem, classificação e compra avulsa (destino por item — OS/Obra/reserva)
  * Rodar: npm test -- compras.service.test.ts
  */
 
@@ -9,11 +10,24 @@ jest.mock('../lib/prisma', () => ({
       findMany: jest.fn(),
       count: jest.fn(),
     },
+    obra: { findUnique: jest.fn() },
+  },
+}));
+
+jest.mock('./reservaMaterialProjeto.service', () => ({
+  ReservaMaterialProjetoService: {
+    resolverObraIdParaDestino: jest.fn(),
   },
 }));
 
 import { prisma } from '../lib/prisma';
 import { ComprasService } from './compras.service';
+
+/** Acesso ao método privado de recebimento por item */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const aplicarDestino = (ComprasService as any).aplicarDestinoItemRecebimento.bind(
+  ComprasService,
+);
 
 describe('ComprasService', () => {
   describe('listarCompras', () => {
@@ -99,6 +113,113 @@ describe('ComprasService', () => {
     it('deve retornar "despesas_variadas" para DESPESAS_VARIADAS (sem fluxo de estoque)', () => {
       expect(ComprasService.destinoPorClassificacao('DESPESAS_VARIADAS')).toBe('despesas_variadas');
       expect(ComprasService.destinoPorClassificacao('despesas_variadas')).toBe('despesas_variadas');
+    });
+  });
+
+  describe('aplicarDestinoItemRecebimento (compra avulsa por item)', () => {
+    const compraBase = { id: 'compra-1', numeroNF: 'NF-100' };
+    const materialId = 'mat-1';
+    const qtd = 10;
+
+    function criarTxMock() {
+      return {
+        material: { update: jest.fn().mockResolvedValue({}), findUnique: jest.fn() },
+        movimentacaoEstoque: { create: jest.fn().mockResolvedValue({}) },
+        obra: { findUnique: jest.fn() },
+        reservaMaterialProjeto: { create: jest.fn().mockResolvedValue({}) },
+      };
+    }
+
+    it('apenas ENTRADA quando destinoEstoque é true (item vai só para estoque)', async () => {
+      const tx = criarTxMock();
+      await aplicarDestino(tx, {
+        compra: { ...compraBase, destinoTipo: 'PROJETO', projetoId: 'proj-1' },
+        item: { id: 'ci-1', destinoEstoque: true },
+        materialId,
+        quantidadeParaEstoque: qtd,
+        observacoesEntrada: 'Entrada NF',
+      });
+      expect(tx.material.update).toHaveBeenCalledTimes(1);
+      expect(tx.material.update).toHaveBeenCalledWith({
+        where: { id: materialId },
+        data: { estoque: { increment: qtd } },
+      });
+      expect(tx.movimentacaoEstoque.create).toHaveBeenCalledTimes(1);
+      expect(tx.reservaMaterialProjeto.create).not.toHaveBeenCalled();
+    });
+
+    it('ENTRADA + SAÍDA OBRA quando destino OBRA e item marcado para destino', async () => {
+      const tx = criarTxMock();
+      await aplicarDestino(tx, {
+        compra: { ...compraBase, destinoTipo: 'OBRA', obraId: 'obra-1' },
+        item: { id: 'ci-2', destinoEstoque: false },
+        materialId,
+        quantidadeParaEstoque: qtd,
+        observacoesEntrada: 'Entrada',
+      });
+      expect(tx.material.update).toHaveBeenCalledTimes(2);
+      expect(tx.movimentacaoEstoque.create).toHaveBeenCalledTimes(2);
+      expect(tx.movimentacaoEstoque.create).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({
+          tipo: 'SAIDA',
+          motivo: 'OBRA',
+          referencia: 'obra-1',
+        }),
+      });
+    });
+
+    it('compatibilidade legada: compra só com obraId trata todos os itens como destino obra', async () => {
+      const tx = criarTxMock();
+      await aplicarDestino(tx, {
+        compra: { ...compraBase, obraId: 'obra-legada' },
+        item: { id: 'ci-3', destinoEstoque: true },
+        materialId,
+        quantidadeParaEstoque: qtd,
+        observacoesEntrada: 'Entrada',
+      });
+      expect(tx.movimentacaoEstoque.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('PROJETO sem obra: ENTRADA + reserva (sem segunda baixa de estoque)', async () => {
+      const tx = criarTxMock();
+      tx.obra.findUnique.mockResolvedValue(null);
+      await aplicarDestino(tx, {
+        compra: { ...compraBase, destinoTipo: 'PROJETO', projetoId: 'proj-os' },
+        item: { id: 'ci-4', destinoEstoque: false },
+        materialId,
+        quantidadeParaEstoque: qtd,
+        observacoesEntrada: 'Entrada OS',
+      });
+      expect(tx.material.update).toHaveBeenCalledTimes(1);
+      expect(tx.reservaMaterialProjeto.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          projetoId: 'proj-os',
+          materialId,
+          quantidade: qtd,
+          compraId: 'compra-1',
+          compraItemId: 'ci-4',
+        }),
+      });
+    });
+
+    it('PROJETO com obra já criada: ENTRADA + SAÍDA para obra resolvida', async () => {
+      const tx = criarTxMock();
+      tx.obra.findUnique.mockResolvedValue({ id: 'obra-da-os' });
+      await aplicarDestino(tx, {
+        compra: { ...compraBase, destinoTipo: 'PROJETO', projetoId: 'proj-com-obra' },
+        item: { id: 'ci-5', destinoEstoque: false },
+        materialId,
+        quantidadeParaEstoque: qtd,
+        observacoesEntrada: 'Entrada',
+      });
+      expect(tx.material.update).toHaveBeenCalledTimes(2);
+      expect(tx.movimentacaoEstoque.create).toHaveBeenLastCalledWith({
+        data: expect.objectContaining({
+          referencia: 'obra-da-os',
+          motivo: 'OBRA',
+        }),
+      });
+      expect(tx.reservaMaterialProjeto.create).not.toHaveBeenCalled();
     });
   });
 });

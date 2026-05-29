@@ -44,21 +44,24 @@ export class NFeSignatureService {
 
       // Procurar certificado
       const certBags = pfx.getBags({ bagType: forge.pki.oids.certBag });
-      if (certBags && certBags[forge.pki.oids.certBag] && certBags[forge.pki.oids.certBag][0]) {
-        certificate = certBags[forge.pki.oids.certBag][0].cert;
+      const certBagList = certBags?.[forge.pki.oids.certBag] ?? [];
+      if (certBagList.length > 0 && certBagList[0]?.cert) {
+        certificate = certBagList[0].cert;
       }
 
       // Procurar chave privada
       const keyBags = pfx.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
-      if (keyBags && keyBags[forge.pki.oids.pkcs8ShroudedKeyBag] && keyBags[forge.pki.oids.pkcs8ShroudedKeyBag][0]) {
-        privateKey = keyBags[forge.pki.oids.pkcs8ShroudedKeyBag][0].key;
+      const shroudedKeyBagList = keyBags?.[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];
+      if (shroudedKeyBagList.length > 0 && shroudedKeyBagList[0]?.key) {
+        privateKey = shroudedKeyBagList[0].key;
       }
 
       // Se não encontrou, tentar keyBag
       if (!privateKey) {
         const keyBagBags = pfx.getBags({ bagType: forge.pki.oids.keyBag });
-        if (keyBagBags && keyBagBags[forge.pki.oids.keyBag] && keyBagBags[forge.pki.oids.keyBag][0]) {
-          privateKey = keyBagBags[forge.pki.oids.keyBag][0].key;
+        const keyBagList = keyBagBags?.[forge.pki.oids.keyBag] ?? [];
+        if (keyBagList.length > 0 && keyBagList[0]?.key) {
+          privateKey = keyBagList[0].key;
         }
       }
 

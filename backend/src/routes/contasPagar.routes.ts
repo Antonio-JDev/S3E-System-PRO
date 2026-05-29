@@ -43,11 +43,11 @@ router.get(
     ContasPagarController.buscarConta
 );
 
-// Atualizar dados da conta (apenas admin e desenvolvedor)
+// Atualizar dados da conta (admin/isAdmin, financeiro e desenvolvedor)
 router.put(
     '/:id',
     authenticate,
-    authorize('admin', 'desenvolvedor'),
+    authorize('admin', 'financeiro', 'financeiro_faturamento', 'desenvolvedor'),
     ContasPagarController.atualizarConta
 );
 
@@ -128,11 +128,11 @@ router.post(
     ContasPagarController.gerarContasDespesasFixas
 );
 
-// Excluir parcela (apenas admin e desenvolvedor)
+// Excluir parcela (admin/isAdmin, financeiro e desenvolvedor)
 router.delete(
     '/:id',
     authenticate,
-    authorize('admin', 'desenvolvedor'),
+    authorize('admin', 'financeiro', 'financeiro_faturamento', 'desenvolvedor'),
     ContasPagarController.excluirParcela
 );
 

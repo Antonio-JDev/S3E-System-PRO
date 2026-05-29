@@ -5,6 +5,7 @@ const BASE = '/api/whatsapp/chat-labels';
 export interface WhatsappChatLabelDto {
   id: string;
   userId: string;
+  isGlobal: boolean;
   nome: string;
   cor: string | null;
   emoji: string | null;
@@ -25,6 +26,8 @@ export function createChatLabel(body: {
   emoji?: string | null;
   ordem?: number;
   chatIds?: string[];
+  /** Quando true, o filtro fica visível para todos os usuários do CRM. */
+  isGlobal?: boolean;
 }) {
   return axiosApiService.post<WhatsappChatLabelDto>(BASE, body);
 }

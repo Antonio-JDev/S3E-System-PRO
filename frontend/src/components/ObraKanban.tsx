@@ -681,7 +681,8 @@ const ObraKanban: React.FC<ObraKanbanProps> = ({ onRefresh, onNavigate }) => {
                     obraId={hubObraId}
                     onClose={() => {
                         setHubObraId(null);
-                        loadObrasKanban(); // Recarrega o kanban para atualizar progresso
+                        loadObrasKanban();
+                        onRefresh?.();
                     }}
                 />
             )}

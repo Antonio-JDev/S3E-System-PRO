@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
+import type { AuthRequest } from '../middlewares/auth';
 import { ModoQuitacaoHorasNegativas, PeriodoCompensacaoHoras } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { RhService } from '../services/rh.service';
 import { ContasPagarService } from '../services/contasPagar.service';
 import { atualizarRegistroBatidas } from '../services/ponto.service';
 import { gerarBufferPdfConferenciaPonto } from '../services/rhConferenciaPdf.service';
+import { resolveLetterheadForUser, readLetterheadImageBuffer } from '../services/pdfLetterhead.service';
 import {
   type AlocacaoPagamentoBanco,
   converterHorasParaFolga,
@@ -14,6 +16,9 @@ import {
   aprovarDiaCompensacao,
   criarCompensacaoHoras,
   criarFaltaJustificada,
+  atualizarFaltaJustificada,
+  criarJustificativaParcial,
+  removerAnexoFaltaJustificada,
   listarCompensacoesCompetencia,
   listarWorkShifts,
 } from '../services/rhJornada.service';
@@ -156,7 +161,14 @@ export const RhController = {
         dataReferencia = parsed;
       }
       const folha = await RhService.calcularFolhaMes({ funcionarioId, dataReferencia });
-      const buf = await gerarBufferPdfConferenciaPonto(folha);
+      const userId = (req as AuthRequest).user?.userId;
+      const letterheadResolved = await resolveLetterheadForUser(userId);
+      const letterheadBuf = readLetterheadImageBuffer(letterheadResolved);
+      const letterhead =
+        letterheadBuf && letterheadBuf.length > 0
+          ? { imageBuffer: letterheadBuf, opacidade: letterheadResolved.opacidade }
+          : null;
+      const buf = await gerarBufferPdfConferenciaPonto(folha, letterhead);
       const nomeArquivo = `conferencia-ponto-${folha.nome.replace(/\s+/g, '_')}-${mes}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', buildContentDisposition('attachment', nomeArquivo, 'conferencia.pdf'));
@@ -290,26 +302,137 @@ export const RhController = {
     }
   },
 
-  /** POST /api/rh/falta-justificada */
+  /** POST /api/rh/falta-justificada — multipart: documento (opcional) + campos do formulário */
   async registrarFaltaJustificada(req: Request, res: Response) {
     try {
-      const { funcionarioId, referenciaAno, referenciaMes, dia, descricao } = req.body ?? {};
-      if (!funcionarioId || !referenciaAno || !referenciaMes || !dia || !descricao) {
+      const body = req.body ?? {};
+      const { funcionarioId, referenciaAno, referenciaMes, dia, descricao } = body;
+      const desc = String(descricao ?? '').trim();
+      if (!funcionarioId || !referenciaAno || !referenciaMes || !dia || !desc) {
         return res.status(400).json({
           success: false,
           message: 'funcionarioId, referenciaAno, referenciaMes, dia e descricao são obrigatórios',
         });
       }
+
+      const file = req.file as Express.Multer.File | undefined;
+      let documentoAnexoUrl: string | null = null;
+      let documentoAnexoNome: string | null = null;
+      if (file) {
+        documentoAnexoUrl = `/uploads/rh-faltas/${file.filename}`;
+        documentoAnexoNome = file.originalname;
+      }
+
       const data = await criarFaltaJustificada({
         funcionarioId: String(funcionarioId),
         referenciaAno: Number(referenciaAno),
         referenciaMes: Number(referenciaMes),
         dia: Number(dia),
-        descricao: String(descricao),
+        descricao: desc,
+        documentoAnexoUrl,
+        documentoAnexoNome,
       });
       return res.status(201).json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao registrar falta justificada' });
+    }
+  },
+
+  /** PUT /api/rh/falta-justificada/:id — atualiza descrição e/ou substitui/remove anexo */
+  async atualizarFaltaJustificada(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const desc = String((req.body as { descricao?: string })?.descricao ?? '').trim();
+      const removerAnexo =
+        (req.body as { removerAnexo?: string })?.removerAnexo === 'true' ||
+        (req.body as { removerAnexo?: boolean })?.removerAnexo === true;
+
+      if (!id || !desc) {
+        return res.status(400).json({ success: false, message: 'id e descricao são obrigatórios' });
+      }
+
+      const file = req.file as Express.Multer.File | undefined;
+      let documentoAnexoUrl: string | null | undefined;
+      let documentoAnexoNome: string | null | undefined;
+
+      if (file) {
+        documentoAnexoUrl = `/uploads/rh-faltas/${file.filename}`;
+        documentoAnexoNome = file.originalname;
+      }
+
+      const data = await atualizarFaltaJustificada(id, {
+        descricao: desc,
+        removerAnexo: removerAnexo && !file,
+        ...(file
+          ? { documentoAnexoUrl, documentoAnexoNome }
+          : {}),
+      });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao atualizar falta justificada' });
+    }
+  },
+
+  /** DELETE /api/rh/falta-justificada/:id/anexo — remove somente o anexo */
+  async deletarAnexoFaltaJustificada(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ success: false, message: 'id é obrigatório' });
+      const data = await removerAnexoFaltaJustificada(id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao remover anexo' });
+    }
+  },
+
+  /** POST /api/rh/justificativa-parcial */
+  async registrarJustificativaParcial(req: Request, res: Response) {
+    try {
+      const { funcionarioId, referenciaAno, referenciaMes, dia, descricao, justificativaTipo, horaInicio, horaFim } =
+        req.body ?? {};
+      const desc = String(descricao ?? '').trim();
+      const tipo = String(justificativaTipo ?? '').trim();
+      const ini = String(horaInicio ?? '').trim();
+      const fim = String(horaFim ?? '').trim();
+
+      if (!funcionarioId || !referenciaAno || !referenciaMes || !dia || !desc) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno, referenciaMes, dia e descricao são obrigatórios',
+        });
+      }
+      if (tipo !== 'ENTRADA_ATRASADA' && tipo !== 'SAIDA_ANTECIPADA') {
+        return res.status(400).json({ success: false, message: 'justificativaTipo inválido' });
+      }
+      if (!/^\d{1,2}:\d{2}$/.test(ini) || !/^\d{1,2}:\d{2}$/.test(fim)) {
+        return res.status(400).json({ success: false, message: 'horaInicio/horaFim devem ser HH:mm' });
+      }
+
+      const file = req.file as Express.Multer.File | undefined;
+      let documentoAnexoUrl: string | null = null;
+      let documentoAnexoNome: string | null = null;
+      if (file) {
+        documentoAnexoUrl = `/uploads/rh-faltas/${file.filename}`;
+        documentoAnexoNome = file.originalname;
+      }
+
+      const data = await criarJustificativaParcial({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: Number(referenciaAno),
+        referenciaMes: Number(referenciaMes),
+        dia: Number(dia),
+        descricao: desc,
+        justificativaTipo: tipo as any,
+        horaInicio: ini,
+        horaFim: fim,
+        documentoAnexoUrl,
+        documentoAnexoNome,
+      });
+      return res.status(201).json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao registrar justificativa' });
     }
   },
 

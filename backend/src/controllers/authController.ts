@@ -3,6 +3,7 @@ import * as authService from '../services/auth.service';
 import { LoginInput, RegisterInput } from '../validators/auth.validator';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
+import { isProtectedAccount } from '../utils/userProtection.util';
 
 /**
  * Controllers de Autenticação
@@ -296,6 +297,11 @@ export const setUserIsAdmin = async (req: Request, res: Response): Promise<void>
     const user = await authService.getUserById(id);
     if (!user) {
       res.status(404).json({ error: 'Usuário não encontrado' });
+      return;
+    }
+
+    if (isProtectedAccount(user as { contaProtegida?: boolean | null })) {
+      res.status(403).json({ error: 'Conta protegida do sistema — permissão de admin não pode ser alterada por terceiros' });
       return;
     }
 

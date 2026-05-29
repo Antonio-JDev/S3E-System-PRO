@@ -6,7 +6,9 @@ import {
   diaSemanaCivil,
   ehFimDeSemanaCivil,
   ehDomingoOuFeriado,
+  ehFeriado,
 } from '../utils/datetime-sp.util';
+import { vincularFaltaJustificadaAoRegistro, vincularJustificativaParcialAoRegistro } from './rhJornada.service';
 import { parsePresencaXlsBuffer } from './ponto-import.parser';
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
 import { sincronizarDescontosDiariaFaltaAposImportPonto } from './autonomoDiariaDesconto.service';
@@ -132,6 +134,7 @@ export function calcularMetricasRegistro(params: {
   const { batidas, ano, mes, dia, tipoContrato, workShift } = params;
   const tolerancia = Math.max(0, params.toleranciaMinutos ?? 5);
   const { minutos, status } = calcularMinutosLiquidos(batidas);
+  const ehFer = ehFeriado(ano, mes, dia);
   const eh100 = ehDomingoOuFeriado(ano, mes, dia);
   const dow = diaSemanaCivil(ano, mes, dia);
   const ehSabado = dow === 6;
@@ -148,7 +151,7 @@ export function calcularMetricasRegistro(params: {
   let minutosExtra100 = 0;
   const minutosTrabalhados = Math.max(0, minutos);
 
-  if (tipoContrato === 'REGISTRADO' && workShift && batidas.length >= 2) {
+  if (tipoContrato === 'REGISTRADO' && workShift && batidas.length >= 2 && !ehFer) {
     const diff = calculateTimeDifference({
       batidaEntrada: entrada,
       batidaSaida: saida,
@@ -157,7 +160,6 @@ export function calcularMetricasRegistro(params: {
       toleranceMin: tolerancia,
     });
     // Compensação diária: minutos extras (chegada antes/saída depois) abatem atraso/saída antecipada no mesmo dia.
-    // Ex.: entrou 08:06 (atraso 6) e saiu 17:36 (extra 6) => atraso líquido 0 (sem desconto).
     let atrasoEntrada = diff.minutosAtrasoEntrada;
     let saidaAntecipada = diff.minutosSaidaAntecipada;
     let compensacao = Math.max(0, diff.minutosExtraTotal);
@@ -168,12 +170,18 @@ export function calcularMetricasRegistro(params: {
 
     const abatSaida = Math.min(saidaAntecipada, compensacao);
     saidaAntecipada -= abatSaida;
+    compensacao -= abatSaida;
 
     minutosAtraso = atrasoEntrada;
     minutosHorasDevidas = saidaAntecipada;
 
     const minutosJornada = jornadaMinutosPorDia(workShift);
-    minutosExtra20 = Math.max(0, minutosTrabalhados - minutosJornada);
+    const extraLiquidaJornada = Math.max(0, minutosTrabalhados - minutosJornada);
+    // Ex.: jornada até 17:18 e saída 17:30 → 12 min viram HE normal (pool de extra após compensar atrasos).
+    minutosExtra20 = Math.max(extraLiquidaJornada, compensacao);
+  } else if (ehFer && batidas.length >= 2) {
+    minutosAtraso = 0;
+    minutosHorasDevidas = 0;
   }
 
   let horasNormais = minutosTrabalhados / 60;
@@ -310,15 +318,19 @@ export async function importarPresencaXls(
           where: { id: existente.id },
           data: payload,
         });
+        await vincularFaltaJustificadaAoRegistro(func.id, dataRef, existente.id);
+        await vincularJustificativaParcialAoRegistro(func.id, dataRef, existente.id);
         atualizados++;
       } else {
-        await prisma.registroPonto.create({
+        const criado = await prisma.registroPonto.create({
           data: {
             funcionarioId: func.id,
             dataReferencia: dataRef,
             ...payload,
           },
         });
+        await vincularFaltaJustificadaAoRegistro(func.id, dataRef, criado.id);
+        await vincularJustificativaParcialAoRegistro(func.id, dataRef, criado.id);
         importados++;
       }
       funcionarioIdsAfetados.add(func.id);
@@ -416,6 +428,8 @@ export async function atualizarRegistroBatidas(registroId: string, batidasInput:
     },
   });
 
+  await vincularFaltaJustificadaAoRegistro(func.id, dr, registroId);
+  await vincularJustificativaParcialAoRegistro(func.id, dr, registroId);
   await sincronizarExcessoCompetencia(func.id, ano, mes);
 
   return updated;

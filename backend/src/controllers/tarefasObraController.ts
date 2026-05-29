@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
+import {
+  syncAlocacaoEquipeFromTarefa,
+  removerAlocacoesPorTarefa
+} from '../services/alocacaoEquipeSync.service';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -651,6 +655,15 @@ export const criarTarefa = async (req: Request, res: Response): Promise<void> =>
       }
     }
 
+    await syncAlocacaoEquipeFromTarefa({
+      id: tarefa.id,
+      obraId: tarefa.obraId,
+      equipeId: tarefa.equipeId,
+      dataPrevista: tarefa.dataPrevista,
+      dataPrevistaFim: tarefa.dataPrevistaFim,
+      observacoes: tarefa.observacoes
+    });
+
     console.log(`✅ Tarefa criada: ${tarefa.id} ${equipe ? `- Atribuída à equipe ${equipe.nome}` : eletricista ? `- Atribuída a ${eletricista.name}` : '- Sem atribuição'}`);
     
     res.json({ 
@@ -760,6 +773,15 @@ export const atualizarTarefa = async (req: Request, res: Response): Promise<void
       }
     }
     
+    await syncAlocacaoEquipeFromTarefa({
+      id: tarefaAtualizada.id,
+      obraId: tarefaAtualizada.obraId,
+      equipeId: tarefaAtualizada.equipeId,
+      dataPrevista: tarefaAtualizada.dataPrevista,
+      dataPrevistaFim: tarefaAtualizada.dataPrevistaFim,
+      observacoes: tarefaAtualizada.observacoes
+    });
+
     // Audit log (desativado) — usa stub de auditoria
     try {
       await AuditoriaService.registrarEvento({
@@ -808,6 +830,8 @@ export const deletarTarefa = async (req: Request, res: Response): Promise<void> 
       return;
     }
     
+    await removerAlocacoesPorTarefa(id);
+
     // Deletar tarefa (cascade deleta registros de atividade)
     await prisma.tarefaObra.delete({
       where: { id }

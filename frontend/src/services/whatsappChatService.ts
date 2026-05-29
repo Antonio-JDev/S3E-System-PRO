@@ -468,6 +468,46 @@ export function whatsappProviderMediaProxyUrl(mediaUrl: string, downloadName?: s
   return `${backend}${BASE}/media-proxy?${q}`;
 }
 
+const WHATSAPP_CDN_HOST_RE = /^https:\/\/(pps|mmg)\.whatsapp\.net\//i;
+
+/**
+ * Fotos de perfil do CDN do WhatsApp retornam 403 no `<img>` direto no browser.
+ * Roteia pelo media-proxy autenticado do backend.
+ */
+export function whatsappCdnImageProxyUrl(url: string | null | undefined): string | undefined {
+  const u = (url || '').trim();
+  if (!u) return undefined;
+  if (!WHATSAPP_CDN_HOST_RE.test(u)) return u;
+  const proxied = whatsappProviderMediaProxyUrl(u);
+  const token =
+    typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  if (token && token !== 'null' && token !== 'undefined' && token.trim()) {
+    const sep = proxied.includes('?') ? '&' : '?';
+    return `${proxied}${sep}token=${encodeURIComponent(token.trim())}`;
+  }
+  return proxied;
+}
+
+/**
+ * URL da foto de perfil servida pelo backend (cache persistente, sem 403 no CDN).
+ * Use quando houver indício de foto (`cachedProfilePictureUrl` ou fetch recente).
+ */
+export function whatsappProfilePictureImageUrl(
+  chatId: string,
+  hasPictureHint = true
+): string | undefined {
+  const cid = (chatId || '').trim();
+  if (!cid || !hasPictureHint) return undefined;
+  const backend = getBackendUrl();
+  let q = `chatId=${encodeURIComponent(cid)}`;
+  const token =
+    typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  if (token && token !== 'null' && token !== 'undefined' && token.trim()) {
+    q += `&token=${encodeURIComponent(token.trim())}`;
+  }
+  return `${backend}${BASE}/profile-picture/image?${q}`;
+}
+
 /** URL do proxy por URL original do provedor forçando download explícito. */
 export function whatsappProviderMediaProxyDownloadUrl(mediaUrl: string, downloadName?: string): string {
   const inline = whatsappProviderMediaProxyUrl(mediaUrl, downloadName);
@@ -606,19 +646,12 @@ export function postWhatsappSendOrcamentoPdf(params: {
   mode?: WhatsappOrcamentoStatusMode;
   /** Mesmo JSON do modal de PDF (ex.: `localStorage` `pdf_customization_temp`) — opcional. */
   pdfCustomization?: Record<string, unknown>;
-  /**
-   * PDF já renderizado no frontend (PrintRenderer) como base64 (cru ou data URL).
-   * Quando presente, o backend NÃO gera o PDF; apenas envia via provedor.
-   */
-  pdfBase64?: string;
-  /** Nome do ficheiro no WhatsApp (opcional). */
-  pdfFilename?: string;
 }) {
   return axiosApiService.post<{
     message: WhatsappMessageDto;
     statusUpdated: boolean;
     mode: WhatsappOrcamentoStatusMode;
-  }>(`${BASE}/actions/send-orcamento-pdf`, params);
+  }>(`${BASE}/actions/send-orcamento-pdf`, params, { timeout: 120_000 });
 }
 
 // ——— Evolution API v2 — Chat Controller (proxy backend) ———

@@ -10,8 +10,8 @@ export class FracionamentoEstoqueController {
             const resultado = await FracionamentoEstoqueService.processarAtualizacoesFracionamento();
             
             res.json({
+                ...resultado,
                 success: true,
-                ...resultado
             });
         } catch (error: any) {
             console.error('❌ Erro ao processar atualizações de fracionamento:', error);

@@ -4,6 +4,99 @@ import { AuthRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
 import { projetosService } from '../services/projetos.service';
+import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
+
+/** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
+export const buscarProjetos = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+
+    if (q.length < 1) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+
+    const projetos = await prisma.projeto.findMany({
+      where: {
+        status: { not: 'CANCELADO' },
+        OR: [
+          { titulo: { contains: q, mode: 'insensitive' } },
+          { descricao: { contains: q, mode: 'insensitive' } },
+          { cliente: { nome: { contains: q, mode: 'insensitive' } } },
+        ],
+      },
+      take: limit * 3,
+      select: {
+        id: true,
+        titulo: true,
+        status: true,
+        semObra: true,
+        cliente: { select: { id: true, nome: true } },
+        orcamento: { select: { numeroSequencial: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const qLower = q.toLowerCase();
+    const filtrados = projetos
+      .filter((p) => {
+        const osNum = p.orcamento?.numeroSequencial
+          ? `os-${p.orcamento.numeroSequencial}`.toLowerCase()
+          : '';
+        if (osNum.includes(qLower.replace(/\s/g, ''))) return true;
+        return true;
+      })
+      .slice(0, limit);
+
+    const ids = filtrados.map((p) => p.id);
+    const obras = await prisma.obra.findMany({
+      where: { projetoId: { in: ids } },
+      select: { id: true, projetoId: true, nomeObra: true, status: true },
+    });
+    const obraPorProjeto = new Map(obras.map((o) => [o.projetoId!, o]));
+
+    const data = filtrados.map((p) => {
+      const obra = obraPorProjeto.get(p.id);
+      return {
+        id: p.id,
+        titulo: p.titulo,
+        status: p.status,
+        semObra: p.semObra,
+        numeroOs: p.orcamento?.numeroSequencial
+          ? `OS-${p.orcamento.numeroSequencial}`
+          : null,
+        cliente: p.cliente,
+        obra: obra
+          ? { id: obra.id, nomeObra: obra.nomeObra, status: obra.status }
+          : null,
+      };
+    });
+
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro buscar projetos:', error);
+    res.status(500).json({ success: false, error: 'Erro ao buscar ordens de serviço' });
+  }
+};
+
+export const getKitDisponibilidadeBomItem = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { projetoId, orcamentoItemId } = req.params;
+    const result = await KitDisponibilidadeService.verificarItemOrcamentoProjeto(
+      projetoId,
+      orcamentoItemId,
+    );
+    if (!result) {
+      res.status(404).json({ success: false, error: 'Item de kit não encontrado' });
+      return;
+    }
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Erro kit-disponibilidade BOM:', error);
+    res.status(500).json({ success: false, error: 'Erro ao verificar kit' });
+  }
+};
 
 // Listar todos os projetos
 export const getProjetos = async (req: Request, res: Response): Promise<void> => {

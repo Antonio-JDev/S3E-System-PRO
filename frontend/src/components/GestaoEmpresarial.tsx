@@ -13,6 +13,7 @@ import {
 } from '../services/gerenciamentoService';
 import { financeiroService } from '../services/financeiroService';
 import { axiosApiService } from '../services/axiosApi';
+import { getUploadUrl } from '../config/api';
 import { maskCpf, maskTelefoneBr, onlyDigits } from '../utils/masks';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/timeFormat';
 import { formatDatePtBrInSaoPaulo, formatDateTimePtBrInSaoPaulo, nowYmdInSaoPaulo } from '../utils/date';
@@ -576,7 +577,60 @@ const RHView: React.FC = () => {
     const [loadingHistorico, setLoadingHistorico] = useState(false);
 
     const [batidasEdicao, setBatidasEdicao] = useState<Record<number, string[]>>({});
+    const skipBatidasSyncRef = useRef(false);
     const [salvandoBatidasDia, setSalvandoBatidasDia] = useState<number | null>(null);
+    const [faltaJustificadaModal, setFaltaJustificadaModal] = useState<{
+        dia: number;
+        modo: 'criar' | 'editar';
+        ocorrenciaId?: string;
+        documentoUrl?: string | null;
+        documentoNome?: string | null;
+    } | null>(null);
+    const [faltaJustificadaDescricao, setFaltaJustificadaDescricao] = useState('');
+    const [faltaJustificadaArquivo, setFaltaJustificadaArquivo] = useState<File | null>(null);
+    const [faltaJustificadaRemoverAnexo, setFaltaJustificadaRemoverAnexo] = useState(false);
+    const [salvandoFaltaJustificada, setSalvandoFaltaJustificada] = useState(false);
+    const [removendoAnexoFalta, setRemovendoAnexoFalta] = useState(false);
+
+    const handleExcluirAnexoFaltaJustificada = async () => {
+        if (!faltaJustificadaModal?.ocorrenciaId) return;
+        setRemovendoAnexoFalta(true);
+        try {
+            const resp = await rhService.deletarAnexoFaltaJustificada(faltaJustificadaModal.ocorrenciaId);
+            if (!resp.success) {
+                toast.error((resp as { message?: string }).message ?? 'Não foi possível remover o anexo');
+                return;
+            }
+            toast.success('Anexo removido');
+            // Atualiza o modal sem fechar (evita “piscar”)
+            setFaltaJustificadaModal((prev) =>
+                prev
+                    ? { ...prev, documentoUrl: null, documentoNome: null }
+                    : prev,
+            );
+            // Atualiza tabela local sem recarregar tudo
+            setFolhaDetalhada((prev: typeof folhaDetalhada) => {
+                if (!prev?.conferenciaPonto) return prev;
+                return {
+                    ...prev,
+                    conferenciaPonto: (prev.conferenciaPonto as any[]).map((row: any) =>
+                        row.faltaJustificadaOcorrenciaId === faltaJustificadaModal.ocorrenciaId
+                            ? {
+                                  ...row,
+                                  faltaJustificadaDocumentoUrl: null,
+                                  faltaJustificadaDocumentoNome: null,
+                              }
+                            : row,
+                    ),
+                };
+            });
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao remover o anexo');
+        } finally {
+            setRemovendoAnexoFalta(false);
+        }
+    };
     const [pdfFolhaBusy, setPdfFolhaBusy] = useState(false);
     const [bancoHorasConverterInput, setBancoHorasConverterInput] = useState('');
     const [modoIncluirBanco, setModoIncluirBanco] = useState<'total' | 'parcial'>('total');
@@ -676,9 +730,12 @@ const RHView: React.FC = () => {
         }
     };
 
-    const recarregarFolhaAberta = async () => {
+    const recarregarFolhaAberta = async (opts?: { preservarBatidasEdicao?: boolean }) => {
         if (!funcionarioFolha?.id || !folhaMesRef) return;
         try {
+            if (opts?.preservarBatidasEdicao) {
+                skipBatidasSyncRef.current = true;
+            }
             const resp = await axiosApiService.get(`/api/rh/folha/${funcionarioFolha.id}/${folhaMesRef}`);
             const folha =
                 resp && typeof resp === 'object' && 'data' in resp && (resp as any).data != null
@@ -694,6 +751,10 @@ const RHView: React.FC = () => {
     useEffect(() => {
         if (!folhaDetalhada?.conferenciaPonto) {
             setBatidasEdicao({});
+            return;
+        }
+        if (skipBatidasSyncRef.current) {
+            skipBatidasSyncRef.current = false;
             return;
         }
         const next: Record<number, string[]> = {};
@@ -741,6 +802,81 @@ const RHView: React.FC = () => {
         }
     };
 
+    const ALMOCO_PADRAO_INICIO = '12:00';
+    const ALMOCO_PADRAO_FIM = '13:00';
+
+    const mergeBatidasComAlmocoPadrao = (batidasAtuais: string[]): string[] => {
+        const toMin = (hhmm: string) => {
+            const m = String(hhmm).trim().match(/^(\d{1,2}):(\d{2})$/);
+            if (!m) return Number.POSITIVE_INFINITY;
+            return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        };
+        const cur = [...batidasAtuais];
+        for (const h of [ALMOCO_PADRAO_INICIO, ALMOCO_PADRAO_FIM]) {
+            if (!cur.includes(h)) cur.push(h);
+        }
+        cur.sort((a, b) => toMin(a) - toMin(b));
+        return cur;
+    };
+
+    const handleAplicarAlmocoPadrao = async (
+        dia: number,
+        registroPontoId: string,
+        batidasBase: string[],
+        intervalo?: { inicio?: string | null; fim?: string | null },
+    ) => {
+        const atualInicio = (intervalo?.inicio ?? '').trim();
+        const atualFim = (intervalo?.fim ?? '').trim();
+        const jaTemIntervalo = !!atualInicio || !!atualFim;
+        const jaEhPadrao =
+            atualInicio === ALMOCO_PADRAO_INICIO && atualFim === ALMOCO_PADRAO_FIM;
+        if (jaTemIntervalo && !jaEhPadrao) {
+            toast.message('Intervalo de almoço já definido', {
+                description: `Este dia já possui intervalo ${atualInicio || '??:??'}–${atualFim || '??:??'}. Remova/ajuste o intervalo antes de aplicar o padrão 12:00–13:00.`,
+            });
+            return;
+        }
+
+        const nextBatidas = mergeBatidasComAlmocoPadrao(batidasBase);
+        const jaNasBatidas =
+            nextBatidas.includes(ALMOCO_PADRAO_INICIO) && nextBatidas.includes(ALMOCO_PADRAO_FIM);
+        if (jaNasBatidas && jaEhPadrao && batidasBase.length === nextBatidas.length) {
+            toast.message('Almoço já aplicado', {
+                description: 'As batidas deste dia já incluem 12:00 e 13:00.',
+            });
+            return;
+        }
+
+        setBatidasEdicao((prev) => ({ ...prev, [dia]: nextBatidas }));
+        setFolhaDetalhada((prev: typeof folhaDetalhada) => {
+            if (!prev?.conferenciaPonto) return prev;
+            return {
+                ...prev,
+                conferenciaPonto: (prev.conferenciaPonto as Array<{ dia: number }>).map((row) =>
+                    row.dia === dia
+                        ? {
+                              ...row,
+                              batidas: nextBatidas,
+                              intervaloAlmocoInicio: ALMOCO_PADRAO_INICIO,
+                              intervaloAlmocoFim: ALMOCO_PADRAO_FIM,
+                          }
+                        : row,
+                ),
+            };
+        });
+
+        try {
+            await handleSalvarBatidasDia(dia, registroPontoId, nextBatidas);
+            await rhService.salvarIntervaloAlmoco(registroPontoId, {
+                inicio: ALMOCO_PADRAO_INICIO,
+                fim: ALMOCO_PADRAO_FIM,
+            });
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao aplicar intervalo de almoço');
+        }
+    };
+
     const handleSalvarBatidasDia = async (dia: number, registroPontoId: string, batidasOverride?: string[]) => {
         const bat = batidasOverride ?? batidasEdicao[dia];
         if (!registroPontoId || !bat) return;
@@ -761,8 +897,7 @@ const RHView: React.FC = () => {
                 return;
             }
             toast.success('Batidas salvas — horas recalculadas');
-            await recarregarFolhaAberta();
-            await carregarDados();
+            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
         } catch (e) {
             console.error(e);
             toast.error('Erro ao salvar batidas');
@@ -771,30 +906,148 @@ const RHView: React.FC = () => {
         }
     };
 
-    const handleRegistrarFaltaJustificada = async (dia: number) => {
-        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia) return;
-        const descricao = window.prompt('Descreva o motivo/atestado da falta justificada:');
-        if (!descricao || !descricao.trim()) {
+    const abrirModalFaltaJustificada = (dia: number) => {
+        setFaltaJustificadaDescricao('');
+        setFaltaJustificadaArquivo(null);
+        setFaltaJustificadaRemoverAnexo(false);
+        setFaltaJustificadaModal({ dia, modo: 'criar' });
+    };
+
+    const abrirModalEditarFaltaJustificada = (params: {
+        dia: number;
+        ocorrenciaId: string;
+        descricao?: string | null;
+        documentoUrl?: string | null;
+        documentoNome?: string | null;
+    }) => {
+        setFaltaJustificadaDescricao(params.descricao ?? '');
+        setFaltaJustificadaArquivo(null);
+        setFaltaJustificadaRemoverAnexo(false);
+        setFaltaJustificadaModal({
+            dia: params.dia,
+            modo: 'editar',
+            ocorrenciaId: params.ocorrenciaId,
+            documentoUrl: params.documentoUrl,
+            documentoNome: params.documentoNome,
+        });
+    };
+
+    const handleConfirmarFaltaJustificada = async () => {
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia || !faltaJustificadaModal) return;
+        const descricao = faltaJustificadaDescricao.trim();
+        if (!descricao) {
+            toast.error('Informe a descrição da justificativa');
             return;
         }
+        setSalvandoFaltaJustificada(true);
         try {
-            const resp = await rhService.registrarFaltaJustificada({
+            const isEditar = faltaJustificadaModal.modo === 'editar' && faltaJustificadaModal.ocorrenciaId;
+            let resp: { success?: boolean; message?: string };
+
+            if (isEditar) {
+                const removerAnexo = faltaJustificadaRemoverAnexo && !faltaJustificadaArquivo;
+                resp = await rhService.atualizarFaltaJustificada(faltaJustificadaModal.ocorrenciaId!, {
+                    descricao,
+                    documento: faltaJustificadaArquivo,
+                    removerAnexo,
+                });
+            } else {
+                resp = await rhService.registrarFaltaJustificada({
+                    funcionarioId: funcionarioFolha.id,
+                    referenciaAno: folhaDetalhada.referencia.ano,
+                    referenciaMes: folhaDetalhada.referencia.mes,
+                    dia: faltaJustificadaModal.dia,
+                    descricao,
+                    documento: faltaJustificadaArquivo,
+                });
+            }
+
+            if (!resp.success) {
+                toast.error(
+                    (resp as { message?: string }).message ??
+                        (isEditar ? 'Não foi possível atualizar a justificativa' : 'Não foi possível registrar a falta'),
+                );
+                return;
+            }
+            if (isEditar) {
+                toast.success(
+                    faltaJustificadaArquivo
+                        ? 'Justificativa atualizada com novo anexo'
+                        : faltaJustificadaRemoverAnexo
+                          ? 'Justificativa atualizada — anexo removido'
+                          : 'Justificativa atualizada',
+                );
+            } else {
+                toast.success(
+                    faltaJustificadaArquivo
+                        ? 'Falta justificada registrada com anexo'
+                        : 'Falta justificada registrada',
+                );
+            }
+            setFaltaJustificadaModal(null);
+            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
+        } catch (error) {
+            console.error(error);
+            toast.error(
+                faltaJustificadaModal.modo === 'editar'
+                    ? 'Erro ao atualizar falta justificada'
+                    : 'Erro ao registrar falta justificada',
+            );
+        } finally {
+            setSalvandoFaltaJustificada(false);
+        }
+    };
+
+    const [justificativaParcialModal, setJustificativaParcialModal] = useState<{ dia: number } | null>(null);
+    const [justificativaParcialTipo, setJustificativaParcialTipo] =
+        useState<'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA'>('SAIDA_ANTECIPADA');
+    const [justificativaParcialInicio, setJustificativaParcialInicio] = useState('12:00');
+    const [justificativaParcialFim, setJustificativaParcialFim] = useState('13:00');
+    const [justificativaParcialDescricao, setJustificativaParcialDescricao] = useState('');
+    const [justificativaParcialArquivo, setJustificativaParcialArquivo] = useState<File | null>(null);
+    const [salvandoJustificativaParcial, setSalvandoJustificativaParcial] = useState(false);
+
+    const abrirModalJustificativaParcial = (dia: number, sugestao?: { tipo?: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA'; ini?: string; fim?: string }) => {
+        setJustificativaParcialDescricao('');
+        setJustificativaParcialTipo(sugestao?.tipo ?? 'SAIDA_ANTECIPADA');
+        setJustificativaParcialInicio(sugestao?.ini ?? '12:00');
+        setJustificativaParcialFim(sugestao?.fim ?? '13:00');
+        setJustificativaParcialArquivo(null);
+        setJustificativaParcialModal({ dia });
+    };
+
+    const handleSalvarJustificativaParcial = async () => {
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia || !justificativaParcialModal) return;
+        const desc = justificativaParcialDescricao.trim();
+        if (!desc) {
+            toast.error('Informe a descrição da justificativa');
+            return;
+        }
+        setSalvandoJustificativaParcial(true);
+        try {
+            const resp = await rhService.registrarJustificativaParcial({
                 funcionarioId: funcionarioFolha.id,
                 referenciaAno: folhaDetalhada.referencia.ano,
                 referenciaMes: folhaDetalhada.referencia.mes,
-                dia,
-                descricao: descricao.trim(),
+                dia: justificativaParcialModal.dia,
+                descricao: desc,
+                justificativaTipo: justificativaParcialTipo,
+                horaInicio: justificativaParcialInicio,
+                horaFim: justificativaParcialFim,
+                documento: justificativaParcialArquivo,
             });
             if (!resp.success) {
-                toast.error((resp as { message?: string }).message ?? 'Não foi possível registrar a falta');
+                toast.error((resp as { message?: string }).message ?? 'Não foi possível registrar a justificativa');
                 return;
             }
-            toast.success('Falta justificada registrada');
-            await recarregarFolhaAberta();
-            await carregarDados();
-        } catch (error) {
-            console.error(error);
-            toast.error('Erro ao registrar falta justificada');
+            toast.success('Justificativa de meio período registrada');
+            setJustificativaParcialModal(null);
+            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao salvar justificativa');
+        } finally {
+            setSalvandoJustificativaParcial(false);
         }
     };
 
@@ -3518,8 +3771,8 @@ const RHView: React.FC = () => {
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Atraso na entrada além da tolerância de 5 minutos">
                                                                 Atraso
                                                             </th>
-                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Saída antes do horário previsto além da tolerância de 5 minutos">
-                                                                Saída ant.
+                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Saída antecipada (vermelho) ou horas extras além da jornada no dia (verde)">
+                                                                Saída ant. / Extra
                                                             </th>
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-24">Situação</th>
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-24">Ações</th>
@@ -3540,27 +3793,58 @@ const RHView: React.FC = () => {
                                                             saida: string | null;
                                                             situacao: string;
                                                             faltaJustificada?: boolean;
+                                                            faltaJustificadaOcorrenciaId?: string | null;
+                                                            faltaJustificadaDescricao?: string | null;
+                                                            faltaJustificadaDocumentoUrl?: string | null;
+                                                            faltaJustificadaDocumentoNome?: string | null;
+                                                            justificativaParcial?: {
+                                                                id: string;
+                                                                tipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+                                                                horaInicio?: string | null;
+                                                                horaFim?: string | null;
+                                                                descricao?: string | null;
+                                                                documentoAnexoUrl?: string | null;
+                                                                documentoAnexoNome?: string | null;
+                                                            } | null;
+                                                            minutosMetaDia?: number;
                                                             statusCompensacaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
                                                             compensacaoDiaId?: string | null;
                                                             minutosAtraso?: number;
                                                             minutosHorasDevidas?: number;
+                                                            minutosExtra20?: number;
                                                             intervaloAlmocoInicio?: string | null;
                                                             intervaloAlmocoFim?: string | null;
                                                         }) => {
-                                                            const bgRow =
-                                                                d.statusCompensacaoRh === 'PENDENTE'
-                                                                    ? 'bg-orange-50/90 dark:bg-orange-900/20'
-                                                                    :
-                                                                d.ehFeriado && !d.ehFimDeSemana
+                                                            const ehFaltaDia =
+                                                                !d.temRegistro &&
+                                                                !d.ehFimDeSemana &&
+                                                                !d.ehFeriado &&
+                                                                !d.faltaJustificada;
+                                                            const bgRow = ehFaltaDia
+                                                                ? 'bg-red-50/90 dark:bg-red-950/30'
+                                                                : d.statusCompensacaoRh === 'PENDENTE'
+                                                                  ? 'bg-orange-50/90 dark:bg-orange-900/20'
+                                                                  : d.ehFeriado && !d.ehFimDeSemana
                                                                     ? 'bg-violet-50/80 dark:bg-violet-950/25'
                                                                     : d.ehFimDeSemana
-                                                                      ? 'bg-gray-50 dark:bg-dark-hover/50'
+                                                                      ? 'bg-yellow-50/90 dark:bg-yellow-900/20'
                                                                       : '';
+                                                            let situacaoLabel = d.situacao;
+                                                            if (d.situacao === 'OK_PARCIAL') {
+                                                                situacaoLabel = 'OK (abaixo da meta)';
+                                                            }
+                                                            const justificativaParcialLabel = d.justificativaParcial?.tipo === 'ENTRADA_ATRASADA'
+                                                                ? 'Entrada atrasada justificada'
+                                                                : d.justificativaParcial?.tipo === 'SAIDA_ANTECIPADA'
+                                                                  ? 'Saída antecipada justificada'
+                                                                  : null;
                                                             let situacaoClass = 'text-gray-500 dark:text-gray-400';
                                                             if (d.situacao === 'OK') {
                                                                 situacaoClass = 'text-emerald-600 dark:text-emerald-400 font-semibold';
-                                                            } else if (d.situacao === 'Inconsistente') {
+                                                            } else if (d.situacao === 'OK_PARCIAL') {
                                                                 situacaoClass = 'text-amber-600 dark:text-amber-400 font-semibold';
+                                                            } else if (d.situacao === 'Inconsistente') {
+                                                                situacaoClass = 'text-red-600 dark:text-red-400 font-semibold';
                                                             } else if (
                                                                 d.situacao === 'Sem registro' &&
                                                                 !d.ehFimDeSemana &&
@@ -3582,9 +3866,14 @@ const RHView: React.FC = () => {
                                                             const almocoFim = d.intervaloAlmocoFim ?? null;
                                                             const almocoLabel =
                                                                 almocoInicio && almocoFim ? `${almocoInicio}–${almocoFim}` : '—';
+                                                            const temAlmocoNasBatidas =
+                                                                listaBat.includes('12:00') &&
+                                                                listaBat.includes('13:00');
                                                             const canAlmoco =
                                                                 !!regId &&
-                                                                (listaBat.length === 2 || listaBat.length === 3);
+                                                                listaBat.length >= 2 &&
+                                                                listaBat.length <= 4 &&
+                                                                !temAlmocoNasBatidas;
                                                             const exibirBatidas =
                                                                 listaBat.length > 0
                                                                     ? listaBat
@@ -3593,10 +3882,24 @@ const RHView: React.FC = () => {
                                                                       : [];
                                                             return (
                                                                 <tr key={d.dia} className={bgRow}>
-                                                                    <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-gray-900 dark:text-gray-100 align-top">
+                                                                    <td
+                                                                        className={`px-2 py-1 border border-gray-200 dark:border-dark-border align-top ${
+                                                                            ehFaltaDia
+                                                                                ? 'text-red-700 dark:text-red-300 font-bold'
+                                                                                : 'text-gray-900 dark:text-gray-100'
+                                                                        }`}
+                                                                    >
                                                                         {String(d.dia).padStart(2, '0')}
                                                                     </td>
-                                                                    <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-gray-700 dark:text-gray-300 align-top">
+                                                                    <td
+                                                                        className={`px-2 py-1 border border-gray-200 dark:border-dark-border align-top ${
+                                                                            ehFaltaDia
+                                                                                ? 'text-red-600 dark:text-red-400 font-semibold'
+                                                                                : d.ehFimDeSemana
+                                                                                  ? 'text-amber-800 dark:text-amber-200 font-medium'
+                                                                                  : 'text-gray-700 dark:text-gray-300'
+                                                                        }`}
+                                                                    >
                                                                         {d.diaSemanaLabel}
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top text-[11px]">
@@ -3682,44 +3985,18 @@ const RHView: React.FC = () => {
                                                                                 <button
                                                                                     type="button"
                                                                                     className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline"
-                                                                                    onClick={async () => {
-                                                                                        const atualInicio = (d.intervaloAlmocoInicio ?? '').trim();
-                                                                                        const atualFim = (d.intervaloAlmocoFim ?? '').trim();
-                                                                                        const jaTemIntervalo = !!atualInicio || !!atualFim;
-                                                                                        const jaEhPadrao =
-                                                                                            atualInicio === '12:00' && atualFim === '13:00';
-                                                                                        if (jaTemIntervalo && !jaEhPadrao) {
-                                                                                            toast.message('Intervalo de almoço já definido', {
-                                                                                                description: `Este dia já possui intervalo ${atualInicio || '??:??'}–${atualFim || '??:??'}. Remova/ajuste o intervalo antes de aplicar o padrão 12:00–13:00.`,
-                                                                                            });
-                                                                                            return;
-                                                                                        }
-
-                                                                                        const inserir = ['12:00', '13:00'];
-                                                                                        const toMin = (hhmm: string) => {
-                                                                                            const m = String(hhmm).trim().match(/^(\d{1,2}):(\d{2})$/);
-                                                                                            if (!m) return Number.POSITIVE_INFINITY;
-                                                                                            return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-                                                                                        };
-                                                                                        const nextBatidas = (() => {
-                                                                                            const cur = [...(batidasEdicao[d.dia] ?? listaBat)];
-                                                                                            for (const h of inserir) {
-                                                                                                if (!cur.includes(h)) cur.push(h);
-                                                                                            }
-                                                                                            cur.sort((a, b) => toMin(a) - toMin(b));
-                                                                                            return cur;
-                                                                                        })();
-                                                                                        setBatidasEdicao((prev) => ({ ...prev, [d.dia]: nextBatidas }));
-                                                                                        try {
-                                                                                            await rhService.salvarIntervaloAlmoco(regId!, { inicio: '12:00', fim: '13:00' });
-                                                                                            toast.success('Intervalo de almoço registrado (12:00–13:00)');
-                                                                                            await handleSalvarBatidasDia(d.dia, regId!, nextBatidas);
-                                                                                        } catch (e) {
-                                                                                            console.error(e);
-                                                                                            toast.error('Erro ao salvar intervalo de almoço');
-                                                                                        }
-                                                                                    }}
-                                                                                    title="Preenche almoço 12:00–13:00 (para dias com 2–3 batidas)"
+                                                                                    onClick={() =>
+                                                                                        void handleAplicarAlmocoPadrao(
+                                                                                            d.dia,
+                                                                                            regId!,
+                                                                                            [...(batidasEdicao[d.dia] ?? listaBat)],
+                                                                                            {
+                                                                                                inicio: d.intervaloAlmocoInicio,
+                                                                                                fim: d.intervaloAlmocoFim,
+                                                                                            },
+                                                                                        )
+                                                                                    }
+                                                                                    title="Insere 12:00 e 13:00 nas batidas e registra o intervalo"
                                                                                 >
                                                                                     Almoço
                                                                                 </button>
@@ -3751,26 +4028,88 @@ const RHView: React.FC = () => {
                                                                         )}
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-center align-top">
-                                                                        {(d.minutosHorasDevidas ?? 0) > 0 ? (
-                                                                            <span
-                                                                                className="font-mono font-bold text-red-600 dark:text-red-400"
-                                                                                title="Saída antes do horário previsto além da tolerância de 5 minutos"
-                                                                            >
-                                                                                {minutesToHHmm(d.minutosHorasDevidas ?? 0)}
-                                                                            </span>
-                                                                        ) : (
-                                                                            <span className="text-gray-400 dark:text-gray-500">—</span>
-                                                                        )}
+                                                                        <div className="flex flex-col items-center gap-0.5">
+                                                                            {(d.minutosHorasDevidas ?? 0) > 0 ? (
+                                                                                <span
+                                                                                    className="font-mono font-bold text-red-600 dark:text-red-400"
+                                                                                    title="Saída antes do horário previsto além da tolerância de 5 minutos"
+                                                                                >
+                                                                                    −{minutesToHHmm(d.minutosHorasDevidas ?? 0)}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {(d.minutosExtra20 ?? 0) > 0 ? (
+                                                                                <span
+                                                                                    className="font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                                                                                    title="Horas extras além da jornada diária"
+                                                                                >
+                                                                                    +{minutesToHHmm(d.minutosExtra20 ?? 0)}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {(d.minutosHorasDevidas ?? 0) <= 0 &&
+                                                                            (d.minutosExtra20 ?? 0) <= 0 ? (
+                                                                                <span className="text-gray-400 dark:text-gray-500">—</span>
+                                                                            ) : null}
+                                                                        </div>
                                                                     </td>
                                                                     <td
                                                                         className={`px-2 py-1 border border-gray-200 dark:border-dark-border text-center align-top ${situacaoClass}`}
                                                                     >
                                                                         <div className="flex flex-col items-center gap-0.5">
-                                                                            <span>{d.situacao}</span>
+                                                                            <span>{situacaoLabel}</span>
                                                                             {d.faltaJustificada && (
                                                                                 <span className="text-[10px] text-sky-600 dark:text-sky-300 font-medium">
                                                                                     Falta justificada
                                                                                 </span>
+                                                                            )}
+                                                                            {d.faltaJustificada && d.faltaJustificadaDocumentoUrl && (
+                                                                                <a
+                                                                                    href={getUploadUrl(d.faltaJustificadaDocumentoUrl)}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium hover:underline"
+                                                                                    title={d.faltaJustificadaDocumentoNome ?? 'Ver anexo'}
+                                                                                >
+                                                                                    Atestado anexado
+                                                                                </a>
+                                                                            )}
+                                                                            {justificativaParcialLabel && (
+                                                                                <span className="text-[10px] text-sky-700 dark:text-sky-300 font-medium">
+                                                                                    {justificativaParcialLabel}
+                                                                                </span>
+                                                                            )}
+                                                                            {d.justificativaParcial?.horaInicio &&
+                                                                            d.justificativaParcial?.horaFim ? (
+                                                                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-200 text-[10px] font-semibold">
+                                                                                    JP: {d.justificativaParcial.horaInicio}-{d.justificativaParcial.horaFim}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {d.justificativaParcial?.documentoAnexoUrl && (
+                                                                                <a
+                                                                                    href={getUploadUrl(d.justificativaParcial.documentoAnexoUrl)}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium hover:underline"
+                                                                                    title={d.justificativaParcial.documentoAnexoNome ?? 'Ver anexo justificativa'}
+                                                                                >
+                                                                                    Documento justificativa
+                                                                                </a>
+                                                                            )}
+                                                                            {d.faltaJustificada && d.faltaJustificadaOcorrenciaId && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        abrirModalEditarFaltaJustificada({
+                                                                                            dia: d.dia,
+                                                                                            ocorrenciaId: d.faltaJustificadaOcorrenciaId!,
+                                                                                            descricao: d.faltaJustificadaDescricao,
+                                                                                            documentoUrl: d.faltaJustificadaDocumentoUrl,
+                                                                                            documentoNome: d.faltaJustificadaDocumentoNome,
+                                                                                        })
+                                                                                    }
+                                                                                    className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 hover:underline"
+                                                                                >
+                                                                                    Editar justificativa
+                                                                                </button>
                                                                             )}
                                                                             {d.statusCompensacaoRh === 'PENDENTE' && (
                                                                                 <span className="text-[10px] text-orange-600 dark:text-orange-300 font-medium">
@@ -3781,23 +4120,57 @@ const RHView: React.FC = () => {
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-center align-top">
                                                                         {regId ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                disabled={salvandoBatidasDia === d.dia}
-                                                                                onClick={() => void handleSalvarBatidasDia(d.dia, regId)}
-                                                                                className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline disabled:opacity-50"
-                                                                            >
-                                                                                {salvandoBatidasDia === d.dia ? 'Salvando…' : 'Salvar'}
-                                                                            </button>
+                                                                            <div className="flex flex-col items-center gap-1">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    disabled={salvandoBatidasDia === d.dia}
+                                                                                    onClick={() => void handleSalvarBatidasDia(d.dia, regId)}
+                                                                                    className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline disabled:opacity-50"
+                                                                                >
+                                                                                    {salvandoBatidasDia === d.dia ? 'Salvando…' : 'Salvar'}
+                                                                                </button>
+                                                                                {((d.minutosAtraso ?? 0) > 0 || (d.minutosHorasDevidas ?? 0) > 0) && !d.ehFeriado && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            abrirModalJustificativaParcial(d.dia, {
+                                                                                                tipo: (d.minutosHorasDevidas ?? 0) > 0 ? 'SAIDA_ANTECIPADA' : 'ENTRADA_ATRASADA',
+                                                                                                ini: (d.minutosHorasDevidas ?? 0) > 0 ? '12:00' : '07:30',
+                                                                                                fim: (d.minutosHorasDevidas ?? 0) > 0 ? '13:00' : '08:00',
+                                                                                            })
+                                                                                        }
+                                                                                        className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
+                                                                                    >
+                                                                                        Justificar meio período
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
                                                                         ) : (
-                                                                            <div className="flex items-center justify-center gap-2">
+                                                                            <div className="flex flex-col items-center justify-center gap-1">
                                                                                 {!d.ehFimDeSemana && !d.ehFeriado && !d.faltaJustificada && (
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={() => void handleRegistrarFaltaJustificada(d.dia)}
+                                                                                        onClick={() => abrirModalFaltaJustificada(d.dia)}
                                                                                         className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
                                                                                     >
                                                                                         Falta justificada
+                                                                                    </button>
+                                                                                )}
+                                                                                {d.faltaJustificada && d.faltaJustificadaOcorrenciaId && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() =>
+                                                                                            abrirModalEditarFaltaJustificada({
+                                                                                                dia: d.dia,
+                                                                                                ocorrenciaId: d.faltaJustificadaOcorrenciaId!,
+                                                                                                descricao: d.faltaJustificadaDescricao,
+                                                                                                documentoUrl: d.faltaJustificadaDocumentoUrl,
+                                                                                                documentoNome: d.faltaJustificadaDocumentoNome,
+                                                                                            })
+                                                                                        }
+                                                                                        className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 hover:underline"
+                                                                                    >
+                                                                                        Editar
                                                                                     </button>
                                                                                 )}
                                                                                 {d.statusCompensacaoRh === 'PENDENTE' && d.compensacaoDiaId && (
@@ -3825,6 +4198,244 @@ const RHView: React.FC = () => {
                                     )}
                                 </>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Falta justificada */}
+            {faltaJustificadaModal && funcionarioFolha && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong w-full max-w-lg overflow-hidden flex flex-col">
+                        <div className="relative p-5 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-sky-600 to-sky-700 shrink-0">
+                            <h3 className="text-lg font-bold text-white pr-8">
+                                {faltaJustificadaModal.modo === 'editar'
+                                    ? 'Editar falta justificada'
+                                    : 'Falta justificada'}
+                            </h3>
+                            <p className="text-sm text-sky-100 mt-0.5">
+                                {funcionarioFolha.nome} — dia{' '}
+                                {String(faltaJustificadaModal.dia).padStart(2, '0')}/
+                                {String(folhaDetalhada?.referencia?.mes ?? '').padStart(2, '0')}/
+                                {folhaDetalhada?.referencia?.ano ?? ''}
+                            </p>
+                            <button
+                                type="button"
+                                disabled={salvandoFaltaJustificada}
+                                onClick={() => setFaltaJustificadaModal(null)}
+                                className="absolute top-3 right-3 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                                {faltaJustificadaModal.modo === 'editar'
+                                    ? 'Altere a descrição, substitua o anexo por um novo arquivo ou remova o documento atual.'
+                                    : 'A justificativa fica vinculada à data mesmo sem batidas no relógio. Após importar o XLS, o sistema associa automaticamente ao registro do dia.'}
+                            </p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Descrição / motivo
+                                </label>
+                                <textarea
+                                    rows={4}
+                                    value={faltaJustificadaDescricao}
+                                    onChange={(e) => setFaltaJustificadaDescricao(e.target.value)}
+                                    placeholder="Ex.: atestado médico, declaração, comparecimento em audiência…"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-sm text-gray-900 dark:text-gray-100 resize-y min-h-[96px]"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    {faltaJustificadaModal.modo === 'editar'
+                                        ? 'Substituir anexo (opcional)'
+                                        : 'Atestado ou declaração (opcional)'}
+                                </label>
+                                {faltaJustificadaModal.modo === 'editar' &&
+                                    faltaJustificadaModal.documentoUrl &&
+                                    !faltaJustificadaRemoverAnexo && (
+                                        <div className="mb-2 p-2 rounded-lg bg-gray-50 dark:bg-dark-hover border border-gray-200 dark:border-dark-border text-xs">
+                                            <span className="text-gray-600 dark:text-gray-400">Anexo atual: </span>
+                                            <a
+                                                href={getUploadUrl(faltaJustificadaModal.documentoUrl)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-indigo-700 dark:text-indigo-300 font-medium hover:underline"
+                                            >
+                                                {faltaJustificadaModal.documentoNome ?? 'Ver documento'}
+                                            </a>
+                                        </div>
+                                    )}
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                                    onChange={(e) => {
+                                        setFaltaJustificadaArquivo(e.target.files?.[0] ?? null);
+                                        if (e.target.files?.[0]) setFaltaJustificadaRemoverAnexo(false);
+                                    }}
+                                    className="block w-full text-xs text-gray-600 dark:text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-50 file:text-sky-700 dark:file:bg-sky-900/30 dark:file:text-sky-200"
+                                />
+                                {faltaJustificadaArquivo && (
+                                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300 truncate">
+                                        Novo arquivo: {faltaJustificadaArquivo.name}
+                                    </p>
+                                )}
+                                {faltaJustificadaModal.modo === 'editar' &&
+                                    faltaJustificadaModal.documentoUrl && (
+                                        <div className="mt-2 flex items-center justify-between gap-2">
+                                            <span className="text-[11px] text-gray-600 dark:text-gray-400">
+                                                Dica: clique no nome do arquivo para abrir em outra aba.
+                                            </span>
+                                            <button
+                                                type="button"
+                                                disabled={removendoAnexoFalta || salvandoFaltaJustificada}
+                                                onClick={() => void handleExcluirAnexoFaltaJustificada()}
+                                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs font-semibold disabled:opacity-50"
+                                                title="Excluir anexo"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m4 0H5" />
+                                                </svg>
+                                                {removendoAnexoFalta ? 'Excluindo…' : 'Excluir'}
+                                            </button>
+                                        </div>
+                                    )}
+                            </div>
+                        </div>
+                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-end gap-2 shrink-0">
+                            <button
+                                type="button"
+                                disabled={salvandoFaltaJustificada}
+                                onClick={() => setFaltaJustificadaModal(null)}
+                                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={salvandoFaltaJustificada}
+                                onClick={() => void handleConfirmarFaltaJustificada()}
+                                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold disabled:opacity-50"
+                            >
+                                {salvandoFaltaJustificada
+                                    ? 'Salvando…'
+                                    : faltaJustificadaModal.modo === 'editar'
+                                      ? 'Salvar alterações'
+                                      : 'Confirmar justificativa'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Justificativa meio período */}
+            {justificativaParcialModal && funcionarioFolha && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong w-full max-w-lg overflow-hidden flex flex-col">
+                        <div className="relative p-5 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-indigo-600 to-indigo-700 shrink-0">
+                            <h3 className="text-lg font-bold text-white pr-8">Justificativa — meio período</h3>
+                            <p className="text-sm text-indigo-100 mt-0.5">
+                                {funcionarioFolha.nome} — dia{' '}
+                                {String(justificativaParcialModal.dia).padStart(2, '0')}/
+                                {String(folhaDetalhada?.referencia?.mes ?? '').padStart(2, '0')}/
+                                {folhaDetalhada?.referencia?.ano ?? ''}
+                            </p>
+                            <button
+                                type="button"
+                                disabled={salvandoJustificativaParcial}
+                                onClick={() => setJustificativaParcialModal(null)}
+                                className="absolute top-3 right-3 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <p className="text-xs text-gray-600 dark:text-gray-400">
+                                Use quando houver atraso/saída antecipada por motivo pontual (ex.: dentista). Sem justificativa, o desconto continua.
+                                Essa justificativa permanece salva mesmo se o ponto (XLS) for importado depois.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo</label>
+                                    <select
+                                        value={justificativaParcialTipo}
+                                        onChange={(e) => setJustificativaParcialTipo(e.target.value as any)}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-sm text-gray-900 dark:text-gray-100"
+                                    >
+                                        <option value="ENTRADA_ATRASADA">Entrada atrasada</option>
+                                        <option value="SAIDA_ANTECIPADA">Saída antecipada</option>
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Início</label>
+                                        <input
+                                            value={justificativaParcialInicio}
+                                            onChange={(e) => setJustificativaParcialInicio(e.target.value)}
+                                            placeholder="HH:mm"
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-sm text-gray-900 dark:text-gray-100 font-mono"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fim</label>
+                                        <input
+                                            value={justificativaParcialFim}
+                                            onChange={(e) => setJustificativaParcialFim(e.target.value)}
+                                            placeholder="HH:mm"
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-sm text-gray-900 dark:text-gray-100 font-mono"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Descrição / motivo</label>
+                                <textarea
+                                    rows={4}
+                                    value={justificativaParcialDescricao}
+                                    onChange={(e) => setJustificativaParcialDescricao(e.target.value)}
+                                    placeholder="Ex.: dentista, exame, atendimento emergencial…"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-sm text-gray-900 dark:text-gray-100 resize-y min-h-[96px]"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Documento (opcional)
+                                </label>
+                                <input
+                                    type="file"
+                                    accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                                    onChange={(e) => setJustificativaParcialArquivo(e.target.files?.[0] ?? null)}
+                                    className="block w-full text-xs text-gray-600 dark:text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 dark:file:bg-indigo-900/30 dark:file:text-indigo-200"
+                                />
+                                {justificativaParcialArquivo && (
+                                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300 truncate">
+                                        Arquivo: {justificativaParcialArquivo.name}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-end gap-2 shrink-0">
+                            <button
+                                type="button"
+                                disabled={salvandoJustificativaParcial}
+                                onClick={() => setJustificativaParcialModal(null)}
+                                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={salvandoJustificativaParcial}
+                                onClick={() => void handleSalvarJustificativaParcial()}
+                                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50"
+                            >
+                                {salvandoJustificativaParcial ? 'Salvando…' : 'Confirmar justificativa'}
+                            </button>
                         </div>
                     </div>
                 </div>

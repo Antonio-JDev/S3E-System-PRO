@@ -7,8 +7,22 @@ interface ActionItem {
   onClick: () => void;
   variant?: 'default' | 'danger' | 'primary' | 'success' | 'info';
   disabled?: boolean;
+  loading?: boolean;
+  /** Mantém o menu aberto até `loading` voltar a false (ex.: abrir modal pesado). */
+  closeOnClick?: boolean;
   show?: boolean; // Para controlar visibilidade condicional
 }
+
+const ActionSpinner = () => (
+  <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path
+      className="opacity-75"
+      fill="currentColor"
+      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+    />
+  </svg>
+);
 
 interface ActionsDropdownProps {
   actions: ActionItem[];
@@ -29,6 +43,7 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
     left: 0, 
     openUpward: false 
   });
+  const waitingCloseRef = useRef(false);
 
   // Filtrar ações visíveis
   const visibleActions = actions.filter(action => action.show !== false);
@@ -153,11 +168,23 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
     };
   }, [isOpen]);
 
-  const handleActionClick = (action: ActionItem) => {
-    if (!action.disabled) {
-      action.onClick();
+  // Fecha o menu após ações com closeOnClick: false quando loading terminar
+  useEffect(() => {
+    if (!isOpen || !waitingCloseRef.current) return;
+    if (!visibleActions.some((a) => a.loading)) {
+      waitingCloseRef.current = false;
       setIsOpen(false);
     }
+  }, [isOpen, visibleActions]);
+
+  const handleActionClick = (action: ActionItem) => {
+    if (action.disabled || action.loading) return;
+    action.onClick();
+    if (action.closeOnClick === false) {
+      waitingCloseRef.current = true;
+      return;
+    }
+    setIsOpen(false);
   };
 
   const getVariantStyles = (variant: ActionItem['variant'] = 'default') => {
@@ -193,16 +220,20 @@ const ActionsDropdown: React.FC<ActionsDropdownProps> = ({
         <button
           key={index}
           onClick={() => handleActionClick(action)}
-          disabled={action.disabled}
+          disabled={action.disabled || action.loading}
           className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors ${
-            action.disabled 
-              ? 'opacity-50 cursor-not-allowed' 
-              : getVariantStyles(action.variant)
+            action.loading && !action.disabled
+              ? `cursor-wait ${getVariantStyles(action.variant)}`
+              : action.disabled || action.loading
+                ? 'opacity-50 cursor-not-allowed'
+                : getVariantStyles(action.variant)
           }`}
         >
-          {action.icon && (
+          {action.loading ? (
+            <ActionSpinner />
+          ) : action.icon ? (
             <span className="flex-shrink-0">{action.icon}</span>
-          )}
+          ) : null}
           <span className="flex-1 text-left">{action.label}</span>
         </button>
       ))}

@@ -31,7 +31,7 @@ interface CalcularFolhaMesParams {
   dataReferencia: Date | string;
 }
 
-export type SituacaoPontoDia = 'OK' | 'Sem registro' | 'Inconsistente';
+export type SituacaoPontoDia = 'OK' | 'OK_PARCIAL' | 'Sem registro' | 'Inconsistente';
 
 export interface ConferenciaPontoDia {
   dia: number;
@@ -55,6 +55,20 @@ export interface ConferenciaPontoDia {
   minutosHorasDevidas: number;
   minutosExtra20: number;
   faltaJustificada: boolean;
+  faltaJustificadaOcorrenciaId?: string | null;
+  faltaJustificadaDescricao?: string | null;
+  faltaJustificadaDocumentoUrl?: string | null;
+  faltaJustificadaDocumentoNome?: string | null;
+  justificativaParcial?: {
+    id: string;
+    tipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+    horaInicio: string | null;
+    horaFim: string | null;
+    descricao: string | null;
+    documentoAnexoUrl?: string | null;
+    documentoAnexoNome?: string | null;
+  } | null;
+  minutosMetaDia?: number;
   statusCompensacaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
   compensacaoDiaId?: string | null;
   /** Intervalo de almoço explícito (manual), formato "HH:mm" */
@@ -95,7 +109,11 @@ export interface FolhaMesResumo {
   resumoPonto?: {
     diasFaltados: number;
     horasTrabalhadas: number;
+    /** Dias úteis sem registro (para detalhar no PDF) */
+    diasFaltadosDetalhe?: Array<{ dia: number; diaSemanaLabel: string }>;
   };
+  /** CLT: quando true, HE são pagas (não usar banco de horas no resumo do PDF) */
+  permitirHorasExtras100?: boolean;
   folgas?: {
     horasFolgaAcumuladas: number;
   };
@@ -325,10 +343,44 @@ export const RhService = {
     }
     const saldoBancoAtual = saldoNAtual + saldo100Atual;
     const ocorrenciasRh = funcionario.ocorrenciasPontoRh ?? [];
-    const faltasJustificadasSet = new Set(
+    const faltasJustificadasMap = new Map(
       ocorrenciasRh
         .filter((o) => o.tipo === 'FALTA_JUSTIFICADA' && o.status !== 'REPROVADO')
-        .map((o) => chaveDiaUtc(o.dataReferencia)),
+        .map((o) => [
+          chaveDiaUtc(o.dataReferencia),
+          {
+            id: o.id,
+            descricao: o.descricao ?? null,
+            documentoAnexoUrl: (o as { documentoAnexoUrl?: string | null }).documentoAnexoUrl ?? null,
+            documentoAnexoNome: (o as { documentoAnexoNome?: string | null }).documentoAnexoNome ?? null,
+          },
+        ]),
+    );
+    const faltasJustificadasSet = new Set(faltasJustificadasMap.keys());
+
+    const hhmmToMin = (hhmm: string | null | undefined): number => {
+      const m = String(hhmm ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return 0;
+      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    };
+    const intervaloMin = (ini: string | null, fim: string | null): number =>
+      Math.max(0, hhmmToMin(fim) - hhmmToMin(ini));
+
+    const justificativasParciaisMap = new Map(
+      ocorrenciasRh
+        .filter((o) => (o as any).tipo === ('JUSTIFICATIVA_PARCIAL' as any) && o.status !== 'REPROVADO')
+        .map((o) => [
+          chaveDiaUtc(o.dataReferencia),
+          {
+            id: o.id,
+            tipo: String((o as any).justificativaTipo ?? '') as 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA',
+            horaInicio: ((o as any).horaInicio ?? null) as string | null,
+            horaFim: ((o as any).horaFim ?? null) as string | null,
+            descricao: o.descricao ?? null,
+            documentoAnexoUrl: (o as { documentoAnexoUrl?: string | null }).documentoAnexoUrl ?? null,
+            documentoAnexoNome: (o as { documentoAnexoNome?: string | null }).documentoAnexoNome ?? null,
+          },
+        ]),
     );
     const compensacaoDias = (funcionario.workShiftCompensacoes ?? []).flatMap((c) =>
       (c.dias ?? []).map((d) => ({
@@ -584,14 +636,24 @@ export const RhService = {
       const nomeFer = nomeFeriado(ano, mes, dia);
       const reg = registrosPorDia.get(chave);
 
+      const faltaJustificada = faltasJustificadasSet.has(chave);
+      const faltaInfo = faltasJustificadasMap.get(chave);
+      const justParcial = justificativasParciaisMap.get(chave) ?? null;
+
       let situacao: SituacaoPontoDia = 'Sem registro';
       if (reg) {
-        situacao =
-          reg.statusConsistencia === StatusConsistenciaPonto.INCONSISTENTE
-            ? 'Inconsistente'
-            : 'OK';
+        if (reg.statusConsistencia === StatusConsistenciaPonto.INCONSISTENTE) {
+          situacao = 'Inconsistente';
+        } else if (faltaJustificada) {
+          situacao = 'OK';
+        } else {
+          const minTrab = Number((reg as { minutosTrabalhados?: number }).minutosTrabalhados ?? 0);
+          const meta = minutosPrevistosDia;
+          situacao = minTrab >= meta ? 'OK' : 'OK_PARCIAL';
+        }
+      } else if (faltaJustificada) {
+        situacao = 'OK';
       }
-      const faltaJustificada = faltasJustificadasSet.has(chave);
       const compDia = compensacaoMap.get(chave);
       if (!reg && !ehFds && !ehFer && !faltaJustificada) {
         minutosFaltaSemRegistro += Math.max(0, minutosPrevistosDia);
@@ -625,10 +687,34 @@ export const RhService = {
         registroPontoId: reg?.id ?? null,
         statusConsistencia: reg?.statusConsistencia ?? null,
         situacao,
-        minutosAtraso: reg ? Number((reg as any).minutosAtraso ?? 0) : 0,
-        minutosHorasDevidas: reg ? Number((reg as any).minutosHorasDevidas ?? 0) : 0,
+        minutosAtraso: (() => {
+          const bruto = reg && !ehFer ? Number((reg as any).minutosAtraso ?? 0) : 0;
+          if (justParcial?.tipo !== 'ENTRADA_ATRASADA') return bruto;
+          return Math.max(0, bruto - intervaloMin(justParcial.horaInicio, justParcial.horaFim));
+        })(),
+        minutosHorasDevidas: (() => {
+          const bruto = reg && !ehFer ? Number((reg as any).minutosHorasDevidas ?? 0) : 0;
+          if (justParcial?.tipo !== 'SAIDA_ANTECIPADA') return bruto;
+          return Math.max(0, bruto - intervaloMin(justParcial.horaInicio, justParcial.horaFim));
+        })(),
         minutosExtra20: reg ? Number((reg as any).minutosExtra20 ?? 0) : 0,
         faltaJustificada,
+        faltaJustificadaOcorrenciaId: faltaInfo?.id ?? null,
+        faltaJustificadaDescricao: faltaInfo?.descricao ?? null,
+        faltaJustificadaDocumentoUrl: faltaInfo?.documentoAnexoUrl ?? null,
+        faltaJustificadaDocumentoNome: faltaInfo?.documentoAnexoNome ?? null,
+        justificativaParcial: justParcial
+          ? {
+            id: justParcial.id,
+            tipo: justParcial.tipo,
+            horaInicio: justParcial.horaInicio,
+            horaFim: justParcial.horaFim,
+            descricao: justParcial.descricao,
+            documentoAnexoUrl: justParcial.documentoAnexoUrl,
+            documentoAnexoNome: justParcial.documentoAnexoNome,
+          }
+          : null,
+        minutosMetaDia: minutosPrevistosDia,
         statusCompensacaoRh: compDia?.status ?? null,
         compensacaoDiaId: compDia?.id ?? null,
         intervaloAlmocoInicio: reg ? (reg as any).intervaloAlmocoInicio ?? null : null,
@@ -636,7 +722,10 @@ export const RhService = {
       });
     }
 
-    const horasNegativas = (minutosAtrasoMes + minutosDevidosMes + minutosFaltaSemRegistro) / 60;
+    const minutosAtrasoMesEf = conferenciaPonto.reduce((sum, d) => sum + Math.max(0, d.minutosAtraso ?? 0), 0);
+    const minutosDevidosMesEf = conferenciaPonto.reduce((sum, d) => sum + Math.max(0, d.minutosHorasDevidas ?? 0), 0);
+
+    const horasNegativas = (minutosAtrasoMesEf + minutosDevidosMesEf + minutosFaltaSemRegistro) / 60;
     const horasCompPendentes =
       compensacaoDias
         .filter((d) => d.status === 'PENDENTE')
@@ -646,13 +735,15 @@ export const RhService = {
         .filter((d) => d.status === 'APROVADO_RH')
         .reduce((sum, d) => sum + d.minutosPrevistos, 0) / 60;
     if (registradoDetail) {
-      const horasNegComFalta = (minutosAtrasoMes + minutosDevidosMes + minutosFaltaSemRegistro) / 60;
+      const horasNegComFalta = (minutosAtrasoMesEf + minutosDevidosMesEf + minutosFaltaSemRegistro) / 60;
       registradoDetail.horasNegativas = horasNegComFalta;
       registradoDetail.horasDevidas = horasNegComFalta;
     }
 
-    const diasFaltados =
-      conferenciaPonto.filter((d) => !d.ehFimDeSemana && !d.ehFeriado && !d.faltaJustificada && !d.temRegistro).length;
+    const diasFaltadosDetalhe = conferenciaPonto
+      .filter((d) => !d.ehFimDeSemana && !d.ehFeriado && !d.faltaJustificada && !d.temRegistro)
+      .map((d) => ({ dia: d.dia, diaSemanaLabel: d.diaSemanaLabel }));
+    const diasFaltados = diasFaltadosDetalhe.length;
     const horasTrabalhadas = conferenciaPonto.reduce((sum, d) => sum + (d.temRegistro ? d.horasLiquidas : 0), 0);
 
     const totalSemBonusDescontos =
@@ -692,7 +783,9 @@ export const RhService = {
       resumoPonto: {
         diasFaltados,
         horasTrabalhadas,
+        diasFaltadosDetalhe,
       },
+      permitirHorasExtras100: funcionario.permitirHorasExtras100 === true,
       folgas: {
         horasFolgaAcumuladas: Number((funcionario as any).horasFolgaAcumuladas ?? 0),
       },

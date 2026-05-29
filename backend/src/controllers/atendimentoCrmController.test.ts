@@ -70,6 +70,11 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
           include: {
             cliente: { select: { id: true, nome: true, cpfCnpj: true } },
             _count: { select: { orcamentos: true } },
+            orcamentos: {
+              select: { numeroSequencial: true },
+              orderBy: { numeroSequencial: 'desc' },
+              take: 1,
+            },
           },
           orderBy: { updatedAt: 'desc' },
         })
@@ -203,10 +208,8 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
   });
 
   describe('update', () => {
-    it('deve retornar 404 quando lead não existe (P2025)', async () => {
-      const err = new Error('Record not found');
-      (err as any).code = 'P2025';
-      mocks.update.mockRejectedValue(err);
+    it('deve retornar 404 quando lead não existe', async () => {
+      mocks.findUnique.mockResolvedValue(null);
       mockReq = { params: { id: 'id-inex' }, body: { nome: 'Atualizado' } };
 
       await atendimentoCrmController.update(
@@ -214,6 +217,8 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         mockRes as Response
       );
 
+      expect(mocks.findUnique).toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
       expect(statusMock).toHaveBeenCalledWith(404);
       expect(jsonMock).toHaveBeenCalledWith({ success: false, error: 'Lead não encontrado' });
     });
@@ -226,6 +231,12 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
         etapa: 2,
         viabilidadeTecnica: true,
       };
+      mocks.findUnique.mockResolvedValue({
+        id: 'lead-1',
+        status: 'EM_ANALISE_TECNICA',
+        etapa: 2,
+        _count: { orcamentos: 0 },
+      });
       mocks.update.mockResolvedValue(updated);
       mockReq = {
         params: { id: 'lead-1' },
@@ -239,6 +250,35 @@ describe('atendimentoCrmController (Funil de Atendimento)', () => {
 
       expect(mocks.update).toHaveBeenCalled();
       expect(jsonMock).toHaveBeenCalledWith({ success: true, data: updated });
+    });
+
+    it('mantém CONVERTIDO quando lead já tem orçamento e body tenta PRONTO_PARA_ORCAR', async () => {
+      mocks.findUnique.mockResolvedValue({
+        id: 'lead-1',
+        status: 'CONVERTIDO',
+        etapa: 3,
+        _count: { orcamentos: 1 },
+      });
+      mocks.update.mockResolvedValue({
+        id: 'lead-1',
+        status: 'CONVERTIDO',
+        etapa: 3,
+      });
+      mockReq = {
+        params: { id: 'lead-1' },
+        body: { nome: 'Lead com proposta', status: 'PRONTO_PARA_ORCAR', etapa: 3 },
+      };
+
+      await atendimentoCrmController.update(
+        mockReq as Request,
+        mockRes as Response
+      );
+
+      expect(mocks.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'CONVERTIDO' }),
+        })
+      );
     });
   });
 

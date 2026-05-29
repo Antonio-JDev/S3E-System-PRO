@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { KitsService } from '../services/kits.service';
+import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
 
 export const listarKits = async (req: Request, res: Response) => {
     try {
@@ -55,6 +56,24 @@ export const buscarKitComposicaoPorId = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             error: error.message || 'Erro ao buscar composição do kit'
+        });
+    }
+};
+
+export const buscarKitComposicaoDisponibilidade = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const quantidade = Math.max(0.0001, Number(req.query.quantidade) || 1);
+        const result = await KitDisponibilidadeService.verificarKit(id, quantidade);
+        if (!result) {
+            return res.status(404).json({ success: false, error: 'Kit não encontrado' });
+        }
+        return res.json({ success: true, data: result });
+    } catch (error: any) {
+        console.error('Erro composição-disponibilidade:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Erro ao verificar disponibilidade do kit',
         });
     }
 };

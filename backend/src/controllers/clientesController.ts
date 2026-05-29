@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
 import { consultarCnpj } from '../services/cnpj-ws.service';
+import { buildClientesWhereFromQuery } from '../utils/clientesSearch.util';
 
 // Configurar multer para upload de JSON
 const storage = multer.diskStorage({
@@ -54,17 +55,11 @@ export const consultarCnpjCliente = async (req: Request, res: Response): Promise
 // Listar todos os clientes
 export const getClientes = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { ativo, busca } = req.query;
-    
-    const where: any = {};
-    if (ativo !== undefined) where.ativo = ativo === 'true';
-    if (busca) {
-      where.OR = [
-        { nome: { contains: busca as string, mode: 'insensitive' } },
-        { cpfCnpj: { contains: busca as string, mode: 'insensitive' } },
-        { email: { contains: busca as string, mode: 'insensitive' } }
-      ];
-    }
+    const where = buildClientesWhereFromQuery({
+      ativo: typeof req.query.ativo === 'string' ? req.query.ativo : undefined,
+      busca: typeof req.query.busca === 'string' ? req.query.busca : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
 
     const clientes = await prisma.cliente.findMany({
       where,

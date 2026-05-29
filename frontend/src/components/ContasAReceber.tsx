@@ -7,6 +7,7 @@ import { AuthContext } from '../contexts/AuthContext';
 import { getUploadUrl } from '../config/api';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { calcValorARegistrar, calcValorBaseFromEfetivo, formatBRL, parseMoney } from '../utils/financeiroValor';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -62,10 +63,26 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
     </svg>
 );
 
+const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125L16.875 4.5" />
+    </svg>
+);
+
+const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 7.5h12m-10.5 0V6a1.5 1.5 0 011.5-1.5h6A1.5 1.5 0 0116.5 6v1.5m-9 0l.643 10.029A2.25 2.25 0 0010.387 19.5h3.226a2.25 2.25 0 002.244-1.971L16.5 7.5M10.5 10.5v6m3-6v6" />
+    </svg>
+);
+
 // ==================== TYPES ====================
 interface ContaReceber {
     id: string;
-    vendaId: string;
+    vendaId?: string;
+    contaManual?: boolean;
+    tipoManual?: 'ENTRADA' | 'OUTRAS_RECEITAS';
+    pagadorNome?: string;
     numeroParcela: number;
     numeroDuplicata: string;
     numeroVenda?: string; // Número da venda (ex: VND-1234567890)
@@ -75,6 +92,8 @@ interface ContaReceber {
     projetoTitulo: string;
     dataVencimento: string;
     valor: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     valorRecebido?: number;
     dataPagamento?: string;
     status: 'Pendente' | 'Recebido' | 'Recebido Parcial' | 'Atrasado';
@@ -139,6 +158,13 @@ interface ContasAReceberProps {
 // ==================== COMPONENT ====================
 const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAtiva }) => {
     const { user } = useContext(AuthContext)!;
+    const userRole = user?.role?.toLowerCase();
+    const canManageManualReceber = Boolean(
+        user?.isAdmin ||
+        userRole === 'admin' ||
+        userRole === 'administrador' ||
+        userRole === 'desenvolvedor'
+    );
 
     const toISODate = (d: Date) => {
         const y = d.getFullYear();
@@ -158,6 +184,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [contasReceber, setContasReceber] = useState<ContaReceber[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchValorExato, setSearchValorExato] = useState('');
+    const [searchValorMin, setSearchValorMin] = useState('');
+    const [searchValorMax, setSearchValorMax] = useState('');
     const [filterStatus, setFilterStatus] = useState<string>('Em aberto'); // Padrão: apenas Pendente e Atrasado
     const [filterPeriodo, setFilterPeriodo] = useState<string>('MesAtual');
     const [{ dataInicio, dataFim }, setFiltroDatas] = useState(() => getMesAtualRange());
@@ -167,6 +196,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [contaSelecionada, setContaSelecionada] = useState<ContaReceber | null>(null);
     const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().split('T')[0]);
     const [valorRecebido, setValorRecebido] = useState('0');
+    const [jurosBaixa, setJurosBaixa] = useState('0');
+    const [descontoBaixa, setDescontoBaixa] = useState('0');
     const [observacoesBaixa, setObservacoesBaixa] = useState('');
     const [meioPagamentoBaixa, setMeioPagamentoBaixa] = useState<string>('PIX');
     
@@ -179,8 +210,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     // Lista de vendas para calcular número sequencial
     const [vendas, setVendas] = useState<Venda[]>([]);
     
-    // AlertDialog de Confirmação
+    // AlertDialog de Confirmação (recebimento / exclusão)
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+    const [confirmDialogTipo, setConfirmDialogTipo] = useState<'receber' | 'excluir' | null>(null);
+    const [contaParaExcluir, setContaParaExcluir] = useState<ContaReceber | null>(null);
+    const [excluindoConta, setExcluindoConta] = useState(false);
 
     // Modal Histórico de recebimentos da duplicata
     const [isHistoricoModalOpen, setIsHistoricoModalOpen] = useState(false);
@@ -194,9 +228,20 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [novaContaPagador, setNovaContaPagador] = useState('');
     const [novaContaDescricao, setNovaContaDescricao] = useState('');
     const [novaContaValor, setNovaContaValor] = useState('');
+    const [novaContaJuros, setNovaContaJuros] = useState('0');
+    const [novaContaDesconto, setNovaContaDesconto] = useState('0');
     const [novaContaVencimento, setNovaContaVencimento] = useState(new Date().toISOString().split('T')[0]);
     const [novaContaObservacoes, setNovaContaObservacoes] = useState('');
     const [salvandoNovaConta, setSalvandoNovaConta] = useState(false);
+    const [isEditarContaModalOpen, setIsEditarContaModalOpen] = useState(false);
+    const [contaEditando, setContaEditando] = useState<ContaReceber | null>(null);
+    const [editContaClassificacao, setEditContaClassificacao] = useState<'ENTRADA' | 'OUTRAS_RECEITAS'>('ENTRADA');
+    const [editContaPagador, setEditContaPagador] = useState('');
+    const [editContaDescricao, setEditContaDescricao] = useState('');
+    const [editContaValor, setEditContaValor] = useState('');
+    const [editContaVencimento, setEditContaVencimento] = useState(new Date().toISOString().split('T')[0]);
+    const [editContaObservacoes, setEditContaObservacoes] = useState('');
+    const [salvandoEdicaoConta, setSalvandoEdicaoConta] = useState(false);
 
     // Carregar dados
     useEffect(() => {
@@ -277,7 +322,10 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
                     return {
                         id: conta.id,
-                        vendaId: vendaId || 'N/A',
+                        vendaId: vendaId || undefined,
+                        contaManual: !vendaId,
+                        tipoManual: conta.tipo === 'OUTRAS_RECEITAS' ? 'OUTRAS_RECEITAS' : 'ENTRADA',
+                        pagadorNome: conta.pagadorNome || undefined,
                         numeroParcela: numeroParcela,
                         isEntrada: isEntrada,
                         numeroDuplicata: isEntrada ? 'ENTRADA' : `DUP-${numeroParcela.toString().padStart(3, '0')}`,
@@ -288,6 +336,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                         projetoTitulo: conta.descricao || orcamento.titulo || 'Projeto',
                         dataVencimento: conta.dataVencimento,
                         valor: conta.valorParcela || conta.valor || 0,
+                        valorJuros: conta.valorJuros ?? 0,
+                        valorDesconto: conta.valorDesconto ?? 0,
                         valorRecebido: conta.valorRecebido ?? (conta.status === 'Pago' ? conta.valorParcela : undefined),
                         dataPagamento: conta.dataPagamento,
                         status: isAtrasada ? 'Atrasado' : (conta.status === 'Pago' ? 'Recebido' : (conta.status === 'Recebido Parcial' ? 'Recebido Parcial' : conta.status)),
@@ -329,6 +379,13 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     // Filtrar contas
     const contasFiltradas = useMemo(() => {
         let filtered = [...contasReceber];
+        const valorExato = searchValorExato ? parseFloat(searchValorExato.replace(',', '.')) : undefined;
+        const valorMin = searchValorMin ? parseFloat(searchValorMin.replace(',', '.')) : undefined;
+        const valorMax = searchValorMax ? parseFloat(searchValorMax.replace(',', '.')) : undefined;
+        const hasFiltroValor =
+            (valorExato !== undefined && !isNaN(valorExato)) ||
+            (valorMin !== undefined && !isNaN(valorMin)) ||
+            (valorMax !== undefined && !isNaN(valorMax));
 
         // Filtro por status: "Em aberto" = Pendente, Atrasado e Recebido Parcial (ainda tem saldo a receber)
         if (filterStatus === 'Em aberto') {
@@ -338,7 +395,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         }
 
         // Filtro por período (calendário)
-        {
+        // Quando há filtro por valor, o período é ignorado para buscar em todos os períodos.
+        if (!hasFiltroValor) {
             const inicio = dataInicio ? new Date(`${dataInicio}T00:00:00`) : null;
             const fim = dataFim ? new Date(`${dataFim}T23:59:59`) : null;
             if (inicio || fim) {
@@ -357,6 +415,17 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
             }
         }
 
+        if (valorExato !== undefined && !isNaN(valorExato)) {
+            filtered = filtered.filter(conta => Math.abs(conta.valor - valorExato) < 0.0001);
+        } else {
+            if (valorMin !== undefined && !isNaN(valorMin)) {
+                filtered = filtered.filter(conta => conta.valor >= valorMin);
+            }
+            if (valorMax !== undefined && !isNaN(valorMax)) {
+                filtered = filtered.filter(conta => conta.valor <= valorMax);
+            }
+        }
+
         // Filtro por busca
         if (searchTerm) {
             filtered = filtered.filter(conta =>
@@ -367,7 +436,17 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         }
 
         return filtered;
-    }, [contasReceber, filterStatus, filterPeriodo, dataInicio, dataFim, searchTerm]);
+    }, [
+        contasReceber,
+        filterStatus,
+        filterPeriodo,
+        dataInicio,
+        dataFim,
+        searchTerm,
+        searchValorExato,
+        searchValorMin,
+        searchValorMax
+    ]);
 
     // Estatísticas
     const estatisticas = useMemo(() => {
@@ -399,7 +478,16 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const handleOpenBaixaModal = (conta: ContaReceber) => {
         setContaSelecionada(conta);
         const saldoRestante = conta.valor - (conta.valorRecebido || 0);
-        setValorRecebido(saldoRestante > 0 ? saldoRestante.toFixed(2) : conta.valor.toString());
+        const jurosPrevistos = conta.valorJuros ?? 0;
+        const descontoPrevisto = conta.valorDesconto ?? 0;
+        const valorBaseSaldo = calcValorBaseFromEfetivo(
+            saldoRestante > 0 ? saldoRestante : conta.valor,
+            jurosPrevistos,
+            descontoPrevisto
+        );
+        setValorRecebido(valorBaseSaldo > 0 ? valorBaseSaldo.toFixed(2) : '0');
+        setJurosBaixa(jurosPrevistos > 0 ? String(jurosPrevistos) : '0');
+        setDescontoBaixa(descontoPrevisto > 0 ? String(descontoPrevisto) : '0');
         setDataPagamento(new Date().toISOString().split('T')[0]);
         setObservacoesBaixa('');
         setMeioPagamentoBaixa('PIX');
@@ -410,11 +498,62 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setIsBaixaModalOpen(false);
         setContaSelecionada(null);
         setValorRecebido('0');
+        setJurosBaixa('0');
+        setDescontoBaixa('0');
         setObservacoesBaixa('');
     };
 
+    const valorARegistrarBaixa = useMemo(
+        () => calcValorARegistrar(valorRecebido, jurosBaixa, descontoBaixa),
+        [valorRecebido, jurosBaixa, descontoBaixa]
+    );
+
+    const valorARegistrarNovaConta = useMemo(
+        () => calcValorARegistrar(novaContaValor, novaContaJuros, novaContaDesconto),
+        [novaContaValor, novaContaJuros, novaContaDesconto]
+    );
+
     const handleOpenConfirmBaixa = () => {
+        setConfirmDialogTipo('receber');
         setIsConfirmDialogOpen(true);
+    };
+
+    const handleOpenConfirmExcluir = (conta: ContaReceber) => {
+        if (!conta.contaManual) {
+            toast.error('Somente contas manuais podem ser excluídas.');
+            return;
+        }
+        setContaParaExcluir(conta);
+        setConfirmDialogTipo('excluir');
+        setIsConfirmDialogOpen(true);
+    };
+
+    const handleCloseConfirmDialog = (open: boolean) => {
+        setIsConfirmDialogOpen(open);
+        if (!open) {
+            setConfirmDialogTipo(null);
+            setContaParaExcluir(null);
+        }
+    };
+
+    const executarExclusaoConta = async () => {
+        if (!contaParaExcluir) return;
+        setExcluindoConta(true);
+        try {
+            const response = await financeiroService.excluirContaReceber(contaParaExcluir.id);
+            if (!response.success) {
+                toast.error(response.error || 'Não foi possível excluir a conta.');
+                return;
+            }
+            toast.success('Conta a receber excluída com sucesso!');
+            handleCloseConfirmDialog(false);
+            await loadContasReceber();
+        } catch (error) {
+            console.error('Erro ao excluir conta a receber:', error);
+            toast.error('Erro ao excluir conta a receber.');
+        } finally {
+            setExcluindoConta(false);
+        }
     };
 
     const handleCloseNovaContaModal = () => {
@@ -423,19 +562,92 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setNovaContaPagador('');
         setNovaContaDescricao('');
         setNovaContaValor('');
+        setNovaContaJuros('0');
+        setNovaContaDesconto('0');
         setNovaContaVencimento(new Date().toISOString().split('T')[0]);
         setNovaContaObservacoes('');
     };
 
-    const handleCriarNovaContaReceber = async () => {
-        const descricao = novaContaDescricao.trim();
-        const valor = parseFloat(String(novaContaValor).replace(',', '.'));
-        if (!descricao || !novaContaVencimento) {
-            toast.error('Preencha Descrição e Data de vencimento.');
+    const handleOpenEditarContaModal = (conta: ContaReceber) => {
+        if (!conta.contaManual) {
+            toast.error('Somente contas manuais podem ser editadas.');
+            return;
+        }
+        setContaEditando(conta);
+        setEditContaClassificacao(conta.tipoManual || 'ENTRADA');
+        setEditContaPagador(conta.pagadorNome || conta.clienteNome || '');
+        setEditContaDescricao(conta.projetoTitulo || '');
+        setEditContaValor(String(conta.valor ?? ''));
+        setEditContaVencimento(conta.dataVencimento ? new Date(conta.dataVencimento).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+        setEditContaObservacoes(conta.observacoes || '');
+        setIsEditarContaModalOpen(true);
+    };
+
+    const handleCloseEditarContaModal = () => {
+        setIsEditarContaModalOpen(false);
+        setContaEditando(null);
+        setEditContaClassificacao('ENTRADA');
+        setEditContaPagador('');
+        setEditContaDescricao('');
+        setEditContaValor('');
+        setEditContaVencimento(new Date().toISOString().split('T')[0]);
+        setEditContaObservacoes('');
+    };
+
+    const handleSalvarEdicaoConta = async () => {
+        if (!contaEditando) return;
+        const descricao = editContaDescricao.trim();
+        const valor = parseFloat(String(editContaValor).replace(',', '.'));
+        if (!descricao || !editContaVencimento) {
+            toast.error('Preencha descrição e data de vencimento.');
             return;
         }
         if (isNaN(valor) || valor <= 0) {
             toast.error('Informe um valor válido.');
+            return;
+        }
+
+        setSalvandoEdicaoConta(true);
+        try {
+            const response = await financeiroService.atualizarContaReceber(contaEditando.id, {
+                tipo: editContaClassificacao,
+                pagadorNome: editContaPagador.trim() || undefined,
+                descricao,
+                valorParcela: valor,
+                dataVencimento: editContaVencimento,
+                observacoes: editContaObservacoes.trim() || undefined
+            });
+            if (!response.success) {
+                toast.error(response.error || 'Não foi possível atualizar a conta.');
+                return;
+            }
+            toast.success('Conta a receber atualizada com sucesso!');
+            handleCloseEditarContaModal();
+            await loadContasReceber();
+        } catch (error) {
+            console.error('Erro ao atualizar conta a receber:', error);
+            toast.error('Erro ao atualizar conta a receber.');
+        } finally {
+            setSalvandoEdicaoConta(false);
+        }
+    };
+
+    const handleCriarNovaContaReceber = async () => {
+        const descricao = novaContaDescricao.trim();
+        const valor = parseMoney(novaContaValor);
+        const juros = parseMoney(novaContaJuros);
+        const desconto = parseMoney(novaContaDesconto);
+        const total = calcValorARegistrar(valor, juros, desconto);
+        if (!descricao || !novaContaVencimento) {
+            toast.error('Preencha Descrição e Data de vencimento.');
+            return;
+        }
+        if (valor <= 0) {
+            toast.error('Informe um valor válido.');
+            return;
+        }
+        if (total <= 0) {
+            toast.error('Valor a registrar deve ser maior que zero.');
             return;
         }
         setSalvandoNovaConta(true);
@@ -445,6 +657,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                 pagadorNome: novaContaPagador.trim() || undefined,
                 descricao,
                 valorParcela: valor,
+                valorJuros: juros > 0 ? juros : undefined,
+                valorDesconto: desconto > 0 ? desconto : undefined,
                 dataVencimento: novaContaVencimento,
                 observacoes: novaContaObservacoes.trim() || undefined
             });
@@ -468,18 +682,29 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const handleBaixaRecebimento = async () => {
         if (!contaSelecionada) return;
 
+        const base = parseMoney(valorRecebido);
+        const juros = parseMoney(jurosBaixa);
+        const desconto = parseMoney(descontoBaixa);
+        const total = calcValorARegistrar(base, juros, desconto);
+        if (total <= 0) {
+            toast.error('Valor a registrar deve ser maior que zero.');
+            return;
+        }
+
         try {
             console.log('💰 Registrando recebimento...');
             const response = await financeiroService.darBaixaRecebimento(contaSelecionada.id, {
                 dataPagamento,
-                valorRecebido: parseFloat(valorRecebido),
+                valorRecebido: base,
+                valorJuros: juros > 0 ? juros : undefined,
+                valorDesconto: desconto > 0 ? desconto : undefined,
                 observacoes: observacoesBaixa,
                 meioPagamento: meioPagamentoBaixa
             });
 
             if (response.success) {
                 toast.success('✅ Recebimento registrado com sucesso!', {
-                    description: `Recebido R$ ${parseFloat(valorRecebido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de ${contaSelecionada.clienteNome}.`
+                    description: `Recebido R$ ${formatBRL(total)} de ${contaSelecionada.clienteNome}.`
                 });
                 handleCloseBaixaModal();
                 // Recarregar lista
@@ -591,6 +816,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     useEscapeKey(isHistoricoModalOpen, handleCloseHistoricoModal);
     useEscapeKey(isConfirmDialogOpen, () => setIsConfirmDialogOpen(false));
     useEscapeKey(isNovaContaModalOpen, handleCloseNovaContaModal);
+    useEscapeKey(isEditarContaModalOpen, handleCloseEditarContaModal);
 
     const getStatusObraDisplay = (statusObra?: 'BACKLOG' | 'A_FAZER' | 'ANDAMENTO' | 'CONCLUIDO' | null) => {
         if (!statusObra) {
@@ -967,7 +1193,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
             {/* Filtros */}
             <div className="card-primary mb-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
                     <div className="md:col-span-1">
                         <div className="relative">
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -980,7 +1206,34 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             />
                         </div>
                     </div>
-                    <div>
+                    <div className="lg:col-span-1">
+                        <input
+                            type="text"
+                            value={searchValorExato}
+                            onChange={(e) => setSearchValorExato(e.target.value)}
+                            placeholder="Valor exato"
+                            className="input-field"
+                        />
+                    </div>
+                    <div className="lg:col-span-1">
+                        <input
+                            type="text"
+                            value={searchValorMin}
+                            onChange={(e) => setSearchValorMin(e.target.value)}
+                            placeholder="Valor mínimo"
+                            className="input-field"
+                        />
+                    </div>
+                    <div className="lg:col-span-1">
+                        <input
+                            type="text"
+                            value={searchValorMax}
+                            onChange={(e) => setSearchValorMax(e.target.value)}
+                            placeholder="Valor máximo"
+                            className="input-field"
+                        />
+                    </div>
+                    <div className="lg:col-span-1">
                         <select
                             value={filterStatus}
                             onChange={(e) => setFilterStatus(e.target.value)}
@@ -994,11 +1247,12 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             <option value="Atrasado">Atrasado</option>
                         </select>
                     </div>
-                    <div>
+                    <div className="lg:col-span-1">
                         <select
                             value={filterPeriodo}
                             onChange={(e) => setFilterPeriodo(e.target.value)}
                             className="select-field"
+                            disabled={Boolean(searchValorExato || searchValorMin || searchValorMax)}
                         >
                             <option value="MesAtual">Mês Atual</option>
                             <option value="Todos">Todos os Períodos</option>
@@ -1019,6 +1273,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                 setFilterPeriodo('Personalizado');
                             }}
                             className="select-field"
+                            disabled={Boolean(searchValorExato || searchValorMin || searchValorMax)}
                         />
                     </div>
                     <div>
@@ -1031,11 +1286,14 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                 setFilterPeriodo('Personalizado');
                             }}
                             className="select-field"
+                            disabled={Boolean(searchValorExato || searchValorMin || searchValorMax)}
                         />
                     </div>
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                    Alterar o período atualiza automaticamente as estatísticas e a lista.
+                    {searchValorExato || searchValorMin || searchValorMax
+                        ? 'Com filtro de valor preenchido, o período é ignorado e a busca considera todos os períodos.'
+                        : 'Alterar o período atualiza automaticamente as estatísticas e a lista.'}
                 </p>
             </div>
 
@@ -1106,7 +1364,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                         ? `Venda #${conta.numeroSequencialVenda}` 
                                                         : conta.numeroVenda && conta.numeroVenda !== 'N/A' 
                                                             ? conta.numeroVenda 
-                                                            : `Venda: ${conta.vendaId}`}
+                                                            : conta.vendaId ? `Venda: ${conta.vendaId}` : 'Conta manual'}
                                                 </p>
                                             </div>
                                         </td>
@@ -1187,12 +1445,31 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                     Histórico
                                                 </button>
                                                 <button
-                                                    onClick={() => handleVisualizarVenda(conta.vendaId)}
+                                                    onClick={() => conta.vendaId && handleVisualizarVenda(conta.vendaId)}
+                                                    disabled={!conta.vendaId}
                                                     className="flex items-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors text-sm font-semibold"
                                                     title="Visualizar Venda"
                                                 >
                                                     <EyeIcon className="w-4 h-4" />
                                                 </button>
+                                                {canManageManualReceber && conta.contaManual && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => handleOpenEditarContaModal(conta)}
+                                                            className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 transition-colors"
+                                                            title="Editar conta manual"
+                                                        >
+                                                            <PencilIcon className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleOpenConfirmExcluir(conta)}
+                                                            className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
+                                                            title="Excluir conta manual"
+                                                        >
+                                                            <TrashIcon className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -1656,12 +1933,24 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         <p className="text-blue-900">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
                                     </div>
                                     <div>
-                                        <span className="text-blue-700 font-medium">Valor Original:</span>
+                                        <span className="text-blue-700 font-medium">Valor da parcela:</span>
                                         <p className="text-blue-900 font-bold">
                                             R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
                                 </div>
+                                {((contaSelecionada.valorJuros ?? 0) > 0 || (contaSelecionada.valorDesconto ?? 0) > 0) && (
+                                    <p className="text-xs text-blue-800 mt-2 pt-2 border-t border-blue-200">
+                                        Previsto na conta:{' '}
+                                        {(contaSelecionada.valorJuros ?? 0) > 0 && (
+                                            <span>+ R$ {formatBRL(contaSelecionada.valorJuros!)} juros </span>
+                                        )}
+                                        {(contaSelecionada.valorDesconto ?? 0) > 0 && (
+                                            <span>- R$ {formatBRL(contaSelecionada.valorDesconto!)} desconto </span>
+                                        )}
+                                        (campos abaixo já preenchidos; você pode alterar)
+                                    </p>
+                                )}
                             </div>
 
                             {/* Formulário */}
@@ -1685,10 +1974,10 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     </label>
                                     <input
                                         type="number"
+                                        inputMode="decimal"
                                         value={valorRecebido}
                                         onChange={(e) => setValorRecebido(e.target.value)}
                                         min="0"
-                                        max={Math.max(0, contaSelecionada.valor - (contaSelecionada.valorRecebido || 0))}
                                         step="0.01"
                                         required
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
@@ -1720,6 +2009,37 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     </select>
                                 </div>
 
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Juros (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            inputMode="decimal"
+                                            value={jurosBaixa}
+                                            onChange={(e) => setJurosBaixa(e.target.value)}
+                                            min="0"
+                                            step="0.01"
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Desconto (R$)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            inputMode="decimal"
+                                            value={descontoBaixa}
+                                            onChange={(e) => setDescontoBaixa(e.target.value)}
+                                            min="0"
+                                            step="0.01"
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                        />
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Observações
@@ -1739,9 +2059,16 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm font-semibold text-green-700">Valor a Registrar:</span>
                                     <span className="text-2xl font-bold text-green-700">
-                                        R$ {parseFloat(valorRecebido || '0').toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {formatBRL(valorARegistrarBaixa)}
                                     </span>
                                 </div>
+                                {(parseMoney(jurosBaixa) > 0 || parseMoney(descontoBaixa) > 0) && (
+                                    <p className="text-xs text-green-600 mt-1">
+                                        {formatBRL(parseMoney(valorRecebido))}
+                                        {parseMoney(jurosBaixa) > 0 ? ` + ${formatBRL(parseMoney(jurosBaixa))} (juros)` : ''}
+                                        {parseMoney(descontoBaixa) > 0 ? ` - ${formatBRL(parseMoney(descontoBaixa))} (desconto)` : ''}
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -1905,6 +2232,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Valor (R$) *</label>
                                     <input
                                         type="number"
+                                        inputMode="decimal"
                                         value={novaContaValor}
                                         onChange={(e) => setNovaContaValor(e.target.value)}
                                         min="0"
@@ -1921,6 +2249,40 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         onChange={(e) => setNovaContaVencimento(e.target.value)}
                                         className="select-field focus:ring-green-500 focus:border-green-500"
                                     />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Juros (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={novaContaJuros}
+                                        onChange={(e) => setNovaContaJuros(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-green-500 focus:border-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Desconto (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={novaContaDesconto}
+                                        onChange={(e) => setNovaContaDesconto(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-green-500 focus:border-green-500"
+                                    />
+                                </div>
+                            </div>
+                            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 p-4 rounded-xl">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm font-semibold text-green-700">Valor a Registrar:</span>
+                                    <span className="text-xl font-bold text-green-700">R$ {formatBRL(valorARegistrarNovaConta)}</span>
                                 </div>
                             </div>
                             <div>
@@ -1950,17 +2312,125 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                 </div>
             )}
 
+            {isEditarContaModalOpen && contaEditando && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-cyan-50 to-teal-50">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Editar Conta a Receber</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Atualize os dados da conta manual</p>
+                            </div>
+                            <button
+                                onClick={handleCloseEditarContaModal}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 dark:hover:bg-dark-card rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Classificação *</label>
+                                <select
+                                    value={editContaClassificacao}
+                                    onChange={(e) => setEditContaClassificacao(e.target.value as 'ENTRADA' | 'OUTRAS_RECEITAS')}
+                                    className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                >
+                                    <option value="ENTRADA">Entradas</option>
+                                    <option value="OUTRAS_RECEITAS">Outras Receitas</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Pagador (opcional)</label>
+                                <input
+                                    type="text"
+                                    value={editContaPagador}
+                                    onChange={(e) => setEditContaPagador(e.target.value)}
+                                    className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                    placeholder="Nome do pagador"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Descrição *</label>
+                                <input
+                                    type="text"
+                                    value={editContaDescricao}
+                                    onChange={(e) => setEditContaDescricao(e.target.value)}
+                                    className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                    placeholder="Descrição da conta"
+                                />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Valor (R$) *</label>
+                                    <input
+                                        type="number"
+                                        value={editContaValor}
+                                        onChange={(e) => setEditContaValor(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Vencimento *</label>
+                                    <input
+                                        type="date"
+                                        value={editContaVencimento}
+                                        onChange={(e) => setEditContaVencimento(e.target.value)}
+                                        className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Observação</label>
+                                <textarea
+                                    value={editContaObservacoes}
+                                    onChange={(e) => setEditContaObservacoes(e.target.value)}
+                                    rows={2}
+                                    className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                    placeholder="Opcional"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 p-6 border-t border-gray-100 dark:border-dark-border">
+                            <button onClick={handleCloseEditarContaModal} className="btn-secondary">
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSalvarEdicaoConta}
+                                disabled={salvandoEdicaoConta}
+                                className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-6 rounded-xl transition-colors flex items-center gap-2 disabled:opacity-50"
+                            >
+                                {salvandoEdicaoConta ? 'Salvando...' : 'Salvar Alterações'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* AlertDialog de Confirmação */}
-            <AlertDialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
+            <AlertDialog open={isConfirmDialogOpen} onOpenChange={handleCloseConfirmDialog}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Confirmar Recebimento</AlertDialogTitle>
+                        <AlertDialogTitle>
+                            {confirmDialogTipo === 'excluir' ? 'Excluir conta' : 'Confirmar Recebimento'}
+                        </AlertDialogTitle>
                         <AlertDialogDescription>
-                            {contaSelecionada && (
+                            {confirmDialogTipo === 'excluir' && contaParaExcluir && (
+                                <>
+                                    Tem certeza que deseja apagar essa conta?
+                                    <span className="block mt-2 text-sm">
+                                        <span className="font-semibold">{contaParaExcluir.projetoTitulo}</span>
+                                        {' '}— esta ação não pode ser desfeita.
+                                    </span>
+                                </>
+                            )}
+                            {confirmDialogTipo === 'receber' && contaSelecionada && (
                                 <>
                                     Confirmar o recebimento de{' '}
                                     <span className="font-bold text-green-600">
-                                        R$ {parseFloat(valorRecebido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {formatBRL(valorARegistrarBaixa)}
                                     </span>
                                     {' '}de {contaSelecionada.clienteNome}?
                                 </>
@@ -1968,18 +2438,28 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => setIsConfirmDialogOpen(false)}>
+                        <AlertDialogCancel disabled={excluindoConta}>
                             Cancelar
                         </AlertDialogCancel>
-                        <AlertDialogAction 
-                            onClick={() => {
-                                setIsConfirmDialogOpen(false);
-                                handleBaixaRecebimento();
-                            }}
-                            className="bg-green-600 hover:bg-green-700"
-                        >
-                            Confirmar Recebimento
-                        </AlertDialogAction>
+                        {confirmDialogTipo === 'excluir' ? (
+                            <AlertDialogAction
+                                onClick={executarExclusaoConta}
+                                disabled={excluindoConta}
+                                className="bg-red-600 hover:bg-red-700"
+                            >
+                                {excluindoConta ? 'Excluindo...' : 'Sim, apagar'}
+                            </AlertDialogAction>
+                        ) : (
+                            <AlertDialogAction
+                                onClick={() => {
+                                    handleCloseConfirmDialog(false);
+                                    handleBaixaRecebimento();
+                                }}
+                                className="bg-green-600 hover:bg-green-700"
+                            >
+                                Confirmar Recebimento
+                            </AlertDialogAction>
+                        )}
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>

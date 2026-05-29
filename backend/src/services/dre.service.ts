@@ -298,7 +298,7 @@ export class DREService {
      * Calcula DRE consolidado por mês (últimos 12 meses)
      */
     static async calcularDREMensal(meses: number = 12) {
-        const resultados = [];
+        const resultados: Array<Record<string, any>> = [];
         const hoje = new Date();
 
         for (let i = meses - 1; i >= 0; i--) {

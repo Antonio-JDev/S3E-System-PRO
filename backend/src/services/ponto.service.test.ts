@@ -124,4 +124,31 @@ describe('ponto.service calcularMetricasRegistro (compensação atraso x extra)'
     });
     expect(r2.minutosAtraso).toBe(2);
   });
+
+  it('contabiliza minutos após horário nominal da jornada como HE normal (ex.: saída 17:30, jornada até 17:18)', () => {
+    const r = calcularMetricasRegistro({
+      batidas: ['07:30', '12:00', '13:00', '17:30'],
+      ano: 2026,
+      mes: 5,
+      dia: 7,
+      tipoContrato: 'REGISTRADO',
+      toleranciaMinutos: 5,
+      workShift: { entrada1: '07:30', saida1: '12:00', entrada2: '13:00', saida2: '17:18' },
+    });
+    expect(r.minutosExtra20).toBeGreaterThanOrEqual(12);
+  });
+
+  it('em feriado não contabiliza atraso nem saída antecipada', () => {
+    const r = calcularMetricasRegistro({
+      batidas: ['09:00', '14:00'],
+      ano: 2026,
+      mes: 12,
+      dia: 25,
+      tipoContrato: 'REGISTRADO',
+      toleranciaMinutos: 5,
+      workShift: { entrada1: '08:00', saida1: '12:00', entrada2: '13:00', saida2: '17:00' },
+    });
+    expect(r.minutosAtraso).toBe(0);
+    expect(r.minutosHorasDevidas).toBe(0);
+  });
 });

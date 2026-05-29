@@ -109,6 +109,9 @@ describe('E2E Vendas/Contas a Receber (DB)', () => {
 
       expect(totalPV).toBe(200);
       expect(totalCR).toBe(200);
+
+      const orcAtualizado = await prisma.orcamento.findUnique({ where: { id: orcamento.id } });
+      expect(orcAtualizado?.status).toBe('Concretizado');
     } finally {
       // limpeza (ordem por FK)
       const vendaRow = await prisma.venda.findUnique({ where: { orcamentoId: orcamento.id } });

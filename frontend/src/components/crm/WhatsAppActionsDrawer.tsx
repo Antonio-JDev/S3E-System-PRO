@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Check, Link2, RefreshCw, Search, UserRound, X } from 'lucide-react';
 import type { WhatsappActionsContextData, WhatsappOrcamentoStatusMode } from '../../services/whatsappChatService';
 import type { Cliente } from '../../services/clientesService';
+import { filterClientesByTerm } from '../../utils/whatsappActionsDrawer.util';
 
 interface WhatsAppActionsDrawerProps {
   open: boolean;
@@ -89,6 +91,37 @@ function statusColorMeta(kind: OrcamentoStatusKind): {
   }
 }
 
+function DrawerSection({
+  title,
+  description,
+  action,
+  children,
+  className = ''
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={`rounded-xl border border-[#e9edef] bg-white p-3.5 shadow-sm dark:border-[#2a3942] dark:bg-[#202c33] ${className}`}
+    >
+      <div className="mb-2.5 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h4 className="text-[13px] font-semibold text-[#111b21] dark:text-[#e9edef]">{title}</h4>
+          {description ? (
+            <p className="mt-0.5 text-[11px] leading-snug text-[#667781] dark:text-[#8696a0]">{description}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   open,
   onClose,
@@ -114,6 +147,10 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   const [selectedOrcamentoId, setSelectedOrcamentoId] = useState('');
   const [orcamentoSearch, setOrcamentoSearch] = useState('');
   const orcamentos = context?.orcamentos || [];
+  const filteredClientes = useMemo(
+    () => filterClientesByTerm(clientes, clienteSearch),
+    [clientes, clienteSearch]
+  );
   const filteredOrcamentos = useMemo(() => {
     const q = orcamentoSearch.trim().toLowerCase();
     if (!q) return orcamentos;
@@ -153,109 +190,143 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
   const modeValue = context?.statusUpdateMode || 'manual';
   const isSendingAny = Boolean(sendingOrcamentoId);
   const isSelectedSending = Boolean(selectedOrcamentoId && sendingOrcamentoId === selectedOrcamentoId);
+  const clienteSearchTrimmed = clienteSearch.trim();
 
   if (!open) return null;
 
   return (
-    <div className="absolute inset-0 z-30 flex justify-end bg-black/30 backdrop-blur-[1px]">
-      <div className="flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-dark-border dark:bg-[#0f1b22]">
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-dark-border">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-700 dark:text-dark-text">Ações</h3>
+    <div className="absolute inset-0 z-30 flex justify-end bg-black/40 backdrop-blur-[2px]">
+      <div className="flex h-full w-full max-w-md flex-col border-l border-[#e9edef] bg-[#f0f2f5] shadow-2xl dark:border-[#2a3942] dark:bg-[#111b21]">
+        <div className="flex shrink-0 items-center justify-between bg-[#00a884] px-4 py-3 text-white">
+          <h3 className="text-[15px] font-semibold tracking-tight">Ações do contato</h3>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:text-dark-text-secondary dark:hover:bg-white/10"
+            className="rounded-full p-1.5 transition hover:bg-white/15"
+            aria-label="Fechar painel de ações"
           >
-            Fechar
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 pb-6">
-          <section className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-dark-border dark:bg-dark-bg">
-            <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Contato</p>
-            <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-dark-text">{context?.contactName || chatLabel || 'Sem nome'}</p>
-            <p className="text-xs text-gray-600 dark:text-dark-text-secondary">{context?.phone || chatPhone || '-'}</p>
-          </section>
+        <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3 pb-6">
+          <DrawerSection title="Contato em atendimento">
+            <p className="truncate text-[14px] font-semibold text-[#111b21] dark:text-[#e9edef]">
+              {context?.contactName || chatLabel || 'Sem nome'}
+            </p>
+            <p className="mt-0.5 text-[12px] text-[#667781] dark:text-[#8696a0]">{context?.phone || chatPhone || '—'}</p>
+          </DrawerSection>
 
-          <section className="rounded-xl border border-gray-200 p-3 dark:border-dark-border">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Informações do contato</p>
+          <DrawerSection
+            title="Informações do contato"
+            action={
               <button
                 type="button"
                 onClick={onRefresh}
-                className="rounded-lg px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 dark:text-dark-text-secondary dark:hover:bg-white/10"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#e9edef] bg-[#f0f2f5] px-2 py-1 text-[11px] font-medium text-[#54656f] transition hover:bg-white dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#aebac1] dark:hover:bg-[#374248]"
               >
+                <RefreshCw className="h-3 w-3" />
                 Atualizar
               </button>
-            </div>
+            }
+          >
             {loading ? (
-              <p className="text-xs text-gray-500 dark:text-dark-text-secondary">Carregando dados...</p>
+              <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">Carregando dados…</p>
             ) : (
-              <div className="space-y-1 text-xs text-gray-600 dark:text-dark-text-secondary">
+              <div className="space-y-2 text-[12px] text-[#54656f] dark:text-[#aebac1]">
                 <p>
-                  Lead: <span className="font-medium">{context?.lead?.nome || 'Não identificado'}</span>
-                </p>
-                <p className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate">
-                    Cliente: <span className="font-medium">{context?.cliente?.nome || 'Não vinculado'}</span>
+                  Lead:{' '}
+                  <span className="font-medium text-[#111b21] dark:text-[#e9edef]">
+                    {context?.lead?.nome || 'Não identificado'}
                   </span>
+                </p>
+                <div className="flex items-start justify-between gap-2 rounded-lg bg-[#f0f2f5] px-2.5 py-2 dark:bg-[#2a3942]/60">
+                  <p className="min-w-0">
+                    Cliente:{' '}
+                    <span className="font-medium text-[#111b21] dark:text-[#e9edef]">
+                      {context?.cliente?.nome || 'Não vinculado'}
+                    </span>
+                  </p>
                   {context?.cliente?.id ? (
                     <button
                       type="button"
                       disabled={unlinkLoading}
                       onClick={onUnlinkCliente}
-                      className="shrink-0 rounded-lg border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+                      className="shrink-0 rounded-md border border-red-200/80 bg-white px-2 py-1 text-[11px] font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/50 dark:bg-transparent dark:text-red-300 dark:hover:bg-red-950/30"
                     >
                       {unlinkLoading ? 'Desvinculando…' : 'Desvincular'}
                     </button>
                   ) : null}
-                </p>
+                </div>
               </div>
             )}
-          </section>
+          </DrawerSection>
 
-          <section className="rounded-xl border border-gray-200 p-3 dark:border-dark-border">
-            <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Pipeline comercial</p>
-            <p className={`mt-2 inline-flex rounded-md px-2 py-1 text-xs font-semibold ${pipelineBadgeClass}`}>
+          <DrawerSection title="Pipeline comercial" description="Status do atendimento com base no orçamento vinculado.">
+            <span className={`inline-flex rounded-md px-2.5 py-1 text-[12px] font-semibold ${pipelineBadgeClass}`}>
               {pipelineLabel}
-            </p>
-            <p className="mt-2 text-xs text-gray-500 dark:text-dark-text-secondary">
-              Status atual do atendimento comercial com base no orçamento vinculado ao contato.
-            </p>
-          </section>
+            </span>
+          </DrawerSection>
 
-          <section className="rounded-xl border border-gray-200 p-3 dark:border-dark-border">
-            <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Vincular ao cliente cadastrado</p>
-            <input
-              value={clienteSearch}
-              onChange={(e) => onClienteSearchChange(e.target.value)}
-              placeholder="Buscar cliente por nome, telefone ou CPF/CNPJ"
-              className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
-            />
-            <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-dark-border dark:bg-dark-bg">
+          <DrawerSection
+            title="Vincular ao cliente cadastrado"
+            description="Busque por nome, telefone ou CPF/CNPJ e selecione o cadastro correto."
+          >
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8696a0]" />
+              <input
+                value={clienteSearch}
+                onChange={(e) => onClienteSearchChange(e.target.value)}
+                placeholder="Buscar cliente…"
+                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-8 text-[13px] text-[#111b21] outline-none transition focus:border-[#00a884] focus:bg-white focus:ring-1 focus:ring-[#00a884]/30 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:border-[#00a884] dark:focus:bg-[#111b21]"
+              />
+              {clienteSearchTrimmed ? (
+                <button
+                  type="button"
+                  onClick={() => onClienteSearchChange('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-[#8696a0] hover:bg-black/5 dark:hover:bg-white/10"
+                  aria-label="Limpar busca"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+
+            <div className="mt-2.5 max-h-52 overflow-y-auto rounded-lg border border-[#e9edef] bg-[#f0f2f5] dark:border-[#2a3942] dark:bg-[#111b21]">
               {clientesLoading ? (
-                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">Carregando clientes…</p>
-              ) : clientes.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">
-                  {clienteSearch.trim() ? 'Nenhum cliente encontrado' : 'Digite para buscar clientes'}
+                <p className="px-3 py-4 text-center text-[12px] text-[#667781] dark:text-[#8696a0]">Buscando clientes…</p>
+              ) : filteredClientes.length === 0 ? (
+                <p className="px-3 py-4 text-center text-[12px] text-[#667781] dark:text-[#8696a0]">
+                  {clienteSearchTrimmed ? 'Nenhum cliente encontrado para esta busca' : 'Digite para buscar clientes cadastrados'}
                 </p>
               ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-white/10">
-                  {clientes.map((c) => {
+                <ul className="divide-y divide-[#e9edef] dark:divide-[#2a3942]">
+                  {filteredClientes.map((c) => {
                     const active = c.id === selectedClienteId;
                     return (
                       <li key={c.id}>
                         <button
                           type="button"
                           onClick={() => setSelectedClienteId(c.id)}
-                          className={`w-full px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-white/5 ${
-                            active ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                          className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition ${
+                            active
+                              ? 'bg-[#00a884]/12 dark:bg-[#00a884]/20'
+                              : 'hover:bg-white/80 dark:hover:bg-[#202c33]'
                           }`}
                         >
-                          <p className="truncate font-semibold text-gray-900 dark:text-dark-text">{c.nome}</p>
-                          <p className="mt-0.5 truncate text-[11px] text-gray-600 dark:text-dark-text-secondary">
-                            {[c.telefone, c.cpfCnpj].filter(Boolean).join(' · ') || '—'}
-                          </p>
+                          <span
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                              active ? 'bg-[#00a884] text-white' : 'bg-[#dfe5e7] text-[#54656f] dark:bg-[#2a3942] dark:text-[#aebac1]'
+                            }`}
+                          >
+                            {active ? <Check className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-semibold text-[#111b21] dark:text-[#e9edef]">{c.nome}</p>
+                            <p className="mt-0.5 truncate text-[11px] text-[#667781] dark:text-[#8696a0]">
+                              {[c.telefone, c.cpfCnpj].filter(Boolean).join(' · ') || '—'}
+                            </p>
+                          </span>
                         </button>
                       </li>
                     );
@@ -263,26 +334,27 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                 </ul>
               )}
             </div>
+
             <button
               type="button"
               disabled={!selectedClienteId || linkLoading}
               onClick={() => onLinkCliente(selectedClienteId)}
-              className="mt-2 w-full rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#00a884] px-3 py-2.5 text-[13px] font-semibold text-white transition hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {linkLoading ? 'Vinculando...' : 'Vincular contato ao cliente'}
+              <Link2 className="h-4 w-4" />
+              {linkLoading ? 'Vinculando…' : 'Vincular contato ao cliente'}
             </button>
-          </section>
+          </DrawerSection>
 
-          <section className="rounded-xl border border-gray-200 p-3 dark:border-dark-border">
-            <p className="text-sm font-semibold text-gray-900 dark:text-dark-text">Envio de orçamento no chat</p>
-            <label className="mt-2 block text-xs font-medium text-gray-600 dark:text-dark-text-secondary">
+          <DrawerSection title="Envio de orçamento no chat">
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
               Regra de atualização de status
             </label>
             <select
               value={modeValue}
               onChange={(e) => onChangeMode(e.target.value as WhatsappOrcamentoStatusMode)}
               disabled={modeSaving}
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 disabled:opacity-70 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
+              className="mt-1.5 w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] px-3 py-2 text-[13px] text-[#111b21] outline-none focus:border-[#00a884] disabled:opacity-70 dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
             >
               <option value="manual">Manual (como está hoje)</option>
               <option value="automatic" disabled={!autoModeAllowed}>
@@ -290,25 +362,30 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
               </option>
             </select>
             {!autoModeAllowed ? (
-              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+              <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">
                 Modo automático fica disponível apenas para orçamento pendente.
               </p>
             ) : null}
 
-            <label className="mt-3 block text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Orçamento</label>
-            <input
-              value={orcamentoSearch}
-              onChange={(e) => setOrcamentoSearch(e.target.value)}
-              placeholder="Buscar orçamento por número, título ou status"
-              className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-900 outline-none focus:border-blue-500 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
-            />
-            <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-dark-border dark:bg-dark-bg">
+            <label className="mt-3 block text-[11px] font-medium uppercase tracking-wide text-[#667781] dark:text-[#8696a0]">
+              Orçamento
+            </label>
+            <div className="relative mt-1.5">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8696a0]" />
+              <input
+                value={orcamentoSearch}
+                onChange={(e) => setOrcamentoSearch(e.target.value)}
+                placeholder="Número, título ou status…"
+                className="w-full rounded-lg border border-[#e9edef] bg-[#f0f2f5] py-2.5 pl-9 pr-3 text-[13px] text-[#111b21] outline-none focus:border-[#00a884] focus:bg-white dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef] dark:focus:bg-[#111b21]"
+              />
+            </div>
+            <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-[#e9edef] bg-[#f0f2f5] dark:border-[#2a3942] dark:bg-[#111b21]">
               {filteredOrcamentos.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-gray-500 dark:text-dark-text-secondary">
+                <p className="px-3 py-4 text-center text-[12px] text-[#667781] dark:text-[#8696a0]">
                   {orcamentoSearch.trim() ? 'Nenhum orçamento encontrado' : 'Nenhum orçamento disponível'}
                 </p>
               ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-white/10">
+                <ul className="divide-y divide-[#e9edef] dark:divide-[#2a3942]">
                   {filteredOrcamentos.map((o) => {
                     const kind = resolveOrcamentoStatusKind(o.status);
                     const meta = statusColorMeta(kind);
@@ -318,15 +395,17 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                         <button
                           type="button"
                           onClick={() => setSelectedOrcamentoId(o.id)}
-                          className={`w-full px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-white/5 ${
-                            active ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                          className={`w-full px-3 py-2.5 text-left text-xs transition ${
+                            active ? 'bg-[#00a884]/12 dark:bg-[#00a884]/20' : 'hover:bg-white/80 dark:hover:bg-[#202c33]'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <p className="min-w-0 truncate font-semibold text-gray-900 dark:text-dark-text">
+                            <p className="min-w-0 truncate font-semibold text-[#111b21] dark:text-[#e9edef]">
                               {meta.dot} #{o.numeroSequencial} · {o.titulo}
                             </p>
-                            <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[11px] ${meta.chipClass} ${meta.textClass}`}>
+                            <span
+                              className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] ${meta.chipClass} ${meta.textClass}`}
+                            >
                               {o.status}
                             </span>
                           </div>
@@ -338,7 +417,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
               )}
             </div>
             {orcamentos.length > 0 ? (
-              <div className="mt-2 space-y-1.5">
+              <div className="mt-2.5 space-y-2">
                 {orcamentos.slice(0, 6).map((o) => {
                   const kind = resolveOrcamentoStatusKind(o.status);
                   const meta = statusColorMeta(kind);
@@ -348,7 +427,7 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                   return (
                     <div
                       key={`chip-${o.id}`}
-                      className={`w-full rounded-lg border px-2.5 py-1.5 text-left text-[11px] transition ${meta.chipClass} ${
+                      className={`rounded-lg border px-2.5 py-2 text-left text-[11px] transition ${meta.chipClass} ${
                         selected ? 'ring-2 ring-[#00a884]/40' : ''
                       }`}
                     >
@@ -361,30 +440,28 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                         <p className={`truncate font-semibold ${meta.textClass}`}>
                           {meta.dot} #{o.numeroSequencial} · {o.status}
                         </p>
-                        <p className="truncate text-[11px] text-gray-700 dark:text-gray-300">{o.titulo}</p>
+                        <p className="truncate text-[11px] text-[#54656f] dark:text-[#aebac1]">{o.titulo}</p>
                       </button>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          disabled={isSendingAny && !isSendingThis}
-                          onClick={() =>
-                            onSendOrcamentoPdf({
-                              orcamentoId: o.id,
-                              modeOverride
-                            })
-                          }
-                          className="inline-flex flex-1 items-center justify-center rounded-md bg-emerald-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isSendingThis ? 'Carregando...' : 'Enviar PDF'}
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={isSendingAny && !isSendingThis}
+                        onClick={() =>
+                          onSendOrcamentoPdf({
+                            orcamentoId: o.id,
+                            modeOverride
+                          })
+                        }
+                        className="mt-2 inline-flex w-full items-center justify-center rounded-md bg-emerald-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isSendingThis ? 'Enviando…' : 'Enviar PDF'}
+                      </button>
                     </div>
                   );
                 })}
               </div>
             ) : null}
             {approvedSelected ? (
-              <p className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-[11px] text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+              <p className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
                 Orçamento aprovado: o envio aqui é tratado como revisão manual de PDF.
               </p>
             ) : null}
@@ -397,11 +474,15 @@ export const WhatsAppActionsDrawer: React.FC<WhatsAppActionsDrawerProps> = ({
                   modeOverride: autoModeAllowed ? undefined : 'manual'
                 })
               }
-              className="mt-2 w-full rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-3 w-full rounded-lg bg-emerald-600 px-3 py-2.5 text-[13px] font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSelectedSending ? 'Carregando...' : approvedSelected ? 'Enviar revisão do PDF' : 'Enviar PDF do orçamento no chat'}
+              {isSelectedSending
+                ? 'Enviando…'
+                : approvedSelected
+                  ? 'Enviar revisão do PDF'
+                  : 'Enviar PDF do orçamento no chat'}
             </button>
-          </section>
+          </DrawerSection>
         </div>
       </div>
     </div>

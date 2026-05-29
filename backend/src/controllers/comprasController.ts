@@ -149,6 +149,8 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
       dataPrimeiroVencimento: req.body.dataPrimeiroVencimento ? new Date(req.body.dataPrimeiroVencimento) : undefined,
       // ✅ NOVO: Obra vinculada (para compras avulsas)
       obraId: req.body.obraId || undefined,
+      destinoTipo: req.body.destinoTipo || undefined,
+      projetoId: req.body.projetoId || undefined,
       // ✅ NOVO: Empresa compradora (para identificar qual CNPJ está sendo usado)
       empresaCompradoraNome: req.body.empresaCompradoraNome || undefined,
       empresaCompradoraCNPJ: req.body.empresaCompradoraCNPJ || undefined
@@ -163,7 +165,7 @@ export const createCompra = async (req: Request, res: Response): Promise<void> =
     });
     
     if (!compraData.fornecedorNome || !compraData.fornecedorCNPJ || !compraData.numeroNF || !compraData.items || compraData.items.length === 0) {
-      const missing = [];
+      const missing: string[] = [];
       if (!compraData.fornecedorNome) missing.push('fornecedorNome');
       if (!compraData.fornecedorCNPJ) missing.push('fornecedorCNPJ');
       if (!compraData.numeroNF) missing.push('numeroNF');

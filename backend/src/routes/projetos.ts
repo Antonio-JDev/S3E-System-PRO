@@ -12,7 +12,9 @@ import {
   getProjetosIdsComMinhasTarefas,
   getProjetosIdsComMinhasTarefasAtrasadas,
   getRelatorioKanbanUsuarios,
-  getRelatorioKanbanUsuarioAtrasadas
+  getRelatorioKanbanUsuarioAtrasadas,
+  buscarProjetos,
+  getKitDisponibilidadeBomItem,
 } from '../controllers/projetosController';
 import {
   getTasksByProjeto,
@@ -57,12 +59,14 @@ router.get('/ids-com-minhas-tarefas-atrasadas', getProjetosIdsComMinhasTarefasAt
 router.get('/relatorios/kanban-usuarios', getRelatorioKanbanUsuarios);
 // Drilldown: tasks atrasadas por usuário no período (Admin/Dev)
 router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUsuarioAtrasadas);
+router.get('/busca', buscarProjetos);
 
 /**
  * @route GET /api/projetos/:id
  * @desc Buscar projeto específico com relacionamentos
  * @access Private
  */
+router.get('/:projetoId/bom/itens/:orcamentoItemId/kit-disponibilidade', getKitDisponibilidadeBomItem);
 router.get('/:id', getProjetoById);
 
 /**

@@ -18,7 +18,7 @@ export interface Orcamento {
   impostoPercentual?: number;
   condicaoPagamento?: string;
   observacoes?: string;
-  status: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Recusado' | 'Declinado' | 'Cancelado';
+  status: 'Rascunho' | 'Pendente' | 'Enviado ao Cliente' | 'Aprovado' | 'Concretizado' | 'Recusado' | 'Declinado' | 'Cancelado';
   items?: OrcamentoItem[];
   cliente?: any;
   empresaCNPJ?: string;
@@ -38,6 +38,8 @@ export interface Orcamento {
     id: string;
     numeroSequencial?: number;
     numeroVenda?: string;
+    createdAt?: string;
+    dataVenda?: string;
   } | null;
   createdAt: string;
   updatedAt: string;
@@ -364,7 +366,8 @@ class OrcamentosService {
         console.warn('⚠️ Erro ao atualizar status:', response);
         return {
           success: false,
-          error: response.error || 'Erro ao atualizar status'
+          error: response.error || 'Erro ao atualizar status',
+          status: response.status
         };
       }
     } catch (error: any) {
@@ -372,6 +375,35 @@ class OrcamentosService {
       return {
         success: false,
         error: error.response?.data?.message || 'Erro de conexão ao atualizar status'
+      };
+    }
+  }
+
+  /** Regressão de status (admin/desenvolvedor). */
+  async regredirStatus(id: string, status: string) {
+    try {
+      const response = await axiosApiService.put<Orcamento>(`${ENDPOINTS.ORCAMENTOS}/${id}/status`, {
+        status,
+        regredir: true,
+      });
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          message: `Status regredido para ${status}`,
+        };
+      }
+      return {
+        success: false,
+        error: response.error || 'Erro ao regredir status',
+        status: response.status,
+      };
+    } catch (error: unknown) {
+      const err = error as { message?: string };
+      return {
+        success: false,
+        error: err.message || 'Erro de conexão ao regredir status',
       };
     }
   }

@@ -3,15 +3,14 @@ import { prisma } from '../lib/prisma';
 import { canonicalWhatsappChatId } from '../utils/whatsappChat.util';
 
 /**
- * Service de listas/etiquetas personalizadas por usuário (estilo "Listas"
- * do WhatsApp Business). Cada lista é privada ao operador, agrupa um
- * conjunto de `chatId`s e aparece como chip extra na barra de filtros
- * do CRM ao lado de `Tudo / Não lidas / Favoritas / Grupos`.
+ * Service de listas/etiquetas personalizadas (estilo "Listas" do WhatsApp Business).
+ * Listas privadas (`isGlobal: false`) ou compartilhadas com todos (`isGlobal: true`).
  */
 
 export interface WhatsappChatLabelDto {
   id: string;
   userId: string;
+  isGlobal: boolean;
   nome: string;
   cor: string | null;
   emoji: string | null;
@@ -33,6 +32,7 @@ function toDto(label: LabelWithMemberships): WhatsappChatLabelDto {
   return {
     id: label.id,
     userId: label.userId,
+    isGlobal: label.isGlobal,
     nome: label.nome,
     cor: label.cor ?? null,
     emoji: label.emoji ?? null,
@@ -44,10 +44,12 @@ function toDto(label: LabelWithMemberships): WhatsappChatLabelDto {
   };
 }
 
-/** Lista todas as etiquetas do usuário, com chatIds embutidos. */
+/** Lista etiquetas do usuário (privadas) + listas globais do sistema. */
 export async function listLabelsForUser(userId: string): Promise<WhatsappChatLabelDto[]> {
   const rows = await prisma.whatsappChatLabel.findMany({
-    where: { userId },
+    where: {
+      OR: [{ userId, isGlobal: false }, { isGlobal: true }]
+    },
     include: { memberships: true },
     orderBy: [{ ordem: 'asc' }, { createdAt: 'asc' }]
   });
@@ -61,17 +63,22 @@ export interface CreateLabelInput {
   emoji?: string | null;
   ordem?: number;
   chatIds?: string[];
+  /** Se true, todos os usuários veem este filtro. */
+  isGlobal?: boolean;
 }
 
-/**
- * Cria uma nova lista. `chatIds` opcional — se vier, já cadastra as
- * membership iniciais na mesma transação (mais robusto que duas chamadas
- * separadas porque um erro no insert da pivô não deixa lista "vazia"
- * cadastrada).
- */
 export async function createLabel(input: CreateLabelInput): Promise<WhatsappChatLabelDto> {
   const nome = input.nome.trim();
   if (!nome) throw new Error('Nome da lista é obrigatório.');
+
+  const isGlobal = !!input.isGlobal;
+
+  if (isGlobal) {
+    const dup = await prisma.whatsappChatLabel.findFirst({
+      where: { isGlobal: true, nome }
+    });
+    if (dup) throw new Error('Já existe uma lista global com esse nome.');
+  }
 
   const chatIds = Array.from(
     new Set(
@@ -85,6 +92,7 @@ export async function createLabel(input: CreateLabelInput): Promise<WhatsappChat
     const label = await tx.whatsappChatLabel.create({
       data: {
         userId: input.userId,
+        isGlobal,
         nome,
         cor: input.cor?.trim() || null,
         emoji: input.emoji?.trim() || null,
@@ -113,17 +121,60 @@ export interface UpdateLabelInput {
   ordem?: number;
 }
 
+/** Leitura: lista privada do dono ou qualquer lista global. */
+async function findLabelReadable(
+  id: string,
+  userId: string
+): Promise<LabelWithMemberships | null> {
+  const row = await prisma.whatsappChatLabel.findUnique({
+    where: { id },
+    include: { memberships: true }
+  });
+  if (!row) return null;
+  if (row.isGlobal) return row;
+  if (row.userId === userId) return row;
+  return null;
+}
+
+export interface LabelMutationOptions {
+  /** Admin CRM pode editar/apagar listas globais de outros usuários. */
+  isAdmin?: boolean;
+}
+
+/** Mutação: criador da lista; admin pode alterar listas globais de qualquer um. */
+async function findLabelMutable(
+  id: string,
+  userId: string,
+  opts?: LabelMutationOptions
+): Promise<LabelWithMemberships | null> {
+  const row = await prisma.whatsappChatLabel.findUnique({
+    where: { id },
+    include: { memberships: true }
+  });
+  if (!row) return null;
+  if (row.userId === userId) return row;
+  if (opts?.isAdmin && row.isGlobal) return row;
+  return null;
+}
+
 export async function updateLabel(
   id: string,
   userId: string,
-  patch: UpdateLabelInput
+  patch: UpdateLabelInput,
+  opts?: LabelMutationOptions
 ): Promise<WhatsappChatLabelDto | null> {
-  const existing = await prisma.whatsappChatLabel.findFirst({ where: { id, userId } });
+  const existing = await findLabelMutable(id, userId, opts);
   if (!existing) return null;
   const data: Prisma.WhatsappChatLabelUpdateInput = {};
   if (patch.nome !== undefined) {
     const t = patch.nome.trim();
     if (!t) throw new Error('Nome da lista é obrigatório.');
+    if (existing.isGlobal) {
+      const dup = await prisma.whatsappChatLabel.findFirst({
+        where: { isGlobal: true, nome: t, id: { not: id } }
+      });
+      if (dup) throw new Error('Já existe uma lista global com esse nome.');
+    }
     data.nome = t;
   }
   if (patch.cor !== undefined) data.cor = patch.cor?.trim() || null;
@@ -138,25 +189,24 @@ export async function updateLabel(
   return toDto(updated);
 }
 
-export async function deleteLabel(id: string, userId: string): Promise<boolean> {
-  const existing = await prisma.whatsappChatLabel.findFirst({ where: { id, userId } });
+export async function deleteLabel(
+  id: string,
+  userId: string,
+  opts?: LabelMutationOptions
+): Promise<boolean> {
+  const existing = await findLabelMutable(id, userId, opts);
   if (!existing) return false;
-  // `onDelete: Cascade` na FK do membership cuida das pivôs.
   await prisma.whatsappChatLabel.delete({ where: { id } });
   return true;
 }
 
-/**
- * Substitui completamente o conjunto de chats de uma lista (replace-set).
- * Usado pelo modal "Selecionar conversas para a lista" no frontend —
- * o usuário marca/desmarca chats e enviamos a lista final.
- */
 export async function setLabelChats(
   id: string,
   userId: string,
-  chatIds: string[]
+  chatIds: string[],
+  opts?: LabelMutationOptions
 ): Promise<WhatsappChatLabelDto | null> {
-  const existing = await prisma.whatsappChatLabel.findFirst({ where: { id, userId } });
+  const existing = await findLabelMutable(id, userId, opts);
   if (!existing) return null;
 
   const normalized = Array.from(
@@ -180,28 +230,20 @@ export async function setLabelChats(
   return toDto(fresh);
 }
 
-/**
- * Adiciona um ou mais chats a uma lista sem mexer no que já existe.
- * Útil quando o operador faz "Adicionar à lista X" pelo menu de cada
- * conversa.
- */
 export async function addChatsToLabel(
   id: string,
   userId: string,
-  chatIds: string[]
+  chatIds: string[],
+  opts?: LabelMutationOptions
 ): Promise<WhatsappChatLabelDto | null> {
-  const existing = await prisma.whatsappChatLabel.findFirst({ where: { id, userId } });
+  const existing = await findLabelMutable(id, userId, opts);
   if (!existing) return null;
 
   const normalized = Array.from(
     new Set(chatIds.map((c) => canonicalWhatsappChatId(c).trim()).filter(Boolean))
   );
   if (normalized.length === 0) {
-    const fresh = await prisma.whatsappChatLabel.findUniqueOrThrow({
-      where: { id },
-      include: { memberships: true }
-    });
-    return toDto(fresh);
+    return toDto(existing);
   }
 
   await prisma.whatsappChatLabelMembership.createMany({
@@ -219,9 +261,10 @@ export async function addChatsToLabel(
 export async function removeChatsFromLabel(
   id: string,
   userId: string,
-  chatIds: string[]
+  chatIds: string[],
+  opts?: LabelMutationOptions
 ): Promise<WhatsappChatLabelDto | null> {
-  const existing = await prisma.whatsappChatLabel.findFirst({ where: { id, userId } });
+  const existing = await findLabelMutable(id, userId, opts);
   if (!existing) return null;
 
   const normalized = Array.from(
@@ -239,3 +282,6 @@ export async function removeChatsFromLabel(
   });
   return toDto(fresh);
 }
+
+/** Exportado para testes/diagnóstico se necessário. */
+export { findLabelReadable };

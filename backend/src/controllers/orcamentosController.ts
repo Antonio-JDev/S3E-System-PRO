@@ -1,4 +1,10 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../middlewares/auth';
+import {
+  isOrcamentoStatusAprovado,
+  isRegredirTargetAllowed,
+  orcamentoConcretizadoBloqueiaRegressao,
+} from '../utils/orcamentoStatus.util';
 import { prisma } from '../lib/prisma';
 import multer from 'multer';
 import fs from 'fs';
@@ -211,7 +217,9 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
           select: {
             id: true,
             numeroSequencial: true,
-            numeroVenda: true
+            numeroVenda: true,
+            createdAt: true,
+            dataVenda: true
           }
         }
       },
@@ -253,7 +261,9 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
           select: {
             id: true,
             numeroSequencial: true,
-            numeroVenda: true
+            numeroVenda: true,
+            createdAt: true,
+            dataVenda: true
           }
         }
       }
@@ -349,7 +359,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
 
     // Calcular custo total e preço de venda
     let custoTotal = 0;
-    const itemsData = [];
+    const itemsData: any[] = [];
 
     for (const item of items) {
       let custoUnit = item.custoUnit || 0;
@@ -778,11 +788,19 @@ async function resetarSequenciaOrcamentos() {
   }
 }
 
+function userCanRegredirOrcamentoStatus(user: AuthRequest['user']): boolean {
+  if (!user) return false;
+  if (user.isAdmin === true) return true;
+  const role = (user.role || '').toLowerCase();
+  return role === 'admin' || role === 'administrador' || role === 'desenvolvedor';
+}
+
 // Atualizar status do orçamento
 export const updateOrcamentoStatus = async (req: Request, res: Response): Promise<void> => {
   try {
+    const authReq = req as AuthRequest;
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, regredir } = req.body as { status?: string; regredir?: boolean };
 
     console.log(`🔄 Atualizando status do orçamento ${id} para ${status}...`);
 
@@ -808,8 +826,90 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
       return;
     }
 
+    if (status === 'Concretizado') {
+      res.status(400).json({
+        success: false,
+        error: 'Status Concretizado é definido automaticamente ao gerar o pedido de venda'
+      });
+      return;
+    }
+
+    const vendaVinculada = await prisma.venda.findUnique({
+      where: { orcamentoId: id },
+      select: { id: true }
+    });
+    const hasPedidoVenda = Boolean(vendaVinculada);
+
+    if (regredir === true) {
+      if (!userCanRegredirOrcamentoStatus(authReq.user)) {
+        res.status(403).json({
+          success: false,
+          error: 'Apenas administrador ou desenvolvedor podem regredir o status do orçamento.'
+        });
+        return;
+      }
+
+      if (!isRegredirTargetAllowed(orcamento.status, status, hasPedidoVenda)) {
+        res.status(400).json({
+          success: false,
+          error: `Não é permitido regredir de "${orcamento.status}" para "${status}".`
+        });
+        return;
+      }
+
+      if (orcamentoConcretizadoBloqueiaRegressao(hasPedidoVenda, orcamento.status)) {
+        res.status(409).json({
+          success: false,
+          code: 'ORCAMENTO_CONCRETIZADO_BLOQUEADO',
+          error:
+            'Para regredir um orçamento concretizado é necessário excluir as contas a receber e, em seguida, o pedido de venda vinculado.'
+        });
+        return;
+      }
+
+      const projetoExistente = await prisma.projeto.findUnique({ where: { orcamentoId: id } });
+      if (projetoExistente && isOrcamentoStatusAprovado(orcamento.status) && status !== 'Aprovado') {
+        await prisma.projeto.update({
+          where: { id: projetoExistente.id },
+          data: { status: 'CANCELADO' }
+        });
+      }
+
+      const orcamentoRegredido = await prisma.orcamento.update({
+        where: { id },
+        data: {
+          status,
+          aprovedAt: status === 'Aprovado' ? orcamento.aprovedAt ?? new Date() : null,
+          recusadoAt: null
+        },
+        include: {
+          cliente: true,
+          items: true,
+          projeto: true
+        }
+      });
+
+      res.json({
+        success: true,
+        data: orcamentoRegredido,
+        message: `Status regredido para ${status} com sucesso`
+      });
+      return;
+    }
+
+    if (
+      (orcamento.status === 'Concretizado' || hasPedidoVenda) &&
+      status !== orcamento.status
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'Orçamento concretizado possui pedido de venda. Exclua o PV para alterar o status.'
+      });
+      return;
+    }
+
     // Se aprovado, criar ou atualizar projeto automaticamente
-    let projeto = null;
+    let projeto: any = null;
     if (status === 'Aprovado' && orcamento.status !== 'Aprovado') {
       // Verificar se já existe um projeto vinculado
       const projetoExistente = await prisma.projeto.findUnique({
@@ -967,7 +1067,7 @@ export const aprovarOrcamento = async (req: Request, res: Response): Promise<voi
       where: { orcamentoId: id }
     });
 
-    let projeto = null;
+    let projeto: any = null;
     if (projetoExistente) {
       // Se já existe, atualizar o status para PROPOSTA e adicionar flag de items frios
       console.log(`📋 Atualizando projeto existente ${projetoExistente.id} para PROPOSTA`);
@@ -1225,12 +1325,12 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
             
             if (kit) {
               custoUnit = kit.items.reduce((sum, kitItem) => 
-                sum + (kitItem.material.preco || 0) * kitItem.quantidade, 0
+                sum + ((kitItem.material?.preco || 0) * kitItem.quantidade), 0
               );
               
               // Calcular preço de venda do kit (soma dos valorVenda || preco dos materiais do estoque real)
               precoVendaUnit = kit.items.reduce((sum, kitItem) => {
-                const precoVendaItem = kitItem.material.valorVenda || kitItem.material.preco || 0;
+                const precoVendaItem = kitItem.material?.valorVenda || kitItem.material?.preco || 0;
                 return sum + precoVendaItem * kitItem.quantidade;
               }, 0);
               
@@ -1699,7 +1799,7 @@ export const previewImportacaoOrcamentos = async (req: Request, res: Response): 
     });
 
     // Processar orçamentos para preview
-    const orcamentosPreview = [];
+    const orcamentosPreview: any[] = [];
     let clientesNovos = 0;
     let clientesExistentesCount = 0;
 

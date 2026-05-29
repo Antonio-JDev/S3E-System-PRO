@@ -25,7 +25,9 @@ import {
   UserPlus,
   UserRound,
 } from 'lucide-react';
-import { PDF_CUSTOMIZATION_STORAGE_KEY } from '../../hooks/usePDFCustomization';
+import { loadPdfCustomizationFromStorage } from '../../hooks/usePDFCustomization';
+import { useMatchMedia, WA_MOBILE_MEDIA } from '../../hooks/useMatchMedia';
+import iconePdfChat from '../../assets/icone-pdf-chat.svg';
 import chatBgWebp from '../../assets/bg-darkBlack.webp';
 import chatBgWhiteWebp from '../../assets/bg-white.webp';
 import {
@@ -64,6 +66,8 @@ import {
   postWhatsappLinkCliente,
   postWhatsappUnlinkCliente,
   postWhatsappSendOrcamentoPdf,
+  whatsappCdnImageProxyUrl,
+  whatsappProfilePictureImageUrl,
   putWhatsappOrcamentoStatusMode,
   checkWhatsappProviderPhoneExists,
   whatsappProviderMediaProxyUrl,
@@ -76,7 +80,6 @@ import {
   postEvolutionFindStatusMessage,
   postEvolutionMarkChatUnread,
   postEvolutionSendContact,
-  postEvolutionSendLocation,
   postEvolutionInstanceSetPresence,
   postEvolutionGroupUpdatePicture,
   postEvolutionGroupUpdateSubject,
@@ -114,12 +117,9 @@ import {
 import { Twemoji } from 'react-emoji-render';
 import { clientesService, type Cliente } from '../../services/clientesService';
 import { listContatosS3e, type ContatoS3eDto } from '../../services/contatosS3eService';
-import { orcamentosService } from '../../services/orcamentosService';
 import { getEmojiOnlyCount } from '../../utils/emojiOnly';
-import type { OrcamentoPDFData, PDFCustomization } from '../../types/pdfCustomization';
 import { getBackoffRemainingMs, registerBackoffSuccess, registerRateLimitBackoff } from '../../utils/rateLimitBackoff';
 import { onlyDigits } from '../../utils/masks';
-import { renderOrcamentoPdfBase64 } from '../../utils/orcamentoPdfRender';
 import { downloadInNewTab, openInNewTab } from '../../utils/browserLinks';
 import WhatsAppActionsDrawer from './WhatsAppActionsDrawer';
 import AudioMessage from './AudioMessage';
@@ -133,7 +133,7 @@ import { AuthContext } from '../../contexts/AuthContext';
 import { useWhatsAppSocket } from '../../hooks/useWhatsAppSocket';
 import { useWhatsAppRealtimeStatus } from '../../hooks/useWhatsAppSocket';
 import { ComposerEmojiGifStickerModal, type ComposerPickerTab } from './ComposerEmojiGifStickerModal';
-import { EmojiInput, type EmojiInputHandle } from '../ui/emoji/EmojiInput';
+import { WhatsappComposerEditor, type WhatsappComposerEditorHandle } from './WhatsappComposerEditor';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -166,7 +166,17 @@ import {
   repairUtf8Mojibake,
   fileWithNormalizedUploadName,
   formatPhoneForProviderContact,
+  dedupeChatPreviews,
+  chatPreviewMergeKey,
+  resolveChatPreviewUpdateContext,
+  upsertChatPreviewInList,
 } from '../../utils/whatsappChat';
+import {
+  WA_SIDEBAR_FILTER_STORAGE_KEY,
+  readStoredSidebarFilter,
+  isCrmAdminUser,
+  buildWhatsappReplyPrefix,
+} from '../../utils/whatsappCrmHelpers';
 
 const FALLBACK_WHATSAPP_PROVIDER_DASHBOARD =
   import.meta.env.VITE_WHATSAPP_PROVIDER_DASHBOARD_URL || 'http://localhost:3333/manager';
@@ -175,6 +185,18 @@ const WHATSAPP_QR_ROTATION_MS = 75_000;
 const chatsQueryKey = ['whatsapp-chats'] as const;
 const archivedChatsQueryKey = ['whatsapp-archived-chats'] as const;
 const messagesQueryKey = (chatId: string) => ['whatsapp-messages', canonicalWhatsappChatId(chatId)] as const;
+
+type SendTextMutationVars = {
+  text: string;
+  optimisticId: string;
+  replySnapshot: WhatsappMessageDto | null;
+};
+
+type SendOrcamentoPdfMutationVars = {
+  orcamentoId: string;
+  modeOverride?: WhatsappOrcamentoStatusMode;
+  optimisticId: string;
+};
 
 const WA_SEND_CONTACT_MAX = 3;
 const WA_SEND_CONTACT_API_GAP_MS = 520;
@@ -698,6 +720,75 @@ function formatListTime(iso: string): string {
  */
 const WHATSAPP_URL_REGEX = /((?:https?:\/\/|www\.)[^\s<>"]+?)(?=$|[\s<>"]|[.,;:!?)\]}]+(?:\s|$))/gi;
 
+/** Telefone em texto (10–15 dígitos; opcional +55) — ex.: 47996362471 */
+const WHATSAPP_PHONE_IN_TEXT_REGEX = /(?<!\d)(?:\+?55[\s.-]?)?\d{10,15}(?!\d)/g;
+
+function splitTextByPhones(text: string): Array<{ kind: 'text' | 'phone'; value: string }> {
+  if (!text) return [];
+  const out: Array<{ kind: 'text' | 'phone'; value: string }> = [];
+  let lastIndex = 0;
+  for (const m of text.matchAll(WHATSAPP_PHONE_IN_TEXT_REGEX)) {
+    if (m.index === undefined) continue;
+    const digits = onlyDigits(m[0]);
+    if (digits.length < 10 || digits.length > 15) continue;
+    if (m.index > lastIndex) out.push({ kind: 'text', value: text.slice(lastIndex, m.index) });
+    out.push({ kind: 'phone', value: m[0] });
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < text.length) out.push({ kind: 'text', value: text.slice(lastIndex) });
+  return out;
+}
+
+function renderTextChunkWithUrlsAndPhones(
+  text: string,
+  keyPrefix: string,
+  onPhoneClick?: (digits: string) => void
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  splitTextByUrls(text).forEach((urlSeg, ui) => {
+    if (urlSeg.kind === 'url') {
+      const href = urlSeg.value.startsWith('www.') ? `https://${urlSeg.value}` : urlSeg.value;
+      nodes.push(
+        <a
+          key={`${keyPrefix}-u${ui}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline break-all dark:text-blue-400"
+        >
+          <Twemoji svg className="message-emoji-text" text={urlSeg.value} />
+        </a>
+      );
+      return;
+    }
+    splitTextByPhones(urlSeg.value).forEach((phSeg, pi) => {
+      if (phSeg.kind === 'phone' && onPhoneClick) {
+        const digits = onlyDigits(phSeg.value);
+        nodes.push(
+          <button
+            key={`${keyPrefix}-p${pi}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onPhoneClick(digits);
+            }}
+            className="inline cursor-pointer border-0 bg-transparent p-0 text-[#027eb5] underline decoration-[#027eb5]/70 hover:text-[#00a884] dark:text-[#53bdeb] dark:decoration-[#53bdeb]/70 dark:hover:text-[#00d4aa]"
+            title="Abrir conversa com este número"
+          >
+            <Twemoji svg className="message-emoji-text" text={phSeg.value} />
+          </button>
+        );
+      } else {
+        nodes.push(
+          <Twemoji key={`${keyPrefix}-t${ui}-${pi}`} svg className="message-emoji-text" text={phSeg.value} />
+        );
+      }
+    });
+  });
+  return nodes;
+}
+
 /**
  * Quebra um pedaço de texto em `text` / `url`, preservando a ordem e o conteúdo
  * exato (concatenar tudo retorna a string original). Usado pelo
@@ -717,63 +808,58 @@ function splitTextByUrls(text: string): Array<{ kind: 'text' | 'url'; value: str
   return out;
 }
 
-function renderWhatsAppText(text: string): React.ReactNode {
-  const t = repairUtf8Mojibake(text || '');
-  if (!t) return null;
-  const boldParts = t.split(/(\*[^*]+\*)/g);
+function renderInlineWhatsAppFormatting(
+  text: string,
+  keyPrefix: string,
+  onPhoneClick?: (digits: string) => void
+): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
+  const italicParts = text.split(/(_[^_]+_)/g);
+  italicParts.forEach((part, i) => {
+    if (!part) return;
+    if (part.startsWith('_') && part.endsWith('_') && part.length > 2) {
+      const inner = part.slice(1, -1);
+      const innerNodes = renderBoldChunks(inner, `${keyPrefix}i${i}`, onPhoneClick);
+      nodes.push(
+        <em key={`${keyPrefix}em${i}`} className="italic">
+          {innerNodes}
+        </em>
+      );
+      return;
+    }
+    nodes.push(...renderBoldChunks(part, `${keyPrefix}p${i}`, onPhoneClick));
+  });
+  return nodes;
+}
+
+function renderBoldChunks(
+  text: string,
+  keyPrefix: string,
+  onPhoneClick?: (digits: string) => void
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  const boldParts = text.split(/(\*[^*]+\*)/g);
   boldParts.forEach((part, i) => {
-    // String.split() com grupo capturador gera entradas vazias quando o padrão
-    // bate no início/fim do texto ou entre dois padrões consecutivos (ex.:
-    // "*olá*" → ["", "*olá*", ""]). <Twemoji text=""> lança "either children
-    // or text prop must be provided", então filtramos aqui.
     if (!part) return;
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
       const inner = part.slice(1, -1);
-      const innerNodes = splitTextByUrls(inner).map((seg, j) => {
-        if (seg.kind === 'url') {
-          const href = seg.value.startsWith('www.') ? `https://${seg.value}` : seg.value;
-          return (
-            <a
-              key={`b${i}-u${j}`}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline break-all dark:text-blue-400"
-            >
-              <Twemoji svg className="message-emoji-text" text={seg.value} />
-            </a>
-          );
-        }
-        return <Twemoji key={`b${i}-t${j}`} svg className="message-emoji-text" text={seg.value} />;
-      });
+      const innerNodes = renderTextChunkWithUrlsAndPhones(inner, `${keyPrefix}b${i}`, onPhoneClick);
       nodes.push(
-        <strong key={`b${i}`} className="font-semibold">
+        <strong key={`${keyPrefix}b${i}`} className="font-semibold">
           {innerNodes}
         </strong>
       );
       return;
     }
-    splitTextByUrls(part).forEach((seg, j) => {
-      if (seg.kind === 'url') {
-        const href = seg.value.startsWith('www.') ? `https://${seg.value}` : seg.value;
-        nodes.push(
-          <a
-            key={`p${i}-u${j}`}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:underline break-all dark:text-blue-400"
-          >
-            <Twemoji svg className="message-emoji-text" text={seg.value} />
-          </a>
-        );
-      } else {
-        nodes.push(<Twemoji key={`p${i}-t${j}`} svg className="message-emoji-text" text={seg.value} />);
-      }
-    });
+    nodes.push(...renderTextChunkWithUrlsAndPhones(part, `${keyPrefix}t${i}`, onPhoneClick));
   });
   return nodes;
+}
+
+function renderWhatsAppText(text: string, onPhoneClick?: (digits: string) => void): React.ReactNode {
+  const t = repairUtf8Mojibake(text || '');
+  if (!t) return null;
+  return renderInlineWhatsAppFormatting(t, 'root', onPhoneClick);
 }
 
 /**
@@ -824,11 +910,13 @@ function avatarLetter(label: string): string {
 }
 
 const ContactAvatar = memo(function ContactAvatar({
+  chatId,
   imageUrl,
   label,
   size,
   children,
 }: {
+  chatId?: string;
   imageUrl?: string | null;
   label: string;
   size: 'list' | 'header';
@@ -836,14 +924,23 @@ const ContactAvatar = memo(function ContactAvatar({
 }) {
   const [imgErr, setImgErr] = useState(false);
   const dim = size === 'header' ? 'h-10 w-10 text-sm' : 'h-12 w-12 text-[15px]';
-  const showImg = Boolean(imageUrl && !imgErr);
+  const avatarSrc = chatId
+    ? whatsappProfilePictureImageUrl(chatId, true)
+    : whatsappCdnImageProxyUrl(imageUrl);
+
+  useEffect(() => {
+    setImgErr(false);
+  }, [chatId, imageUrl]);
+
+  const showImg = Boolean(avatarSrc && !imgErr);
   return (
     <div className={`relative flex ${dim} shrink-0 items-center justify-center`}>
       {showImg ? (
         <img
-          src={imageUrl!}
+          src={avatarSrc!}
           alt=""
           className="h-full w-full rounded-full object-cover"
+          loading="lazy"
           onError={() => setImgErr(true)}
         />
       ) : (
@@ -911,13 +1008,6 @@ const SendPlaneIcon = (p: React.SVGProps<SVGSVGElement>) => (
 const AttachIcon = (p: React.SVGProps<SVGSVGElement>) => (
   <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-  </svg>
-);
-
-const LocationPinIcon = (p: React.SVGProps<SVGSVGElement>) => (
-  <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <path d="M12 21s-7-4.35-7-11a7 7 0 1 1 14 0c0 6.65-7 11-7 11z" />
-    <circle cx="12" cy="10" r="2.5" />
   </svg>
 );
 
@@ -1104,6 +1194,48 @@ function tokenQueryString(): string {
   return t ? `&token=${encodeURIComponent(t)}` : '';
 }
 
+function PdfDocumentCard({
+  filename,
+  sizeLabel,
+  pending,
+  fromMe,
+  onOpen,
+}: {
+  filename: string;
+  sizeLabel?: string | null;
+  pending?: boolean;
+  fromMe?: boolean;
+  onOpen?: () => void;
+}) {
+  const meta = pending ? 'PDF' : sizeLabel ? `PDF • ${sizeLabel}` : 'PDF';
+  const cardBg = fromMe
+    ? 'bg-[#d1f4cc] dark:bg-[#0b3d33]/70'
+    : 'bg-[#f0f2f5] dark:bg-[#1d282f]';
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (!pending) onOpen?.();
+      }}
+      className={`mb-1 w-full min-w-[min(100%,280px)] overflow-hidden rounded-lg text-left transition ${
+        pending ? 'cursor-default' : 'cursor-pointer hover:opacity-95'
+      } ${cardBg}`}
+      aria-label={pending ? `Enviando ${filename}` : `Abrir ${filename}`}
+    >
+      <div className="flex items-center gap-3 px-3 py-2.5">
+        <img src={iconePdfChat} alt="" className="h-9 w-9 shrink-0 object-contain" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[14px] font-medium leading-tight text-[#111b21] dark:text-[#e9edef]">
+            {filename}
+          </p>
+          <p className="mt-0.5 text-[12px] leading-tight text-[#667781] dark:text-[#8696a0]">{meta}</p>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 function MediaRenderer({
   m,
   onImageClick,
@@ -1132,7 +1264,6 @@ function MediaRenderer({
   const byIdDownload = m.hasMedia ? whatsappMessageMediaDownloadUrl(m.id) : null;
   const mediaSrc = byId || legacy;
   const mediaSrcDownload = byIdDownload || (m.mediaUrl ? whatsappProviderMediaProxyDownloadUrl(m.mediaUrl, fname) + tokenQueryString() : null) || mediaSrc;
-  if (!mediaSrc) return null;
 
   let cat = mediaMimeCategory(m.mediaMimetype ?? m.mimeType ?? undefined, m.mediaType, fname);
   if (cat === 'document') {
@@ -1141,6 +1272,47 @@ function MediaRenderer({
     else if (c.includes('imagem') || c.includes('foto') || c.includes('📷')) cat = 'image';
   }
   const sizeLabel = formatFileSize(m.fileSize ?? undefined);
+  const lowName = fname.toLowerCase();
+  const isPdf =
+    (m.mediaMimetype || '').toLowerCase().includes('pdf') ||
+    lowName.endsWith('.pdf') ||
+    (m.content || '').toLowerCase().includes('.pdf');
+  const isPendingOutboundPdf = Boolean(m.fromMe && isPdf && hasAnyMediaRef && !mediaSrc);
+
+  if (isPdf && (mediaSrc || isPendingOutboundPdf)) {
+    const openPdfAsBlobInNewTab = async () => {
+      if (!mediaSrc) return;
+      try {
+        const resp = await fetch(mediaSrc, { credentials: 'include' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        openInNewTab(url);
+        window.setTimeout(() => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            /* ignore */
+          }
+        }, 60_000);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Não foi possível abrir o PDF');
+        openInNewTab(mediaSrc);
+      }
+    };
+    return (
+      <PdfDocumentCard
+        filename={fname}
+        sizeLabel={sizeLabel}
+        pending={isPendingOutboundPdf}
+        fromMe={m.fromMe}
+        onOpen={() => void openPdfAsBlobInNewTab()}
+      />
+    );
+  }
+
+  if (!mediaSrc) return null;
+
   const audioMime =
     (m.mediaMimetype || '').toLowerCase().includes('ogg') || fname.toLowerCase().endsWith('.ogg')
       ? 'audio/ogg'
@@ -1195,34 +1367,6 @@ function MediaRenderer({
     );
   }
 
-  const lowName = fname.toLowerCase();
-  const canInlineDoc =
-    (m.mediaMimetype || '').toLowerCase().includes('pdf') ||
-    lowName.endsWith('.pdf');
-
-  const openPdfAsBlobInNewTab = async () => {
-    try {
-      const resp = await fetch(mediaSrc, { credentials: 'include' });
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}`);
-      }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      openInNewTab(url);
-      window.setTimeout(() => {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {
-          // ignore
-        }
-      }, 60_000);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Não foi possível abrir o PDF');
-      // fallback: tenta abrir direto
-      openInNewTab(mediaSrc);
-    }
-  };
-
   return (
     <div className="mb-1 overflow-hidden rounded-lg border border-black/10 bg-white/60 dark:border-white/10 dark:bg-[#161717]/40">
       <div className="flex items-center gap-3 px-2 py-2">
@@ -1235,16 +1379,10 @@ function MediaRenderer({
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (canInlineDoc) {
-              void openPdfAsBlobInNewTab();
-            } else {
-              openInNewTab(mediaSrc);
-            }
-          }}
+          onClick={() => openInNewTab(mediaSrc)}
           className="rounded-md border border-[#00a884] px-2 py-1 text-[11px] font-medium text-[#00a884] hover:bg-[#00a884]/10"
         >
-          {canInlineDoc ? 'Abrir PDF' : 'Visualizar'}
+          Visualizar
         </button>
         <button
           type="button"
@@ -1336,6 +1474,7 @@ const MessageBubble = memo(function MessageBubble({
   isFavoriteMessage,
   onImageClick,
   onNavigateWhatsappChat,
+  onOpenPhoneFromText,
   actionsDisabled,
 }: {
   m: WhatsappMessageDto;
@@ -1353,6 +1492,8 @@ const MessageBubble = memo(function MessageBubble({
   onImageClick?: (url: string) => void;
   /** Abre conversa ao tocar em “Conversar” no cartão de contato (vCard). */
   onNavigateWhatsappChat?: (chatId: string, label: string) => void;
+  /** Abre conversa ao tocar em número detectado no texto da mensagem. */
+  onOpenPhoneFromText?: (digits: string) => void;
   actionsDisabled?: boolean;
 }) {
   const [bubbleMenuOpen, setBubbleMenuOpen] = useState(false);
@@ -1478,7 +1619,7 @@ const MessageBubble = memo(function MessageBubble({
               <DropdownMenuContent
                 sideOffset={6}
                 align={m.fromMe ? 'end' : 'start'}
-                className="min-w-[240px] rounded-lg border border-gray-200 p-1.5 shadow-lg dark:border-[#3b4a54] dark:bg-[#233138] dark:text-[#e9edef]"
+                className="min-w-[11.5rem] w-max max-w-[min(100vw-2rem,16rem)] rounded-lg border border-gray-200 p-1.5 shadow-lg dark:border-[#3b4a54] dark:bg-[#233138] dark:text-[#e9edef]"
               >
                 {m.providerMessageId ? (
                   <>
@@ -1519,18 +1660,23 @@ const MessageBubble = memo(function MessageBubble({
                   </WaMenuIconWrap>
                   Responder
                 </DropdownMenuItem>
-                {m.fromMe && m.providerMessageId ? (
+                {m.fromMe && !hasMedia ? (
                   <DropdownMenuItem
                     className={WA_MSG_MENU_ITEM}
                     onSelect={(e) => {
                       e.preventDefault();
+                      if (!m.providerMessageId) {
+                        toast.message('Aguarde a mensagem ser entregue antes de editar.');
+                        return;
+                      }
+                      setBubbleMenuOpen(false);
                       onEditMessage(m);
                     }}
                   >
                     <WaMenuIconWrap>
                       <WaMenuIconPencil className={WA_MSG_MENU_ICON} />
                     </WaMenuIconWrap>
-                    Editar mensagem
+                    Editar
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem
@@ -1578,7 +1724,7 @@ const MessageBubble = memo(function MessageBubble({
                   <WaMenuIconWrap>
                     <WaMenuIconForward className={WA_MSG_MENU_ICON} />
                   </WaMenuIconWrap>
-                  Encaminhar mensagem
+                  Encaminhar
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   className={WA_MSG_MENU_ITEM}
@@ -1778,7 +1924,7 @@ const MessageBubble = memo(function MessageBubble({
           }
           return (
             <p className="whitespace-pre-wrap break-words text-[14.2px] leading-[19px] pr-14 pb-0.5">
-              {renderWhatsAppText(m.content)}
+              {renderWhatsAppText(m.content, onOpenPhoneFromText)}
             </p>
           );
         })()}
@@ -1889,7 +2035,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
    * Filtros built-in: `all` (Tudo) e `unread / favorites / groups`.
    * Filtros customizados: `label:<id>` — pertinência via `whatsapp_chat_label_memberships`.
    */
-  const [chatSidebarFilter, setChatSidebarFilter] = useState<string>('all');
+  const [chatSidebarFilter, setChatSidebarFilter] = useState<string>(readStoredSidebarFilter);
   const [labelEditOpen, setLabelEditOpen] = useState(false);
   const [labelEditTarget, setLabelEditTarget] = useState<WhatsappChatLabelDto | null>(null);
   const [labelPickChatsOpen, setLabelPickChatsOpen] = useState(false);
@@ -2041,13 +2187,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [composerPickerTab, setComposerPickerTab] = useState<ComposerPickerTab>('emoji');
   const composerPickerPanelRef = useRef<HTMLDivElement>(null);
   const composerPickerTriggerRef = useRef<HTMLButtonElement>(null);
-  const composerDraftInputRef = useRef<EmojiInputHandle>(null);
+  const composerDraftInputRef = useRef<WhatsappComposerEditorHandle>(null);
   const chatFileDragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const markReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const evolutionReadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const evolutionReadLastByChatRef = useRef<Map<string, string>>(new Map());
-  const sendLockRef = useRef(false);
   const prevProviderConnRef = useRef<boolean | undefined>(undefined);
   const [peerTyping, setPeerTyping] = useState(false);
   const typingHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2093,6 +2238,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [actionsPanelOpen, setActionsPanelOpen] = useState(false);
   const contactPanelAutoFetchKeyRef = useRef<string>('');
   const [actionsClienteSearch, setActionsClienteSearch] = useState('');
+  const [actionsClienteSearchDebounced, setActionsClienteSearchDebounced] = useState('');
   const [actionsContextSnapshot, setActionsContextSnapshot] = useState<WhatsappActionsContextData | null>(null);
   const [groupSubjectDraft, setGroupSubjectDraft] = useState('');
   const [groupDescriptionDraft, setGroupDescriptionDraft] = useState('');
@@ -2194,11 +2340,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
   const [pendingRecordedAudio, setPendingRecordedAudio] = useState<PendingRecordedAudio | null>(null);
-  const [locationComposerOpen, setLocationComposerOpen] = useState(false);
-  const [locationNameDraft, setLocationNameDraft] = useState('');
-  const [locationAddressDraft, setLocationAddressDraft] = useState('');
-  const [locationLatitudeDraft, setLocationLatitudeDraft] = useState('');
-  const [locationLongitudeDraft, setLocationLongitudeDraft] = useState('');
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [previewProgress, setPreviewProgress] = useState(0);
@@ -2209,6 +2350,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const ackFallbackSignatureRef = useRef('');
   const auth = useContext(AuthContext);
   const crmUser = auth?.user ?? null;
+  const crmIsAdmin = useMemo(() => isCrmAdminUser(crmUser), [crmUser]);
   const realtime = useWhatsAppRealtimeStatus();
   chatIdRef.current = chatId;
 
@@ -2229,11 +2371,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const r = await fetchWhatsappChats();
       if (!r.success || !Array.isArray(r.data)) return [];
       return sortChatsByRecent(
-        r.data.map((c) => ({
-          ...c,
-          unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : 0,
-          lastAck: c.lastAck ?? null,
-        }))
+        dedupeChatPreviews(
+          r.data.map((c) => ({
+            ...c,
+            unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : 0,
+            lastAck: c.lastAck ?? null,
+          }))
+        )
       );
     },
     // Fallback se o Socket.io falhar (CORS, proxy, etc.)
@@ -2252,6 +2396,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(WA_SIDEBAR_FILTER_STORAGE_KEY, chatSidebarFilter);
+    } catch {
+      // localStorage indisponível
+    }
+  }, [chatSidebarFilter]);
+
+  useEffect(() => {
+    if (!chatSidebarFilter.startsWith('label:')) return;
+    const labelId = chatSidebarFilter.slice('label:'.length);
+    if (chatLabels.some((l) => l.id === labelId)) return;
+    setChatSidebarFilter('all');
+  }, [chatSidebarFilter, chatLabels]);
 
   const { data: messages = [], isLoading: loadingMsgs } = useQuery({
     queryKey: messagesQueryKey(chatId),
@@ -2569,11 +2729,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const r = await fetchWhatsappArchivedChats();
       if (!r.success || !Array.isArray(r.data)) return [];
       return sortChatsByRecent(
-        r.data.map((c) => ({
-          ...c,
-          unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : 0,
-          lastAck: c.lastAck ?? null,
-        }))
+        dedupeChatPreviews(
+          r.data.map((c) => ({
+            ...c,
+            unreadCount: typeof c.unreadCount === 'number' ? c.unreadCount : 0,
+            lastAck: c.lastAck ?? null,
+          }))
+        )
       );
     },
     enabled: archivedPanelOpen,
@@ -3053,11 +3215,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     setActionsContextSnapshot(actionsContextQuery.data);
   }, [actionsContextQuery.data]);
 
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setActionsClienteSearchDebounced(actionsClienteSearch);
+    }, 280);
+    return () => window.clearTimeout(id);
+  }, [actionsClienteSearch]);
+
+  useEffect(() => {
+    if (actionsPanelOpen) return;
+    setActionsClienteSearch('');
+    setActionsClienteSearchDebounced('');
+  }, [actionsPanelOpen]);
+
   const actionsClientesQuery = useQuery({
-    queryKey: ['whatsapp-actions-clientes', actionsClienteSearch],
+    queryKey: ['whatsapp-actions-clientes', actionsClienteSearchDebounced],
     queryFn: async (): Promise<Cliente[]> => {
       const result = await clientesService.listar({
-        search: actionsClienteSearch.trim() || undefined,
+        search: actionsClienteSearchDebounced.trim() || undefined,
       });
       if (!result.success || !Array.isArray(result.data)) return [];
       return result.data.slice(0, 120);
@@ -3130,129 +3305,74 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const [sendingOrcamentoId, setSendingOrcamentoId] = useState<string | null>(null);
 
   const sendOrcamentoPdfMut = useMutation({
-    mutationFn: async (payload: { orcamentoId: string; modeOverride?: WhatsappOrcamentoStatusMode }) => {
+    mutationFn: async (payload: SendOrcamentoPdfMutationVars) => {
       const mode = payload.modeOverride ?? actionsContextSnapshot?.statusUpdateMode;
-      let pdfCustomization: PDFCustomization | null = null;
-      try {
-        const raw = localStorage.getItem(PDF_CUSTOMIZATION_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as unknown;
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            pdfCustomization = parsed as PDFCustomization;
-          }
-        }
-      } catch {
-        // ignora JSON inválido
-      }
-
-      const full = await orcamentosService.buscar(payload.orcamentoId);
-      if (!full.success || !full.data) {
-        throw new Error(full.error || 'Não foi possível carregar os dados do orçamento para gerar o PDF.');
-      }
-      const o: any = full.data;
-
-      const mapItemName = (item: any): string =>
-        item?.material?.nome || item?.kit?.nome || item?.servicoNome || item?.nome || item?.descricao || 'Item';
-
-      const orcamentoData: OrcamentoPDFData = {
-        numero: (o?.id ? String(o.id).slice(0, 8).toUpperCase() : payload.orcamentoId.slice(0, 8).toUpperCase()),
-        numeroSequencial: typeof o?.numeroSequencial === 'number' ? o.numeroSequencial : undefined,
-        data: o?.createdAt ? new Date(o.createdAt).toLocaleDateString('pt-BR') : undefined,
-        emissao: o?.createdAt ? new Date(o.createdAt).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
-        validade: o?.validade ? new Date(o.validade).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
-        orcamentistaNome: typeof o?.orcamentistaNome === 'string' ? o.orcamentistaNome : undefined,
-        enderecos: {
-          cobranca: o?.cliente?.endereco,
-          obra: o?.enderecoObra
-        },
-        cliente: {
-          nome: o?.cliente?.nome || 'Cliente',
-          cpfCnpj: o?.cliente?.cpfCnpj || undefined,
-          endereco: o?.cliente?.endereco,
-          telefone: o?.cliente?.telefone,
-          email: o?.cliente?.email
-        },
-        projeto: {
-          titulo: o?.titulo,
-          descricao: o?.descricao,
-          enderecoObra: o?.enderecoObra,
-          cidade: o?.cidade,
-          bairro: o?.bairro,
-          cep: o?.cep,
-          responsavelObra: o?.responsavelObra
-        },
-        prazos: {
-          previsaoInicio: o?.previsaoInicio ? new Date(o.previsaoInicio).toLocaleDateString('pt-BR') : undefined,
-          previsaoTermino: o?.previsaoTermino ? new Date(o.previsaoTermino).toLocaleDateString('pt-BR') : undefined
-        },
-        items: Array.isArray(o?.items)
-          ? o.items.map((it: any) => ({
-              codigo: it?.materialId || it?.kitId || it?.cotacaoId,
-              nome: mapItemName(it),
-              descricao: typeof it?.descricao === 'string' ? it.descricao : undefined,
-              unidade: it?.unidadeMedida || 'UN',
-              quantidade: Number(it?.quantidade || 0),
-              valorUnitario: Number(it?.precoUnit ?? it?.precoUnitario ?? it?.valorUnitario ?? 0),
-              valorTotal: Number(it?.subtotal ?? it?.valorTotal ?? 0)
-            }))
-          : [],
-        financeiro: {
-          subtotal: Number(o?.custoTotal ?? 0),
-          bdi: typeof o?.bdi === 'number' ? o.bdi : undefined,
-          valorComBDI: Number(o?.custoTotal ?? 0),
-          desconto: Number(o?.descontoValor ?? 0),
-          impostos: Number(o?.impostoPercentual ?? 0),
-          valorTotal: Number(o?.precoVenda ?? o?.valorTotal ?? 0),
-          condicaoPagamento: o?.condicaoPagamento
-        },
-        observacoes: o?.observacoes,
-        descricaoGeral: o?.descricao,
-        descricaoTecnica: o?.descricaoProjeto,
-        fotos: []
-      };
-
-      const rendered = await renderOrcamentoPdfBase64({ orcamentoData, customization: pdfCustomization });
-      // Fallback de segurança: se a captura falhar/sair vazia, manda o backend gerar via Puppeteer.
-      const seemsEmpty = !rendered.base64 || rendered.base64.trim().length < 10_000;
+      const pdfCustomization = loadPdfCustomizationFromStorage();
 
       const r = await postWhatsappSendOrcamentoPdf({
-        chatId,
+        chatId: outboundChatId,
         orcamentoId: payload.orcamentoId,
         mode,
-        ...(pdfCustomization ? { pdfCustomization: pdfCustomization as unknown as Record<string, unknown> } : {}),
-        ...(seemsEmpty ? {} : { pdfBase64: rendered.base64, pdfFilename: rendered.filename })
+        pdfCustomization: pdfCustomization as unknown as Record<string, unknown>,
       });
       const httpOk = r.status == null || (r.status >= 200 && r.status < 300);
       if (!httpOk || !r.success) {
+        const errLow = `${r.error || ''}`.toLowerCase();
+        const timeoutLike = errLow.includes('timeout') || errLow.includes('demorou');
+        if (timeoutLike) {
+          toast.warning('Envio em processamento', {
+            description:
+              'O WhatsApp demorou para responder. O PDF pode ter sido enviado; confirme no chat e clique em Atualizar.',
+          });
+          throwAfterWhatsappToast();
+        }
         toastWhatsappApiError(r, { titleFallback: 'Falha ao enviar PDF do orçamento' });
         throwAfterWhatsappToast();
       }
-      if (!r.data) {
-        toast.error('Falha ao enviar PDF do orçamento');
-        throwAfterWhatsappToast();
-      }
-      return r.data;
+      return r.data ?? null;
     },
     onMutate: (payload) => {
-      setSendingOrcamentoId(payload.orcamentoId);
-    },
-    onSuccess: (data) => {
-      if (data?.message) {
-        mergeMessage(data.message);
-      } else {
-        toast.warning('Envio registrado sem confirmação da mensagem no histórico', {
-          description: 'Confira o chat; se não aparecer o PDF, tente novamente.',
-        });
-      }
-      toast.success(
-        data?.statusUpdated
-          ? 'PDF enviado e status atualizado para "Enviado ao Cliente"'
-          : 'PDF enviado no chat com sucesso'
-      );
-      void actionsContextQuery.refetch();
       setActionsPanelOpen(false);
+      setSendingOrcamentoId(payload.orcamentoId);
+
+      const ctx = actionsContextSnapshot ?? actionsContextQuery.data;
+      const orc = ctx?.orcamentos?.find((o) => o.id === payload.orcamentoId);
+      const num = orc?.numeroSequencial ?? orc?.numero ?? 'orcamento';
+      const fname = `Orcamento-${num}.pdf`;
+      const userName = (crmUser?.name || 'Usuário').trim() || 'Usuário';
+      const caption = `*${userName}*\n\nSegue o orçamento ${num} conforme tratativa enviado via S3E System.`;
+
+      const optimistic: WhatsappMessageDto = {
+        id: payload.optimisticId,
+        chatId: outboundChatId,
+        content: `📎 Arquivo\n${caption}`,
+        fromMe: true,
+        timestamp: new Date().toISOString(),
+        ack: 0,
+        providerMessageId: null,
+        hasMedia: true,
+        mediaType: 'document',
+        mediaMimetype: 'application/pdf',
+        mediaFilename: fname,
+        fileName: fname,
+      };
+      mergeMessage(optimistic);
     },
-    onError: (e: Error) => {
+    onSuccess: (data, variables) => {
+      const cid = canonicalWhatsappChatId(outboundChatId);
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+        (old ?? []).filter((x) => x.id !== variables.optimisticId)
+      );
+      if (data?.message) {
+        mergeMessage({ ...data.message, chatId: cid });
+      }
+      void actionsContextQuery.refetch();
+    },
+    onError: (e: Error, variables) => {
+      const cid = canonicalWhatsappChatId(outboundChatId);
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+        (old ?? []).filter((x) => x.id !== variables.optimisticId)
+      );
       if (!isWhatsappErrorAlreadyToasted(e)) toast.error(e.message || 'Erro ao enviar PDF');
     },
     onSettled: () => {
@@ -3263,9 +3383,14 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const syncMarkRead = useCallback(
     (cid: string) => {
       const canon = canonicalWhatsappChatId(cid);
-      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) =>
-        old?.map((c) => (canonicalWhatsappChatId(c.chatId) === canon ? { ...c, unreadCount: 0 } : c))
-      );
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) => {
+        const list = old ?? [];
+        const row = list.find((c) => canonicalWhatsappChatId(c.chatId) === canon);
+        const key = chatPreviewMergeKey(canon, row?.phoneNumberFromS3e);
+        return list.map((c) =>
+          chatPreviewMergeKey(c.chatId, c.phoneNumberFromS3e) === key ? { ...c, unreadCount: 0 } : c
+        );
+      });
       void postWhatsappMarkRead(cid).then((res) => {
         if (!res.success) {
           console.warn('[WhatsApp] mark-read (CRM) falhou', res.error, res.status);
@@ -3394,11 +3519,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     setContactPanelOpen(false);
     setGroupInfo(null);
     setGroupInviteUrl('');
-    setLocationComposerOpen(false);
-    setLocationNameDraft('');
-    setLocationAddressDraft('');
-    setLocationLatitudeDraft('');
-    setLocationLongitudeDraft('');
     ackFallbackSignatureRef.current = '';
   }, [chatId]);
 
@@ -3478,11 +3598,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         setProfilePanelOpen(false);
         return;
       }
-      if (locationComposerOpen) {
-        e.preventDefault();
-        setLocationComposerOpen(false);
-        return;
-      }
 
       // Se nenhum modal/overlay estiver aberto, Esc fecha a conversa ativa.
       if (chatId && onClose) {
@@ -3507,35 +3622,55 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     groupPanelOpen,
     contactPanelOpen,
     profilePanelOpen,
-    locationComposerOpen,
   ]);
 
   const mergeMessage = useCallback(
     (msg: WhatsappMessageDto) => {
       const cid = canonicalWhatsappChatId(msg.chatId);
-      const normalizedMsg = { ...msg, chatId: cid };
+      const list = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey) ?? [];
+      const ctx = resolveChatPreviewUpdateContext(list, cid, chatId, msg.fromMe);
+      const storageCid = ctx.messageCacheChatId || ctx.preferredChatId || cid;
+      const normalizedMsg = { ...msg, chatId: storageCid };
 
-      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) => {
-        const list = old ?? [];
-        if (list.some((x) => x.id === normalizedMsg.id)) return list;
-        return [...list, normalizedMsg];
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(storageCid), (old) => {
+        const merged = old ?? [];
+        if (merged.some((x) => x.id === normalizedMsg.id)) return merged;
+        return [...merged, normalizedMsg];
       });
 
+      if (storageCid !== cid) {
+        queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+          (old ?? []).filter((x) => x.id !== normalizedMsg.id)
+        );
+      }
+
       queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) => {
-        const list = old ?? [];
-        const prevRow = list.find((c) => canonicalWhatsappChatId(c.chatId) === cid);
+        const previews = old ?? [];
+        const prevRows = ctx.matchedRows;
+        const prevRow = prevRows.length
+          ? prevRows.reduce((a, b) => (new Date(b.lastAt ?? 0) > new Date(a.lastAt ?? 0) ? b : a))
+          : undefined;
+        const activeKey = chatId
+          ? chatPreviewMergeKey(
+              canonicalWhatsappChatId(chatId),
+              previews.find((c) => canonicalWhatsappChatId(c.chatId) === canonicalWhatsappChatId(chatId))
+                ?.phoneNumberFromS3e ?? ctx.phoneHint
+            )
+          : '';
+        const isActiveChat = Boolean(activeKey && activeKey === ctx.mergeKey);
+
         let unreadCount: number;
-        if (canonicalWhatsappChatId(chatId) === cid) {
+        if (isActiveChat) {
           unreadCount = 0;
-          if (!normalizedMsg.fromMe) scheduleMarkRead(cid);
+          if (!normalizedMsg.fromMe) scheduleMarkRead(storageCid);
         } else if (!normalizedMsg.fromMe) {
-          unreadCount = (prevRow?.unreadCount ?? 0) + 1;
+          unreadCount = prevRows.reduce((s, r) => s + (r.unreadCount ?? 0), 0) + 1;
         } else {
-          unreadCount = prevRow?.unreadCount ?? 0;
+          unreadCount = prevRows.reduce((s, r) => s + (r.unreadCount ?? 0), 0);
         }
 
         const preview: WhatsappChatPreview = {
-          chatId: cid,
+          chatId: ctx.preferredChatId,
           lastContent: normalizedMsg.content,
           lastAt: normalizedMsg.timestamp,
           lastFromMe: normalizedMsg.fromMe,
@@ -3543,10 +3678,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           unreadCount,
           contactName: prevRow?.contactName,
           providerCachedName: prevRow?.providerCachedName,
+          phoneNumberFromS3e: prevRow?.phoneNumberFromS3e ?? ctx.phoneHint,
           cachedProfilePictureUrl: prevRow?.cachedProfilePictureUrl,
         };
-        const rest = list.filter((c) => canonicalWhatsappChatId(c.chatId) !== cid);
-        return sortChatsByRecent([preview, ...rest]);
+        return sortChatsByRecent(
+          upsertChatPreviewInList(previews, preview, { activeChatId: chatId, mergeKey: ctx.mergeKey })
+        );
       });
 
       // Se o chat está aberto e a mensagem chegou agora, isso equivale a “visualizar” no CRM.
@@ -3554,13 +3691,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       if (
         !normalizedMsg.fromMe &&
         normalizedMsg.providerMessageId &&
-        canonicalWhatsappChatId(chatId) === cid &&
+        ctx.mergeKey ===
+          chatPreviewMergeKey(
+            canonicalWhatsappChatId(chatId),
+            list.find((c) => canonicalWhatsappChatId(c.chatId) === canonicalWhatsappChatId(chatId))
+              ?.phoneNumberFromS3e ?? ctx.phoneHint
+          ) &&
         document.visibilityState === 'visible'
       ) {
         if (evolutionReadDebounceRef.current) clearTimeout(evolutionReadDebounceRef.current);
         evolutionReadDebounceRef.current = setTimeout(() => {
           evolutionReadDebounceRef.current = null;
-          const canon = canonicalWhatsappChatId(cid);
+          const canon = canonicalWhatsappChatId(storageCid);
           const pid = String(normalizedMsg.providerMessageId);
           const lastSent = evolutionReadLastByChatRef.current.get(canon);
           if (lastSent === pid) return;
@@ -3625,11 +3767,20 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       );
       queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) => {
         const list = old ?? [];
-        const msgs = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid)) ?? [];
+        const row = list.find((c) => canonicalWhatsappChatId(c.chatId) === cid);
+        const key = chatPreviewMergeKey(cid, row?.phoneNumberFromS3e);
+        const msgs =
+          queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid)) ??
+          queryClient.getQueryData<WhatsappMessageDto[]>(
+            messagesQueryKey(row?.chatId ?? cid)
+          ) ??
+          [];
         const lastOut = [...msgs].reverse().find((m) => m.fromMe);
         if (!lastOut || lastOut.id !== p.id) return list;
         return list.map((c) =>
-          canonicalWhatsappChatId(c.chatId) === cid ? { ...c, lastAck: p.ack ?? c.lastAck } : c
+          chatPreviewMergeKey(c.chatId, c.phoneNumberFromS3e) === key
+            ? { ...c, lastAck: p.ack ?? c.lastAck }
+            : c
         );
       });
     },
@@ -3979,47 +4130,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
-  const sendLocationMut = useMutation({
-    mutationFn: async () => {
-      const number = evolutionNumberFromChat(outboundChatId);
-      if (!number || number.length < 8) {
-        throw new Error('Localização Evolution requer número válido (chat individual).');
-      }
-      const latitude = Number.parseFloat(locationLatitudeDraft.trim().replace(',', '.'));
-      const longitude = Number.parseFloat(locationLongitudeDraft.trim().replace(',', '.'));
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        throw new Error('Latitude e longitude inválidas.');
-      }
-      const name = locationNameDraft.trim();
-      const address = locationAddressDraft.trim();
-      if (!name || !address) {
-        throw new Error('Nome da cidade/local e endereço são obrigatórios.');
-      }
-      const r = await postEvolutionSendLocation({
-        number,
-        name,
-        address,
-        latitude,
-        longitude,
-        delay: 600,
-      });
-      if (!r.success) throw new Error(r.error || 'Falha ao enviar localização no Evolution');
-    },
-    onSuccess: () => {
-      setLocationComposerOpen(false);
-      setLocationNameDraft('');
-      setLocationAddressDraft('');
-      setLocationLatitudeDraft('');
-      setLocationLongitudeDraft('');
-      toast.success('Localização enviada');
-      void queryClient.invalidateQueries({ queryKey: messagesQueryKey(chatId) });
-      void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
-    },
-    onError: (e: Error) => {
-      toast.error(e.message || 'Erro ao enviar localização');
-    },
-  });
-
   const sendContactConfirmMut = useMutation({
     mutationFn: async (rows: S3eContactPickerRow[]) => {
       if (isWhatsappGroupChatId(outboundChatId)) {
@@ -4072,23 +4182,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       toast.error(e.message || 'Erro ao enviar contato');
     },
   });
-
-  const handleUseCurrentLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocalização não suportada neste navegador.');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocationLatitudeDraft(pos.coords.latitude.toFixed(6));
-        setLocationLongitudeDraft(pos.coords.longitude.toFixed(6));
-      },
-      (err) => {
-        toast.error(err.message || 'Não foi possível obter sua localização atual.');
-      },
-      { enableHighAccuracy: true, timeout: 12_000 }
-    );
-  }, []);
 
   const stageFilesFromPicker = useCallback(
     (rawFiles: File[]) => {
@@ -4306,7 +4399,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       });
       setMediaCaption('');
       discardRecordedAudio();
-      setLocationComposerOpen(false);
       setIsInForwardSelectionMode(true);
       setForwardModalOpen(false);
       setForwardTargetChatId(null);
@@ -5172,40 +5264,112 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     },
   });
 
+  const refocusComposer = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        composerDraftInputRef.current?.focus();
+      });
+    });
+  }, []);
+
+  // Lê o draft via ref para não invalidar handleSend/onSubmit a cada keystroke.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
   const sendMut = useMutation({
-    mutationFn: async (text: string) => {
-      const prefix = replyToMessage
-        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
-        : '';
-      const r = await sendWhatsappMessage(outboundChatId, `${prefix}${text}`);
+    mutationFn: async ({ text, replySnapshot }: SendTextMutationVars) => {
+      const r = await sendWhatsappMessage(outboundChatId, `${buildWhatsappReplyPrefix(replySnapshot)}${text}`);
       if (!r.success) throw new Error(r.error || 'Falha ao enviar');
       return r.data;
     },
-    onSuccess: (data) => {
-      setDraft('');
-      setReplyToMessage(null);
-      if (data) mergeMessage(data);
+    onSuccess: (data, variables) => {
+      if (!data) return;
+      const localCid = canonicalWhatsappChatId(outboundChatId);
+      const normalized = { ...data, chatId: localCid };
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(localCid), (old) => {
+        const list = (old ?? []).filter((x) => x.id !== variables.optimisticId);
+        if (list.some((x) => x.id === normalized.id)) return list;
+        return [...list, normalized];
+      });
+      const serverCid = canonicalWhatsappChatId(data.chatId);
+      if (serverCid !== localCid) {
+        queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(serverCid), (old) =>
+          (old ?? []).filter((x) => x.id !== normalized.id && x.id !== variables.optimisticId)
+        );
+      }
+      mergeMessage(normalized);
+      refocusComposer();
     },
-    onError: (e: Error) => {
+    onError: (e: Error, variables) => {
+      const cid = canonicalWhatsappChatId(outboundChatId);
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+        (old ?? []).filter((x) => x.id !== variables.optimisticId)
+      );
+      setDraft(variables.text);
+      draftRef.current = variables.text;
+      if (variables.replySnapshot) setReplyToMessage(variables.replySnapshot);
       toast.error(e.message || 'Erro ao enviar mensagem');
+      refocusComposer();
     },
   });
 
-  // Lê o draft via ref para não invalidar este callback a cada keystroke
-  // (o EmojiInput depende dele como prop `onSubmit`; recriar a cada tecla
-  // contribuía para o lag de digitação relatado).
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   const handleSend = useCallback(() => {
     const t = draftRef.current.trim();
-    if (!t || sendMut.isPending || sendLockRef.current) return;
-    sendLockRef.current = true;
-    sendMut.mutate(t, {
-      onSettled: () => {
-        sendLockRef.current = false;
-      },
+    if (!t) return;
+
+    const replySnapshot = replyToMessage;
+    const fullText = `${buildWhatsappReplyPrefix(replySnapshot)}${t}`;
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const optimistic: WhatsappMessageDto = {
+      id: optimisticId,
+      chatId: outboundChatId,
+      content: fullText,
+      fromMe: true,
+      timestamp: new Date().toISOString(),
+      ack: 0,
+      providerMessageId: null,
+    };
+
+    setDraft('');
+    draftRef.current = '';
+    setReplyToMessage(null);
+    mergeMessage(optimistic);
+    refocusComposer();
+
+    sendMut.mutate({ text: t, optimisticId, replySnapshot });
+  }, [sendMut, refocusComposer, replyToMessage, outboundChatId, mergeMessage]);
+
+  const handleOpenPhoneFromText = useCallback(
+    async (rawDigits: string) => {
+      let digits = onlyDigits(rawDigits);
+      if (digits.length < 10) return;
+      if (digits.length <= 11 && !digits.startsWith('55')) digits = `55${digits}`;
+      const title = formatPhoneForDisplay(`${digits.replace(/^\+/, '')}@c.us`);
+      try {
+        const r = await fetchWhatsappResolveOpenChat(digits);
+        if (r.success && r.data?.chatId) {
+          onNavigateChat?.(canonicalWhatsappChatId(r.data.chatId), title);
+          return;
+        }
+      } catch {
+        // fallback abaixo
+      }
+      onNavigateChat?.(canonicalWhatsappChatId(toWhatsappChatId(digits)), title);
+    },
+    [onNavigateChat]
+  );
+
+  useEffect(() => {
+    if (!chatId || isInForwardSelectionMode || sendContactStep !== 'idle' || editingId) return;
+    const id = window.requestAnimationFrame(() => {
+      composerDraftInputRef.current?.focus();
     });
-  }, [sendMut]);
+    return () => window.cancelAnimationFrame(id);
+  }, [chatId, isInForwardSelectionMode, sendContactStep, editingId]);
+
+  const isWaMobile = useMatchMedia(WA_MOBILE_MEDIA);
+  const mobileListOnly = isWaMobile && !chatId;
+  const mobileChatOnly = isWaMobile && !!chatId;
 
   const rootClass =
     layout === 'full'
@@ -5214,8 +5378,10 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const asideClass =
     layout === 'full'
-      ? 'flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] sm:w-[var(--wa-aside-w,408px)] sm:max-w-[60vw] sm:shrink-0'
-      : 'flex w-full max-w-[300px] shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] sm:max-w-[320px]';
+      ? `flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] min-[780px]:w-[var(--wa-aside-w,408px)] min-[780px]:max-w-[60vw] min-[780px]:shrink-0${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none max-[779px]:border-r-0'}`
+      : `flex w-full max-w-[300px] shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] min-[780px]:max-w-[320px]${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none max-[779px]:border-r-0'}`;
+
+  const chatColumnClass = `relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#161717]${mobileListOnly ? ' max-[779px]:hidden' : ''}${mobileChatOnly ? ' max-[779px]:w-full max-[779px]:flex-1' : ''}`;
 
   return (
     <div className={rootClass}>
@@ -5229,7 +5395,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             : undefined
         }
       >
-        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#161717]">
+        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-white px-3 max-[779px]:pl-14 dark:border-[#2a3942] dark:bg-[#161717]">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <h1 className="truncate text-[19px] font-bold tracking-tight text-[#1daa61] dark:text-white">WhatsApp</h1>
             {totalUnreadMsgs > 0 ? (
@@ -5526,7 +5692,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     setLabelEditTarget(label);
                     setLabelEditOpen(true);
                   }}
-                  title={`${label.nome} — duplo-clique para editar`}
+                  title={`${label.nome}${label.isGlobal ? ' (todos os usuários)' : ''} — duplo-clique para editar`}
                   style={
                     active && label.cor
                       ? { backgroundColor: label.cor, color: '#fff', borderColor: label.cor }
@@ -5630,7 +5796,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                   active ? 'bg-[#edeae7] dark:bg-[#2a3942]' : 'hover:bg-[#f7f5f3] dark:hover:bg-[#2a3942]'
                 }`}
               >
-                <ContactAvatar imageUrl={rowPic} label={avatarLabel} size="list" />
+                <ContactAvatar chatId={c.chatId} imageUrl={rowPic} label={avatarLabel} size="list" />
                 <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center gap-1">
                   <div className="flex items-center justify-between gap-2">
                     <span
@@ -5755,9 +5921,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-1 text-left transition hover:bg-[#f7f5f3] dark:hover:bg-white/5"
             title="Meu perfil (WhatsApp e CRM)"
           >
-            {sessionProfilePayload?.profilePictureUrl ? (
+            {whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl) ? (
               <img
-                src={sessionProfilePayload.profilePictureUrl}
+                src={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
                 alt=""
                 className="h-10 w-10 shrink-0 rounded-full object-cover"
               />
@@ -5920,9 +6086,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </button>
             </div>
             <div className="flex flex-col items-center px-4 py-6">
-              {sessionProfilePayload?.profilePictureUrl ? (
+              {whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl) ? (
                 <img
-                  src={sessionProfilePayload.profilePictureUrl}
+                  src={whatsappCdnImageProxyUrl(sessionProfilePayload?.profilePictureUrl)}
                   alt=""
                   className="h-28 w-28 rounded-full object-cover shadow-md"
                 />
@@ -6186,13 +6352,24 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </div>
 
             <div className="flex flex-col items-center px-4 py-6">
-              {(activePreview?.cachedProfilePictureUrl || activeContactMeta?.profilePictureUrl || profileUrlByChatId.get(chatId)) ? (
+              {whatsappProfilePictureImageUrl(
+                chatId,
+                Boolean(
+                  activePreview?.cachedProfilePictureUrl ||
+                    activeContactMeta?.profilePictureUrl ||
+                    profileUrlByChatId.get(chatId)
+                )
+              ) ? (
                 <img
                   src={
-                    activePreview?.cachedProfilePictureUrl ||
-                    activeContactMeta?.profilePictureUrl ||
-                    profileUrlByChatId.get(chatId) ||
-                    ''
+                    whatsappProfilePictureImageUrl(
+                      chatId,
+                      Boolean(
+                        activePreview?.cachedProfilePictureUrl ||
+                          activeContactMeta?.profilePictureUrl ||
+                          profileUrlByChatId.get(chatId)
+                      )
+                    )!
                   }
                   alt=""
                   className="h-28 w-28 rounded-full object-cover shadow-md"
@@ -6911,7 +7088,12 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     }}
                     className="flex w-full gap-3 border-b border-[#e9edef] px-3 py-2.5 text-left transition-colors hover:bg-white dark:border-[#2a3942] dark:hover:bg-[#202c33]"
                   >
-                    <ContactAvatar imageUrl={rowPic} label={primary} size="list" />
+                    <ContactAvatar
+                      chatId={canonicalWhatsappChatId(row.id)}
+                      imageUrl={rowPic}
+                      label={primary}
+                      size="list"
+                    />
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[15px] font-medium text-[#111b21] dark:text-[#e9edef]">{primary}</span>
@@ -6958,6 +7140,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           open={labelEditOpen}
           onClose={() => setLabelEditOpen(false)}
           initialLabel={labelEditTarget}
+          currentUserId={crmUser?.id ?? null}
+          isCrmAdmin={crmIsAdmin}
           onSaved={(label) => {
             queryClient.invalidateQueries({ queryKey: ['whatsapp-chat-labels'] });
             // Se a lista atual foi deletada, volta para "Tudo".
@@ -7006,7 +7190,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             onPointerUp={handleAsideResizeEnd}
             onPointerCancel={handleAsideResizeEnd}
             onDoubleClick={() => setAsideWidth(WA_ASIDE_MIN_WIDTH)}
-            className={`group absolute -right-[3px] top-0 z-30 hidden h-full w-1.5 cursor-col-resize select-none touch-none sm:block ${
+            className={`group absolute -right-[3px] top-0 z-30 hidden h-full w-1.5 cursor-col-resize select-none touch-none min-[780px]:block ${
               isResizingAside ? 'bg-[#00a884]/30' : 'hover:bg-[#00a884]/20'
             }`}
           >
@@ -7021,7 +7205,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       </aside>
 
       {/* Coluna direita — conversa ativa */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#161717]">
+      <div className={chatColumnClass}>
         {!chatId ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-[#efeae2] px-6 text-center dark:bg-[#161717]">
             <div className="text-5xl opacity-40" aria-hidden>
@@ -7034,7 +7218,18 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           </div>
         ) : (
           <>
-            <header className="flex h-[60px] shrink-0 items-center gap-2 border-b border-[#e9edef] bg-white px-3 dark:border-[#2a3942] dark:bg-[#161717]">
+            <header className="flex h-[60px] shrink-0 items-center gap-1 border-b border-[#e9edef] bg-white px-2 min-[780px]:gap-2 min-[780px]:px-3 dark:border-[#2a3942] dark:bg-[#161717]">
+              {onClose ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="mr-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] hover:bg-black/5 min-[780px]:hidden dark:text-[#8696a0] dark:hover:bg-white/5"
+                  aria-label="Voltar para conversas"
+                  title="Voltar"
+                >
+                  <ArrowLeft className="h-6 w-6" strokeWidth={2} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -7046,6 +7241,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 title={activeIsGroup ? 'Ver dados do grupo' : 'Ver dados do contato'}
               >
                 <ContactAvatar
+                  chatId={chatId}
                   imageUrl={
                     activePreview?.cachedProfilePictureUrl ||
                     activeContactMeta?.profilePictureUrl ||
@@ -7190,7 +7386,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-full p-2 text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/5"
+                  className="hidden rounded-full p-2 text-[#54656f] hover:bg-black/5 min-[780px]:inline-flex dark:text-[#8696a0] dark:hover:bg-white/5"
                   aria-label="Fechar painel"
                 >
                   <span className="text-lg leading-none">✕</span>
@@ -7234,7 +7430,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               }}
               onSendOrcamentoPdf={(params) => {
                 if (!chatId || !params?.orcamentoId) return;
-                sendOrcamentoPdfMut.mutate(params);
+                const optimisticId = `optimistic-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+                sendOrcamentoPdfMut.mutate({ ...params, optimisticId });
               }}
               onChangeMode={(mode) => {
                 updateStatusModeMut.mutate(mode);
@@ -7362,6 +7559,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       isFavoriteMessage={isFavoriteMessage}
                               onImageClick={(url) => setSelectedImageUrl(url)}
                               onNavigateWhatsappChat={(jid, label) => onNavigateChat?.(jid, label)}
+                              onOpenPhoneFromText={handleOpenPhoneFromText}
                               actionsDisabled={isInForwardSelectionMode}
                             />
                           </div>
@@ -7541,83 +7739,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               </div>
             ) : null}
 
-            {!isInForwardSelectionMode && locationComposerOpen ? (
-              <div className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] text-lg dark:bg-[#2a3942]">
-                    📍
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[14px] font-medium text-[#111b21] dark:text-[#e9edef]">Enviar localização</p>
-                    <p className="text-[12px] text-[#667781] dark:text-[#8696a0]">
-                      Informe os dados do local para enviar ao contato.
-                    </p>
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <input
-                    type="text"
-                    value={locationNameDraft}
-                    onChange={(e) => setLocationNameDraft(e.target.value)}
-                    placeholder="Nome da cidade/local"
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                  />
-                  <input
-                    type="text"
-                    value={locationAddressDraft}
-                    onChange={(e) => setLocationAddressDraft(e.target.value)}
-                    placeholder="Endereço"
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                  />
-                  <input
-                    type="text"
-                    value={locationLatitudeDraft}
-                    onChange={(e) => setLocationLatitudeDraft(e.target.value)}
-                    placeholder="Latitude (ex.: -23.550520)"
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                  />
-                  <input
-                    type="text"
-                    value={locationLongitudeDraft}
-                    onChange={(e) => setLocationLongitudeDraft(e.target.value)}
-                    placeholder="Longitude (ex.: -46.633308)"
-                    className="rounded border border-[#d1d7db] bg-white px-2 py-1.5 text-[13px] text-[#111b21] dark:border-[#2a3942] dark:bg-[#2a3942] dark:text-[#e9edef]"
-                  />
-                </div>
-                <div className="flex justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={handleUseCurrentLocation}
-                    className="rounded-lg border border-[#00a884] px-3 py-1.5 text-[12px] font-medium text-[#00a884] hover:bg-[#00a884]/10"
-                  >
-                    Usar minha localização
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setLocationComposerOpen(false)}
-                      className="rounded-lg px-3 py-1.5 text-[13px] text-[#54656f] hover:bg-black/5 dark:text-[#8696a0]"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={sendLocationMut.isPending}
-                      onClick={() => sendLocationMut.mutate()}
-                      className="flex items-center gap-1.5 rounded-lg bg-[#00a884] px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
-                    >
-                      {sendLocationMut.isPending ? (
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                      ) : (
-                        <SendPlaneIcon className="h-4 w-4" />
-                      )}
-                      Enviar localização
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
             {isInForwardSelectionMode ? (
               <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#e9edef] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <div className="flex items-center gap-3">
@@ -7648,7 +7769,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </button>
               </div>
             ) : (
-              <footer className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef]/90 bg-[#f0f2f5] px-3 py-2 dark:border-[#2a3942]/50 dark:bg-[#161717]">
+              <footer className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef]/90 bg-[#f0f2f5] px-2 py-2 max-[779px]:pb-[max(0.5rem,env(safe-area-inset-bottom))] min-[780px]:px-3 dark:border-[#2a3942]/50 dark:bg-[#161717]">
                 {(sendMediaMut.isPending && !pendingMediaList.length) || batchUploadProgress ? (
                   <div
                     className="flex items-center gap-2 rounded-lg border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-[13px] font-medium text-[#075e54] dark:border-[#00a884]/40 dark:bg-[#00a884]/15 dark:text-[#5ee8a2]"
@@ -7894,39 +8015,21 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                         }}
                       />
 
-                      <button
-                        type="button"
-                        onClick={() => setLocationComposerOpen((v) => !v)}
-                        disabled={sendLocationMut.isPending || isWhatsappGroupChatId(chatId)}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#54656f] transition hover:bg-[#00a884]/14 disabled:opacity-40 dark:text-[#8696a0] dark:hover:bg-[#00a884]/28"
-                        aria-label="Enviar localização"
-                        title="Enviar localização (sendLocation)"
-                      >
-                        <LocationPinIcon className="h-6 w-6" />
-                      </button>
-                      <EmojiInput
+                      <WhatsappComposerEditor
                         ref={composerDraftInputRef}
                         value={draft}
                         onChange={setDraft}
                         onSubmit={handleSend}
-                        disabled={sendMut.isPending}
-                        embeddedInPill
-                        showOpener={false}
-                        hideEmojiMenu
                       />
                       {draft.trim() ? (
                         <button
                           type="button"
                           onClick={handleSend}
-                          disabled={sendMut.isPending || !draft.trim()}
+                          disabled={!draft.trim()}
                           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white transition enabled:hover:bg-[#008f6f] disabled:cursor-not-allowed disabled:opacity-50"
                           aria-label="Enviar"
                         >
-                          {sendMut.isPending ? (
-                            <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          ) : (
-                            <SendPlaneIcon className="ml-0.5 h-5 w-5" />
-                          )}
+                          <SendPlaneIcon className="ml-0.5 h-5 w-5" />
                         </button>
                       ) : (
                         <button
@@ -8059,6 +8162,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                                       {checked ? <CheckIcon className="h-3.5 w-3.5" /> : null}
                                     </span>
                                     <ContactAvatar
+                                      chatId={canonicalWhatsappChatId(row.id)}
                                       imageUrl={sendFlowPicByContactId.get(row.id) ?? undefined}
                                       label={primary}
                                       size="list"
@@ -8131,6 +8235,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                             className="flex gap-3 border-b border-[#e9edef] py-3 last:border-b-0 dark:border-[#2a3942]"
                           >
                             <ContactAvatar
+                              chatId={canonicalWhatsappChatId(row.id)}
                               imageUrl={sendFlowPicByContactId.get(row.id) ?? undefined}
                               label={primary}
                               size="list"
@@ -8286,6 +8391,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       ) : null}
 
       <style>{`
+        @media (max-width: 779px) {
+          body[data-wa-mobile-chat="open"] .s3e-mobile-menu-btn {
+            display: none !important;
+          }
+        }
         /* Scrollbar estilo WhatsApp Web (fino, sem trilho, thumb translúcido) */
         .wa-scroll {
           scrollbar-width: thin;

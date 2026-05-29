@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from '../lib/prisma';
 import DynamicPDFService from '../services/DynamicPDFService';
+import { listFolhasTimbradasFiles } from '../services/pdfLetterhead.service';
 import { PDFCustomization, OrcamentoPDFData } from '../types/pdfCustomization';
 import { buildContentDisposition } from '../utils/filename.util';
 
@@ -366,39 +367,7 @@ export class PDFCustomizationController {
      */
     static async listFolhasTimbradas(req: Request, res: Response): Promise<void> {
         try {
-            console.log('📋 [listFolhasTimbradas] Endpoint chamado');
-            const cwd = process.cwd();
-            const uploadDir = path.join(cwd, 'uploads', 'pdf-customization');
-            console.log('📁 [listFolhasTimbradas] Diretório:', uploadDir);
-            
-            if (!fs.existsSync(uploadDir)) {
-                res.json({
-                    success: true,
-                    data: []
-                });
-                return;
-            }
-
-            // Listar apenas arquivos de imagem (cornerDesign-*.png, cornerDesign-*.jpg, etc)
-            const files = fs.readdirSync(uploadDir)
-                .filter(file => {
-                    const ext = path.extname(file).toLowerCase();
-                    return ['.png', '.jpg', '.jpeg', '.svg', '.webp'].includes(ext) && 
-                           file.startsWith('cornerDesign-');
-                })
-                .map(file => {
-                    const filePath = path.join(uploadDir, file);
-                    const stats = fs.statSync(filePath);
-                    return {
-                        filename: file,
-                        url: `/uploads/pdf-customization/${file}`,
-                        size: stats.size,
-                        createdAt: stats.birthtime,
-                        modifiedAt: stats.mtime
-                    };
-                })
-                .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()); // Mais recentes primeiro
-
+            const files = listFolhasTimbradasFiles();
             res.json({
                 success: true,
                 data: files

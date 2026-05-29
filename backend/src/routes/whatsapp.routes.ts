@@ -20,6 +20,7 @@ import {
   getWhatsappProviderGroupsIndex,
   getWhatsappProviderMediaProxy,
   getWhatsappProviderProfilePicture,
+  getWhatsappProfilePictureImageController,
   getWhatsappChats,
   getWhatsappActionsContextController,
   getWhatsappArchivedChats,
@@ -120,6 +121,7 @@ router.get('/provider-contacts/search', getWhatsappProviderContactsSearch);
 router.get('/provider-contacts', getWhatsappProviderContactsIndex);
 router.get('/provider-groups', getWhatsappProviderGroupsIndex);
 router.get('/profile-picture', getWhatsappProviderProfilePicture);
+router.get('/profile-picture/image', getWhatsappProfilePictureImageController);
 router.get('/media/:mediaId', getWhatsappMediaById);
 router.get('/media-proxy', getWhatsappProviderMediaProxy);
 router.get('/contact-meta', getWhatsappProviderContactMeta);

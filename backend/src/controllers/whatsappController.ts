@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Readable } from 'stream';
 import multer from 'multer';
 import { Response } from 'express';
@@ -340,16 +341,16 @@ export async function postWhatsappSendOrcamentoPdf(req: AuthRequest, res: Respon
       userId,
       userName: req.user?.name || null,
       updateStatusMode: modeRaw ? (modeRaw as WhatsappOrcamentoStatusMode) : undefined,
-      pdfCustomization,
-      pdfBase64: typeof (req.body as any)?.pdfBase64 === 'string' ? String((req.body as any).pdfBase64) : undefined,
-      pdfFilename: typeof (req.body as any)?.pdfFilename === 'string' ? String((req.body as any).pdfFilename) : undefined
+      pdfCustomization
     });
     res.status(200).json({
       success: true,
       data: {
         message: toSocketDto(result.message),
         statusUpdated: result.statusUpdated,
-        mode: result.finalMode
+        mode: result.finalMode,
+        leadId: result.leadId,
+        numeroSequencial: result.numeroSequencial
       }
     });
   } catch (e) {
@@ -681,6 +682,40 @@ export async function getWhatsappProviderProfilePicture(req: AuthRequest, res: R
   } catch (e) {
     console.error('getWhatsappProviderProfilePicture', e);
     res.status(500).json({ success: false, error: 'Erro ao obter foto do contato' });
+  }
+}
+
+/** Imagem da foto de perfil (cache em disco; browser não acessa CDN do WhatsApp). */
+export async function getWhatsappProfilePictureImageController(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    if (!req.user?.userId) {
+      res.status(401).json({ success: false, error: 'Não autenticado' });
+      return;
+    }
+    const chatId = typeof req.query.chatId === 'string' ? req.query.chatId.trim() : '';
+    if (!chatId) {
+      res.status(400).json({ success: false, error: 'chatId é obrigatório' });
+      return;
+    }
+    const { getWhatsappProfilePictureImage } = await import('../services/whatsappProfilePictureImage.service');
+    const img = await getWhatsappProfilePictureImage(chatId);
+    if (!img) {
+      res.status(404).end();
+      return;
+    }
+    const etag = `"${createHash('sha256').update(img.etag).digest('hex').slice(0, 32)}"`;
+    const inm = req.headers['if-none-match'];
+    if (inm && inm === etag) {
+      res.status(304).end();
+      return;
+    }
+    res.setHeader('Content-Type', img.contentType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('ETag', etag);
+    res.send(img.buffer);
+  } catch (e) {
+    console.error('getWhatsappProfilePictureImageController', e);
+    res.status(500).json({ success: false, error: 'Erro ao carregar foto do contato' });
   }
 }
 

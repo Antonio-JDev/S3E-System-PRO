@@ -20,6 +20,7 @@ jest.mock('@prisma/client', () => {
 
 // Importar o serviço DEPOIS do mock
 import { PDFOrcamentoService } from './pdfOrcamento.service';
+import { buildMeasurePaginationEvalExpression } from './pdfOrcamentoPagination.util';
 
 // Mock do Puppeteer
 jest.mock('puppeteer', () => ({
@@ -78,6 +79,16 @@ describe('PDFOrcamentoService', () => {
         mockFindUnique.mockResolvedValue(mockOrcamento);
     });
 
+    describe('buildMeasurePaginationEvalExpression', () => {
+        it('gera script sem helpers do esbuild (__name)', () => {
+            const expr = buildMeasurePaginationEvalExpression(812, 16);
+            expect(expr).not.toContain('__name');
+            expect(expr).toContain('812');
+            expect(expr).toContain('16');
+            expect(expr).toContain('data-measure="item-row"');
+        });
+    });
+
     describe('gerarHTMLOrcamento', () => {
         it('deve gerar HTML válido com estrutura de página A4', async () => {
             mockFindUnique.mockResolvedValue(mockOrcamento);
@@ -89,8 +100,10 @@ describe('PDFOrcamentoService', () => {
             expect(html).toContain('<!DOCTYPE html>');
             expect(html).toContain('<html');
             expect(html).toContain('.page-content');
+            expect(html).toContain('.pdf-page');
             expect(html).toContain('padding-top: 95px');
             expect(html).toContain('padding-bottom: 100px');
+            expect(html).toContain('container-fechamento');
         });
 
         it('deve incluir número sequencial no formato correto', async () => {
@@ -123,17 +136,19 @@ describe('PDFOrcamentoService', () => {
             const html = await PDFOrcamentoService.gerarHTMLOrcamento('test-id', marcaDaguaConfig);
 
             expect(html).toContain('custom-letterhead');
+            expect(html).toContain('letterhead-img');
             expect(html).toContain('https://example.com/folha.png');
         });
 
-        it('deve aplicar margens corretas em @media print', async () => {
+        it('deve aplicar padding do conteúdo e quebra de tabela no print', async () => {
             mockFindUnique.mockResolvedValue(mockOrcamento);
 
             const html = await PDFOrcamentoService.gerarHTMLOrcamento('test-id');
 
+            expect(html).toContain('@page');
+            expect(html).toContain('padding-top: 95px');
             expect(html).toContain('@media print');
-            expect(html).toContain('padding-top: 95px !important');
-            expect(html).toContain('padding-bottom: 100px !important');
+            expect(html).toContain('table.itens-table');
         });
 
         it('deve incluir itens do orçamento na tabela', async () => {
@@ -185,26 +200,25 @@ describe('PDFOrcamentoService', () => {
     });
 
     describe('Estrutura CSS para paginação', () => {
-        it('deve incluir CSS para page-content com margens corretas', async () => {
+        it('deve posicionar conteúdo acima da folha timbrada via z-index', async () => {
             mockFindUnique.mockResolvedValue(mockOrcamento);
 
             const html = await PDFOrcamentoService.gerarHTMLOrcamento('test-id');
 
             expect(html).toContain('.page-content {');
-            expect(html).toContain('padding-top: 95px');
-            expect(html).toContain('padding-bottom: 100px');
-            expect(html).toContain('padding-left: 20px');
-            expect(html).toContain('padding-right: 20px');
+            expect(html).toContain('z-index: 1');
         });
 
-        it('deve incluir @page com tamanho A4', async () => {
+        it('deve incluir @page A4 sem margem física e recuo do texto em .page-content', async () => {
             mockFindUnique.mockResolvedValue(mockOrcamento);
 
             const html = await PDFOrcamentoService.gerarHTMLOrcamento('test-id');
 
             expect(html).toContain('@page {');
             expect(html).toContain('size: A4');
-            expect(html).toContain('margin: 0');
+            expect(html).toMatch(/@page\s*\{[^}]*margin:\s*0/);
+            expect(html).toContain('padding-top: 95px');
+            expect(html).toContain('position: absolute');
         });
     });
 });

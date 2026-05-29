@@ -25,4 +25,18 @@ router.get(
   ContasReceberController.historico
 );
 
+router.put(
+  '/:id',
+  authenticate,
+  authorize('admin', 'desenvolvedor'),
+  ContasReceberController.atualizar
+);
+
+router.delete(
+  '/:id',
+  authenticate,
+  authorize('admin', 'desenvolvedor'),
+  ContasReceberController.excluir
+);
+
 export default router;

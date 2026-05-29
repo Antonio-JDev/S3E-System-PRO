@@ -25,6 +25,8 @@ export class ContasPagarController {
             const contaData: ContaPagarPayload = {
                 ...body,
                 valorParcela: typeof valorParcela === 'number' ? valorParcela : parseFloat(valorParcela),
+                valorJuros: body.valorJuros != null ? Number(body.valorJuros) : undefined,
+                valorDesconto: body.valorDesconto != null ? Number(body.valorDesconto) : undefined,
                 dataVencimento: dataVencimentoParsed
             };
 
@@ -94,7 +96,7 @@ export class ContasPagarController {
     static async pagarConta(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { dataPagamento, valorPago, observacoes, meioPagamento } = req.body;
+            const { dataPagamento, valorPago, observacoes, meioPagamento, valorJuros, valorDesconto } = req.body;
 
             if (!id) {
                 return res.status(400).json({
@@ -116,7 +118,9 @@ export class ContasPagarController {
                 dataPagamento,
                 valorPago,
                 observacoes,
-                meioPagamento
+                meioPagamento,
+                valorJuros != null ? Number(valorJuros) : undefined,
+                valorDesconto != null ? Number(valorDesconto) : undefined
             );
 
             res.json({

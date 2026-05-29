@@ -547,22 +547,35 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
         return s;
     }, [vendas]);
 
-    // Detectar orçamento pré-selecionado vindo da navegação
+    // Detectar orçamento pré-selecionado vindo da navegação (state/query/localStorage)
     useEffect(() => {
         const state = location.state as { orcamentoId?: string } | null;
-        if (state?.orcamentoId) {
-            // Mudar para aba de nova venda
-            setActiveTab('nova');
-            // Pré-selecionar o orçamento
-            setVendaForm(prev => ({ ...prev, orcamentoId: state.orcamentoId }));
-            // Mostrar toast informativo
-            toast.success('Orçamento pré-selecionado!', {
-                description: 'O orçamento foi automaticamente selecionado para criar o pedido de venda.'
-            });
-            // Limpar o state para evitar re-seleção ao navegar de volta
-            window.history.replaceState({}, document.title);
+        const sp = new URLSearchParams(location.search || '');
+        const fromState = (state?.orcamentoId || '').trim();
+        const fromQuery = (sp.get('orcamentoId') || '').trim();
+        let fromStorage = '';
+        try {
+            fromStorage = (localStorage.getItem('s3e_venda_orcamento_id') || '').trim();
+        } catch (_) {
+            // ignore
         }
-    }, [location.state]);
+        const selectedOrcamentoId = fromState || fromQuery || fromStorage;
+        if (!selectedOrcamentoId) return;
+
+        setActiveTab('nova');
+        setVendaForm(prev => ({ ...prev, orcamentoId: selectedOrcamentoId }));
+        toast.success('Orçamento pré-selecionado!', {
+            description: 'O orçamento foi automaticamente selecionado para criar o pedido de venda.'
+        });
+
+        try {
+            localStorage.removeItem('s3e_venda_orcamento_id');
+        } catch (_) {
+            // ignore
+        }
+        // Limpa query/state para permitir novo disparo em cliques futuros.
+        window.history.replaceState({}, document.title, '/vendas');
+    }, [location.state, location.search]);
 
     // Função para abrir modal de visualização e buscar detalhes da venda
     const abrirModalVisualizarVenda = async (venda: Venda) => {

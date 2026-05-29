@@ -33,6 +33,7 @@ import {
   buildMarcaDaguaFromPdfCustomization,
   resolveMarcaDaguaFromUserTemplate
 } from '../utils/orcamentoPdfPersonalization.util';
+import { shouldPromoteOrcamentoToEnviadoOnWhatsappPdf } from '../utils/orcamentoStatus.util';
 import { normalizeStoredMediaFilename, normalizeUserFilename } from '../utils/filename.util';
 import {
   expandedStorageChatIdVariants,
@@ -40,6 +41,7 @@ import {
   mergeKeyForChatPreviewRow,
   normalizePhoneDigitsKey,
   recordWhatsappChatIdentity,
+  resolvePhoneDigitKeysForChat,
   resolvePreferredChatIdForOutbound
 } from './whatsappIdentity.service';
 import { upsertContatoS3eFromInboundMessage } from './contatosS3e.service';
@@ -281,16 +283,28 @@ export function emitWhatsappProviderConnectionStatus(payload: {
   }
 }
 
-function phoneVariantsFromChatId(chatId: string): Set<string> {
-  const phone = waJidToDigits(chatId);
-  const v = new Set<string>([phone]);
-  if (phone.startsWith('55')) v.add(phone.slice(2));
-  else v.add(`55${phone}`);
+async function buildPhoneMatchVariants(chatId: string): Promise<Set<string>> {
+  const keys = await resolvePhoneDigitKeysForChat(chatId);
+  const v = new Set<string>();
+  for (const phone of keys) {
+    if (!phone) continue;
+    v.add(phone);
+    if (phone.startsWith('55')) v.add(phone.slice(2));
+    else v.add(`55${phone}`);
+  }
+  if (v.size === 0) {
+    const phone = waJidToDigits(chatId);
+    if (phone) {
+      v.add(phone);
+      if (phone.startsWith('55')) v.add(phone.slice(2));
+      else v.add(`55${phone}`);
+    }
+  }
   return v;
 }
 
 export async function resolveClienteIdForChat(chatId: string): Promise<string | null> {
-  const variants = phoneVariantsFromChatId(chatId);
+  const variants = await buildPhoneMatchVariants(chatId);
   const rows = await prisma.cliente.findMany({
     where: { telefone: { not: null } },
     select: { id: true, telefone: true }
@@ -308,7 +322,7 @@ export async function resolveClienteIdForChat(chatId: string): Promise<string | 
 }
 
 export async function resolveContatoLeadIdForChat(chatId: string): Promise<string | null> {
-  const variants = phoneVariantsFromChatId(chatId);
+  const variants = await buildPhoneMatchVariants(chatId);
   const leads = await prisma.contatoLead.findMany({
     where: { whatsapp: { not: null } },
     select: { id: true, whatsapp: true }
@@ -344,7 +358,7 @@ async function findLeadForChat(chatId: string): Promise<{
   clienteId: string | null;
   cliente: { id: string; nome: string; telefone: string | null; cpfCnpj: string | null } | null;
 } | null> {
-  const variants = phoneVariantsFromChatId(chatId);
+  const variants = await buildPhoneMatchVariants(chatId);
   const leads = await prisma.contatoLead.findMany({
     where: { whatsapp: { not: null } },
     select: {
@@ -376,7 +390,7 @@ async function findClienteForChat(chatId: string): Promise<{
   telefone: string | null;
   cpfCnpj: string | null;
 } | null> {
-  const variants = phoneVariantsFromChatId(chatId);
+  const variants = await buildPhoneMatchVariants(chatId);
   const rows = await prisma.cliente.findMany({
     where: { telefone: { not: null } },
     select: { id: true, nome: true, telefone: true, cpfCnpj: true }
@@ -391,6 +405,115 @@ async function findClienteForChat(chatId: string): Promise<{
     }
   }
   return null;
+}
+
+/** Extrai o número sequencial de nomes padrão `Orcamento-123.pdf` (envio WhatsApp / download). */
+export function parseOrcamentoNumeroFromPdfFilename(filename: string): number | null {
+  if (!filename?.trim()) return null;
+  const base = filename.trim().replace(/^.*[/\\]/, '');
+  const m =
+    /^Orcamento-(\d+)\.pdf$/i.exec(base) ||
+    /^orcamento[_\s-]*(\d+)\.pdf$/i.exec(base);
+  if (!m) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Após envio de PDF de proposta: vincula orçamento ao lead do telefone do chat e move para CONVERTIDO. */
+async function syncLeadAfterOrcamentoPdfSent(params: {
+  chatIdInput: string;
+  chatIdResolved: string;
+  orcamentoId: string;
+  orcamentoClienteId: string;
+  orcamentoContatoLeadId: string | null;
+}): Promise<{ leadId: string | null }> {
+  const { chatIdInput, chatIdResolved, orcamentoId, orcamentoClienteId, orcamentoContatoLeadId } =
+    params;
+  const chatInputCanon = canonicalWhatsappChatId(chatIdInput);
+
+  let lead = await findLeadForChat(chatIdInput);
+  if (!lead && chatIdResolved !== chatInputCanon) {
+    lead = await findLeadForChat(chatIdResolved);
+  }
+  let cliente = await findClienteForChat(chatIdInput);
+  if (!cliente && chatIdResolved !== chatInputCanon) {
+    cliente = await findClienteForChat(chatIdResolved);
+  }
+
+  const leadClienteId = lead?.clienteId || cliente?.id || orcamentoClienteId || null;
+
+  const linkOrcamentoToLead = async (leadId: string) => {
+    if (orcamentoContatoLeadId !== leadId) {
+      await prisma.orcamento.update({
+        where: { id: orcamentoId },
+        data: { contatoLeadId: leadId }
+      });
+    }
+  };
+
+  if (lead?.id) {
+    if (lead.status !== 'NAO_ATENDE') {
+      await prisma.contatoLead.update({
+        where: { id: lead.id },
+        data: {
+          status: 'CONVERTIDO',
+          etapa: Math.max(lead.etapa || 1, 3),
+          ...(leadClienteId ? { clienteId: leadClienteId } : {})
+        }
+      });
+    } else if (leadClienteId && lead.clienteId !== leadClienteId) {
+      await prisma.contatoLead.update({
+        where: { id: lead.id },
+        data: { clienteId: leadClienteId }
+      });
+    }
+    await linkOrcamentoToLead(lead.id);
+    return { leadId: lead.id };
+  }
+
+  const leadByPhoneId =
+    (await resolveContatoLeadIdForChat(chatIdResolved)) ||
+    (chatIdResolved !== chatInputCanon ? await resolveContatoLeadIdForChat(chatIdInput) : null);
+
+  if (leadByPhoneId) {
+    const existingLead = await prisma.contatoLead.findUnique({
+      where: { id: leadByPhoneId },
+      select: { id: true, status: true, etapa: true, clienteId: true }
+    });
+    if (existingLead) {
+      await prisma.contatoLead.update({
+        where: { id: existingLead.id },
+        data: {
+          ...(existingLead.status !== 'NAO_ATENDE'
+            ? { status: 'CONVERTIDO', etapa: Math.max(existingLead.etapa || 1, 3) }
+            : {}),
+          ...(leadClienteId && existingLead.clienteId !== leadClienteId
+            ? { clienteId: leadClienteId }
+            : {})
+        }
+      });
+      await linkOrcamentoToLead(existingLead.id);
+      return { leadId: existingLead.id };
+    }
+  }
+
+  const phone = waJidToDigits(chatIdResolved) || waJidToDigits(chatIdInput);
+  if (phone) {
+    const cached = await prisma.whatsappContactCache.findUnique({ where: { chatId: chatIdResolved } });
+    const created = await prisma.contatoLead.create({
+      data: {
+        nome: cached?.displayName || cliente?.nome || 'Contato WhatsApp',
+        whatsapp: phone,
+        status: 'CONVERTIDO',
+        etapa: 3,
+        ...(leadClienteId ? { clienteId: leadClienteId } : {})
+      }
+    });
+    await linkOrcamentoToLead(created.id);
+    return { leadId: created.id };
+  }
+
+  return { leadId: null };
 }
 
 export type WhatsappOrcamentoStatusMode = 'manual' | 'automatic';
@@ -430,15 +553,6 @@ export interface WhatsappActionsContext {
 
 function parseWhatsappOrcamentoStatusMode(raw: unknown): WhatsappOrcamentoStatusMode {
   return raw === 'automatic' ? 'automatic' : 'manual';
-}
-
-function isPendenteStatus(status: string): boolean {
-  const v = (status || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  return v.includes('pendente') || v.includes('rascunho');
 }
 
 async function resolveOutboundDisplayName(userId: string, fallbackName?: string | null): Promise<string> {
@@ -482,7 +596,8 @@ export async function setWhatsappOrcamentoStatusUpdateMode(
 
 export async function getWhatsappActionsContext(userId: string, chatIdRaw: string): Promise<WhatsappActionsContext> {
   const chatId = canonicalWhatsappChatId(chatIdRaw);
-  const phone = waJidToDigits(chatId);
+  const phoneKeys = await resolvePhoneDigitKeysForChat(chatIdRaw);
+  const phone = phoneKeys[0] || waJidToDigits(chatId);
   const [leadFound, clienteFromPhone, cache, statusUpdateMode] = await Promise.all([
     findLeadForChat(chatId),
     findClienteForChat(chatId),
@@ -557,47 +672,84 @@ export async function getWhatsappActionsContext(userId: string, chatIdRaw: strin
   };
 }
 
+async function resolveWhatsappPhoneForChatLink(chatIdRaw: string, chatId: string): Promise<string> {
+  const phoneKeys = await resolvePhoneDigitKeysForChat(chatIdRaw);
+  const phone = phoneKeys[0] || waJidToDigits(chatId);
+  if (!phone || phone.length < 10) {
+    throw new Error(
+      'Não foi possível identificar o telefone deste contato. Abra pelo funil com o WhatsApp cadastrado ou aguarde a sincronização do número.'
+    );
+  }
+  return phone;
+}
+
 export async function linkWhatsappChatToCliente(chatIdRaw: string, clienteId: string): Promise<void> {
   const chatId = canonicalWhatsappChatId(chatIdRaw);
   const cliente = await prisma.cliente.findUnique({
     where: { id: clienteId },
-    select: { id: true, nome: true }
+    select: { id: true, nome: true, telefone: true }
   });
   if (!cliente) {
     throw new Error('Cliente não encontrado');
   }
-  const lead = await findLeadForChat(chatId);
+
+  const phone = await resolveWhatsappPhoneForChatLink(chatIdRaw, chatId);
+
+  let lead = await findLeadForChat(chatId);
+  if (!lead && chatIdRaw.trim() !== chatId) {
+    lead = await findLeadForChat(chatIdRaw);
+  }
+
   if (lead) {
     await prisma.contatoLead.update({
       where: { id: lead.id },
       data: {
         clienteId: cliente.id,
-        status: lead.status === 'NAO_ATENDE' ? lead.status : 'CONVERTIDO',
-        etapa: Math.max(lead.etapa || 1, 3)
+        ...(!lead.whatsapp?.trim() ? { whatsapp: phone } : {})
       }
     });
-    return;
+  } else {
+    const leadByPhoneId =
+      (await resolveContatoLeadIdForChat(chatId)) ||
+      (chatIdRaw.trim() !== chatId ? await resolveContatoLeadIdForChat(chatIdRaw) : null);
+    if (leadByPhoneId) {
+      await prisma.contatoLead.update({
+        where: { id: leadByPhoneId },
+        data: { clienteId: cliente.id }
+      });
+    } else {
+      const cache = await prisma.whatsappContactCache.findUnique({ where: { chatId } });
+      await prisma.contatoLead.create({
+        data: {
+          nome: cache?.displayName || cliente.nome,
+          whatsapp: phone,
+          clienteId: cliente.id,
+          status: 'CONVERTIDO',
+          etapa: 3
+        }
+      });
+    }
   }
 
-  const phone = waJidToDigits(chatId);
-  const cached = await prisma.whatsappContactCache.findUnique({ where: { chatId } });
-  await prisma.contatoLead.create({
-    data: {
-      nome: cached?.displayName || cliente.nome,
-      whatsapp: phone || null,
-      status: 'CONVERTIDO',
-      etapa: 3,
-      clienteId: cliente.id
-    }
-  });
+  if (!cliente.telefone?.trim()) {
+    await prisma.cliente.update({
+      where: { id: cliente.id },
+      data: { telefone: phone }
+    });
+  }
 }
 
 export async function unlinkWhatsappChatFromCliente(chatIdRaw: string): Promise<void> {
   const chatId = canonicalWhatsappChatId(chatIdRaw);
-  const lead = await findLeadForChat(chatId);
-  if (!lead) return;
-
-  if (!lead.clienteId) return;
+  let lead = await findLeadForChat(chatId);
+  if (!lead && chatIdRaw.trim() !== chatId) {
+    lead = await findLeadForChat(chatIdRaw);
+  }
+  if (!lead?.clienteId) {
+    throw new Error(
+      'Não há vínculo ativo deste contato com um cliente no funil. Se o nome ainda aparecer, ele pode estar sendo identificado automaticamente pelo telefone cadastrado no cliente.'
+    );
+  }
 
   await prisma.contatoLead.update({
     where: { id: lead.id },
@@ -2218,6 +2370,36 @@ export async function sendMediaMessageFromUser(params: {
 
   emitWhatsAppMessage(created);
   await markChatRead(params.userId, chatId);
+
+  const isPdfFile =
+    params.mediaType === 'file' &&
+    (params.mimetype?.toLowerCase().includes('pdf') || safeFilename?.toLowerCase().endsWith('.pdf'));
+  if (isPdfFile && safeFilename) {
+    const numero = parseOrcamentoNumeroFromPdfFilename(safeFilename);
+    if (numero != null) {
+      try {
+        const orc = await prisma.orcamento.findFirst({
+          where: { numeroSequencial: numero },
+          select: { id: true, clienteId: true, contatoLeadId: true }
+        });
+        if (orc) {
+          await syncLeadAfterOrcamentoPdfSent({
+            chatIdInput: params.chatId,
+            chatIdResolved: chatId,
+            orcamentoId: orc.id,
+            orcamentoClienteId: orc.clienteId,
+            orcamentoContatoLeadId: orc.contatoLeadId
+          });
+        }
+      } catch (e) {
+        console.warn(
+          '[WA-PDF] Falha ao sincronizar lead após PDF de orçamento:',
+          e instanceof Error ? e.message : String(e)
+        );
+      }
+    }
+  }
+
   return created;
 }
 
@@ -2354,6 +2536,8 @@ export async function forwardWhatsappMessagesFromUser(params: {
   return { forwardedCount };
 }
 
+const MAX_WHATSAPP_ORCAMENTO_PDF_BYTES = 12 * 1024 * 1024;
+
 export async function sendOrcamentoPdfToWhatsappChat(params: {
   chatId: string;
   orcamentoId: string;
@@ -2362,14 +2546,13 @@ export async function sendOrcamentoPdfToWhatsappChat(params: {
   updateStatusMode?: WhatsappOrcamentoStatusMode;
   /** Mesmo JSON do modal (localStorage `pdf_customization_temp`) — opcional. */
   pdfCustomization?: unknown;
-  /**
-   * PDF já renderizado no frontend (PrintRenderer) como base64 (cru ou data URL).
-   * Quando presente, o backend NÃO gera o PDF via Puppeteer; apenas envia via provedor.
-   */
-  pdfBase64?: string;
-  /** Nome do ficheiro no WhatsApp (opcional). */
-  pdfFilename?: string;
-}): Promise<{ message: ChatMessage; statusUpdated: boolean; finalMode: WhatsappOrcamentoStatusMode }> {
+}): Promise<{
+  message: ChatMessage;
+  statusUpdated: boolean;
+  finalMode: WhatsappOrcamentoStatusMode;
+  leadId: string | null;
+  numeroSequencial: number;
+}> {
   const chatIdInput = canonicalWhatsappChatId(params.chatId);
   const chatIdResolved = canonicalWhatsappChatId(await resolvePreferredChatIdForOutbound(params.chatId));
   const orcamento = await prisma.orcamento.findUnique({
@@ -2399,41 +2582,40 @@ export async function sendOrcamentoPdfToWhatsappChat(params: {
     (lead?.id && orcamento.contatoLeadId === lead.id) ||
     (lead?.clienteId && orcamento.clienteId === lead.clienteId) ||
     (cliente?.id && orcamento.clienteId === cliente.id);
-  if (!matchesChat) {
-    throw new Error('Este orçamento não está vinculado ao contato atual do chat');
+  const leadMatchesChatPhone = Boolean(lead?.id);
+  if (!matchesChat && !leadMatchesChatPhone) {
+    throw new Error(
+      'Nenhum lead com o WhatsApp deste contato foi encontrado. Cadastre o lead no funil com o mesmo número ou vincule o orçamento ao cliente do chat.'
+    );
   }
 
   const marcaDagua =
     params.pdfCustomization != null
       ? buildMarcaDaguaFromPdfCustomization(params.pdfCustomization)
       : await resolveMarcaDaguaFromUserTemplate(params.userId);
-
-  const stripPdfBase64 = (raw: string): string => {
-    const t = (raw || '').trim();
-    if (!t) return '';
-    if (t.toLowerCase().startsWith('data:')) {
-      const idx = t.toLowerCase().indexOf('base64,');
-      if (idx >= 0) return t.slice(idx + 'base64,'.length).replace(/\s/g, '');
-    }
-    return t.replace(/\s/g, '');
-  };
-
-  const pdfBuffer = params.pdfBase64?.trim()
-    ? Buffer.from(stripPdfBase64(params.pdfBase64), 'base64')
-    : await PDFOrcamentoService.gerarPDF(orcamento.id, marcaDagua);
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await PDFOrcamentoService.gerarPDF(orcamento.id, marcaDagua);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error('[WA-PDF] falha ao gerar PDF no servidor', { orcamentoId: orcamento.id, detail });
+    throw new Error(
+      `Não foi possível gerar o PDF do orçamento no servidor${detail ? `: ${detail}` : ''}. Verifique se o Chromium/Puppeteer está disponível no backend.`
+    );
+  }
 
   if (!pdfBuffer.length) {
-    throw new Error('PDF vazio: não foi possível gerar ou receber o arquivo do orçamento.');
+    throw new Error('PDF vazio: não foi possível gerar o arquivo do orçamento.');
+  }
+  if (pdfBuffer.length > MAX_WHATSAPP_ORCAMENTO_PDF_BYTES) {
+    throw new Error('PDF excede o tamanho máximo permitido para envio no WhatsApp (12 MB).');
   }
   if (pdfBuffer.length < 500) {
     console.warn('[WA-PDF] buffer suspeito (muito pequeno)', { bytes: pdfBuffer.length, orcamentoId: orcamento.id });
   }
 
   const defaultPdfName = `Orcamento-${orcamento.numeroSequencial || orcamento.id}.pdf`;
-  const filename =
-    normalizeUserFilename(
-      (params.pdfFilename && params.pdfFilename.trim()) ? params.pdfFilename.trim() : defaultPdfName
-    ) || defaultPdfName;
+  const filename = normalizeUserFilename(defaultPdfName) || defaultPdfName;
   const message = await sendMediaMessageFromUser({
     chatId: params.chatId,
     userId: params.userId,
@@ -2442,32 +2624,42 @@ export async function sendOrcamentoPdfToWhatsappChat(params: {
     base64Data: pdfBuffer.toString('base64'),
     mimetype: 'application/pdf',
     filename,
-    caption: `Segue o orçamento ${orcamento.numeroSequencial || orcamento.id} solicitado via S3E System.`,
+    caption: `Segue o orçamento ${orcamento.numeroSequencial || orcamento.id} conforme tratativa enviado via S3E System.`,
     fileSize: pdfBuffer.length
   });
 
   if (!message.providerMessageId?.trim()) {
-    console.error('[WA-PDF] envio sem providerMessageId', {
+    console.warn('[WA-PDF] envio sem providerMessageId (PDF pode ter sido entregue mesmo assim)', {
       internalMessageId: message.id,
       chatId: message.chatId,
       orcamentoId: orcamento.id
     });
-    throw new Error(
-      'O WhatsApp não confirmou o envio do PDF (resposta sem ID da mensagem). Verifique o JID do contato e tente novamente.'
-    );
   }
+
+  const { leadId: syncedLeadId } = await syncLeadAfterOrcamentoPdfSent({
+    chatIdInput,
+    chatIdResolved,
+    orcamentoId: orcamento.id,
+    orcamentoClienteId: orcamento.clienteId,
+    orcamentoContatoLeadId: orcamento.contatoLeadId
+  });
 
   const finalMode = params.updateStatusMode ?? (await getWhatsappOrcamentoStatusUpdateMode(params.userId));
   let statusUpdated = false;
-  // Atualização automática de status só é permitida para orçamentos pendentes, após sucesso confirmado acima.
-  if (finalMode === 'automatic' && isPendenteStatus(orcamento.status)) {
+  if (shouldPromoteOrcamentoToEnviadoOnWhatsappPdf(orcamento.status)) {
     await prisma.orcamento.update({
       where: { id: orcamento.id },
       data: { status: 'Enviado ao Cliente' }
     });
     statusUpdated = true;
   }
-  return { message, statusUpdated, finalMode };
+  return {
+    message,
+    statusUpdated,
+    finalMode,
+    leadId: syncedLeadId,
+    numeroSequencial: orcamento.numeroSequencial
+  };
 }
 
 /** Exclui no provedor e no banco (apenas mensagens suas com providerMessageId). */

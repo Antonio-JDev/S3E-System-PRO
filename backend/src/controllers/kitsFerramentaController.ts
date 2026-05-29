@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
+import type { AuthRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
+import { resolveLetterheadForUser } from '../services/pdfLetterhead.service';
 import { AuditoriaService } from '../services/auditoria.service';
 import multer from 'multer';
 import path from 'path';
@@ -70,18 +72,20 @@ export const uploadFolhaTimbradaHandler = uploadFolhaTimbrada.fields([
 export const gerarReciboPreviewPersonalizado = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { opacidade = '0.1' } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
     console.log('📄 Gerando preview personalizado do recibo para kit:', id);
 
     let folhaTimbradaUrl: string | undefined;
 
-    // Converter folha timbrada para data URL
     if (files?.folhaTimbrada?.[0]) {
       const folhaBuffer = files.folhaTimbrada[0].buffer;
       const folhaBase64 = folhaBuffer.toString('base64');
       folhaTimbradaUrl = `data:${files.folhaTimbrada[0].mimetype};base64,${folhaBase64}`;
+    } else {
+      const userId = (req as AuthRequest).user?.userId;
+      const resolved = await resolveLetterheadForUser(userId);
+      folhaTimbradaUrl = resolved.folhaTimbradaDataUrl;
     }
 
     const kit = await prisma.kitFerramenta.findUnique({
@@ -104,7 +108,7 @@ export const gerarReciboPreviewPersonalizado = async (req: Request, res: Respons
     }
 
     // Gerar HTML do recibo com folha timbrada
-    const html = gerarHTMLReciboComFolhaTimbrada(kit, folhaTimbradaUrl, parseFloat(opacidade));
+    const html = gerarHTMLReciboComFolhaTimbrada(kit, folhaTimbradaUrl);
 
     res.json({
       success: true,
@@ -121,10 +125,24 @@ export const gerarReciboPreviewPersonalizado = async (req: Request, res: Respons
   }
 };
 
+function escapeHtmlAttr(value: string): string {
+  return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /**
- * Função auxiliar para gerar HTML do recibo com folha timbrada
+ * Função auxiliar para gerar HTML do recibo com folha timbrada (A4, margens + timbre opaco).
  */
-function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string, opacidade: number = 0.1): string {
+function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string): string {
+  const folha = (folhaTimbradaUrl || '').trim();
+  const folhaEsc = folha ? escapeHtmlAttr(folha) : '';
+  const letterheadBlock = folha
+    ? `<div class="pdf-page">
+        <div class="watermark-background custom-letterhead">
+          <img class="letterhead-img" src="${folhaEsc}" alt="" />
+        </div>
+        <div class="recibo-page-content">`
+    : `<div class="pdf-page"><div class="recibo-page-content">`;
+
   const html = `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -140,41 +158,54 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string, op
         }
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
-            max-width: 210mm;
-            margin: 0 auto;
-            padding: 10mm;
-            background: white;
+            margin: 0;
+            padding: 0;
+            background: #e5e7eb;
             color: #111827;
             font-size: 10pt;
             line-height: 1.3;
-            position: relative;
         }
 
-        /* === FOLHA TIMBRADA / MARCA D'ÁGUA === */
+        .pdf-page {
+            position: relative;
+            width: 210mm;
+            min-height: 297mm;
+            height: 297mm;
+            margin: 0 auto;
+            background: white;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
         .watermark-background {
-            position: fixed;
+            position: absolute;
             top: 0;
             left: 0;
+            width: 210mm;
+            height: 297mm;
+            z-index: 0;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .watermark-background .letterhead-img {
+            display: block;
             width: 100%;
             height: 100%;
-            z-index: -1;
-            pointer-events: none;
+            object-fit: fill;
+            object-position: top left;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
         }
 
-        .watermark-background.custom-letterhead {
-            background-image: ${folhaTimbradaUrl ? `url('${folhaTimbradaUrl}')` : 'none'};
-            background-size: 210mm 297mm;
-            background-position: top left;
-            background-repeat: no-repeat;
-            opacity: ${opacidade};
-        }
-
-        @media print {
-            .watermark-background {
-                position: fixed !important;
-                print-color-adjust: exact;
-                -webkit-print-color-adjust: exact;
-            }
+        .recibo-page-content {
+            position: relative;
+            z-index: 1;
+            box-sizing: border-box;
+            min-height: 297mm;
+            height: 297mm;
+            padding: 95px 20px 100px 20px;
+            background: transparent;
         }
 
         .header {
@@ -311,14 +342,32 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string, op
             background: #1d4ed8;
         }
         @media print {
-            body { padding: 0; }
+            body { background: white; padding: 0; margin: 0; }
+            .pdf-page {
+                width: 210mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                page-break-after: avoid;
+            }
+            .watermark-background {
+                position: absolute !important;
+                print-color-adjust: exact !important;
+                -webkit-print-color-adjust: exact !important;
+            }
+            .recibo-page-content {
+                padding-top: 95px !important;
+                padding-bottom: 100px !important;
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+                background: transparent !important;
+            }
             .print-button { display: none; }
         }
     </style>
 </head>
 <body>
-    ${folhaTimbradaUrl ? `<div class="watermark-background custom-letterhead"></div>` : ''}
-    <button class="print-button" onclick="window.print()">🖨️ Imprimir</button>
+    ${letterheadBlock}
+    <button type="button" class="print-button" onclick="window.print()">🖨️ Imprimir</button>
 
     <div class="header">
         <h1>RECIBO DE ENTREGA DE KIT DE FERRAMENTAS</h1>
@@ -411,6 +460,13 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string, op
         <p><strong>S3E Engenharia Elétrica</strong> | Sistema de Gestão de Ferramentas</p>
         <p>Gerado em: ${new Date().toLocaleString('pt-BR')} | ID: ${kit.id.substring(0, 8)}</p>
     </div>
+    </div>
+    </div>
+    <script>
+      window.addEventListener('load', function () {
+        setTimeout(function () { window.print(); }, 400);
+      });
+    </script>
 </body>
 </html>
   `;
@@ -1119,281 +1175,11 @@ export const gerarRecibo = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Gerar HTML do recibo (formato compacto A4)
-    const html = `
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Recibo de Entrega de Kit - ${kit.nome}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        @page { size: A4; margin: 0; }
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            width: 210mm;
-            min-height: 297mm;
-            margin: 0 auto;
-            background: white;
-            color: #111827;
-            font-size: 10pt;
-            line-height: 1.3;
-            position: relative;
-        }
-        .page-content {
-            padding: 15mm;
-            position: relative;
-            z-index: 2;
-        }
-        .header {
-            text-align: center;
-            border-bottom: 2px solid #2563eb;
-            padding-bottom: 8px;
-            margin-bottom: 12px;
-        }
-        .header h1 {
-            color: #1e40af;
-            font-size: 18pt;
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-        .header .subtitle {
-            color: #6b7280;
-            font-size: 9pt;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 12px;
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            padding: 10px;
-            border-radius: 6px;
-        }
-        .info-item {
-            font-size: 9pt;
-        }
-        .info-label {
-            font-weight: 600;
-            color: #374151;
-            display: inline;
-        }
-        .info-value {
-            color: #6b7280;
-            display: inline;
-        }
-        .section-title {
-            color: #1e40af;
-            font-size: 11pt;
-            font-weight: bold;
-            margin: 12px 0 8px 0;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #dbeafe;
-        }
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 12px;
-            font-size: 9pt;
-        }
-        .items-table th {
-            background: #f3f4f6;
-            padding: 6px 4px;
-            text-align: left;
-            font-weight: 600;
-            border: 1px solid #e5e7eb;
-            font-size: 8pt;
-        }
-        .items-table td {
-            padding: 5px 4px;
-            border: 1px solid #e5e7eb;
-        }
-        .item-nome {
-            font-weight: 600;
-            color: #111827;
-        }
-        .item-detalhes {
-            font-size: 8pt;
-            color: #6b7280;
-        }
-        .termo-box {
-            background: #fef2f2;
-            border: 1px solid #ef4444;
-            padding: 10px;
-            border-radius: 6px;
-            margin: 12px 0;
-            font-size: 8pt;
-        }
-        .termo-box p {
-            color: #7f1d1d;
-            line-height: 1.4;
-            text-align: justify;
-        }
-        .signatures {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        .signature-block {
-            text-align: center;
-        }
-        .signature-line {
-            border-top: 2px solid #111827;
-            margin-top: 40px;
-            padding-top: 6px;
-        }
-        .signature-name {
-            font-size: 10pt;
-            font-weight: bold;
-            color: #111827;
-        }
-        .signature-label {
-            color: #6b7280;
-            font-size: 8pt;
-        }
-        .footer {
-            margin-top: 15px;
-            text-align: center;
-            font-size: 8pt;
-            color: #9ca3af;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 8px;
-        }
-        .print-button {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: #2563eb;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: none;
-            font-weight: bold;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-            z-index: 1000;
-        }
-        .print-button:hover {
-            background: #1d4ed8;
-        }
-        @media print {
-            body { padding: 0; }
-            .print-button { display: none; }
-        }
-    </style>
-</head>
-<body>
-    <button class="print-button" onclick="window.print()">🖨️ Imprimir</button>
+    const userId = (req as AuthRequest).user?.userId;
+    const resolved = await resolveLetterheadForUser(userId);
+    const html = gerarHTMLReciboComFolhaTimbrada(kit, resolved.folhaTimbradaDataUrl);
 
-    <div class="header">
-        <h1>RECIBO DE ENTREGA DE KIT DE FERRAMENTAS</h1>
-        <p class="subtitle">S3E Engenharia Elétrica - Sistema de Gestão</p>
-    </div>
-
-    <div class="info-grid">
-        <div class="info-item">
-            <span class="info-label">Kit:</span>
-            <span class="info-value">${kit.nome}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">Recibo:</span>
-            <span class="info-value">#${kit.id.substring(0, 8).toUpperCase()}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">Eletricista:</span>
-            <span class="info-value">${kit.eletricistaNome}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">Data de Entrega:</span>
-            <span class="info-value">${new Date(kit.dataEntrega).toLocaleDateString('pt-BR')}</span>
-        </div>
-    </div>
-
-    <h3 class="section-title">Ferramentas Incluídas (${kit.itens.length} itens)</h3>
-    
-    <table class="items-table">
-        <thead>
-            <tr>
-                <th style="width: 5%">#</th>
-                <th style="width: 45%">Ferramenta</th>
-                <th style="width: 20%">Código</th>
-                <th style="width: 15%">Categoria</th>
-                <th style="width: 10%">Qtd</th>
-                <th style="width: 15%">Estado</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${kit.itens.map((item, index) => `
-            <tr>
-                <td style="text-align: center; font-weight: bold;">${index + 1}</td>
-                <td>
-                    <div class="item-nome">${item.ferramenta.nome}</div>
-                    ${item.ferramenta.marca || item.ferramenta.modelo ? `
-                    <div class="item-detalhes">
-                        ${item.ferramenta.marca ? `${item.ferramenta.marca}` : ''}
-                        ${item.ferramenta.modelo ? ` - ${item.ferramenta.modelo}` : ''}
-                    </div>
-                    ` : ''}
-                </td>
-                <td>${item.ferramenta.codigo}</td>
-                <td>${item.ferramenta.categoria}</td>
-                <td style="text-align: center; font-weight: bold;">${item.quantidade}</td>
-                <td style="font-size: 8pt;">${item.estadoEntrega}</td>
-            </tr>
-            `).join('')}
-        </tbody>
-    </table>
-
-    <div class="termo-box">
-        <p>
-            Eu, <strong>${kit.eletricistaNome}</strong>, afirmo que recebi os itens descritos acima em perfeito estado. 
-            Comprometo-me a zelar pelo bom uso e conservação das ferramentas, devolvendo-as quando solicitado ou ao 
-            término do meu vínculo com a empresa. Estou ciente de que sou responsável por qualquer dano, perda ou 
-            extravio das ferramentas sob minha responsabilidade.
-        </p>
-    </div>
-
-    <p style="text-align: right; margin: 10px 0; font-size: 9pt;">
-        <strong>Itajaí, ${new Date(kit.dataEntrega).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong>
-    </p>
-
-    <div class="signatures">
-        <div class="signature-block">
-            <div class="signature-line">
-                <div class="signature-name">${kit.eletricistaNome}</div>
-                <div class="signature-label">Assinatura do Eletricista</div>
-            </div>
-        </div>
-        <div class="signature-block">
-            <div class="signature-line">
-                <div class="signature-name">____________________</div>
-                <div class="signature-label">Assinatura do Administrador</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="footer">
-        <p><strong>S3E Engenharia Elétrica</strong> | Sistema de Gestão de Ferramentas</p>
-        <p>Gerado em: ${new Date().toLocaleString('pt-BR')} | ID: ${kit.id.substring(0, 8)}</p>
-    </div>
-
-    <script>
-        // Auto print quando abrir
-        window.onload = function() {
-            // Pequeno delay para carregar CSS
-            setTimeout(function() {
-                window.print();
-            }, 800);
-        };
-    </script>
-</body>
-</html>
-    `;
-
-    // Retornar HTML como JSON para o frontend processar
+        // Retornar HTML como JSON para o frontend processar
     res.status(200).json({
       success: true,
       data: html,

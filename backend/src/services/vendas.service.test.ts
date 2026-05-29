@@ -6,12 +6,13 @@
  */
 
 import { VendasService, VendaPayload } from './vendas.service';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { VendaStatus, ContaStatus } from '../types/index';
+import { ORCAMENTO_STATUS_CONCRETIZADO } from '../utils/orcamentoStatus.util';
 
 // Mock do Prisma
-jest.mock('@prisma/client', () => {
-  const mockPrisma = {
+jest.mock('../lib/prisma', () => ({
+  prisma: {
     $transaction: jest.fn(),
     venda: {
       findUnique: jest.fn(),
@@ -40,11 +41,11 @@ jest.mock('@prisma/client', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
-  };
-  return {
-    PrismaClient: jest.fn(() => mockPrisma),
-  };
-});
+    empresaFiscal: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+  },
+}));
 
 // Mock do EstoqueService
 jest.mock('./estoque.service', () => ({
@@ -55,11 +56,10 @@ jest.mock('./estoque.service', () => ({
 }));
 
 describe('VendasService', () => {
-  let mockPrisma: any;
+  const mockPrisma = prisma as any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockPrisma = new PrismaClient();
   });
 
   describe('realizarVenda', () => {
@@ -69,6 +69,7 @@ describe('VendasService', () => {
       precoVenda: 10000,
       status: 'Aprovado',
       projeto: null,
+      items: [],
     };
 
     const mockVenda = {
@@ -79,32 +80,49 @@ describe('VendasService', () => {
       status: VendaStatus.Pendente,
     };
 
+    function mockPosTransacaoConcretizado() {
+      mockPrisma.venda.findUnique.mockResolvedValue(mockVenda as any);
+      mockPrisma.orcamento.findUnique.mockResolvedValue({
+        status: ORCAMENTO_STATUS_CONCRETIZADO,
+        aprovedAt: new Date(),
+      } as any);
+    }
+
+    function buildTxMock(overrides: Record<string, unknown> = {}) {
+      return {
+        venda: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue(mockVenda),
+        },
+        orcamento: {
+          findUnique: jest.fn().mockResolvedValue(mockOrcamento),
+          update: jest.fn(),
+        },
+        projeto: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 'proj-123' }),
+        },
+        empresaFiscal: {
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+        contaReceber: {
+          create: jest.fn().mockResolvedValue({
+            id: 'conta-1',
+            numeroParcela: 1,
+            valorParcela: 10000,
+            status: ContaStatus.Pendente,
+          }),
+        },
+        ...overrides,
+      };
+    }
+
     it('deve criar venda à vista com 1 parcela apenas', async () => {
+      const orcamentoUpdate = jest.fn();
       mockPrisma.$transaction.mockImplementation(async (callback: any) => {
-        const tx = {
-          venda: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(mockVenda),
-          },
-          orcamento: {
-            findUnique: jest.fn().mockResolvedValue(mockOrcamento),
-            update: jest.fn(),
-          },
-          projeto: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue({ id: 'proj-123' }),
-          },
-          contaReceber: {
-            create: jest.fn().mockResolvedValue({
-              id: 'conta-1',
-              numeroParcela: 1,
-              valorParcela: 10000,
-              status: ContaStatus.Pendente,
-            }),
-          },
-        };
-        return callback(tx);
+        return callback(buildTxMock({ orcamento: { findUnique: jest.fn().mockResolvedValue(mockOrcamento), update: orcamentoUpdate } }));
       });
+      mockPosTransacaoConcretizado();
 
       const vendaData: VendaPayload = {
         orcamentoId: 'orc-123',
@@ -122,25 +140,18 @@ describe('VendasService', () => {
       expect(resultado.contasReceber).toHaveLength(1);
       expect((resultado.contasReceber[0] as any).numeroParcela).toBe(1);
       expect((resultado.contasReceber[0] as any).valorParcela).toBe(10000);
+      expect(orcamentoUpdate).toHaveBeenCalledWith({
+        where: { id: 'orc-123' },
+        data: expect.objectContaining({ status: ORCAMENTO_STATUS_CONCRETIZADO }),
+      });
+      expect(resultado.orcamentoStatus).toBe(ORCAMENTO_STATUS_CONCRETIZADO);
     });
 
     it('deve criar venda com entrada separada das parcelas', async () => {
       const contasCriadas: any[] = [];
       
       mockPrisma.$transaction.mockImplementation(async (callback: any) => {
-        const tx = {
-          venda: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(mockVenda),
-          },
-          orcamento: {
-            findUnique: jest.fn().mockResolvedValue(mockOrcamento),
-            update: jest.fn(),
-          },
-          projeto: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue({ id: 'proj-123' }),
-          },
+        const tx = buildTxMock({
           contaReceber: {
             create: jest.fn().mockImplementation((data: any) => {
               const conta = {
@@ -151,9 +162,10 @@ describe('VendasService', () => {
               return Promise.resolve(conta);
             }),
           },
-        };
+        });
         return callback(tx);
       });
+      mockPosTransacaoConcretizado();
 
       const vendaData: VendaPayload = {
         orcamentoId: 'orc-123',
@@ -211,31 +223,8 @@ describe('VendasService', () => {
     });
 
     it('deve criar venda com status Pendente inicialmente', async () => {
-      mockPrisma.$transaction.mockImplementation(async (callback: any) => {
-        const tx = {
-          venda: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue(mockVenda),
-          },
-          orcamento: {
-            findUnique: jest.fn().mockResolvedValue(mockOrcamento),
-            update: jest.fn(),
-          },
-          projeto: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            create: jest.fn().mockResolvedValue({ id: 'proj-123' }),
-          },
-          contaReceber: {
-            create: jest.fn().mockResolvedValue({
-              id: 'conta-1',
-              numeroParcela: 1,
-              valorParcela: 10000,
-              status: ContaStatus.Pendente,
-            }),
-          },
-        };
-        return callback(tx);
-      });
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => callback(buildTxMock()));
+      mockPosTransacaoConcretizado();
 
       const vendaData: VendaPayload = {
         orcamentoId: 'orc-123',
@@ -249,6 +238,22 @@ describe('VendasService', () => {
       const resultado = await VendasService.realizarVenda(vendaData);
 
       expect(resultado.venda.status).toBe(VendaStatus.Pendente);
+    });
+  });
+
+  describe('ensureOrcamentoConcretizadoAposPedidoVenda', () => {
+    it('reconcilia orçamento para Concretizado se PV existir mas status não foi atualizado', async () => {
+      mockPrisma.venda.findUnique.mockResolvedValue({ id: 'venda-123' });
+      mockPrisma.orcamento.findUnique.mockResolvedValue({ status: 'Aprovado', aprovedAt: new Date() });
+      mockPrisma.orcamento.update.mockResolvedValue({ status: ORCAMENTO_STATUS_CONCRETIZADO });
+
+      const status = await VendasService.ensureOrcamentoConcretizadoAposPedidoVenda('orc-123');
+
+      expect(mockPrisma.orcamento.update).toHaveBeenCalledWith({
+        where: { id: 'orc-123' },
+        data: expect.objectContaining({ status: ORCAMENTO_STATUS_CONCRETIZADO }),
+      });
+      expect(status).toBe(ORCAMENTO_STATUS_CONCRETIZADO);
     });
   });
 
@@ -440,6 +445,68 @@ describe('VendasService', () => {
       await expect(VendasService.pagarConta('conta-1')).rejects.toThrow(
         'Esta parcela já está marcada como paga'
       );
+    });
+
+    it('deve registrar recebimento com juros e desconto (valor a registrar = base + juros − desconto)', async () => {
+      const conta = {
+        id: 'conta-1',
+        vendaId: null,
+        valorParcela: 960,
+        valorRecebido: 0,
+        status: ContaStatus.Pendente,
+        observacoes: null,
+      };
+
+      mockPrisma.contaReceber.findUnique.mockResolvedValue(conta);
+      mockPrisma.recebimentoParcial.create.mockResolvedValue({ id: 'rp-1' });
+      mockPrisma.contaReceber.update.mockResolvedValue({
+        ...conta,
+        status: ContaStatus.Pago,
+        valorRecebido: 960,
+      });
+
+      await VendasService.pagarConta('conta-1', {
+        valorRecebido: 1000,
+        valorJuros: 10,
+        valorDesconto: 50,
+        meioPagamento: 'PIX',
+      });
+
+      expect(mockPrisma.recebimentoParcial.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          valorPago: 960,
+          valorJuros: 10,
+          valorDesconto: 50,
+          meioPagamento: 'PIX',
+        }),
+      });
+      expect(mockPrisma.contaReceber.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            valorRecebido: 960,
+            valorJuros: 10,
+            valorDesconto: 50,
+          }),
+        })
+      );
+    });
+
+    it('deve rejeitar quando valor a registrar excede saldo restante', async () => {
+      mockPrisma.contaReceber.findUnique.mockResolvedValue({
+        id: 'conta-1',
+        valorParcela: 100,
+        valorRecebido: 0,
+        status: ContaStatus.Pendente,
+        observacoes: null,
+      });
+
+      await expect(
+        VendasService.pagarConta('conta-1', {
+          valorRecebido: 100,
+          valorJuros: 50,
+          valorDesconto: 0,
+        })
+      ).rejects.toThrow('não pode ser maior que o saldo restante');
     });
   });
 

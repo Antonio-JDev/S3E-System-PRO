@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { createPortal } from 'react-dom';
 import { clientesService, type Cliente, type CreateClienteData } from '../../services/clientesService';
 
 const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -161,6 +162,26 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
     });
   }, [computedInitialForm, isOpen]);
 
+  // Evita rolagem da página de fundo enquanto o modal está aberto.
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+
+    const { body, documentElement } = document;
+    const previousOverflow = body.style.overflow;
+    const previousPaddingRight = body.style.paddingRight;
+    const scrollBarWidth = window.innerWidth - documentElement.clientWidth;
+
+    body.style.overflow = 'hidden';
+    if (scrollBarWidth > 0) {
+      body.style.paddingRight = `${scrollBarWidth}px`;
+    }
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.paddingRight = previousPaddingRight;
+    };
+  }, [isOpen]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (saving) return;
@@ -203,10 +224,10 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[120] p-4 animate-fade-in">
       <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
         {/* Header */}
         <div className="modal-header relative bg-gradient-to-r from-blue-600 to-blue-700 border-0">
@@ -621,7 +642,8 @@ const ClienteCreateEditModal: React.FC<ClienteCreateEditModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

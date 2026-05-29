@@ -4,6 +4,7 @@ import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
+import { calcValorARegistrar, formatBRL, parseMoney } from '../utils/financeiroValor';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -55,6 +56,19 @@ const CalendarIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const ShoppingCartIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+    </svg>
+);
+
+const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125L16.875 4.5" />
+    </svg>
+);
+
+const TrashIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 7.5h12m-10.5 0V6a1.5 1.5 0 011.5-1.5h6A1.5 1.5 0 0116.5 6v1.5m-9 0l.643 10.029A2.25 2.25 0 0010.387 19.5h3.226a2.25 2.25 0 002.244-1.971L16.5 7.5M10.5 10.5v6m3-6v6" />
     </svg>
 );
 
@@ -161,6 +175,13 @@ function nomeColaboradorContaRh(conta: { funcionario?: { nome?: string } | null;
 // ==================== COMPONENT ====================
 const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva, initialContaId, onClearInitialContaId }) => {
     const { user } = useContext(AuthContext)!;
+    const userRole = user?.role?.toLowerCase();
+    const isAdminOrDev = Boolean(
+        user?.isAdmin ||
+        userRole === 'admin' ||
+        userRole === 'administrador' ||
+        userRole === 'desenvolvedor'
+    );
 
     const toISODate = (d: Date) => {
         const y = d.getFullYear();
@@ -235,7 +256,9 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     
     // AlertDialog de Confirmação
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
-    const [confirmAction, setConfirmAction] = useState<'pagar' | 'atualizar' | null>(null);
+    const [confirmAction, setConfirmAction] = useState<'pagar' | 'atualizar' | 'excluir' | null>(null);
+    const [contaParaExcluir, setContaParaExcluir] = useState<ContaPagar | null>(null);
+    const [excluindoConta, setExcluindoConta] = useState(false);
     
     // Modal de Agendamento
     const [isAgendamentoModalOpen, setIsAgendamentoModalOpen] = useState(false);
@@ -246,6 +269,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const [novaContaCredor, setNovaContaCredor] = useState('');
     const [novaContaDescricao, setNovaContaDescricao] = useState('');
     const [novaContaValor, setNovaContaValor] = useState('');
+    const [novaContaJuros, setNovaContaJuros] = useState('0');
+    const [novaContaDesconto, setNovaContaDesconto] = useState('0');
     const [novaContaVencimento, setNovaContaVencimento] = useState(new Date().toISOString().split('T')[0]);
     const [novaContaObservacoes, setNovaContaObservacoes] = useState('');
     const [novaContaClassificacao, setNovaContaClassificacao] = useState<string>('');
@@ -280,6 +305,16 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const [jurosPagamento, setJurosPagamento] = useState('0');
     const [descontosPagamento, setDescontosPagamento] = useState('0');
 
+    const valorARegistrarPagamento = useMemo(
+        () => calcValorARegistrar(valorPago, jurosPagamento, descontosPagamento),
+        [valorPago, jurosPagamento, descontosPagamento]
+    );
+
+    const valorARegistrarNovaConta = useMemo(
+        () => calcValorARegistrar(novaContaValor, novaContaJuros, novaContaDesconto),
+        [novaContaValor, novaContaJuros, novaContaDesconto]
+    );
+
     // Handlers de Modal - Declarados antes do useEscapeKey para evitar erro de inicialização
     const handleClosePagamentoModal = () => {
         setIsPagamentoModalOpen(false);
@@ -306,6 +341,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         setNovaContaCredor('');
         setNovaContaDescricao('');
         setNovaContaValor('');
+        setNovaContaJuros('0');
+        setNovaContaDesconto('0');
         setNovaContaVencimento(new Date().toISOString().split('T')[0]);
         setNovaContaObservacoes('');
         setNovaContaClassificacao('');
@@ -395,9 +432,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
     // Verificar se pode excluir a parcela
     const podeExcluirParcela = (conta: ContaPagar): boolean => {
-        // Só admin e desenvolvedor podem excluir
-        const userRole = user?.role?.toLowerCase();
-        if (userRole !== 'admin' && userRole !== 'administrador' && userRole !== 'desenvolvedor') {
+        if (!isAdminOrDev) {
             return false;
         }
 
@@ -430,20 +465,37 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         return true;
     };
 
-    const handleExcluirParcela = async (conta: ContaPagar) => {
-        if (!confirm(`Tem certeza que deseja excluir a parcela "${conta.descricao}"?\n\nEsta ação não pode ser desfeita.`)) {
-            return;
+    const getDeleteTooltip = (conta: ContaPagar): string => {
+        const contaManual = !conta.compraId && !conta.despesaFixaId;
+        if (contaManual) {
+            return 'Excluir conta manual';
         }
+        return 'Excluir parcela com origem (somente paga e com origem removida)';
+    };
 
+    const handleOpenConfirmExcluir = (conta: ContaPagar) => {
+        setContaParaExcluir(conta);
+        setConfirmAction('excluir');
+        setIsConfirmDialogOpen(true);
+    };
+
+    const executarExclusaoConta = async () => {
+        if (!contaParaExcluir) return;
+        setExcluindoConta(true);
         try {
-            await axiosApiService.delete(`/api/contas-pagar/${conta.id}`);
-            toast.success('Parcela excluída com sucesso!');
+            await axiosApiService.delete(`/api/contas-pagar/${contaParaExcluir.id}`);
+            toast.success('Conta excluída com sucesso!');
+            setIsConfirmDialogOpen(false);
+            setConfirmAction(null);
+            setContaParaExcluir(null);
             await loadContasPagar();
         } catch (error: any) {
-            console.error('Erro ao excluir parcela:', error);
-            toast.error('Erro ao excluir parcela', {
+            console.error('Erro ao excluir conta:', error);
+            toast.error('Erro ao excluir conta', {
                 description: error.response?.data?.message || 'Tente novamente'
             });
+        } finally {
+            setExcluindoConta(false);
         }
     };
 
@@ -727,13 +779,20 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const handleCriarNovaConta = async () => {
         const credor = novaContaCredor.trim();
         const descricao = novaContaDescricao.trim();
-        const valor = parseFloat(novaContaValor.replace(',', '.'));
+        const valor = parseMoney(novaContaValor);
+        const juros = parseMoney(novaContaJuros);
+        const desconto = parseMoney(novaContaDesconto);
+        const total = calcValorARegistrar(valor, juros, desconto);
         if (!descricao || !novaContaVencimento) {
             toast.error('Preencha Descrição e Vencimento.');
             return;
         }
-        if (isNaN(valor) || valor <= 0) {
+        if (valor <= 0) {
             toast.error('Informe um valor válido.');
+            return;
+        }
+        if (total <= 0) {
+            toast.error('Valor a registrar deve ser maior que zero.');
             return;
         }
 
@@ -793,6 +852,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                     : (novaContaTipoDespesa === 'RH' ? 'RH' : 'DESPESA_FIXA'),
                 descricao: descricaoFinal,
                 valor,
+                valorJuros: juros > 0 ? juros : undefined,
+                valorDesconto: desconto > 0 ? desconto : undefined,
                 dataVencimento: novaContaVencimento,
                 tipo: novaContaTipoDespesa,
                 subtipo: novaContaTipoDespesa === 'RH' ? novaContaRhSubtipo : undefined,
@@ -826,16 +887,22 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const handlePagarConta = async () => {
         if (!contaSelecionada) return;
 
-        const valorBase = parseFloat(valorPago || '0') || 0;
-        const juros = parseFloat(jurosPagamento || '0') || 0;
-        const descontos = parseFloat(descontosPagamento || '0') || 0;
-        const valorARegistrar = valorBase + juros - descontos;
+        const valorBase = parseMoney(valorPago);
+        const juros = parseMoney(jurosPagamento);
+        const descontos = parseMoney(descontosPagamento);
+        const valorARegistrar = calcValorARegistrar(valorBase, juros, descontos);
+        if (valorARegistrar <= 0) {
+            toast.error('Valor a registrar deve ser maior que zero.');
+            return;
+        }
 
         try {
             console.log('💳 Registrando pagamento...');
             const response = await financeiroService.pagarContaPagar(contaSelecionada.id, {
                 dataPagamento,
-                valorPago: valorARegistrar,
+                valorPago: valorBase,
+                valorJuros: juros > 0 ? juros : undefined,
+                valorDesconto: descontos > 0 ? descontos : undefined,
                 observacoes: observacoesPagamento,
                 meioPagamento
             });
@@ -973,11 +1040,23 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     };
 
     const handleConfirmAction = () => {
+        if (confirmAction === 'excluir') {
+            executarExclusaoConta();
+            return;
+        }
         setIsConfirmDialogOpen(false);
         if (confirmAction === 'pagar') {
             handlePagarConta();
         } else if (confirmAction === 'atualizar') {
             handleAtualizarConta();
+        }
+    };
+
+    const handleCloseConfirmDialog = (open: boolean) => {
+        setIsConfirmDialogOpen(open);
+        if (!open) {
+            setConfirmAction(null);
+            setContaParaExcluir(null);
         }
     };
 
@@ -1695,15 +1774,15 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                                         >
                                                             <CheckCircleIcon className="w-4 h-4" />
                                                         </button>
-                                                        <button
-                                                            onClick={() => handleOpenAtualizarModal(conta)}
-                                                            className="flex items-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
-                                                            title="Atualizar Conta"
-                                                        >
-                                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                            </svg>
-                                                        </button>
+                                                        {isAdminOrDev && (
+                                                            <button
+                                                                onClick={() => handleOpenAtualizarModal(conta)}
+                                                                className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 transition-colors"
+                                                                title="Editar"
+                                                            >
+                                                                <PencilIcon className="w-4 h-4" />
+                                                            </button>
+                                                        )}
                                                     </>
                                                 )}
                                                 {conta.compraId && (
@@ -1717,13 +1796,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                                 )}
                                                 {podeExcluirParcela(conta) && (
                                                     <button
-                                                        onClick={() => handleExcluirParcela(conta)}
-                                                        className="flex items-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                                        title="Excluir Parcela (apenas para parcelas pagas cuja origem foi excluída)"
+                                                        onClick={() => handleOpenConfirmExcluir(conta)}
+                                                        className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
+                                                        title={getDeleteTooltip(conta)}
                                                     >
-                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                        </svg>
+                                                        <TrashIcon className="w-4 h-4" />
                                                     </button>
                                                 )}
                                             </div>
@@ -2291,6 +2368,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">Valor (R$) *</label>
                                     <input
                                         type="number"
+                                        inputMode="decimal"
                                         value={novaContaValor}
                                         onChange={(e) => setNovaContaValor(e.target.value)}
                                         min="0"
@@ -2307,6 +2385,40 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         onChange={(e) => setNovaContaVencimento(e.target.value)}
                                         className="select-field focus:ring-emerald-500 focus:border-emerald-500"
                                     />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Juros (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={novaContaJuros}
+                                        onChange={(e) => setNovaContaJuros(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Desconto (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={novaContaDesconto}
+                                        onChange={(e) => setNovaContaDesconto(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        placeholder="0,00"
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
+                                </div>
+                            </div>
+                            <div className="bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-300 p-4 rounded-xl">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm font-semibold text-emerald-700">Valor a Registrar:</span>
+                                    <span className="text-xl font-bold text-emerald-700">R$ {formatBRL(valorARegistrarNovaConta)}</span>
                                 </div>
                             </div>
                             <div>
@@ -2482,27 +2594,21 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             </div>
 
                             {/* Resumo: Valor a Registrar = Valor Pago + Juros - Descontos */}
-                            {(() => {
-                                const v = parseFloat(valorPago || '0') || 0;
-                                const j = parseFloat(jurosPagamento || '0') || 0;
-                                const d = parseFloat(descontosPagamento || '0') || 0;
-                                const total = v + j - d;
-                                return (
-                                    <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 p-4 rounded-xl">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-sm font-semibold text-red-700">Valor a Registrar:</span>
-                                            <span className="text-2xl font-bold text-red-700">
-                                                R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </span>
-                                        </div>
-                                        {(j > 0 || d > 0) && (
-                                            <p className="text-xs text-red-600 mt-1">
-                                                {v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} {j > 0 ? `+ ${j.toFixed(2)} (juros)` : ''} {d > 0 ? `- ${d.toFixed(2)} (descontos)` : ''}
-                                            </p>
-                                        )}
-                                    </div>
-                                );
-                            })()}
+                            <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 p-4 rounded-xl">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm font-semibold text-red-700">Valor a Registrar:</span>
+                                    <span className="text-2xl font-bold text-red-700">
+                                        R$ {formatBRL(valorARegistrarPagamento)}
+                                    </span>
+                                </div>
+                                {(parseMoney(jurosPagamento) > 0 || parseMoney(descontosPagamento) > 0) && (
+                                    <p className="text-xs text-red-600 mt-1">
+                                        {formatBRL(parseMoney(valorPago))}
+                                        {parseMoney(jurosPagamento) > 0 ? ` + ${formatBRL(parseMoney(jurosPagamento))} (juros)` : ''}
+                                        {parseMoney(descontosPagamento) > 0 ? ` - ${formatBRL(parseMoney(descontosPagamento))} (descontos)` : ''}
+                                    </p>
+                                )}
+                            </div>
                         </div>
 
                         {/* Footer */}
@@ -2526,28 +2632,35 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             )}
 
             {/* AlertDialog de Confirmação */}
-            <AlertDialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
+            <AlertDialog open={isConfirmDialogOpen} onOpenChange={handleCloseConfirmDialog}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>
-                            {confirmAction === 'pagar' ? 'Confirmar Pagamento' : 'Confirmar Atualização'}
+                            {confirmAction === 'excluir'
+                                ? 'Excluir conta'
+                                : confirmAction === 'pagar'
+                                    ? 'Confirmar Pagamento'
+                                    : 'Confirmar Atualização'}
                         </AlertDialogTitle>
                         <AlertDialogDescription>
-                            {confirmAction === 'pagar' && contaSelecionada && (() => {
-                                const v = parseFloat(valorPago || '0') || 0;
-                                const j = parseFloat(jurosPagamento || '0') || 0;
-                                const d = parseFloat(descontosPagamento || '0') || 0;
-                                const total = v + j - d;
-                                return (
-                                    <>
-                                        Confirmar o pagamento de{' '}
-                                        <span className="font-bold text-red-600">
-                                            R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </span>
-                                        {' '}para {contaSelecionada.fornecedorNome}?
-                                    </>
-                                );
-                            })()}
+                            {confirmAction === 'excluir' && contaParaExcluir && (
+                                <>
+                                    Tem certeza que deseja apagar essa conta?
+                                    <span className="block mt-2 text-sm">
+                                        <span className="font-semibold">{contaParaExcluir.descricao}</span>
+                                        {' '}— esta ação não pode ser desfeita.
+                                    </span>
+                                </>
+                            )}
+                            {confirmAction === 'pagar' && contaSelecionada && (
+                                <>
+                                    Confirmar o pagamento de{' '}
+                                    <span className="font-bold text-red-600">
+                                        R$ {formatBRL(valorARegistrarPagamento)}
+                                    </span>
+                                    {' '}para {contaSelecionada.fornecedorNome}?
+                                </>
+                            )}
                             {confirmAction === 'atualizar' && contaSelecionada && (
                                 <>
                                     Confirmar a atualização da conta de {contaSelecionada.fornecedorNome}?
@@ -2560,14 +2673,25 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => setIsConfirmDialogOpen(false)}>
+                        <AlertDialogCancel disabled={excluindoConta}>
                             Cancelar
                         </AlertDialogCancel>
-                        <AlertDialogAction 
+                        <AlertDialogAction
                             onClick={handleConfirmAction}
-                            className={confirmAction === 'pagar' ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}
+                            disabled={excluindoConta}
+                            className={
+                                confirmAction === 'excluir'
+                                    ? 'bg-red-600 hover:bg-red-700'
+                                    : confirmAction === 'pagar'
+                                        ? 'bg-red-600 hover:bg-red-700'
+                                        : 'bg-yellow-600 hover:bg-yellow-700'
+                            }
                         >
-                            {confirmAction === 'pagar' ? 'Confirmar Pagamento' : 'Confirmar Atualização'}
+                            {confirmAction === 'excluir'
+                                ? (excluindoConta ? 'Excluindo...' : 'Sim, apagar')
+                                : confirmAction === 'pagar'
+                                    ? 'Confirmar Pagamento'
+                                    : 'Confirmar Atualização'}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

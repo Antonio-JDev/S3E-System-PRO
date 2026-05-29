@@ -15,6 +15,18 @@ router.use(authenticate);
 router.get('/estatisticas', DashboardController.getEstatisticas);
 
 /**
+ * @route GET /api/dashboard/cards-metricas
+ * @desc Cards do dashboard com valores e tendências reais
+ */
+router.get('/cards-metricas', DashboardController.getCardsMetricas);
+
+/**
+ * @route GET /api/dashboard/detalhe-kpis
+ * @desc Tabela detalhada para modal dos gráficos
+ */
+router.get('/detalhe-kpis', DashboardController.getDetalheKpis);
+
+/**
  * @route GET /api/dashboard/graficos
  * @desc Retorna dados para gráficos do dashboard
  * @access Authenticated

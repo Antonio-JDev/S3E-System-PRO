@@ -189,6 +189,7 @@ export const getUserById = async (userId: string) => {
       setor: true,
       role: true, 
       isAdmin: true,
+      contaProtegida: true,
       active: true,
       createdAt: true,
       updatedAt: true

@@ -124,6 +124,12 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('s3e-open-conta-pagar', handler);
   }, []);
 
+  useEffect(() => {
+    const goCompras = () => setActiveView('Compras');
+    window.addEventListener('s3e-navigate-compras-avulsa', goCompras);
+    return () => window.removeEventListener('s3e-navigate-compras-avulsa', goCompras);
+  }, []);
+
   // Detectar URL e setar activeView automaticamente
   // Também lê sinais do localStorage (ex: Compras -> Contas a Pagar) para navegação cross-page
   useEffect(() => {
@@ -183,7 +189,7 @@ const MainApp: React.FC = () => {
     } else if (pathname === '/' || pathname === '') {
       setActiveView('Dashboard');
     }
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   const toggleSidebar = () => {
     setIsSidebarOpen(!isSidebarOpen);

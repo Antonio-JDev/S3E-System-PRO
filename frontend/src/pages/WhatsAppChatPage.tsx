@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { WhatsAppChatPanel } from '../components/crm/WhatsAppChatPanel';
+import { useMatchMedia, WA_MOBILE_MEDIA } from '../hooks/useMatchMedia';
 import { canonicalWhatsappChatId, formatPhoneForDisplay } from '../utils/whatsappChat';
 
 const Bars3Icon = (p: React.SVGProps<SVGSVGElement>) => (
@@ -56,8 +57,23 @@ const WhatsAppChatPage: React.FC<WhatsAppChatPageProps> = ({
     setTitle('');
   }, []);
 
+  const isWaMobile = useMatchMedia(WA_MOBILE_MEDIA);
+
+  useEffect(() => {
+    if (isWaMobile && chatId) {
+      document.body.setAttribute('data-wa-mobile-chat', 'open');
+    } else {
+      document.body.removeAttribute('data-wa-mobile-chat');
+    }
+    return () => document.body.removeAttribute('data-wa-mobile-chat');
+  }, [isWaMobile, chatId]);
+
   return (
-    <div className="flex flex-1 min-h-0 flex-col bg-gray-50 dark:bg-dark-bg">
+    <div
+      className={`flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-dark-bg ${
+        isWaMobile ? 'fixed inset-0 z-[35] bg-white dark:bg-[#161717]' : ''
+      }`}
+    >
       {/* Header removido para o chat ocupar toda a área útil (estilo WhatsApp Web). */}
       <div className="min-h-0 flex-1 overflow-hidden">
         <WhatsAppChatPanel

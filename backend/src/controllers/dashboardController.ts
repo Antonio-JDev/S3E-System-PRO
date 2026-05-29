@@ -1,5 +1,15 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import {
+  OS_STATUS_LABEL,
+  agregarOsBucket,
+  buildProgressoMapForProjetos,
+  calcularTendenciaPct,
+  classificarOsPorProgresso,
+  contarClientesComOrcamentoAprovado,
+  contarOsEmAndamento,
+  contarQuadrosProduzidosMesAtual,
+} from '../services/dashboardMetrics.service';
 
 function inRange(d: Date, b: { start: Date; end: Date }): boolean {
   const t = new Date(d).getTime();
@@ -84,6 +94,256 @@ export class DashboardController {
     } catch (error: any) {
       console.error('Erro ao buscar estatísticas:', error);
       res.status(500).json({ success: false, message: 'Erro ao buscar estatísticas', error: error.message });
+    }
+  }
+
+  /**
+   * Métricas dos cards do dashboard + tendências reais (mês atual vs mês anterior).
+   * GET /api/dashboard/cards-metricas
+   */
+  static async getCardsMetricas(req: Request, res: Response): Promise<void> {
+    try {
+      const agora = new Date();
+      const mesAtualIni = new Date(agora.getFullYear(), agora.getMonth(), 1);
+      const mesAnteriorIni = new Date(agora.getFullYear(), agora.getMonth() - 1, 1);
+      const mesAnteriorFim = new Date(agora.getFullYear(), agora.getMonth(), 0, 23, 59, 59, 999);
+
+      const [
+        obrasAtivas,
+        obrasAtivasMesAnterior,
+        equipesAtivas,
+        equipesAtivasMesAnterior,
+        osEmAndamento,
+        clientesAtendidos,
+        clientesAprovadosMesAtual,
+        clientesAprovadosMesAnterior,
+        quadrosMesAtual,
+        quadrosMesAnterior,
+        osAtualizadasMesAtual,
+        osAtualizadasMesAnterior,
+      ] = await Promise.all([
+        prisma.projeto.count({ where: { status: 'EXECUCAO' } }),
+        prisma.projeto.count({
+          where: {
+            status: 'EXECUCAO',
+            updatedAt: { lte: mesAnteriorFim },
+          },
+        }),
+        prisma.equipe.count({ where: { ativa: true } }),
+        prisma.equipe.count({
+          where: { ativa: true, updatedAt: { lte: mesAnteriorFim } },
+        }),
+        contarOsEmAndamento(),
+        contarClientesComOrcamentoAprovado(),
+        prisma.orcamento.findMany({
+          where: {
+            status: { contains: 'aprovado', mode: 'insensitive' },
+            updatedAt: { gte: mesAtualIni },
+          },
+          select: { clienteId: true },
+          distinct: ['clienteId'],
+        }),
+        prisma.orcamento.findMany({
+          where: {
+            status: { contains: 'aprovado', mode: 'insensitive' },
+            updatedAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
+          },
+          select: { clienteId: true },
+          distinct: ['clienteId'],
+        }),
+        contarQuadrosProduzidosMesAtual(),
+        prisma.projeto.count({
+          where: {
+            createdAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
+            status: { in: ['EXECUCAO', 'CONCLUIDO'] },
+            OR: [
+              { titulo: { contains: 'Quadro', mode: 'insensitive' } },
+              { titulo: { contains: 'Painel', mode: 'insensitive' } },
+              { descricao: { contains: 'Quadro', mode: 'insensitive' } },
+            ],
+          },
+        }),
+        prisma.projeto.count({
+          where: { status: { not: 'CANCELADO' }, updatedAt: { gte: mesAtualIni } },
+        }),
+        prisma.projeto.count({
+          where: {
+            status: { not: 'CANCELADO' },
+            updatedAt: { gte: mesAnteriorIni, lte: mesAnteriorFim },
+          },
+        }),
+      ]);
+
+      const projetosAtivos = await prisma.projeto.findMany({
+        where: { status: { not: 'CANCELADO' } },
+        select: { id: true, status: true, updatedAt: true },
+      });
+      const progressoMap = await buildProgressoMapForProjetos(projetosAtivos);
+      const osComProgressoMesAnterior = projetosAtivos.filter((p) => {
+        if (p.updatedAt > mesAnteriorFim) return false;
+        const pct = progressoMap[p.id]?.percentual ?? 0;
+        return classificarOsPorProgresso(p.status, pct) === 'comProgresso';
+      }).length;
+
+      const data = {
+        obrasAtivas: {
+          valor: obrasAtivas,
+          tendencia: calcularTendenciaPct(obrasAtivas, obrasAtivasMesAnterior),
+        },
+        osEmAndamento: {
+          valor: osEmAndamento,
+          tendencia: calcularTendenciaPct(osEmAndamento, osComProgressoMesAnterior),
+          descricao:
+            'OS com barra de progresso entre 1% e 99% (mesma regra da página Ordem de Serviços)',
+        },
+        equipesAtivas: {
+          valor: equipesAtivas,
+          tendencia: calcularTendenciaPct(equipesAtivas, equipesAtivasMesAnterior),
+        },
+        quadrosProduzidos: {
+          valor: quadrosMesAtual,
+          tendencia: calcularTendenciaPct(quadrosMesAtual, quadrosMesAnterior),
+          fonte:
+            'OS (projetos) criadas no mês com status Em Execução ou Concluído e título/descrição contendo "Quadro" ou "Painel"',
+        },
+        clientesAtendidos: {
+          valor: clientesAtendidos,
+          tendencia: calcularTendenciaPct(
+            clientesAprovadosMesAtual.length,
+            clientesAprovadosMesAnterior.length,
+          ),
+          descricao: 'Clientes distintos com pelo menos um orçamento aprovado',
+        },
+        osAtividadeMensal: {
+          mesAtual: osAtualizadasMesAtual,
+          mesAnterior: osAtualizadasMesAnterior,
+        },
+      };
+
+      res.status(200).json({ success: true, data });
+    } catch (error: any) {
+      console.error('Erro ao buscar cards métricas:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao buscar métricas dos cards',
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Detalhamento dos KPIs de um gráfico (modal).
+   * GET /api/dashboard/detalhe-kpis?grafico=ordens-servico|orcamentos|obras-kanban|pedidos-vendas&periodo=monthly&bucket=Mai
+   */
+  static async getDetalheKpis(req: Request, res: Response): Promise<void> {
+    try {
+      const grafico = String(req.query.grafico || 'ordens-servico');
+      const periodo = String(req.query.periodo || 'monthly');
+      const bucket = String(req.query.bucket || '').trim();
+      const hoje = new Date();
+      const anoAtual = hoje.getFullYear();
+      const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+      if (grafico === 'ordens-servico') {
+        const projetos = await prisma.projeto.findMany({
+          select: {
+            id: true,
+            titulo: true,
+            status: true,
+            semObra: true,
+            createdAt: true,
+            orcamento: { select: { numeroSequencial: true } },
+          },
+        });
+        const progressoMap = await buildProgressoMapForProjetos(projetos);
+
+        let filtrados = projetos;
+        if (bucket) {
+          if (periodo === 'monthly') {
+            const mesIdx = mesesNomes.indexOf(bucket);
+            if (mesIdx >= 0) {
+              filtrados = projetos.filter((p) => {
+                const d = new Date(p.createdAt);
+                return d.getFullYear() === anoAtual && d.getMonth() === mesIdx;
+              });
+            }
+          } else if (periodo === 'annual' && /^\d{4}$/.test(bucket)) {
+            const ano = parseInt(bucket, 10);
+            filtrados = projetos.filter((p) => new Date(p.createdAt).getFullYear() === ano);
+          }
+        }
+
+        const resumo = agregarOsBucket(filtrados, progressoMap, bucket || 'Período');
+
+        const linhas = filtrados
+          .filter((p) => p.status !== 'CANCELADO')
+          .map((p) => {
+            const pct = progressoMap[p.id]?.percentual ?? 0;
+            const cls = classificarOsPorProgresso(p.status, pct);
+            const osNum = p.orcamento?.numeroSequencial
+              ? `OS-${p.orcamento.numeroSequencial}`
+              : p.id.slice(0, 8);
+            return {
+              os: osNum,
+              titulo: p.titulo,
+              statusPagina: OS_STATUS_LABEL[p.status] || p.status,
+              progressoPct: pct,
+              classificacaoGrafico:
+                cls === 'concluido'
+                  ? 'Concluído (100%)'
+                  : cls === 'comProgresso'
+                    ? 'Com progresso (barra 1–99%)'
+                    : 'Aguardando (0%)',
+              criadoEm: new Date(p.createdAt).toLocaleDateString('pt-BR'),
+            };
+          })
+          .sort((a, b) => b.progressoPct - a.progressoPct);
+
+        const legenda = [
+          {
+            kpi: 'Com progresso',
+            significado: 'Barra de progresso entre 1% e 99% na listagem de OS',
+            termoPaginaOs: 'Coluna Progresso (mesma regra do Kanban + obra)',
+          },
+          {
+            kpi: 'Aguardando',
+            significado: 'Progresso 0% e ainda não concluída',
+            termoPaginaOs: 'Cards na aba Listagem sem avanço na barra',
+          },
+          {
+            kpi: 'Concluído',
+            significado: 'Status Concluído com progresso 100%',
+            termoPaginaOs: 'Aba Concluídos',
+          },
+          {
+            kpi: 'Proposta / Validado / Aprovado / Em Execução',
+            significado: 'Status cadastrado na OS (filtro da página)',
+            termoPaginaOs: 'Badge colorido no card da OS',
+          },
+        ];
+
+        res.status(200).json({
+          success: true,
+          data: {
+            titulo: 'Ordens de serviço — detalhamento',
+            periodo,
+            bucket: bucket || 'Todos',
+            resumo,
+            legenda,
+            linhas,
+            nota: 'Contagem por data de criação da OS no período. "Planejamento" foi renomeado para Aguardando (0% de progresso).',
+          },
+        });
+        return;
+      }
+
+      res.status(400).json({
+        success: false,
+        message: 'grafico inválido. Use: ordens-servico, orcamentos, obras-kanban, pedidos-vendas',
+      });
+    } catch (error: any) {
+      console.error('Erro detalhe KPIs:', error);
+      res.status(500).json({ success: false, message: error.message });
     }
   }
 
@@ -283,7 +543,7 @@ export class DashboardController {
             const fornecedorDireto = item.fornecedor;
             
             // Buscar última compra ordenando por dataCompra
-            let ultimaCompra = null;
+            let ultimaCompra: any = null;
             if (item.compraItems && item.compraItems.length > 0) {
               // Ordenar compras por dataCompra (mais recente primeiro)
               const comprasOrdenadas = [...item.compraItems]
@@ -816,7 +1076,7 @@ export class DashboardController {
         }),
         prisma.projeto.findMany({
           where: { createdAt: { gte: dataInicio, lte: dataFim } },
-          select: { createdAt: true, status: true }
+          select: { id: true, createdAt: true, status: true, semObra: true }
         }),
         prisma.obra.findMany({
           where: { createdAt: { gte: dataInicio, lte: dataFim } },
@@ -836,6 +1096,8 @@ export class DashboardController {
       let evolucaoPedidosVendas: any[] = [];
       let comparativoMensal: any[] = [];
       let categoriasVendas: { name: string; value: number }[] = [];
+
+      const progressoMapOs = await buildProgressoMapForProjetos(projetos);
 
       if (modo === 'month') {
         for (let mes = 0; mes < 12; mes++) {
@@ -865,14 +1127,9 @@ export class DashboardController {
             ).length
           });
 
-          evolucaoOrdensServico.push({
-            name: mesesNomes[mes],
-            concluidas: pM.filter((p) => p.status === 'CONCLUIDO').length,
-            emAndamento: pM.filter((p) => p.status === 'EXECUCAO').length,
-            planejadas: pM.filter((p) =>
-              ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
-            ).length
-          });
+          evolucaoOrdensServico.push(
+            agregarOsBucket(pM, progressoMapOs, mesesNomes[mes]),
+          );
 
           evolucaoObrasKanban.push({
             name: mesesNomes[mes],
@@ -921,9 +1178,10 @@ export class DashboardController {
         evolucaoOrcamentos = buckets.map((b) =>
           DashboardController.fillBucketOrcamentos(orcamentos, b)
         );
-        evolucaoOrdensServico = buckets.map((b) =>
-          DashboardController.fillBucketProjetos(projetos, b)
-        );
+        evolucaoOrdensServico = buckets.map((b) => {
+          const pB = projetos.filter((p) => inRange(p.createdAt, b));
+          return agregarOsBucket(pB, progressoMapOs, b.label);
+        });
         evolucaoObrasKanban = buckets.map((b) => DashboardController.fillBucketObras(obras, b));
         evolucaoPedidosVendas = buckets.map((b) => DashboardController.fillBucketVendas(vendas, b));
         comparativoMensal = buckets.map((b) => {
@@ -962,14 +1220,9 @@ export class DashboardController {
               (o) => !/Aprovado|Recusado|Cancelado|Declinado/i.test(o.status || '')
             ).length
           });
-          evolucaoOrdensServico.push({
-            name: String(ano),
-            concluidas: pY.filter((p) => p.status === 'CONCLUIDO').length,
-            emAndamento: pY.filter((p) => p.status === 'EXECUCAO').length,
-            planejadas: pY.filter((p) =>
-              ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
-            ).length
-          });
+          evolucaoOrdensServico.push(
+            agregarOsBucket(pY, progressoMapOs, String(ano)),
+          );
           evolucaoObrasKanban.push({
             name: String(ano),
             backlog: obY.filter((o) => o.status === 'BACKLOG').length,

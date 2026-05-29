@@ -5,6 +5,7 @@ import { type PurchaseOrder, type Supplier, PurchaseStatus, type PurchaseOrderIt
 import { parseNFeXML, readFileAsText } from '../utils/xmlParser';
 import { comprasService } from '../services/comprasService';
 import { obrasService, type Obra } from '../services/obrasService';
+import { projetosService } from '../services/projetosService';
 import { formatDateBR, parseLocalDate } from '../utils/dateUtils';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
@@ -18,6 +19,12 @@ import { axiosApiService } from '../services/axiosApi';
 import { empresaFiscalService } from '../services/empresaFiscalService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { formatCNPJ, formatTelefoneBR, onlyDigits } from '../utils/inputMasks';
+import {
+    itemParaDraft,
+    aplicarDraftNoItem,
+    atualizarCampoNumericoItem,
+    type CompraItemEditDraft
+} from '../utils/compraItemList.util';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -54,6 +61,11 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const PencilIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+    </svg>
+);
+const CheckIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
     </svg>
 );
 const DocumentArrowUpIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -209,6 +221,15 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [isCompraAvulsa, setIsCompraAvulsa] = useState(false); // ✅ NOVO: Modo compra avulsa
     const [obraId, setObraId] = useState<string>(''); // ✅ NOVO: Obra vinculada
     const [obrasEmAndamento, setObrasEmAndamento] = useState<Obra[]>([]); // ✅ NOVO: Lista de obras em andamento
+    type DestinoAvulsaUI = 'ESTOQUE' | 'OBRA' | 'PROJETO';
+    const [destinoTipo, setDestinoTipo] = useState<DestinoAvulsaUI>('ESTOQUE');
+    const [projetoId, setProjetoId] = useState('');
+    const [projetoSearch, setProjetoSearch] = useState('');
+    const [projetoLabel, setProjetoLabel] = useState('');
+    const [projetoOptions, setProjetoOptions] = useState<
+        Array<{ id: string; titulo: string; numeroOs?: string; cliente?: { nome: string } }>
+    >([]);
+    const [showProjetoDropdown, setShowProjetoDropdown] = useState(false);
 
     // Action states
     const [purchaseToView, setPurchaseToView] = useState<PurchaseOrder | null>(null);
@@ -249,9 +270,24 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         quantidadeFracionada?: number; // Quantidade de unidades por embalagem
         tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
         unidadeEmbalagem?: string; // "cx", "pct", etc.
+        /** true = apenas estoque; false = obra/OS conforme classificação */
+        destinoEstoque?: boolean;
     };
     const [purchaseItems, setPurchaseItems] = useState<ExtendedItem[]>([]);
-    const [productToAdd, setProductToAdd] = useState<{id: string, quantity: string, cost: string, ncm?: string, sku?: string}>({id: '', quantity: '1', cost: ''});
+    const [productToAdd, setProductToAdd] = useState<{
+        name: string;
+        quantity: string;
+        cost: string;
+        ncm?: string;
+        sku?: string;
+        unidadeMedida?: string;
+    }>({ name: '', quantity: '1', cost: '', unidadeMedida: 'un' });
+    const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+    const [itemEditDraft, setItemEditDraft] = useState<CompraItemEditDraft | null>(null);
+    /** Rascunho local enquanto digita qtd/valor unitário (evita travar ao apagar e redigitar) */
+    const [inlineNumericDraft, setInlineNumericDraft] = useState<
+        Record<number, { quantity: string; unitCost: string }>
+    >({});
     
     // Novos campos do fornecedor
     const [supplierName, setSupplierName] = useState('');
@@ -601,6 +637,12 @@ const filteredPurchases = useMemo(() => {
         setSupplierAddress('');
         setIsCompraAvulsa(false); // ✅ NOVO: Resetar modo compra avulsa
         setObraId(''); // ✅ NOVO: Resetar obra selecionada
+        setDestinoTipo('ESTOQUE');
+        setProjetoId('');
+        setProjetoSearch('');
+        setProjetoLabel('');
+        setProjetoOptions([]);
+        setShowProjetoDropdown(false);
         // ✅ NOVO: Resetar empresa compradora
         setEmpresaCompradoraId('');
         setEmpresaCompradoraNome('');
@@ -622,6 +664,10 @@ const filteredPurchases = useMemo(() => {
         setSelectedXMLFile(null);
         setXmlError(null);
         setObservacoesCompra('');
+        setEditingItemIndex(null);
+        setItemEditDraft(null);
+        setInlineNumericDraft({});
+        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
     };
 
     useEffect(() => {
@@ -629,6 +675,76 @@ const filteredPurchases = useMemo(() => {
             setObservacoesDetalheDraft(purchaseToView.notes || purchaseToView.observacoes || '');
         }
     }, [purchaseToView]);
+
+    useEffect(() => {
+        try {
+            const raw = sessionStorage.getItem('s3e_compra_avulsa_preset');
+            if (!raw) return;
+            sessionStorage.removeItem('s3e_compra_avulsa_preset');
+            const preset = JSON.parse(raw) as {
+                destinoTipo?: DestinoAvulsaUI;
+                projetoId?: string;
+                projetoLabel?: string;
+                obraId?: string;
+                items?: Array<{
+                    productName: string;
+                    quantity: number;
+                    unitCost?: number;
+                    materialId?: string;
+                    destinoEstoque?: boolean;
+                }>;
+            };
+            setIsCompraAvulsa(true);
+            setDestinoTipo(preset.destinoTipo || 'PROJETO');
+            if (preset.projetoId) setProjetoId(preset.projetoId);
+            if (preset.projetoLabel) {
+                setProjetoLabel(preset.projetoLabel);
+                setProjetoSearch(preset.projetoLabel);
+            }
+            if (preset.obraId) setObraId(preset.obraId);
+            if (preset.items?.length) {
+                setPurchaseItems(
+                    preset.items.map((it) => ({
+                        productName: it.productName,
+                        quantity: it.quantity,
+                        unitCost: it.unitCost ?? 0,
+                        totalCost: (it.unitCost ?? 0) * it.quantity,
+                        materialId: it.materialId,
+                        destinoEstoque: it.destinoEstoque ?? false,
+                    })),
+                );
+            }
+            setIsModalOpen(true);
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isCompraAvulsa || destinoTipo !== 'PROJETO') return;
+        const q = projetoSearch.trim();
+        if (q.length < 2) {
+            setProjetoOptions([]);
+            return;
+        }
+        const t = window.setTimeout(async () => {
+            const res = await projetosService.buscarPorTermo(q, 20);
+            if (res.success && Array.isArray(res.data)) {
+                setProjetoOptions(res.data);
+                setShowProjetoDropdown(true);
+            }
+        }, 300);
+        return () => window.clearTimeout(t);
+    }, [projetoSearch, isCompraAvulsa, destinoTipo]);
+
+    const temClassificacaoDestino =
+        isCompraAvulsa && destinoTipo !== 'ESTOQUE' && (destinoTipo === 'OBRA' ? !!obraId : !!projetoId);
+
+    const marcarTodosItensDestino = (paraDestino: boolean) => {
+        setPurchaseItems((prev) =>
+            prev.map((it) => ({ ...it, destinoEstoque: paraDestino ? false : true })),
+        );
+    };
 
     const salvarObservacoesDetalhe = async () => {
         if (!purchaseToView) return;
@@ -792,34 +908,195 @@ const filteredPurchases = useMemo(() => {
     useEscapeKey(!!purchaseToView, () => setPurchaseToView(null));
     useEscapeKey(!!purchaseToDelete, () => setPurchaseToDelete(null));
 
+    const limparFormularioAdicao = () => {
+        setProductToAdd({ name: '', quantity: '1', cost: '', ncm: '', sku: '', unidadeMedida: 'un' });
+        setEditingItemIndex(null);
+        setItemEditDraft(null);
+        setInlineNumericDraft({});
+    };
+
+    const getInlineNumericDisplay = (
+        index: number,
+        field: 'quantity' | 'unitCost',
+        item: ExtendedItem
+    ): string => {
+        if (inlineNumericDraft[index]) {
+            return inlineNumericDraft[index][field];
+        }
+        if (editingItemIndex === index && itemEditDraft) {
+            return field === 'quantity' ? itemEditDraft.quantity : itemEditDraft.unitCost;
+        }
+        const val = field === 'quantity' ? item.quantity : item.unitCost;
+        return val === undefined || val === null ? '' : String(val);
+    };
+
+    const handleInlineNumericChange = (
+        index: number,
+        field: 'quantity' | 'unitCost',
+        value: string
+    ) => {
+        const item = purchaseItems[index];
+        if (!item) return;
+
+        setInlineNumericDraft((prev) => ({
+            ...prev,
+            [index]: {
+                quantity:
+                    field === 'quantity'
+                        ? value
+                        : prev[index]?.quantity ?? String(item.quantity ?? ''),
+                unitCost:
+                    field === 'unitCost'
+                        ? value
+                        : prev[index]?.unitCost ?? String(item.unitCost ?? '')
+            }
+        }));
+
+        if (itemEditDraft && editingItemIndex === index) {
+            setItemEditDraft((prev) =>
+                prev
+                    ? {
+                          ...prev,
+                          [field === 'quantity' ? 'quantity' : 'unitCost']: value
+                      }
+                    : prev
+            );
+        }
+
+        const updated = atualizarCampoNumericoItem(item, field, value);
+        if (updated) {
+            setPurchaseItems((prev) => prev.map((it, i) => (i === index ? updated : it)));
+        }
+    };
+
+    const commitInlineNumericDraft = (index: number) => {
+        const draft = inlineNumericDraft[index];
+        if (!draft) return;
+
+        const item = purchaseItems[index];
+        if (!item) return;
+
+        const quantity = parseFloat(draft.quantity.replace(',', '.'));
+        const unitCost = parseFloat(draft.unitCost.replace(',', '.'));
+
+        if (Number.isFinite(quantity) && quantity > 0 && Number.isFinite(unitCost) && unitCost >= 0) {
+            setPurchaseItems((prev) =>
+                prev.map((it, i) =>
+                    i === index
+                        ? { ...it, quantity, unitCost, totalCost: quantity * unitCost }
+                        : it
+                )
+            );
+            if (editingItemIndex === index && itemEditDraft) {
+                setItemEditDraft((prev) =>
+                    prev
+                        ? {
+                              ...prev,
+                              quantity: String(quantity),
+                              unitCost: String(unitCost)
+                          }
+                        : prev
+                );
+            }
+        }
+
+        setInlineNumericDraft((prev) => {
+            const next = { ...prev };
+            delete next[index];
+            return next;
+        });
+    };
+
+    const iniciarEdicaoItemLinha = (index: number) => {
+        const item = purchaseItems[index];
+        if (!item) return;
+        setEditingItemIndex(index);
+        setItemEditDraft(itemParaDraft(item));
+    };
+
+    const salvarEdicaoItemLinha = () => {
+        if (editingItemIndex === null || !itemEditDraft) return;
+        const atualizado = aplicarDraftNoItem(purchaseItems[editingItemIndex], itemEditDraft);
+        if (!atualizado) {
+            toast.error('Preencha nome, quantidade e valor unitário válidos');
+            return;
+        }
+        setPurchaseItems((prev) =>
+            prev.map((item, i) => (i === editingItemIndex ? { ...item, ...atualizado } : item))
+        );
+        limparFormularioAdicao();
+        toast.success('Item atualizado');
+    };
+
     const handleAddProduct = () => {
-        if (!productToAdd.id || !productToAdd.quantity || !productToAdd.cost) {
-            toast.error('Preencha todos os campos do produto');
+        if (!productToAdd.name?.trim() || !productToAdd.quantity || !productToAdd.cost) {
+            toast.error('Preencha nome, quantidade e valor unitário do produto');
             return;
         }
 
-        const product = products.find(p => p.id === productToAdd.id);
-        if (!product) return;
-
         const quantity = parseFloat(productToAdd.quantity);
         const unitCost = parseFloat(productToAdd.cost);
+        if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0) {
+            toast.error('Quantidade e valor unitário inválidos');
+            return;
+        }
         const totalCost = quantity * unitCost;
 
-        const newItem: ExtendedItem = {
-            productId: product.id,
-            productName: product.name,
+        const baseItem: ExtendedItem = {
+            productId: '',
+            productName: productToAdd.name.trim(),
             quantity,
             unitCost,
             totalCost,
             ncm: productToAdd.ncm,
-            sku: productToAdd.sku
+            sku: productToAdd.sku,
+            unidadeMedida: productToAdd.unidadeMedida || 'un'
         };
 
-        setPurchaseItems(prev => [...prev, newItem]);
-        setProductToAdd({id: '', quantity: '1', cost: ''});
+        if (editingItemIndex !== null) {
+            const existente = purchaseItems[editingItemIndex];
+            setPurchaseItems((prev) =>
+                prev.map((item, i) =>
+                    i === editingItemIndex
+                        ? {
+                              ...existente,
+                              ...baseItem,
+                              materialId: existente.materialId,
+                              materialVinculado: existente.materialVinculado,
+                              matchAutomatico: existente.matchAutomatico,
+                              destinoEstoque: existente.destinoEstoque,
+                              quantidadeFracionada: existente.quantidadeFracionada,
+                              tipoEmbalagem: existente.tipoEmbalagem,
+                              unidadeEmbalagem: existente.unidadeEmbalagem
+                          }
+                        : item
+                )
+            );
+            limparFormularioAdicao();
+            toast.success('Item atualizado na listagem');
+            return;
+        }
+
+        setPurchaseItems((prev) => [...prev, baseItem]);
+        limparFormularioAdicao();
+        toast.success('Produto adicionado à listagem');
     };
 
     const handleRemoveProduct = (index: number) => {
+        if (editingItemIndex === index) {
+            limparFormularioAdicao();
+        } else if (editingItemIndex !== null && index < editingItemIndex) {
+            setEditingItemIndex(editingItemIndex - 1);
+        }
+        setInlineNumericDraft((prev) => {
+            const next: Record<number, { quantity: string; unitCost: string }> = {};
+            Object.entries(prev).forEach(([key, val]) => {
+                const i = Number(key);
+                if (i < index) next[i] = val;
+                else if (i > index) next[i - 1] = val;
+            });
+            return next;
+        });
         setPurchaseItems(prev => prev.filter((_, i) => i !== index));
     };
 
@@ -832,6 +1109,15 @@ const filteredPurchases = useMemo(() => {
         
         if (purchaseItems.length === 0) {
             toast.error('Adicione pelo menos um item à compra');
+            return;
+        }
+
+        if (isCompraAvulsa && destinoTipo === 'OBRA' && !obraId) {
+            toast.error('Selecione a obra em andamento');
+            return;
+        }
+        if (isCompraAvulsa && destinoTipo === 'PROJETO' && !projetoId) {
+            toast.error('Selecione a ordem de serviço (OS)');
             return;
         }
 
@@ -915,7 +1201,10 @@ const filteredPurchases = useMemo(() => {
                     // Campos de fracionamento
                     quantidadeFracionada: (it as any).quantidadeFracionada,
                     tipoEmbalagem: (it as any).tipoEmbalagem,
-                    unidadeEmbalagem: (it as any).unidadeEmbalagem
+                    unidadeEmbalagem: (it as any).unidadeEmbalagem,
+                    destinoEstoque: temClassificacaoDestino
+                        ? it.destinoEstoque !== false
+                        : true,
                 })),
                 observacoes: observacoesCompra.trim() || undefined,
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
@@ -925,7 +1214,11 @@ const filteredPurchases = useMemo(() => {
                 valorTotalProdutos: totalProdutosCalculado,
                 valorTotalNota: valorTotalNotaCalculado,
                 duplicatas: parcelas,
-                obraId: isCompraAvulsa && obraId ? obraId : undefined, // ✅ NOVO: Incluir obraId se for compra avulsa
+                destinoTipo:
+                    isCompraAvulsa && destinoTipo !== 'ESTOQUE' ? destinoTipo : undefined,
+                obraId: isCompraAvulsa && destinoTipo === 'OBRA' && obraId ? obraId : undefined,
+                projetoId:
+                    isCompraAvulsa && destinoTipo === 'PROJETO' && projetoId ? projetoId : undefined,
                 empresaCompradoraNome: empresaCompradoraNome || undefined, // ✅ NOVO: Nome da empresa compradora
                 empresaCompradoraCNPJ: onlyDigits(empresaCompradoraCNPJ) || empresaCompradoraCNPJ || undefined // ✅ NOVO: CNPJ da empresa compradora
             };
@@ -1864,33 +2157,136 @@ const filteredPurchases = useMemo(() => {
                                 </div>
                             </div>
 
-                            {/* ✅ NOVO: Campo de Obra (apenas para compra avulsa) */}
                             {isCompraAvulsa && (
                                 <div>
                                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                                         <span className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">🏗️</span>
-                                        Classificação - Obra em Andamento
+                                        Classificação da compra avulsa
                                     </h3>
-                                    <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6">
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            Vincular a Obra em Andamento *
-                                        </label>
-                                        <select
-                                            value={obraId}
-                                            onChange={(e) => setObraId(e.target.value)}
-                                            required={isCompraAvulsa}
-                                            className="w-full px-4 py-3 border border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500 bg-white"
-                                        >
-                                            <option value="">Selecione uma obra em andamento</option>
-                                            {obrasEmAndamento.map((obra) => (
-                                                <option key={obra.id} value={obra.id}>
-                                                    {obra.nomeObra} - {obra.status === 'ANDAMENTO' ? '🟢 Em Andamento' : '🟡 A Fazer'}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <p className="text-xs text-purple-600 mt-2">
-                                            💡 Esta compra será vinculada à obra selecionada para rastreamento de materiais por obra
-                                        </p>
+                                    <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6 space-y-4">
+                                        <div className="flex flex-wrap gap-4">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="destinoTipo"
+                                                    checked={destinoTipo === 'ESTOQUE'}
+                                                    onChange={() => {
+                                                        setDestinoTipo('ESTOQUE');
+                                                        setObraId('');
+                                                        setProjetoId('');
+                                                    }}
+                                                />
+                                                <span className="text-sm font-medium">Composição de estoque</span>
+                                            </label>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="destinoTipo"
+                                                    checked={destinoTipo === 'OBRA'}
+                                                    onChange={() => setDestinoTipo('OBRA')}
+                                                />
+                                                <span className="text-sm font-medium">Obra em andamento</span>
+                                            </label>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="destinoTipo"
+                                                    checked={destinoTipo === 'PROJETO'}
+                                                    onChange={() => setDestinoTipo('PROJETO')}
+                                                />
+                                                <span className="text-sm font-medium">Ordem de serviço (OS)</span>
+                                            </label>
+                                        </div>
+
+                                        {destinoTipo === 'OBRA' && (
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    Obra em andamento *
+                                                </label>
+                                                <select
+                                                    value={obraId}
+                                                    onChange={(e) => setObraId(e.target.value)}
+                                                    required
+                                                    className="w-full px-4 py-3 border border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500 bg-white"
+                                                >
+                                                    <option value="">Selecione uma obra</option>
+                                                    {obrasEmAndamento.map((obra) => (
+                                                        <option key={obra.id} value={obra.id}>
+                                                            {obra.nomeObra} —{' '}
+                                                            {obra.status === 'ANDAMENTO'
+                                                                ? 'Em andamento'
+                                                                : 'A fazer'}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {destinoTipo === 'PROJETO' && (
+                                            <div className="relative">
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    Buscar OS *
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={projetoSearch}
+                                                    onChange={(e) => {
+                                                        setProjetoSearch(e.target.value);
+                                                        setProjetoId('');
+                                                        setProjetoLabel('');
+                                                    }}
+                                                    placeholder="Nº OS, título ou cliente..."
+                                                    className="w-full px-4 py-3 border border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500 bg-white"
+                                                />
+                                                {showProjetoDropdown && projetoOptions.length > 0 && (
+                                                    <ul className="absolute z-20 mt-1 w-full bg-white border border-purple-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                                        {projetoOptions.map((p) => (
+                                                            <li key={p.id}>
+                                                                <button
+                                                                    type="button"
+                                                                    className="w-full text-left px-4 py-2 hover:bg-purple-50 text-sm"
+                                                                    onClick={() => {
+                                                                        setProjetoId(p.id);
+                                                                        const label = `${p.numeroOs || 'OS'} · ${p.titulo}${p.cliente?.nome ? ` · ${p.cliente.nome}` : ''}`;
+                                                                        setProjetoLabel(label);
+                                                                        setProjetoSearch(label);
+                                                                        setShowProjetoDropdown(false);
+                                                                    }}
+                                                                >
+                                                                    {p.numeroOs ? `${p.numeroOs} · ` : ''}
+                                                                    {p.titulo}
+                                                                    {p.cliente?.nome ? ` · ${p.cliente.nome}` : ''}
+                                                                </button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                                {projetoId && (
+                                                    <p className="text-xs text-purple-600 mt-1">
+                                                        OS selecionada: {projetoLabel || projetoId}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {temClassificacaoDestino && (
+                                            <div className="flex flex-wrap gap-2 pt-2 border-t border-purple-200">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => marcarTodosItensDestino(true)}
+                                                    className="px-3 py-1.5 text-xs font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                                >
+                                                    Todos para destino
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => marcarTodosItensDestino(false)}
+                                                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-100"
+                                                >
+                                                    Todos para estoque
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -2059,12 +2455,31 @@ const filteredPurchases = useMemo(() => {
                                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Itens da Compra</h3>
                                 
                                 {/* Adicionar Produto */}
-                                <div className="bg-gray-50 border border-gray-200 p-4 rounded-xl mb-4">
-                                    <h4 className="font-medium text-gray-800 mb-3">Adicionar Item</h4>
+                                <div
+                                    className={`bg-gray-50 border p-4 rounded-xl mb-4 ${
+                                        editingItemIndex !== null ? 'border-amber-400 ring-2 ring-amber-200' : 'border-gray-200'
+                                    }`}
+                                >
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                                        <h4 className="font-medium text-gray-800">
+                                            {editingItemIndex !== null ? 'Editar item da listagem' : 'Adicionar Item'}
+                                        </h4>
+                                        {editingItemIndex !== null && (
+                                            <button
+                                                type="button"
+                                                onClick={limparFormularioAdicao}
+                                                className="text-sm text-gray-600 hover:text-gray-900 underline"
+                                            >
+                                                Cancelar edição
+                                            </button>
+                                        )}
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                                         <div>
                                             <input
                                                 type="text"
+                                                value={productToAdd.name}
+                                                onChange={(e) => setProductToAdd({ ...productToAdd, name: e.target.value })}
                                                 placeholder="Nome do produto"
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                                             />
@@ -2113,9 +2528,13 @@ const filteredPurchases = useMemo(() => {
                                             <button
                                                 type="button"
                                                 onClick={handleAddProduct}
-                                                className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-semibold"
+                                                className={`w-full px-4 py-2 text-white rounded-lg transition-all font-semibold ${
+                                                    editingItemIndex !== null
+                                                        ? 'bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600'
+                                                        : 'bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600'
+                                                }`}
                                             >
-                                                Adicionar
+                                                {editingItemIndex !== null ? 'Salvar alterações' : 'Adicionar'}
                                             </button>
                                         </div>
                                     </div>
@@ -2142,6 +2561,11 @@ const filteredPurchases = useMemo(() => {
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">NCM</th>
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">SKU</th>
                                                         <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Subtotal</th>
+                                                        {temClassificacaoDestino && (
+                                                            <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                                                                Destino
+                                                            </th>
+                                                        )}
                                                         <th className="px-4 py-4 text-center text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Ações</th>
                                                     </tr>
                                                 </thead>
@@ -2153,8 +2577,18 @@ const filteredPurchases = useMemo(() => {
                                                         
                                                         return (
                                                             <React.Fragment key={index}>
-                                                                <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                                                <tr className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
+                                                                    editingItemIndex === index ? 'bg-amber-50/80 dark:bg-amber-900/10' : ''
+                                                                }`}>
                                                                     <td className="px-6 py-4">
+                                                                        {editingItemIndex === index && itemEditDraft ? (
+                                                                            <input
+                                                                                type="text"
+                                                                                value={itemEditDraft.productName}
+                                                                                onChange={(e) => setItemEditDraft({ ...itemEditDraft, productName: e.target.value })}
+                                                                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-sm dark:bg-dark-bg dark:text-white"
+                                                                            />
+                                                                        ) : (
                                                                         <div>
                                                                             <p className="font-semibold text-gray-900 dark:text-dark-text text-sm">{item.productName}</p>
                                                                             {(item as any).quantidadeFracionada && item.quantity && (
@@ -2182,42 +2616,107 @@ const filteredPurchases = useMemo(() => {
                                                                                 )}
                                                                             </div>
                                                                         </div>
+                                                                        )}
                                                                     </td>
                                                             <td className="px-4 py-4 text-center">
-                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
-                                                                    {item.quantity}
-                                                                    {item.unidadeMedida && (
-                                                                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
-                                                                            {item.unidadeMedida}
-                                                                        </span>
-                                                                    )}
-                                                                    {(item as any).quantidadeFracionada && (
-                                                                        <span className="text-blue-600 dark:text-blue-400 ml-1">
-                                                                            ({(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'})
-                                                                        </span>
-                                                                    )}
-                                                                </span>
+                                                                <input
+                                                                    type="number"
+                                                                    min="0.01"
+                                                                    step="0.01"
+                                                                    value={getInlineNumericDisplay(index, 'quantity', item)}
+                                                                    onChange={(e) =>
+                                                                        handleInlineNumericChange(index, 'quantity', e.target.value)
+                                                                    }
+                                                                    onBlur={() => commitInlineNumericDraft(index)}
+                                                                    title="Quantidade"
+                                                                    className="w-20 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm text-center dark:bg-dark-bg dark:text-white focus:ring-2 focus:ring-orange-400"
+                                                                />
+                                                                {item.unidadeMedida && (
+                                                                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-1 block mt-1">
+                                                                        {item.unidadeMedida}
+                                                                    </span>
+                                                                )}
+                                                                {(item as any).quantidadeFracionada && (
+                                                                    <span className="text-blue-600 dark:text-blue-400 ml-1 text-xs block">
+                                                                        ({(item as any).tipoEmbalagem?.toLowerCase() || 'embalagens'})
+                                                                    </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-4 text-right">
-                                                                <span className="text-gray-700 dark:text-dark-text font-medium">
-                                                                    R$ {(item.unitCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                </span>
+                                                                <div className="inline-flex items-center justify-end gap-1">
+                                                                    <span className="text-xs text-gray-500 dark:text-gray-400">R$</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        step="0.01"
+                                                                        value={getInlineNumericDisplay(index, 'unitCost', item)}
+                                                                        onChange={(e) =>
+                                                                            handleInlineNumericChange(index, 'unitCost', e.target.value)
+                                                                        }
+                                                                        onBlur={() => commitInlineNumericDraft(index)}
+                                                                        title="Valor unitário"
+                                                                        className="w-28 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm text-right dark:bg-dark-bg dark:text-white focus:ring-2 focus:ring-orange-400"
+                                                                    />
+                                                                </div>
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
+                                                                {editingItemIndex === index && itemEditDraft ? (
+                                                                    <input
+                                                                        type="text"
+                                                                        value={itemEditDraft.ncm}
+                                                                        onChange={(e) => setItemEditDraft({ ...itemEditDraft, ncm: e.target.value })}
+                                                                        className="w-28 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm font-mono dark:bg-dark-bg dark:text-white"
+                                                                    />
+                                                                ) : (
                                                                 <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
                                                                     {item.ncm || '-'}
                                                                 </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-4 py-4 text-center">
+                                                                {editingItemIndex === index && itemEditDraft ? (
+                                                                    <input
+                                                                        type="text"
+                                                                        value={itemEditDraft.sku}
+                                                                        onChange={(e) => setItemEditDraft({ ...itemEditDraft, sku: e.target.value })}
+                                                                        className="w-28 px-2 py-1 border border-gray-300 dark:border-dark-border rounded-md text-sm font-mono dark:bg-dark-bg dark:text-white"
+                                                                    />
+                                                                ) : (
                                                                 <span className="text-gray-600 dark:text-gray-400 font-mono text-sm">
                                                                     {item.sku || '-'}
                                                                 </span>
+                                                                )}
                                                             </td>
                                                             <td className="px-6 py-4 text-right">
                                                                 <span className="font-bold text-orange-700 dark:text-orange-400 text-base">
                                                                     R$ {(item.totalCost ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                                 </span>
                                                             </td>
+                                                            {temClassificacaoDestino && (
+                                                                <td className="px-4 py-4 text-center">
+                                                                    <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={item.destinoEstoque === false}
+                                                                            onChange={(e) => {
+                                                                                setPurchaseItems((prev) =>
+                                                                                    prev.map((row, i) =>
+                                                                                        i === index
+                                                                                            ? {
+                                                                                                  ...row,
+                                                                                                  destinoEstoque: !e.target.checked,
+                                                                                              }
+                                                                                            : row,
+                                                                                    ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                        <span>
+                                                                            {destinoTipo === 'PROJETO' ? 'OS' : 'Obra'}
+                                                                        </span>
+                                                                    </label>
+                                                                </td>
+                                                            )}
                                                             <td className="px-4 py-4 text-center">
                                                                 <div className="flex items-center justify-center gap-2">
                                                                     {/* Ver Detalhes do Material */}
@@ -2308,6 +2807,46 @@ const filteredPurchases = useMemo(() => {
                                                                     >
                                                                         📦
                                                                     </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            if (editingItemIndex === index) {
+                                                                                salvarEdicaoItemLinha();
+                                                                            } else {
+                                                                                iniciarEdicaoItemLinha(index);
+                                                                                setProductToAdd({
+                                                                                    name: item.productName,
+                                                                                    quantity: String(item.quantity),
+                                                                                    cost: String(item.unitCost),
+                                                                                    ncm: item.ncm || '',
+                                                                                    sku: item.sku || '',
+                                                                                    unidadeMedida: item.unidadeMedida || 'un'
+                                                                                });
+                                                                            }
+                                                                        }}
+                                                                        className={`p-1.5 rounded-lg transition-colors ${
+                                                                            editingItemIndex === index
+                                                                                ? 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
+                                                                                : 'text-amber-600 hover:text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                                                                        }`}
+                                                                        title={editingItemIndex === index ? 'Confirmar edição na linha' : 'Editar item na linha'}
+                                                                    >
+                                                                        {editingItemIndex === index ? (
+                                                                            <CheckIcon className="w-4 h-4" />
+                                                                        ) : (
+                                                                            <PencilIcon className="w-4 h-4" />
+                                                                        )}
+                                                                    </button>
+                                                                    {editingItemIndex === index && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={limparFormularioAdicao}
+                                                                            className="p-1.5 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                                                            title="Cancelar edição"
+                                                                        >
+                                                                            <XMarkIcon className="w-4 h-4" />
+                                                                        </button>
+                                                                    )}
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => handleRemoveProduct(index)}

@@ -6,7 +6,9 @@
 # Topologia (LAN 192.168.100.228 + Tailscale 100.74.201.62 + hosts app.s3eengenharia.com.br):
 #   Operadores ──HTTP:80──> Traefik (só nos IPs internos abaixo) ──> containers
 #     /           → frontend
-#     /api        → backend (+ /socket.io, /uploads no mesmo router)
+#     /api        → backend (sem middleware forwardingTimeout — ver labels)
+#     /socket.io  → backend (router dedicado, sem timeout agressivo)
+#     /uploads    → backend (router dedicado)
 #     /manager    → Evolution Go (stripPrefix /manager)
 #
 # WhatsApp webhook (sempre interno, não passa pelo Traefik):
@@ -204,7 +206,7 @@ services:
         condition: service_started
     networks:
       - traefik
-    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/app.js"
+    command: sh -c "npx prisma migrate deploy && node dist/app.js"
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
       interval: 30s
@@ -214,17 +216,25 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik"
-      - "traefik.http.routers.s3e-api.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && (PathPrefix(`/api`) || PathPrefix(`/socket.io`) || PathPrefix(`/uploads`))"
+      # Roteador 1: Socket.io — prioridade alta, sem middleware de timeout (conexões longas)
+      - "traefik.http.routers.s3e-websocket.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/socket.io`)"
+      - "traefik.http.routers.s3e-websocket.entrypoints=web"
+      - "traefik.http.routers.s3e-websocket.priority=150"
+      - "traefik.http.routers.s3e-websocket.service=s3e-api"
+      # Roteador 2: API REST (sem middleware s3e-api-timeout — label inválida derruba o router → 502)
+      - "traefik.http.routers.s3e-api.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/api`)"
       - "traefik.http.routers.s3e-api.entrypoints=web"
       - "traefik.http.routers.s3e-api.priority=100"
+      # Roteador 3: uploads estáticos do backend
       - "traefik.http.routers.s3e-uploads.rule=(Host(`app.s3eengenharia.com.br`) || Host(`192.168.100.228`) || Host(`100.74.201.62`) || Host(`s3e-system-vpn`)) && PathPrefix(`/uploads`)"
       - "traefik.http.routers.s3e-uploads.entrypoints=web"
       - "traefik.http.routers.s3e-uploads.priority=110"
       - "traefik.http.routers.s3e-uploads.service=s3e-api"
-      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.dialTimeout=60s"
-      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.responseHeaderTimeout=60s"
-      - "traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.idleTimeout=60s"
-      - "traefik.http.routers.s3e-api.middlewares=s3e-api-timeout"
+      # Opcional Traefik v2.10 — NÃO usar forwardingTimeouts (plural) nem idleTimeout:
+      # - traefik.http.routers.s3e-api.middlewares=s3e-api-timeout@docker
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.dialtimeout=60s
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.responseheadertimeout=60s
+      # - traefik.http.middlewares.s3e-api-timeout.forwardingtimeout.idleconntimeout=60s
       # stripprefix /api NÃO ligar — Express monta rotas em /api/*
       - "traefik.http.middlewares.s3e-api-strip.stripprefix.prefixes=/api"
       - "traefik.http.services.s3e-api.loadbalancer.server.port=3001"

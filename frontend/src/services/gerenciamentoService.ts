@@ -175,8 +175,71 @@ export const rhService = {
         referenciaMes: number;
         dia: number;
         descricao: string;
+        documento?: File | null;
     }) {
+        if (data.documento) {
+            const fd = new FormData();
+            fd.append('funcionarioId', data.funcionarioId);
+            fd.append('referenciaAno', String(data.referenciaAno));
+            fd.append('referenciaMes', String(data.referenciaMes));
+            fd.append('dia', String(data.dia));
+            fd.append('descricao', data.descricao);
+            fd.append('documento', data.documento);
+            return await axiosApiService.upload('/api/rh/falta-justificada', fd);
+        }
         return await axiosApiService.post('/api/rh/falta-justificada', data);
+    },
+
+    async atualizarFaltaJustificada(
+        ocorrenciaId: string,
+        data: {
+            descricao: string;
+            documento?: File | null;
+            removerAnexo?: boolean;
+        },
+    ) {
+        const precisaMultipart = !!data.documento || data.removerAnexo === true;
+        if (precisaMultipart) {
+            const fd = new FormData();
+            fd.append('descricao', data.descricao);
+            if (data.removerAnexo) fd.append('removerAnexo', 'true');
+            if (data.documento) fd.append('documento', data.documento);
+            return await axiosApiService.uploadPut(`/api/rh/falta-justificada/${ocorrenciaId}`, fd);
+        }
+        return await axiosApiService.put(`/api/rh/falta-justificada/${ocorrenciaId}`, {
+            descricao: data.descricao,
+        });
+    },
+
+    async deletarAnexoFaltaJustificada(ocorrenciaId: string) {
+        return await axiosApiService.delete(`/api/rh/falta-justificada/${ocorrenciaId}/anexo`);
+    },
+
+    async registrarJustificativaParcial(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        descricao: string;
+        justificativaTipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+        horaInicio: string;
+        horaFim: string;
+        documento?: File | null;
+    }) {
+        if (data.documento) {
+            const fd = new FormData();
+            fd.append('funcionarioId', data.funcionarioId);
+            fd.append('referenciaAno', String(data.referenciaAno));
+            fd.append('referenciaMes', String(data.referenciaMes));
+            fd.append('dia', String(data.dia));
+            fd.append('descricao', data.descricao);
+            fd.append('justificativaTipo', data.justificativaTipo);
+            fd.append('horaInicio', data.horaInicio);
+            fd.append('horaFim', data.horaFim);
+            fd.append('documento', data.documento);
+            return await axiosApiService.upload('/api/rh/justificativa-parcial', fd);
+        }
+        return await axiosApiService.post('/api/rh/justificativa-parcial', data);
     },
 
     async proporDividaHoras(data: {

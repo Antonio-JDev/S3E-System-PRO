@@ -36,12 +36,12 @@ export class SincronizacaoOrcamentoPVService {
             throw new Error('Orçamento não encontrado');
         }
 
-        // 2. Verificar se orçamento está aprovado
-        if (orcamento.status !== 'Aprovado') {
-            console.log('⚠️ Orçamento não está aprovado. Sincronização cancelada.');
+        // 2. Verificar se orçamento está aprovado ou concretizado
+        if (orcamento.status !== 'Aprovado' && orcamento.status !== 'Concretizado') {
+            console.log('⚠️ Orçamento não está aprovado/concretizado. Sincronização cancelada.');
             return {
                 success: false,
-                message: 'Orçamento precisa estar aprovado para sincronizar com PV'
+                message: 'Orçamento precisa estar aprovado ou concretizado para sincronizar com PV'
             };
         }
 

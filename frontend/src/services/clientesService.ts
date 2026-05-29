@@ -61,9 +61,14 @@ class ClientesService {
    */
   async listar(filters?: ClienteFilters) {
     try {
-      console.log('👥 Carregando lista de clientes...', filters);
-      
-      const response = await axiosApiService.get<Cliente[]>(ENDPOINTS.CLIENTES, filters);
+      const { search, ...rest } = filters || {};
+      const params: Record<string, string | boolean | undefined> = { ...rest };
+      if (search?.trim()) {
+        params.busca = search.trim();
+      }
+      console.log('👥 Carregando lista de clientes...', params);
+
+      const response = await axiosApiService.get<Cliente[]>(ENDPOINTS.CLIENTES, params);
       
       if (response.success && response.data) {
         // Verificar se os dados estão em response.data.data ou diretamente em response.data

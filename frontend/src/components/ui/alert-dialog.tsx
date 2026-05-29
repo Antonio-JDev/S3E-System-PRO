@@ -1,4 +1,8 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
+
+/** Acima do Dialog Radix (z-50) quando aninhado em modais portaled. */
+const ALERT_Z = 100
 
 interface AlertDialogProps {
   open: boolean
@@ -16,16 +20,30 @@ interface AlertDialogActionProps extends React.ButtonHTMLAttributes<HTMLButtonEl
 }
 
 export const AlertDialog: React.FC<AlertDialogProps> = ({ open, onOpenChange, children }) => {
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+  return createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center pointer-events-auto"
+      style={{ zIndex: ALERT_Z }}
+      role="alertdialog"
+      aria-modal="true"
+    >
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100]"
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm pointer-events-auto"
+        style={{ zIndex: ALERT_Z }}
         onClick={() => onOpenChange(false)}
+        aria-hidden="true"
       />
-      <div className="relative z-[101]">{children}</div>
-    </div>
+      <div
+        className="relative pointer-events-auto"
+        style={{ zIndex: ALERT_Z + 1 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
   );
 };
 

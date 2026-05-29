@@ -559,3 +559,222 @@ export function formatChatDate(input: string | Date): string {
   const mm = String(p.m).padStart(2, '0');
   return `${dd}/${mm}/${p.y}`;
 }
+
+/** Dígitos normalizados para chave única (DDI 55 quando aplicável ao BR). */
+export function normalizePhoneDigitsKey(digitsRaw: string): string {
+  const d0 = onlyDigits(digitsRaw || '');
+  if (!d0) return '';
+  let d = d0;
+  if (d.length <= 11 && !d.startsWith('55')) {
+    d = `55${d}`;
+  }
+  return d;
+}
+
+function isPlausibleBrPhoneDigits(d: string): boolean {
+  if (!d) return false;
+  const len = d.length;
+  return len >= 10 && len <= 15;
+}
+
+/**
+ * Chave estável para agrupar previews da mesma pessoa (@c.us, @lid, variantes de 55).
+ * Espelha a intenção de `mergeKeyForChatPreviewRow` no backend (sem mapa de identidades).
+ */
+export function chatPreviewMergeKey(chatId: string, phoneHint?: string | null): string {
+  const canon = canonicalWhatsappChatId(chatId);
+  const lower = canon.toLowerCase();
+  if (lower.endsWith('@g.us') || lower.endsWith('@newsletter')) {
+    return canon;
+  }
+
+  if (phoneHint) {
+    const hk = normalizePhoneDigitsKey(phoneHint);
+    if (hk && isPlausibleBrPhoneDigits(hk)) return `phone:${hk}`;
+  }
+
+  if (!lower.endsWith('@lid')) {
+    const phoneKey = normalizePhoneDigitsKey(waJidToDigits(canon));
+    if (phoneKey && isPlausibleBrPhoneDigits(phoneKey)) return `phone:${phoneKey}`;
+  }
+
+  return `jid:${canon}`;
+}
+
+/** Preferência: chat ativo → @c.us → primeiro candidato. */
+export function pickPreferredPreviewChatId(candidates: string[], activeChatId?: string | null): string {
+  const unique = [...new Set(candidates.map((c) => canonicalWhatsappChatId(c)).filter(Boolean))];
+  if (unique.length === 0) return '';
+  const active = activeChatId ? canonicalWhatsappChatId(activeChatId) : '';
+  if (active && unique.includes(active)) return active;
+  const cUs = unique.find((id) => id.toLowerCase().endsWith('@c.us'));
+  if (cUs) return cUs;
+  return unique[0]!;
+}
+
+export type ChatPreviewMergeFields = {
+  chatId: string;
+  phoneNumberFromS3e?: string | null;
+  lastAt?: string;
+  unreadCount?: number;
+  contactName?: string | null;
+  providerCachedName?: string | null;
+  agendaS3eName?: string | null;
+  cachedProfilePictureUrl?: string | null;
+  pinned?: boolean;
+  favorite?: boolean;
+  lastContent?: string;
+  lastFromMe?: boolean;
+  lastAck?: number | null;
+};
+
+/** Remove duplicatas vindas do servidor ou de race conditions no cliente. */
+export function dedupeChatPreviews<T extends ChatPreviewMergeFields>(list: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const c of list) {
+    const k = chatPreviewMergeKey(c.chatId, c.phoneNumberFromS3e);
+    const g = groups.get(k) ?? [];
+    g.push(c);
+    groups.set(k, g);
+  }
+
+  const out: T[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push(group[0]!);
+      continue;
+    }
+    const latest = group.reduce((a, b) =>
+      new Date(b.lastAt ?? 0) > new Date(a.lastAt ?? 0) ? b : a
+    );
+    out.push({
+      ...latest,
+      chatId: pickPreferredPreviewChatId(group.map((g) => g.chatId)),
+      unreadCount: group.reduce((s, g) => s + (g.unreadCount ?? 0), 0),
+      contactName: group.find((g) => g.contactName)?.contactName ?? latest.contactName,
+      providerCachedName: group.find((g) => g.providerCachedName)?.providerCachedName ?? latest.providerCachedName,
+      agendaS3eName: group.find((g) => g.agendaS3eName)?.agendaS3eName ?? latest.agendaS3eName,
+      phoneNumberFromS3e: group.find((g) => g.phoneNumberFromS3e)?.phoneNumberFromS3e ?? latest.phoneNumberFromS3e,
+      cachedProfilePictureUrl:
+        group.find((g) => g.cachedProfilePictureUrl)?.cachedProfilePictureUrl ?? latest.cachedProfilePictureUrl,
+      pinned: group.some((g) => g.pinned),
+      favorite: group.some((g) => g.favorite),
+    });
+  }
+  return out;
+}
+
+export function resolveChatPreviewUpdateContext(
+  list: ChatPreviewMergeFields[],
+  msgChatId: string,
+  activeChatId?: string | null,
+  fromMe?: boolean
+): {
+  mergeKey: string;
+  preferredChatId: string;
+  messageCacheChatId: string;
+  matchedRows: ChatPreviewMergeFields[];
+  phoneHint: string | null | undefined;
+} {
+  const cid = canonicalWhatsappChatId(msgChatId);
+  let phoneHint: string | null | undefined;
+
+  let matched = list.filter(
+    (p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === chatPreviewMergeKey(cid)
+  );
+
+  if (matched.length === 0 && fromMe && activeChatId) {
+    const activeCanon = canonicalWhatsappChatId(activeChatId);
+    const activeRow = list.find((p) => canonicalWhatsappChatId(p.chatId) === activeCanon);
+    if (activeRow) {
+      phoneHint = activeRow.phoneNumberFromS3e;
+      const activeKey = chatPreviewMergeKey(activeRow.chatId, activeRow.phoneNumberFromS3e);
+      matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === activeKey);
+      const preferredChatId = pickPreferredPreviewChatId(
+        [...matched.map((m) => m.chatId), cid],
+        activeChatId
+      );
+      return {
+        mergeKey: activeKey,
+        preferredChatId,
+        messageCacheChatId: pickPreferredPreviewChatId([activeCanon, preferredChatId], activeChatId),
+        matchedRows: matched,
+        phoneHint,
+      };
+    } else if (activeCanon) {
+      const activeKey = chatPreviewMergeKey(activeCanon);
+      const msgKey = chatPreviewMergeKey(cid);
+      if (activeKey.startsWith('phone:') && msgKey.startsWith('jid:')) {
+        matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === activeKey);
+        const preferredChatId = pickPreferredPreviewChatId([activeCanon, cid], activeChatId);
+        return {
+          mergeKey: activeKey,
+          preferredChatId,
+          messageCacheChatId: preferredChatId,
+          matchedRows: matched,
+          phoneHint: null,
+        };
+      }
+    }
+  }
+
+  phoneHint = phoneHint ?? matched.find((m) => m.phoneNumberFromS3e)?.phoneNumberFromS3e;
+  const mergeKey = chatPreviewMergeKey(cid, phoneHint);
+  matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === mergeKey);
+
+  const preferredChatId = pickPreferredPreviewChatId(
+    [...matched.map((m) => m.chatId), cid],
+    activeChatId
+  );
+
+  let messageCacheChatId = preferredChatId;
+  const activeCanon = activeChatId ? canonicalWhatsappChatId(activeChatId) : '';
+  if (activeCanon) {
+    const activeRow = list.find((p) => canonicalWhatsappChatId(p.chatId) === activeCanon);
+    const activeKey = chatPreviewMergeKey(activeCanon, activeRow?.phoneNumberFromS3e ?? phoneHint);
+    if (activeKey === mergeKey) {
+      messageCacheChatId = pickPreferredPreviewChatId([activeCanon, preferredChatId], activeChatId);
+    }
+  }
+
+  return { mergeKey, preferredChatId, messageCacheChatId, matchedRows: matched, phoneHint };
+}
+
+export function upsertChatPreviewInList<T extends ChatPreviewMergeFields>(
+  list: T[],
+  incoming: T,
+  options?: { activeChatId?: string | null; mergeKey?: string }
+): T[] {
+  const mergeKey =
+    options?.mergeKey ?? chatPreviewMergeKey(incoming.chatId, incoming.phoneNumberFromS3e);
+  const matched = list.filter(
+    (c) => chatPreviewMergeKey(c.chatId, c.phoneNumberFromS3e) === mergeKey
+  );
+  const rest = list.filter(
+    (c) => chatPreviewMergeKey(c.chatId, c.phoneNumberFromS3e) !== mergeKey
+  );
+
+  const metaSource = matched.length
+    ? matched.reduce((a, b) => (new Date(b.lastAt ?? 0) > new Date(a.lastAt ?? 0) ? b : a))
+    : undefined;
+
+  const preferredChatId = pickPreferredPreviewChatId(
+    [...matched.map((m) => m.chatId), incoming.chatId],
+    options?.activeChatId
+  );
+
+  const merged: T = {
+    ...(metaSource ?? incoming),
+    ...incoming,
+    chatId: preferredChatId,
+    contactName: incoming.contactName ?? metaSource?.contactName,
+    providerCachedName: incoming.providerCachedName ?? metaSource?.providerCachedName,
+    agendaS3eName: incoming.agendaS3eName ?? metaSource?.agendaS3eName,
+    phoneNumberFromS3e: incoming.phoneNumberFromS3e ?? metaSource?.phoneNumberFromS3e,
+    cachedProfilePictureUrl: incoming.cachedProfilePictureUrl ?? metaSource?.cachedProfilePictureUrl,
+    pinned: matched.some((m) => m.pinned) || incoming.pinned,
+    favorite: matched.some((m) => m.favorite) || incoming.favorite,
+  };
+
+  return [...rest, merged];
+}

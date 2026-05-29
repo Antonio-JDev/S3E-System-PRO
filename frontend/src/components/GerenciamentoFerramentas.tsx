@@ -6,8 +6,6 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { matchCrossSearch } from '../utils/searchUtils';
-import KitPDFCustomizationModal from './PDFCustomization/KitPDFCustomizationModal';
-import { KitFerramentasPDFData } from '../types/pdfCustomization';
 import AlertDialog from './ui/AlertDialog';
 
 // Icons
@@ -150,9 +148,6 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     const [kitVisualizando, setKitVisualizando] = useState<KitFerramenta | null>(null);
     const [modalEditarKit, setModalEditarKit] = useState(false);
     const [kitEditando, setKitEditando] = useState<KitFerramenta | null>(null);
-    const [modalPersonalizarPDF, setModalPersonalizarPDF] = useState(false);
-    const [kitParaPDF, setKitParaPDF] = useState<KitFerramenta | null>(null);
-    const [kitPDFData, setKitPDFData] = useState<KitFerramentasPDFData | null>(null);
     const [assinaturaEletricista, setAssinaturaEletricista] = useState<string>('');
     const [fotoKitEntregue, setFotoKitEntregue] = useState<File | null>(null);
     const [fotoKitPreview, setFotoKitPreview] = useState<string>('');
@@ -629,44 +624,41 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
         }
     };
 
-    const handleGerarRecibo = (kit: KitFerramenta) => {
-        // Preparar dados do kit para o PDF
-        const kitPDFData: KitFerramentasPDFData = {
-            numero: kit.id.substring(0, 8).toUpperCase(),
-            data: new Date().toLocaleDateString('pt-BR'),
-            kit: {
-                nome: kit.nome,
-                descricao: kit.descricao,
-                observacoes: kit.observacoes
-            },
-            eletricista: {
-                nome: kit.eletricistaNome,
-                email: ''
-            },
-            ferramentas: kit.itens.map(item => ({
-                codigo: item.ferramenta.codigo,
-                nome: item.ferramenta.nome,
-                categoria: item.ferramenta.categoria,
-                marca: item.ferramenta.marca,
-                modelo: item.ferramenta.modelo,
-                quantidade: item.quantidade,
-                estadoEntrega: item.estadoEntrega,
-                observacoes: item.observacoes
-            })),
-            dataEntrega: new Date(kit.dataEntrega).toLocaleDateString('pt-BR'),
-            empresa: {
-                nome: 'S3E Engenharia Elétrica',
-                cnpj: '00.000.000/0000-00',
-                endereco: 'Itajaí - SC',
-                telefone: '(47) 0000-0000',
-                email: 'contato@s3eengenharia.com.br'
-            }
-        };
+    const handleGerarRecibo = async (kit: KitFerramenta) => {
+        try {
+            toast.loading('Gerando recibo...', { id: 'recibo-loading' });
 
-        // Salvar dados e abrir modal de personalização
-        setKitParaPDF(kit);
-        setKitPDFData(kitPDFData);
-        setModalPersonalizarPDF(true);
+            const response = await axiosApiService.get(`/api/kits-ferramenta/${kit.id}/recibo`);
+            const html =
+                response.success && response.data && typeof response.data === 'string'
+                    ? response.data
+                    : null;
+
+            if (!html) {
+                toast.error('Erro ao gerar recibo: ' + (response.error || 'Resposta inválida'), {
+                    id: 'recibo-loading',
+                });
+                return;
+            }
+
+            const novaJanela = window.open('', '_blank');
+            if (!novaJanela) {
+                toast.error('Não foi possível abrir nova aba. Verifique o bloqueador de pop-ups.', {
+                    id: 'recibo-loading',
+                });
+                return;
+            }
+
+            novaJanela.document.write(html);
+            novaJanela.document.close();
+            toast.success('Recibo gerado com sucesso!', { id: 'recibo-loading' });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } }; message?: string };
+            console.error('Erro ao gerar recibo:', error);
+            toast.error('Erro ao gerar recibo: ' + (err?.response?.data?.error || err?.message), {
+                id: 'recibo-loading',
+            });
+        }
     };
 
     const handleVisualizarFerramenta = (ferramenta: Ferramenta) => {
@@ -2682,20 +2674,6 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                         </form>
                     </div>
                 </div>
-            )}
-
-            {/* Modal de Personalização de PDF */}
-            {modalPersonalizarPDF && kitParaPDF && kitPDFData && (
-                <KitPDFCustomizationModal
-                    isOpen={modalPersonalizarPDF}
-                    onClose={() => {
-                        setModalPersonalizarPDF(false);
-                        setKitParaPDF(null);
-                        setKitPDFData(null);
-                    }}
-                    kitId={kitParaPDF.id}
-                    kitData={kitPDFData}
-                />
             )}
 
             {/* AlertDialog de Confirmação de Exclusão de Kit */}

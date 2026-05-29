@@ -88,10 +88,64 @@ export interface DashboardCompleto {
     movimentacoes: any[];
 }
 
+export interface MetricaCardComTendencia {
+    valor: number;
+    tendencia: number;
+    descricao?: string;
+    fonte?: string;
+}
+
+export interface DashboardCardsMetricas {
+    obrasAtivas: MetricaCardComTendencia;
+    osEmAndamento: MetricaCardComTendencia;
+    equipesAtivas: MetricaCardComTendencia;
+    quadrosProduzidos: MetricaCardComTendencia;
+    clientesAtendidos: MetricaCardComTendencia;
+}
+
 class DashboardService {
     /**
      * Carrega todas as estatísticas do dashboard
      */
+    async getCardsMetricas(): Promise<{
+        success: boolean;
+        data?: DashboardCardsMetricas;
+        error?: string;
+    }> {
+        try {
+            const response = await axiosApiService.get('/api/dashboard/cards-metricas');
+            if (response.success && response.data) {
+                return { success: true, data: response.data as DashboardCardsMetricas };
+            }
+            return { success: false, error: 'Dados inválidos' };
+        } catch (error) {
+            console.error('Erro ao carregar métricas dos cards:', error);
+            return { success: false, error: 'Erro de conexão' };
+        }
+    }
+
+    async getDetalheKpis(params: {
+        grafico: string;
+        periodo?: string;
+        bucket?: string;
+    }): Promise<{ success: boolean; data?: unknown; error?: string }> {
+        try {
+            const q = new URLSearchParams({
+                grafico: params.grafico,
+                periodo: params.periodo || 'monthly',
+            });
+            if (params.bucket) q.set('bucket', params.bucket);
+            const response = await axiosApiService.get(`/api/dashboard/detalhe-kpis?${q.toString()}`);
+            if (response.success && response.data) {
+                return { success: true, data: response.data };
+            }
+            return { success: false, error: 'Dados inválidos' };
+        } catch (error) {
+            console.error('Erro ao carregar detalhe KPIs:', error);
+            return { success: false, error: 'Erro de conexão' };
+        }
+    }
+
     async getEstatisticas(): Promise<{ success: boolean; data?: DashboardEstatisticas; error?: string }> {
         try {
             console.log('📊 Carregando estatísticas do dashboard...');

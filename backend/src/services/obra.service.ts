@@ -1,6 +1,7 @@
 import { StatusObra } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { EstoqueService } from './estoque.service';
+import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service';
 
 export interface CreateObraData {
   projetoId: string;
@@ -194,6 +195,23 @@ export class ObraService {
         data: { status: 'EXECUCAO' }
       });
 
+      const reservaPorMaterial = new Map<string, number>();
+      try {
+        const reservas = await ReservaMaterialProjetoService.listarPorProjeto(projetoId);
+        for (const r of reservas) {
+          reservaPorMaterial.set(
+            r.materialId,
+            (reservaPorMaterial.get(r.materialId) || 0) + r.quantidade,
+          );
+        }
+        if (reservas.length > 0) {
+          await ReservaMaterialProjetoService.consumirReservasAoIniciarObra(projetoId, obra.id);
+        }
+      } catch (reservaErr) {
+        console.error('Erro ao consumir reservas do projeto:', reservaErr);
+        throw reservaErr;
+      }
+
       // ✅ Alocar (dar baixa) automaticamente dos materiais do orçamento ao gerar a obra
       // Regra: se a baixa já foi feita no Pedido de Venda, não fazer novamente ao Iniciar obra.
       try {
@@ -273,12 +291,15 @@ export class ObraService {
           }
 
           for (const [materialId, quantidade] of materiaisAgrupados.entries()) {
+            const reservado = reservaPorMaterial.get(materialId) || 0;
+            const qtdRestante = Math.max(0, quantidade - reservado);
+            if (qtdRestante <= 0) continue;
             await EstoqueService.darBaixaMaterial(
               materialId,
-              quantidade,
+              qtdRestante,
               'Alocação para obra',
               obra.id,
-              `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`
+              `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`,
             );
           }
 
@@ -670,6 +691,8 @@ export class ObraService {
           `Não é possível excluir a obra. Existem ${tarefasEmAndamento.length} tarefa(s) em andamento ou pendente(s). Finalize ou cancele as tarefas antes de excluir.`
         );
       }
+
+      await prisma.alocacaoEquipe.deleteMany({ where: { obraId } });
 
       // Deletar alocações relacionadas ao projeto da obra (se houver)
       if (obra.projetoId) {

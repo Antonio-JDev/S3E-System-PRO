@@ -25,6 +25,25 @@ describe('comprasService (módulo compras)', () => {
     vi.clearAllMocks();
   });
 
+  describe('createCompra (payload compra avulsa OS/Obra)', () => {
+    it('envia destinoTipo, projetoId e destinoEstoque por item ao POST /api/compras', async () => {
+      mockPost.mockResolvedValue({ success: true, data: { id: 'c1' } });
+      const payload = {
+        fornecedorNome: 'F',
+        fornecedorCNPJ: '12345678000199',
+        numeroNF: '1',
+        destinoTipo: 'PROJETO',
+        projetoId: 'proj-1',
+        items: [
+          { nomeProduto: 'A', quantidade: 2, valorUnit: 10, destinoEstoque: false },
+          { nomeProduto: 'B', quantidade: 1, valorUnit: 5, destinoEstoque: true },
+        ],
+      };
+      await comprasService.createCompra(payload);
+      expect(mockPost).toHaveBeenCalledWith('/api/compras', payload);
+    });
+  });
+
   describe('mapCompraToPurchaseOrder', () => {
     it('deve mapear DTO do backend para PurchaseOrder', () => {
       const dto = {

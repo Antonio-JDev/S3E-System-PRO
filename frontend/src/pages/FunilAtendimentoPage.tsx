@@ -47,6 +47,38 @@ function leadTemPropostaComercial(lead: ContatoLead): boolean {
   return typeof n === 'number' && n > 0;
 }
 
+function leadNumeroOrcamento(lead: ContatoLead): number | null {
+  const seq = lead.orcamentos?.[0]?.numeroSequencial;
+  if (typeof seq === 'number' && Number.isFinite(seq)) return seq;
+  return null;
+}
+
+function statusEfetivoLead(lead: ContatoLead): ContatoLeadStatus {
+  if (lead.status === 'NAO_ATENDE') return 'NAO_ATENDE';
+  if (lead.status === 'CONVERTIDO' || leadTemPropostaComercial(lead)) return 'CONVERTIDO';
+  return lead.status;
+}
+
+function resolveStatusEtapaOnSave(
+  lead: ContatoLead | null,
+  step: number
+): { status: ContatoLeadStatus; etapa: number } {
+  if (lead?.status === 'NAO_ATENDE') {
+    return { status: 'NAO_ATENDE', etapa: lead.etapa };
+  }
+  if (lead && (lead.status === 'CONVERTIDO' || leadTemPropostaComercial(lead))) {
+    return { status: 'CONVERTIDO', etapa: Math.max(lead.etapa || 3, 3) };
+  }
+  return { status: stepToStatus(step), etapa: step };
+}
+
+function stepToStatus(step: number): ContatoLeadStatus {
+  if (step === 1) return 'AGUARDANDO_DOCUMENTO';
+  if (step === 2) return 'EM_ANALISE_TECNICA';
+  if (step === 3) return 'PRONTO_PARA_ORCAR';
+  return 'AGUARDANDO_DOCUMENTO';
+}
+
 const statusLabels: Record<ContatoLeadStatus, string> = {
   AGUARDANDO_DOCUMENTO: 'Aguardando Documento',
   EM_ANALISE_TECNICA: 'Em Análise Técnica',
@@ -190,6 +222,10 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
   const [confirmExcluirOpen, setConfirmExcluirOpen] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
+  const [openingOrcamento, setOpeningOrcamento] = useState(false);
+  const openOrcamentoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [leadSearch, setLeadSearch] = useState('');
+  const [showStats, setShowStats] = useState(false);
   const cepAbortRef = useRef<AbortController | null>(null);
   const cepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openChatForLead = async (lead: ContatoLead) => {
@@ -348,7 +384,11 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       cidade: lead.cidade || '',
       estado: lead.estado || '',
     });
-    setCurrentStep(lead.etapa || 1);
+    const step =
+      lead.status === 'CONVERTIDO' || leadTemPropostaComercial(lead)
+        ? 3
+        : lead.etapa || 1;
+    setCurrentStep(step);
     setModalOpen(true);
   };
 
@@ -360,6 +400,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
     setSaving(true);
     try {
       if (editingLead) {
+        const { status, etapa } = resolveStatusEtapaOnSave(editingLead, currentStep);
         await atendimentoCrmService.atualizar(editingLead.id, {
           nome: form.nome.trim(),
           whatsapp: form.whatsapp.trim() || undefined,
@@ -370,8 +411,8 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           observacoesTecnicas: form.observacoesTecnicas.trim() || undefined,
           viabilidadeTecnica: form.viabilidadeTecnica === '' ? undefined : form.viabilidadeTecnica === true,
           condicoesNaoAtender: form.condicoesNaoAtender.trim() || undefined,
-          etapa: currentStep,
-          status: stepToStatus(currentStep),
+          etapa,
+          status,
           logradouro: form.logradouro.trim() || undefined,
           numero: form.numero.trim() || undefined,
           bairro: form.bairro.trim() || undefined,
@@ -384,8 +425,16 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           if (!up.success) {
             throw new Error(up.error || 'Falha ao enviar anexos');
           }
+          if (up.data) {
+            setEditingLead((prev) => (prev ? { ...prev, ...up.data } : prev));
+          }
         }
-        toast.success('Lead atualizado', { description: 'Alterações salvas com sucesso.' });
+        toast.success('Lead atualizado', {
+          description:
+            form.contaEnergiaFiles.length > 0
+              ? 'Dados e anexos salvos com sucesso.'
+              : 'Alterações salvas com sucesso.',
+        });
       } else {
         const createData: CreateContatoLeadInput = {
           nome: form.nome.trim(),
@@ -404,8 +453,11 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           estado: form.estado.trim() || undefined,
         };
         const res = await atendimentoCrmService.criar(createData);
-        const id = res.data?.id;
-        if (id && form.contaEnergiaFiles.length > 0) {
+        if (!res.success || !res.data?.id) {
+          throw new Error('Não foi possível criar o lead');
+        }
+        const id = res.data.id;
+        if (form.contaEnergiaFiles.length > 0) {
           const up = await atendimentoCrmService.uploadContaEnergia(id, form.contaEnergiaFiles);
           if (!up.success) {
             throw new Error(up.error || 'Falha ao enviar anexos');
@@ -422,21 +474,45 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
     }
   };
 
-  const stepToStatus = (step: number): ContatoLeadStatus => {
-    if (step === 1) return 'AGUARDANDO_DOCUMENTO';
-    if (step === 2) return 'EM_ANALISE_TECNICA';
-    if (step === 3) return 'PRONTO_PARA_ORCAR';
-    return 'AGUARDANDO_DOCUMENTO';
-  };
-
   const goToNovoOrcamento = () => {
+    if (openingOrcamento) return;
+    setOpeningOrcamento(true);
+    if (openOrcamentoTimeoutRef.current) clearTimeout(openOrcamentoTimeoutRef.current);
+    openOrcamentoTimeoutRef.current = setTimeout(() => {
+      setOpeningOrcamento(false);
+      openOrcamentoTimeoutRef.current = null;
+    }, 1200);
+
     setModalOpen(false);
     const clienteId = editingLead?.clienteId?.trim();
     const leadId = editingLead?.id?.trim();
     const params = new URLSearchParams();
     if (clienteId) params.set('clienteId', clienteId);
     if (leadId) params.set('leadId', leadId);
-    navigate(`/orcamentos${params.toString() ? `?${params.toString()}` : ''}`);
+    // Token anti-cache de navegação: garante mudança de URL mesmo em cliques repetidos.
+    params.set('fromLeadAt', String(Date.now()));
+
+    // Fallback via localStorage para quando a shell estiver em `activeView` sem trocar pathname.
+    try {
+      localStorage.setItem('s3e_lead_para_orcamento', JSON.stringify({
+        nome: editingLead?.nome || '',
+        cpfCnpj: editingLead?.cpfCnpj || '',
+        observacoes: editingLead?.observacoes || '',
+        logradouro: editingLead?.logradouro || '',
+        numero: editingLead?.numero || '',
+        bairro: editingLead?.bairro || '',
+        cep: editingLead?.cep || '',
+        cidade: editingLead?.cidade || '',
+        estado: editingLead?.estado || '',
+        clienteId: clienteId || undefined,
+        contatoLeadId: leadId || undefined,
+      }));
+    } catch (_) {
+      // ignore
+    }
+
+    navigate(`/orcamentos?${params.toString()}`);
+    onNavigate('Orçamentos');
     toast.success('Pronto para gerar proposta', { description: 'Abrindo o Novo orçamento com os dados do lead.' });
   };
 
@@ -467,10 +543,20 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
     }
   };
 
+  const normalizedSearch = leadSearch.trim().toLowerCase();
+  const filteredLeads = normalizedSearch
+    ? leads.filter((l) => (l.nome || '').toLowerCase().includes(normalizedSearch))
+    : leads;
+
   const leadsByStatus = statusOrder.reduce((acc, s) => {
-    acc[s] = leads.filter((l) => l.status === s);
+    acc[s] = filteredLeads.filter((l) => statusEfetivoLead(l) === s);
     return acc;
   }, {} as Record<ContatoLeadStatus, ContatoLead[]>);
+
+  const totalByStatus = statusOrder.reduce((acc, s) => {
+    acc[s] = leads.filter((l) => statusEfetivoLead(l) === s).length;
+    return acc;
+  }, {} as Record<ContatoLeadStatus, number>);
 
   // Buscar CEP via BrasilAPI e preencher endereço (debounced + abortable)
   const buscarCepLead = async (cepRaw: string) => {
@@ -515,6 +601,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
   useEffect(() => () => {
     if (cepTimeoutRef.current) clearTimeout(cepTimeoutRef.current);
     try { if (cepAbortRef.current) cepAbortRef.current.abort(); } catch (_) { /* ignore */ }
+    if (openOrcamentoTimeoutRef.current) clearTimeout(openOrcamentoTimeoutRef.current);
   }, []);
 
   return (
@@ -534,6 +621,37 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           Novo Lead
         </button>
       </header>
+
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={leadSearch}
+            onChange={(e) => setLeadSearch(e.target.value)}
+            placeholder="Pesquisar lead por nome..."
+            className="w-full rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card px-4 py-2.5 pr-10 text-sm text-gray-800 dark:text-dark-text focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">🔎</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowStats((v) => !v)}
+          className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card text-gray-700 dark:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors text-sm font-semibold"
+        >
+          {showStats ? 'Ocultar estatísticas' : 'Ver estatísticas'}
+        </button>
+      </div>
+
+      {showStats && (
+        <section className="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {(['EM_ANALISE_TECNICA', 'PRONTO_PARA_ORCAR', 'NAO_ATENDE', 'CONVERTIDO'] as ContatoLeadStatus[]).map((status) => (
+            <div key={status} className="rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-dark-text-secondary">{statusLabels[status]}</p>
+              <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-dark-text">{totalByStatus[status] || 0}</p>
+            </div>
+          ))}
+        </section>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -555,8 +673,8 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
               <div className="flex-1 space-y-3 overflow-y-auto max-h-[70vh] p-4">
                 {leadsByStatus[status].map((lead) => {
                   const movimentoLento = isAtrasado(lead.updatedAt);
-                  const propostaJaGerada =
-                    status === 'PRONTO_PARA_ORCAR' && leadTemPropostaComercial(lead);
+                  const numeroOrc = leadNumeroOrcamento(lead);
+                  const propostaJaGerada = leadTemPropostaComercial(lead);
                   const atrasado =
                     movimentoLento &&
                     status !== 'NAO_ATENDE' &&
@@ -588,9 +706,14 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                           </p>
                         )}
                         <p className="text-xs text-gray-400 dark:text-dark-text-secondary mt-1">{formatarData(lead.updatedAt)}</p>
-                        {propostaJaGerada && (
-                          <span className="inline-block mt-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                            Proposta comercial gerada — lead atendido nesta etapa
+                        {numeroOrc != null && (
+                          <span className="inline-block mt-1 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                            Orçamento #{numeroOrc}
+                          </span>
+                        )}
+                        {propostaJaGerada && status === 'PRONTO_PARA_ORCAR' && (
+                          <span className="inline-block mt-1 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
+                            Proposta gerada — exibido em Convertido
                           </span>
                         )}
                         {movimentoLento && status !== 'NAO_ATENDE' && status !== 'CONVERTIDO' && !propostaJaGerada && (
@@ -629,6 +752,16 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
               <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium flex-shrink-0">
                 {editingLead ? <BoltIcon className="w-6 h-6 text-white" /> : <UserIcon className="w-6 h-6 text-white" />}
               </div>
+              {editingLead && leadNumeroOrcamento(editingLead) != null && (
+                <div
+                  className="flex-shrink-0 min-w-[3rem] h-12 px-3 rounded-[20px] border-2 border-white/80 bg-white/15 flex items-center justify-center shadow-medium"
+                  title="Número do orçamento vinculado"
+                >
+                  <span className="text-xl font-bold text-white leading-none whitespace-nowrap">
+                    #{leadNumeroOrcamento(editingLead)}
+                  </span>
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <DialogHeader className="text-left space-y-0">
                   <DialogTitle className="text-left text-xl font-bold text-white">
@@ -775,6 +908,32 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                         ? ` · ${form.contaEnergiaFiles.length} selecionado(s) para enviar ao salvar`
                         : ''}
                     </p>
+                    {form.contaEnergiaFiles.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {form.contaEnergiaFiles.map((file, idx) => (
+                          <li
+                            key={`${file.name}-${file.size}-${idx}`}
+                            className="flex items-center justify-between gap-2 text-xs text-gray-700 dark:text-dark-text-secondary bg-gray-50 dark:bg-dark-bg rounded-lg px-2 py-1.5"
+                          >
+                            <span className="truncate" title={file.name}>
+                              {file.name}
+                            </span>
+                            <button
+                              type="button"
+                              className="shrink-0 text-red-600 hover:text-red-700 font-medium"
+                              onClick={() =>
+                                setForm((f) => ({
+                                  ...f,
+                                  contaEnergiaFiles: f.contaEnergiaFiles.filter((_, i) => i !== idx),
+                                }))
+                              }
+                            >
+                              Remover
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {anexosDoLead(editingLead).length > 0 && (
                       <ul className="mt-2 space-y-1">
                         {anexosDoLead(editingLead).map((url, idx) => (
@@ -854,9 +1013,14 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                   Cadastrar Cliente (CNPJ)
                 </button>
               )}
-              <button type="button" onClick={goToNovoOrcamento} className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium w-full sm:w-auto justify-center">
+              <button
+                type="button"
+                onClick={goToNovoOrcamento}
+                disabled={openingOrcamento}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium w-full sm:w-auto justify-center disabled:opacity-70 disabled:cursor-wait"
+              >
                 <RocketIcon className="w-5 h-5" />
-                Gerar Proposta Comercial (Orçamento)
+                {openingOrcamento ? 'Abrindo...' : 'Gerar Proposta Comercial (Orçamento)'}
               </button>
             </div>
             )}

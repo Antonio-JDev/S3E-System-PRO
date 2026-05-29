@@ -550,33 +550,38 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
     const handleGerarRecibo = async (kit: KitFerramenta) => {
         try {
-            console.log('🔍 Gerando recibo para kit:', kit.id);
-            console.log('🔍 Token no localStorage:', localStorage.getItem('token')?.substring(0, 30) + '...');
-            
-            toast.loading('📄 Gerando recibo...', { id: 'recibo-loading' });
-            
-            // Buscar o HTML do recibo via API (com token)
+            toast.loading('Gerando recibo...', { id: 'recibo-loading' });
+
             const response = await axiosApiService.get(`/api/kits-ferramenta/${kit.id}/recibo`);
-            
-            console.log('📥 Resposta da API:', { success: response.success, hasData: !!response.data });
-            
-            if (response.success && response.data) {
-                // Criar uma nova janela e escrever o HTML
-                const novaJanela = window.open('', '_blank');
-                if (novaJanela) {
-                    novaJanela.document.write(response.data as string);
-                    novaJanela.document.close();
-                    toast.success('✅ Recibo gerado com sucesso!', { id: 'recibo-loading' });
-                } else {
-                    toast.error('❌ Não foi possível abrir nova aba. Verifique o bloqueador de pop-ups.', { id: 'recibo-loading' });
-                }
-            } else {
-                console.error('❌ Resposta sem sucesso:', response);
-                toast.error('❌ Erro ao gerar recibo: ' + (response.error || 'Erro desconhecido'), { id: 'recibo-loading' });
+            const html =
+                response.success && response.data && typeof response.data === 'string'
+                    ? response.data
+                    : null;
+
+            if (!html) {
+                toast.error('Erro ao gerar recibo: ' + (response.error || 'Resposta inválida'), {
+                    id: 'recibo-loading',
+                });
+                return;
             }
-        } catch (error: any) {
-            console.error('❌ Erro ao gerar recibo:', error);
-            toast.error('❌ Erro ao gerar recibo: ' + (error?.response?.data?.error || error?.message), { id: 'recibo-loading' });
+
+            const novaJanela = window.open('', '_blank');
+            if (!novaJanela) {
+                toast.error('Não foi possível abrir nova aba. Verifique o bloqueador de pop-ups.', {
+                    id: 'recibo-loading',
+                });
+                return;
+            }
+
+            novaJanela.document.write(html);
+            novaJanela.document.close();
+            toast.success('Recibo gerado com sucesso!', { id: 'recibo-loading' });
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } }; message?: string };
+            console.error('Erro ao gerar recibo:', error);
+            toast.error('Erro ao gerar recibo: ' + (err?.response?.data?.error || err?.message), {
+                id: 'recibo-loading',
+            });
         }
     };
 

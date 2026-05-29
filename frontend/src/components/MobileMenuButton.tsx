@@ -9,7 +9,7 @@ const MobileMenuButton: React.FC<MobileMenuButtonProps> = ({ onClick, isOpen = f
   return (
     <button
       onClick={onClick}
-      className="lg:hidden fixed top-4 left-4 z-50 p-3 bg-white dark:bg-dark-card rounded-xl shadow-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-bg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 active:scale-95"
+      className="s3e-mobile-menu-btn lg:hidden fixed top-4 left-4 z-50 p-3 bg-white dark:bg-dark-card rounded-xl shadow-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-bg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 active:scale-95"
       aria-label={isOpen ? 'Fechar menu' : 'Abrir menu'}
       aria-expanded={isOpen}
     >

@@ -61,6 +61,20 @@ class ProjetosService {
     return axiosApiService.get<Projeto[]>(ENDPOINTS.PROJETOS, filters);
   }
 
+  async buscarPorTermo(q: string, limit = 20) {
+    return axiosApiService.get<
+      Array<{
+        id: string;
+        titulo: string;
+        numeroOs?: string;
+        cliente?: { nome: string };
+        status: string;
+        obra?: { id: string; nomeObra: string; status: string } | null;
+        semObra?: boolean;
+      }>
+    >(`${ENDPOINTS.PROJETOS}/busca`, { q, limit });
+  }
+
   async buscar(id: string) {
     return axiosApiService.get<Projeto>(`${ENDPOINTS.PROJETOS}/${id}`);
   }

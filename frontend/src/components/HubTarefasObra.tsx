@@ -332,13 +332,14 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
         const conflitosRes = await alocacaoService.verificarConflitos(
           formTarefa.equipeId,
           formTarefa.dataPrevista,
-          formTarefa.dataPrevistaFim
+          formTarefa.dataPrevistaFim,
+          { obraId }
         );
 
         if (conflitosRes.success && conflitosRes.data?.temConflito) {
           const conflitos = conflitosRes.data.conflitos;
           toast.error('⚠️ Conflito de Alocação', {
-            description: `Esta equipe já está alocada em ${conflitos.length} tarefa(s) neste período.`,
+            description: `Esta equipe já está alocada em ${conflitos.length} tarefa(s) de outra obra neste período.`,
             duration: 5000
           });
           
@@ -380,17 +381,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
         throw new Error('Resposta inválida do servidor: tarefa criada sem ID');
       }
 
-      // Se for equipe, criar alocação
       if (tipoAtribuicao === 'equipe' && formTarefa.equipeId && formTarefa.dataPrevista && formTarefa.dataPrevistaFim) {
-        await alocacaoService.criar({
-          tarefaId: tarefaCriada.id,
-          obraId: obraId,
-          equipeId: formTarefa.equipeId,
-          dataInicio: formTarefa.dataPrevista,
-          dataFim: formTarefa.dataPrevistaFim,
-          observacoes: formTarefa.observacoes
-        });
-
         const equipe = equipes.find(e => e.id === formTarefa.equipeId);
         toast.success('✅ Tarefa criada e equipe alocada!', {
           description: `Equipe "${equipe?.nome}" alocada de ${new Date(formTarefa.dataPrevista).toLocaleDateString('pt-BR')} até ${new Date(formTarefa.dataPrevistaFim).toLocaleDateString('pt-BR')}`
@@ -415,19 +406,51 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
     if (!tarefaEditando) return;
 
     try {
-      const ids = tarefaEditando.atribuidosIds?.length ? tarefaEditando.atribuidosIds : (tarefaEditando.atribuidoA ? [tarefaEditando.atribuidoA] : []);
-      await axiosApiService.put(`/api/obras/tarefas/${tarefaEditando.id}`, {
+      const payload: Record<string, unknown> = {
         descricao: tarefaEditando.descricao,
-        atribuidoA: tarefaEditando.atribuidoA || null,
-        atribuidosIds: ids.length ? ids : undefined,
         dataPrevista: tarefaEditando.dataPrevista || null,
+        dataPrevistaFim: tarefaEditando.dataPrevistaFim || null,
         observacoes: tarefaEditando.observacoes || null,
         progresso: tarefaEditando.progresso
-      });
+      };
+
+      if (tarefaEditando.equipeId) {
+        payload.equipeId = tarefaEditando.equipeId;
+        payload.atribuidoA = null;
+        payload.atribuidosIds = null;
+
+        if (tarefaEditando.dataPrevista && tarefaEditando.dataPrevistaFim) {
+          const conflitosRes = await alocacaoService.verificarConflitos(
+            tarefaEditando.equipeId,
+            tarefaEditando.dataPrevista,
+            tarefaEditando.dataPrevistaFim,
+            { obraId, tarefaId: tarefaEditando.id }
+          );
+          if (conflitosRes.success && conflitosRes.data?.temConflito) {
+            toast.error('⚠️ Conflito de Alocação', {
+              description: 'Esta equipe já está alocada em outra obra neste período.',
+              duration: 5000
+            });
+            return;
+          }
+        }
+      } else {
+        const ids = tarefaEditando.atribuidosIds?.length
+          ? tarefaEditando.atribuidosIds
+          : tarefaEditando.atribuidoA
+            ? [tarefaEditando.atribuidoA]
+            : [];
+        payload.atribuidoA = ids[0] || null;
+        payload.atribuidosIds = ids.length ? ids : null;
+        payload.equipeId = null;
+      }
+
+      await axiosApiService.put(`/api/obras/tarefas/${tarefaEditando.id}`, payload);
       toast.success('✅ Tarefa atualizada com sucesso!');
       setModalEditarTarefa(false);
       setTarefaEditando(null);
       carregarTarefas();
+      carregarAlocacoes();
     } catch (error: any) {
       console.error('Erro ao atualizar tarefa:', error);
       toast.error(error?.response?.data?.error || 'Erro ao atualizar tarefa');
@@ -443,6 +466,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
       await axiosApiService.delete(`/api/obras/tarefas/${tarefaId}`);
       toast.success('✅ Tarefa excluída com sucesso!');
       carregarTarefas();
+      carregarAlocacoes();
     } catch (error: any) {
       console.error('Erro ao excluir tarefa:', error);
       toast.error(error?.response?.data?.error || 'Erro ao excluir tarefa');
@@ -1099,16 +1123,29 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                  Data Prevista
-                </label>
-                <input
-                  type="date"
-                  value={tarefaEditando.dataPrevista ? new Date(tarefaEditando.dataPrevista).toISOString().split('T')[0] : ''}
-                  onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevista: e.target.value })}
-                  className="input-field"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                    Data início
+                  </label>
+                  <input
+                    type="date"
+                    value={tarefaEditando.dataPrevista ? new Date(tarefaEditando.dataPrevista).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevista: e.target.value })}
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                    Data fim {tarefaEditando.equipeId ? '*' : ''}
+                  </label>
+                  <input
+                    type="date"
+                    value={tarefaEditando.dataPrevistaFim ? new Date(tarefaEditando.dataPrevistaFim).toISOString().split('T')[0] : ''}
+                    onChange={(e) => setTarefaEditando({ ...tarefaEditando, dataPrevistaFim: e.target.value })}
+                    className="input-field"
+                  />
+                </div>
               </div>
 
               <div>

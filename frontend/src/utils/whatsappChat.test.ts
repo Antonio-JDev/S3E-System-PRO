@@ -5,6 +5,10 @@ import {
   sanitizeWhatsappContactMetaForChat,
   resolveChatPreviewLabels,
   repairUtf8Mojibake,
+  chatPreviewMergeKey,
+  dedupeChatPreviews,
+  upsertChatPreviewInList,
+  resolveChatPreviewUpdateContext,
 } from './whatsappChat';
 
 describe('findWhatsappContactInRows', () => {
@@ -78,7 +82,7 @@ describe('displayNameForChatHeader', () => {
       chatId: '13774060826850@lid',
       cachedProviderName: 'Luciana',
     });
-    expect(secondary).toBe('WhatsApp · número não disponível neste ID (privacidade)');
+    expect(secondary).toBe('WhatsApp');
   });
 });
 
@@ -120,7 +124,80 @@ describe('resolveChatPreviewLabels', () => {
       { id: '5511999999999@c.us', name: '' },
       undefined
     );
-    expect(out.listTitle).toBe('Maria');
+    expect(out.listTitle).toBe('Maria Silva');
     expect(out.showPhoneSub).toBe(false);
+  });
+});
+
+describe('chatPreviewMergeKey', () => {
+  it('unifica @c.us com e sem prefixo 55', () => {
+    const a = chatPreviewMergeKey('554797304499@c.us');
+    const b = chatPreviewMergeKey('4797304499@c.us');
+    expect(a).toBe(b);
+    expect(a).toBe('phone:554797304499');
+  });
+
+  it('não mistura grupos', () => {
+    expect(chatPreviewMergeKey('120363123@g.us')).toBe('120363123@g.us');
+  });
+});
+
+describe('dedupeChatPreviews / upsertChatPreviewInList', () => {
+  const base = {
+    lastContent: 'oi',
+    lastFromMe: true,
+    lastAck: 1 as number | null,
+    unreadCount: 0,
+  };
+
+  it('dedupe mescla duas linhas do mesmo telefone', () => {
+    const list = dedupeChatPreviews([
+      {
+        ...base,
+        chatId: '554797304499@c.us',
+        lastAt: '2026-05-28T15:58:00.000Z',
+        lastContent: 'msg antiga',
+      },
+      {
+        ...base,
+        chatId: '13774060826850@lid',
+        phoneNumberFromS3e: '4797304499',
+        lastAt: '2026-05-28T15:59:00.000Z',
+        lastContent: 'msg nova',
+      },
+    ]);
+    expect(list).toHaveLength(1);
+    expect(list[0]?.lastContent).toBe('msg nova');
+    expect(list[0]?.chatId).toBe('554797304499@c.us');
+  });
+
+  it('upsert não duplica ao enviar rápido com JIDs diferentes', () => {
+    const existing = [
+      {
+        ...base,
+        chatId: '554797304499@c.us',
+        lastAt: '2026-05-28T15:58:00.000Z',
+        lastContent: 'primeira',
+      },
+    ];
+    const ctx = resolveChatPreviewUpdateContext(
+      existing,
+      '13774060826850@lid',
+      '554797304499@c.us',
+      true
+    );
+    expect(ctx.mergeKey).toBe('phone:554797304499');
+    const next = upsertChatPreviewInList(
+      existing,
+      {
+        ...base,
+        chatId: ctx.preferredChatId,
+        lastAt: '2026-05-28T15:59:00.000Z',
+        lastContent: 'segunda',
+      },
+      { activeChatId: '554797304499@c.us', mergeKey: ctx.mergeKey }
+    );
+    expect(next).toHaveLength(1);
+    expect(next[0]?.lastContent).toBe('segunda');
   });
 });

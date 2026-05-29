@@ -61,11 +61,6 @@ vi.mock('../utils/searchUtils', () => ({
     matchCrossSearch: vi.fn(() => false)
 }));
 
-// Mock do KitPDFCustomizationModal
-vi.mock('./PDFCustomization/KitPDFCustomizationModal', () => ({
-    default: () => <div>KitPDFCustomizationModal</div>
-}));
-
 // Mock do getUploadUrl
 vi.mock('../config/api', () => ({
     getUploadUrl: vi.fn((url) => url || '')

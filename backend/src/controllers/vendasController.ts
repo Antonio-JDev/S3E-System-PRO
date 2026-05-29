@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { VendasService, VendaPayload } from '../services/vendas.service';
 import { VendaStatus } from '../types/index';
+import { ORCAMENTO_STATUS_APROVADO, ORCAMENTO_STATUS_CONCRETIZADO } from '../utils/orcamentoStatus.util';
 import { prisma } from '../lib/prisma';
 
 const storageContrato = multer.diskStorage({
@@ -78,7 +79,10 @@ export class VendasController {
             res.status(201).json({
                 success: true,
                 message: 'Venda realizada com sucesso',
-                data: resultado
+                data: {
+                    ...resultado,
+                    orcamentoStatus: resultado.orcamentoStatus ?? ORCAMENTO_STATUS_CONCRETIZADO
+                }
             });
 
         } catch (error) {
@@ -379,6 +383,13 @@ export class VendasController {
                     where: { id }
                 });
                 console.log(`✅ Venda excluída permanentemente: ${venda.id}`);
+
+                // 4. Reverter orçamento para Aprovado (sem PV)
+                await tx.orcamento.update({
+                    where: { id: venda.orcamentoId },
+                    data: { status: ORCAMENTO_STATUS_APROVADO }
+                });
+                console.log(`✅ Orçamento ${venda.orcamentoId} revertido para Aprovado`);
             });
 
             console.log('═══════════════════════════════════════════════════════════');

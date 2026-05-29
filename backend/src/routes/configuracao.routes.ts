@@ -25,6 +25,13 @@ router.get('/meta-vendas', ConfiguracaoController.getMetaVendas);
 router.put('/meta-vendas', authorize('admin', 'desenvolvedor'), ConfiguracaoController.salvarMetaVendas);
 
 /**
+ * @route PUT /api/configuracoes/portfolio-url
+ * @desc Atualiza URL do portfólio público exibida no login
+ * @access Desenvolvedor only
+ */
+router.put('/portfolio-url', authorize('desenvolvedor'), ConfiguracaoController.salvarPortfolioUrl);
+
+/**
  * @route GET /api/configuracoes
  * @desc Busca configurações do sistema
  * @access Authenticated

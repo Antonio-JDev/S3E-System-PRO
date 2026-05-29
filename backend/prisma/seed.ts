@@ -63,6 +63,7 @@ async function main() {
       password: devPassword,
       name: 'Antonio Jr - Desenvolvedor',
       role: 'desenvolvedor',
+      contaProtegida: true,
       active: true
     }
   });

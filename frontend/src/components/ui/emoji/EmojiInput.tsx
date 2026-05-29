@@ -100,7 +100,11 @@ export const EmojiInput = forwardRef<EmojiInputHandle, EmojiInputProps>(function
     () => ({
       insertAtCursor,
       focus: () => {
-        inputRef.current?.focus();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            inputRef.current?.focus();
+          });
+        });
       },
     }),
     [insertAtCursor]
@@ -143,6 +147,9 @@ export const EmojiInput = forwardRef<EmojiInputHandle, EmojiInputProps>(function
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 onSubmit();
+                requestAnimationFrame(() => {
+                  inputRef.current?.focus();
+                });
               }
             }}
             placeholder={placeholder}
@@ -175,6 +182,9 @@ export const EmojiInput = forwardRef<EmojiInputHandle, EmojiInputProps>(function
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               onSubmit();
+              requestAnimationFrame(() => {
+                inputRef.current?.focus();
+              });
             }
           }}
           placeholder={placeholder}

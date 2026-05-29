@@ -274,7 +274,7 @@ describe('RhService.calcularFolhaMes', () => {
       expect(r.conferenciaPonto[27].dia).toBe(28);
     });
 
-    it('marca dia com registro como OK', async () => {
+    it('marca dia com registro abaixo da meta como OK_PARCIAL', async () => {
       mockFindUnique.mockResolvedValue(
         baseFuncionario({
           tipoContrato: TipoContratoFuncionario.REGISTRADO,
@@ -300,7 +300,7 @@ describe('RhService.calcularFolhaMes', () => {
 
       const dia5 = r.conferenciaPonto.find((d) => d.dia === 5);
       expect(dia5?.temRegistro).toBe(true);
-      expect(dia5?.situacao).toBe('OK');
+      expect(dia5?.situacao).toBe('OK_PARCIAL');
       expect(dia5?.horasLiquidas).toBe(8);
       expect(dia5?.entrada).toBe('08:00');
       expect(dia5?.saida).toBe('19:00');

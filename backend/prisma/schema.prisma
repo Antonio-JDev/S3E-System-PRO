@@ -22,6 +22,7 @@ model User {
   setor       String?
   role        String   @default("user") // desenhista_industrial, engenheiro_eletricista, financeiro_faturamento, desenvolvedor, gerente, admin (não alterar valores existentes)
   isAdmin     Boolean  @default(false) // Se true, acesso a todos os módulos (ex: Financeiro). Definido no gerenciamento de usuários.
+  contaProtegida Boolean @default(false) @map("conta_protegida") // Conta seed/sistema — não editável por terceiros
   active      Boolean  @default(true)
   preferences Json? // Preferências do usuário (ex: orcamentoInsercaoModo: 'check' | 'ocultar')
   createdAt   DateTime @default(now())
@@ -78,15 +79,17 @@ model WhatsappContactCache {
   @@map("whatsapp_contact_cache")
 }
 
-/// Lista/etiqueta de conversas do WhatsApp por usuário (estilo "Listas" do WhatsApp Business).
+/// Lista/etiqueta de conversas do WhatsApp (estilo "Listas" do WhatsApp Business).
 ///
-/// Cada operador tem suas próprias listas — o filtro de conversas na sidebar do CRM
-/// alterna entre `Tudo / Não lidas / Favoritas / Grupos` (built-in) e as listas
-/// criadas aqui. Os chats pertencentes à lista vivem em `WhatsappChatLabelMembership`.
+/// Por padrão cada operador tem listas privadas (`isGlobal = false`). Quando
+/// `isGlobal = true`, a lista aparece para todos os usuários do sistema.
+/// Os chats pertencentes à lista vivem em `WhatsappChatLabelMembership`.
 model WhatsappChatLabel {
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
-  /** Nome curto exibido como chip (ex.: "Vendas", "Atendimento"). Único por usuário. */
+  /** Quando true, visível e editável (pelo criador) por todos os operadores. */
+  isGlobal   Boolean  @default(false) @map("is_global")
+  /** Nome curto exibido como chip (ex.: "Vendas", "Atendimento"). Único por usuário (privado) ou global. */
   nome       String   @map("nome")
   /** Cor HEX opcional para diferenciar o chip (ex.: "#00a884"). */
   cor        String?  @map("cor")
@@ -241,6 +244,7 @@ model ConfiguracaoSistema {
   nomeEmpresa             String   @default("Eng System Pro")
   emailContato            String?
   telefoneContato         String?
+  portfolioUrl            String? // URL pública do portfólio exibida no login
   multiplicadorVenda      Float?   @default(1.55) // legado; preferir markupFabricante
   percentualImpostoPadrao Float?   @default(8) // legado; preferir aliquotaImpostoPadrao
   aliquotaImpostoPadrao   Float?   @default(8) // Alíquota % sobre valor de venda (DAS Simples Nacional)
@@ -454,9 +458,10 @@ model Material {
   fornecedor      Fornecedor?           @relation(fields: [fornecedorId], references: [id])
   kitItems        KitItem[]
   orcamentoItems  OrcamentoItem[]
-  compraItems     CompraItem[]
-  movimentacoes   MovimentacaoEstoque[]
-  historicoPrecos HistoricoPreco[]
+  compraItems      CompraItem[]
+  movimentacoes    MovimentacaoEstoque[]
+  historicoPrecos  HistoricoPreco[]
+  reservasProjeto  ReservaMaterialProjeto[]
 
   @@map("materiais")
 }
@@ -575,7 +580,7 @@ model Orcamento {
   descricao        String? // HTML do Quill editor ou texto rico
   descricaoProjeto String? // Descrição técnica avançada do projeto
   validade         DateTime
-  status           String   @default("Pendente") // Pendente, Enviado ao Cliente, Aprovado, Recusado, Declinado, Cancelado
+  status           String   @default("Pendente") // Pendente, Enviado ao Cliente, Aprovado, Concretizado, Recusado, Declinado, Cancelado
   bdi              Float    @default(0) // Margem de lucro (%)
   custoTotal       Float    @default(0)
   precoVenda       Float    @default(0)
@@ -731,6 +736,8 @@ model Projeto {
   obra         Obra? // Relação 1:1 com Obra (quando projeto vai para execução)
   documentos   ProjetoDocumento[]
   qualidade    ProjetoQualidade? // Aba Qualidade: visita técnica, checklist, inspeções
+  compras          Compra[] // Compras avulsas classificadas para esta OS
+  reservasMaterial ReservaMaterialProjeto[]
 
   @@map("projetos")
 }
@@ -872,6 +879,7 @@ enum StatusConsistenciaPonto {
 
 enum OcorrenciaPontoRhTipo {
   FALTA_JUSTIFICADA
+  JUSTIFICATIVA_PARCIAL
   DIVIDA_HORAS
 }
 
@@ -928,6 +936,12 @@ enum ClassificacaoCompra {
   DESPESAS_VARIADAS
 }
 
+enum DestinoCompraAvulsa {
+  ESTOQUE
+  OBRA
+  PROJETO
+}
+
 model Compra {
   id                    String              @id @default(uuid())
   numeroSequencial      Int                 @unique @default(autoincrement()) // Número sequencial automático
@@ -949,15 +963,19 @@ model Compra {
   classificacao         ClassificacaoCompra @default(COMPOSICAO_ESTOQUE) // ✅ NOVO: Classificação da compra
   xmlData               String? // JSON string com dados completos do XML
   observacoes           String?
-  obraId                String? // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
-  empresaCompradoraNome String? // ✅ Nome da empresa compradora (para identificar qual CNPJ está sendo usado)
-  empresaCompradoraCNPJ String? // ✅ CNPJ da empresa compradora
+  obraId                String? // Obra vinculada (compras avulsas de obras em andamento)
+  destinoTipo           DestinoCompraAvulsa? // null = compra normal (estoque)
+  projetoId             String? // OS vinculada quando destinoTipo = PROJETO
+  empresaCompradoraNome String? // Nome da empresa compradora (para identificar qual CNPJ está sendo usado)
+  empresaCompradoraCNPJ String? // CNPJ da empresa compradora
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
   fornecedor      Fornecedor             @relation(fields: [fornecedorId], references: [id])
-  obra            Obra?                  @relation(fields: [obraId], references: [id]) // ✅ NOVO: Relação com Obra
+  obra            Obra?                  @relation(fields: [obraId], references: [id])
+  projeto         Projeto?               @relation(fields: [projetoId], references: [id])
   items           CompraItem[]
+  reservasProjeto ReservaMaterialProjeto[]
   contasPagar     ContaPagar[] // Relação com contas a pagar
   recursosHumanos RecursoHumanoEstoque[] // ✅ NOVO: Relação com estoque de recursos humanos
 
@@ -978,13 +996,36 @@ model CompraItem {
   quantidadeFracionada  Float? // Quantidade de unidades individuais dentro do pacote/caixa (ex: 100)
   tipoEmbalagem         String? // Tipo de embalagem: "CAIXA", "PACOTE", "FARDO", etc.
   unidadeEmbalagem      String? // Unidade da embalagem: "cx", "pct", "fardo", etc.
-  fracionamentoAplicado Boolean @default(false) // ✅ Marca se o fracionamento já foi aplicado ao estoque
+  fracionamentoAplicado Boolean @default(false) // Marca se o fracionamento já foi aplicado ao estoque
+  destinoEstoque        Boolean @default(true) // false = item segue destinoTipo da compra (obra/OS)
 
   compra     Compra      @relation(fields: [compraId], references: [id], onDelete: Cascade)
   material   Material?   @relation(fields: [materialId], references: [id])
   ferramenta Ferramenta? @relation(fields: [ferramentaId], references: [id])
+  reservas   ReservaMaterialProjeto[]
 
   @@map("compra_items")
+}
+
+model ReservaMaterialProjeto {
+  id           String   @id @default(uuid())
+  projetoId    String
+  materialId   String
+  quantidade   Float
+  compraId     String?
+  compraItemId String?
+  observacoes  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projeto    Projeto     @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  material   Material    @relation(fields: [materialId], references: [id])
+  compra     Compra?     @relation(fields: [compraId], references: [id], onDelete: SetNull)
+  compraItem CompraItem? @relation(fields: [compraItemId], references: [id], onDelete: SetNull)
+
+  @@index([projetoId])
+  @@index([materialId])
+  @@map("reservas_material_projeto")
 }
 
 // ============================================
@@ -1160,6 +1201,8 @@ model RecebimentoParcial {
   id             String   @id @default(uuid())
   contaReceberId String
   valorPago      Float
+  valorJuros     Float? // Juros deste recebimento (conciliação)
+  valorDesconto  Float? // Desconto deste recebimento (conciliação)
   dataPagamento  DateTime
   observacoes    String?
   meioPagamento  String? // PIX, CARTAO_CREDITO, BOLETO, etc.
@@ -1858,6 +1901,11 @@ model OcorrenciaPontoRh {
   tipo                   OcorrenciaPontoRhTipo
   status                 StatusAprovacaoRh       @default(PENDENTE)
   descricao              String?
+  documentoAnexoUrl      String?
+  documentoAnexoNome     String?
+  justificativaTipo      String?
+  horaInicio             String?
+  horaFim                String?
   minutos                Int                      @default(0)
   modoQuitacao           ModoQuitacaoHorasNegativas?
   periodoCompensacao     PeriodoCompensacaoHoras?

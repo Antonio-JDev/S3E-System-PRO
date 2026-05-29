@@ -542,11 +542,17 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
     };
 
     const handleOpenModalEditar = (usuario: Usuario) => {
-        // Verificar se o usuário tem permissão (gerente, admin ou desenvolvedor)
+        const isSelf = usuario.id === user?.id;
+        if (usuario.contaProtegida && !isSelf) {
+            toast.error('🚫 Conta protegida do sistema — cadastro não pode ser editado por terceiros');
+            return;
+        }
+
+        // Verificar se o usuário tem permissão (gerente, admin ou desenvolvedor), ou edição do próprio cadastro
         const userRole = user?.role?.toLowerCase();
         const rolesPermitidos = ['gerente', 'admin', 'desenvolvedor'];
         
-        if (!rolesPermitidos.includes(userRole || '')) {
+        if (!isSelf && !rolesPermitidos.includes(userRole || '')) {
             toast.error('🚫 Você não tem permissão para editar usuários');
             return;
         }
@@ -603,6 +609,13 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
             
             if (response.success) {
                 toast.success('✅ Usuário atualizado com sucesso!');
+                if (usuarioParaEditar.id === user?.id && authContext?.updateUser) {
+                    authContext.updateUser({
+                        ...user!,
+                        name: editarUsuarioForm.name,
+                        email: editarUsuarioForm.email,
+                    });
+                }
                 handleCloseModalEditar();
                 await loadUsuarios();
             } else {
@@ -1334,7 +1347,15 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                 </tr>
                                             </thead>
                                             <tbody className="bg-white divide-y divide-gray-200">
-                                                {usuariosFiltrados.map((usuario) => (
+                                                {usuariosFiltrados.map((usuario) => {
+                                                    const contaProtegida = !!usuario.contaProtegida;
+                                                    const isSelf = usuario.id === user?.id;
+                                                    const podeEditarCadastro = !contaProtegida || isSelf;
+                                                    const temPermissaoGerenciar = user?.role?.toLowerCase() === 'gerente'
+                                                        || user?.role?.toLowerCase() === 'admin'
+                                                        || user?.role?.toLowerCase() === 'desenvolvedor'
+                                                        || user?.isAdmin === true;
+                                                    return (
                                                     <tr key={usuario.id} className="hover:bg-gray-50 transition-colors">
                                                         <td className="px-6 py-4 whitespace-nowrap">
                                                             <div className="font-semibold text-gray-900">{usuario.name}</div>
@@ -1349,7 +1370,9 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                             <select
                                                                 value={usuario.role}
                                                                 onChange={(e) => handleAtualizarRole(usuario.id, e.target.value)}
-                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getRoleBadgeClass(usuario.role)} border-0 cursor-pointer`}
+                                                                disabled={contaProtegida}
+                                                                title={contaProtegida ? 'Conta protegida do sistema' : undefined}
+                                                                className={`px-3 py-1.5 text-xs font-bold rounded-lg ${getRoleBadgeClass(usuario.role)} border-0 ${contaProtegida ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
                                                             >
                                                                 <option value="admin">Administrador</option>
                                                                 <option value="gerente">Gerente</option>
@@ -1366,18 +1389,16 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             {(() => {
-                                                                const targetIsDesenvolvedor = usuario.role?.toLowerCase() === 'desenvolvedor';
-                                                                const currentIsDesenvolvedor = user?.role?.toLowerCase() === 'desenvolvedor';
-                                                                const onlyDevCanToggleDev = targetIsDesenvolvedor && !currentIsDesenvolvedor;
+                                                                const bloqueado = contaProtegida;
                                                                 return (
                                                                     <button
-                                                                        onClick={() => !onlyDevCanToggleDev && handleToggleIsAdmin(usuario.id, !!usuario.isAdmin)}
-                                                                        disabled={onlyDevCanToggleDev}
-                                                                        title={onlyDevCanToggleDev
-                                                                            ? 'Apenas Desenvolvedor pode alterar permissão de admin de outro Desenvolvedor'
+                                                                        onClick={() => !bloqueado && handleToggleIsAdmin(usuario.id, !!usuario.isAdmin)}
+                                                                        disabled={bloqueado}
+                                                                        title={contaProtegida
+                                                                            ? 'Conta protegida do sistema'
                                                                             : (usuario.isAdmin ? 'Remover permissão de administrador' : 'Conceder permissão de administrador (acesso universal exceto Logs)')}
                                                                         className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
-                                                                            onlyDevCanToggleDev
+                                                                            bloqueado
                                                                                 ? 'bg-red-100 text-red-800 ring-1 ring-red-300 cursor-not-allowed opacity-90'
                                                                                 : usuario.isAdmin
                                                                                     ? 'bg-purple-100 text-purple-800 ring-1 ring-purple-200 hover:bg-purple-200'
@@ -1391,8 +1412,14 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         </td>
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             <button
-                                                                onClick={() => handleToggleStatus(usuario.id, usuario.active)}
+                                                                onClick={() => !contaProtegida && handleToggleStatus(usuario.id, usuario.active)}
+                                                                disabled={contaProtegida}
+                                                                title={contaProtegida ? 'Conta protegida do sistema' : undefined}
                                                                 className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                                                                    contaProtegida
+                                                                        ? 'cursor-not-allowed opacity-70'
+                                                                        : ''
+                                                                } ${
                                                                     usuario.active
                                                                         ? 'bg-green-100 text-green-800 ring-1 ring-green-200 hover:bg-green-200'
                                                                         : 'bg-red-100 text-red-800 ring-1 ring-red-200 hover:bg-red-200'
@@ -1404,14 +1431,11 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                         <td className="px-6 py-4 whitespace-nowrap text-center">
                                                             <div className="flex items-center justify-center gap-2">
                                                                 {/* Botão Editar - Gerente, admin, desenvolvedor ou usuário com isAdmin */}
-                                                                {(user?.role?.toLowerCase() === 'gerente' || 
-                                                                  user?.role?.toLowerCase() === 'admin' || 
-                                                                  user?.role?.toLowerCase() === 'desenvolvedor' ||
-                                                                  user?.isAdmin === true) && (
+                                                                {(temPermissaoGerenciar || isSelf) && podeEditarCadastro && (
                                                                     <button
                                                                         onClick={() => handleOpenModalEditar(usuario)}
                                                                         className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 ring-1 ring-blue-200 hover:bg-blue-200 transition-colors"
-                                                                        title="Editar usuário"
+                                                                        title={isSelf && contaProtegida ? 'Editar seu cadastro (conta protegida)' : 'Editar usuário'}
                                                                     >
                                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -1419,6 +1443,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                                         Editar
                                                                     </button>
                                                                 )}
+                                                                {!contaProtegida && (
                                                                 <button
                                                                     onClick={() => handleOpenModalExcluir(usuario)}
                                                                     className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-100 text-red-800 ring-1 ring-red-200 hover:bg-red-200 transition-colors"
@@ -1427,10 +1452,21 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                                                                     <TrashIcon className="w-4 h-4" />
                                                                     Excluir
                                                                 </button>
+                                                                )}
+                                                                {contaProtegida && !isSelf && (
+                                                                    <span className="text-xs font-semibold text-red-700 bg-red-50 px-2 py-1 rounded-lg ring-1 ring-red-200" title="Conta protegida do sistema">
+                                                                        🔒 Protegida
+                                                                    </span>
+                                                                )}
+                                                                {contaProtegida && isSelf && (
+                                                                    <span className="text-xs font-semibold text-amber-800 bg-amber-50 px-2 py-1 rounded-lg ring-1 ring-amber-200" title="Somente você pode editar este cadastro">
+                                                                        🔒 Só você edita
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         </td>
                                                     </tr>
-                                                ))}
+                                                );})}
                                             </tbody>
                                         </table>
                                     </div>

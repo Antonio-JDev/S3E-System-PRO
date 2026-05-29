@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import {
+  SystemPdfPage,
+  resolveSystemPdfLetterhead,
+  renderSystemPdfDocument,
+  downloadPdfBlob,
+  effectiveLetterheadOpacity,
+} from '../pdf';
 import { financeiroService, type MovimentacaoCaixaItem, type ResumoMovimentacoes, type AtualizarMovimentacaoPayload } from '../services/financeiroService';
 import { toast } from 'sonner';
 import { AuthContext } from '../contexts/AuthContext';
@@ -47,6 +54,15 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
   const [showDetalhesModal, setShowDetalhesModal] = useState(false);
   const [movimentacaoToView, setMovimentacaoToView] = useState<MovimentacaoCaixaItem | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  const ROWS_PER_PDF_PAGE = 22;
+  const chunkRows = <T,>(arr: T[], size: number): T[][] => {
+    if (arr.length === 0) return [[]];
+    const pages: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) pages.push(arr.slice(i, i + size));
+    return pages;
+  };
 
   const CATEGORIAS_SAIDA = ['Fornecedor', 'Recursos Humanos', 'Despesa Fixa', 'Frota'];
   const MEIOS_PAGAMENTO = [
@@ -191,75 +207,120 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
     return v + j - d;
   };
 
-  const handleExportarPDF = () => {
-    if (!printRef.current) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Não foi possível abrir a janela de impressão');
+  const handleExportarPDF = async () => {
+    if (!movimentacoes.length) {
+      toast.error('Não há movimentações para exportar no período.');
       return;
     }
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Extrato Movimentações de Caixa - ${dataInicio} a ${dataFim}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #333; }
-            h1 { font-size: 18px; margin-bottom: 8px; }
-            .periodo { font-size: 12px; color: #666; margin-bottom: 16px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
-            th { background: #f5f5f5; }
-            .entrada { color: #059669; }
-            .saida { color: #dc2626; }
-            .resumo { margin-top: 16px; display: flex; gap: 24px; flex-wrap: wrap; }
-            .resumo span { font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <h1>Movimentações de Caixa (Extrato)</h1>
-          <p class="periodo">Período: ${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Descrição</th>
-                <th>Categoria</th>
-                <th>Valor</th>
-                <th>Meio</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${movimentacoes
-                .map(
-                  (m) =>
-                    `<tr>
-                <td>${new Date(m.dataPagamento).toLocaleDateString('pt-BR')}</td>
-                <td>${m.descricao}</td>
-                <td>${m.categoria}</td>
-                <td class="${m.tipo === 'ENTRADA' ? 'entrada' : 'saida'}">${m.tipo === 'ENTRADA' ? '+' : '-'} R$ ${m.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                <td>${m.meioPagamento || '-'}</td>
-              </tr>`
-                )
-                .join('')}
-            </tbody>
-          </table>
-          <div class="resumo" style="margin-top: 16px;">
-            <span>Entradas: R$ ${(resumo?.entradasTotal ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            <span>Saídas: R$ ${(resumo?.saidasTotal ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-            <span>Saldo: R$ ${(resumo?.saldoConta ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-          </div>
-          <p style="margin-top: 20px; font-size: 10px; color: #888;">Gerado em ${new Date().toLocaleString('pt-BR')}</p>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 300);
-    toast.success('Use a janela de impressão e escolha "Salvar como PDF" para exportar.');
+    setExportingPdf(true);
+    toast.loading('Gerando PDF...', { id: 'caixa-pdf' });
+    try {
+      const letterhead = await resolveSystemPdfLetterhead();
+      const opacidadeFolha = effectiveLetterheadOpacity(letterhead.opacidade);
+      const pages = chunkRows(movimentacoes, ROWS_PER_PDF_PAGE);
+      const totalPages = pages.length;
+      const periodo = `${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}`;
+      const fmt = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+      const { blob, filename } = await renderSystemPdfDocument({
+        filename: `extrato-caixa-${dataInicio}-${dataFim}.pdf`,
+        letterhead,
+        document: (
+          <>
+            {pages.map((pageRows, pageIndex) => (
+              <SystemPdfPage
+                key={pageIndex}
+                folhaTimbradaUrl={letterhead.folhaTimbradaDataUrl}
+                opacidade={opacidadeFolha}
+                pageNumber={pageIndex + 1}
+                totalPages={totalPages}
+                compact
+              >
+                {pageIndex === 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <h1 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: '#111' }}>
+                      Movimentações de Caixa (Extrato)
+                    </h1>
+                    <p style={{ fontSize: 11, color: '#666', margin: '4px 0 0' }}>Período: {periodo}</p>
+                  </div>
+                )}
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                  <thead>
+                    <tr>
+                      {['Data', 'Descrição', 'Categoria', 'Valor', 'Meio'].map((h) => (
+                        <th
+                          key={h}
+                          style={{
+                            border: '1px solid #ddd',
+                            padding: '5px 6px',
+                            background: '#f5f5f5',
+                            textAlign: 'left',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageRows.map((m) => (
+                      <tr key={m.id}>
+                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>
+                          {new Date(m.dataPagamento).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>{m.descricao}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>{m.categoria}</td>
+                        <td
+                          style={{
+                            border: '1px solid #ddd',
+                            padding: '5px 6px',
+                            color: m.tipo === 'ENTRADA' ? '#059669' : '#dc2626',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {m.tipo === 'ENTRADA' ? '+' : '-'} R$ {fmt(m.valor)}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>
+                          {m.meioPagamento || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pageIndex === totalPages - 1 && (
+                  <div
+                    style={{
+                      marginTop: 14,
+                      display: 'flex',
+                      gap: 20,
+                      flexWrap: 'wrap',
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>Entradas: R$ {fmt(resumo?.entradasTotal ?? 0)}</span>
+                    <span>Saídas: R$ {fmt(resumo?.saidasTotal ?? 0)}</span>
+                    <span>Saldo: R$ {fmt(resumo?.saldoConta ?? 0)}</span>
+                  </div>
+                )}
+                {pageIndex === totalPages - 1 && (
+                  <p style={{ marginTop: 12, fontSize: 9, color: '#888' }}>
+                    Gerado em {new Date().toLocaleString('pt-BR')}
+                  </p>
+                )}
+              </SystemPdfPage>
+            ))}
+          </>
+        ),
+      });
+      downloadPdfBlob(blob, filename);
+      toast.success('PDF exportado com sucesso!', { id: 'caixa-pdf' });
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao exportar PDF', { id: 'caixa-pdf' });
+    } finally {
+      setExportingPdf(false);
+    }
   };
 
   return (
@@ -284,7 +345,8 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
         <div className="flex items-center gap-3">
           <button
             onClick={handleExportarPDF}
-            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2"
+            disabled={exportingPdf || loading}
+            className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2 disabled:opacity-60"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />

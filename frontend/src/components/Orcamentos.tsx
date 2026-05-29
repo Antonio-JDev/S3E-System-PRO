@@ -12,7 +12,13 @@ import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
 import { AuthContext } from '../contexts/AuthContext';
-import { canDelete } from '../utils/permissions';
+import { canDelete, canRegredirOrcamentoStatus } from '../utils/permissions';
+import {
+  getRegredirStatusTargets,
+  isOrcamentoConcretizadoVisual,
+  type OrcamentoRegredirTarget,
+} from '../utils/orcamentoStatus';
+import { OrcamentoRegredirStatusModal } from './OrcamentoRegredirStatusModal';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -96,6 +102,23 @@ const DocumentArrowUpIcon = (props: React.SVGProps<SVGSVGElement>) => (
 
 type OrcamentosAbaNav = 'listagem' | 'novo' | 'expirados' | 'declinados';
 
+const ORCAMENTO_STATUS_FILTERS = [
+    { value: 'Todos', label: 'Todos' },
+    { value: 'Pendente', label: 'Pendente' },
+    { value: 'Enviado ao Cliente', label: 'Enviado ao Cliente' },
+    { value: 'Aprovado', label: 'Aprovado' },
+    { value: 'Concretizado', label: 'Concretizado' },
+] as const;
+
+function isOrcamentoConcretizado(orc: Orcamento): boolean {
+    return orc.status === 'Concretizado' || (orc.status === 'Aprovado' && Boolean(orc.venda?.id));
+}
+
+function getVendaGeracaoTimestamp(orc: Orcamento): number {
+    const raw = orc.venda?.createdAt || orc.venda?.dataVenda;
+    return raw ? new Date(raw).getTime() : 0;
+}
+
 /** Borda esquerda no primeiro <td> (tabelas collapse — mesma abordagem da página Compras). Na aba Expirados sem barra. */
 function getOrcamentoRowLateralBorderClass(status: string, abaAtiva: OrcamentosAbaNav): string {
     if (abaAtiva === 'expirados') return '';
@@ -109,6 +132,8 @@ function getOrcamentoRowLateralBorderClass(status: string, abaAtiva: OrcamentosA
             return 'border-l-4 border-blue-600';
         case 'Aprovado':
             return 'border-l-4 border-green-600';
+        case 'Concretizado':
+            return 'border-l-4 border-violet-600';
         case 'Recusado':
         case 'Declinado':
         case 'Cancelado':
@@ -131,6 +156,8 @@ function getOrcamentoCardStripeClass(status: string, abaAtiva: OrcamentosAbaNav)
             return 'bg-blue-600';
         case 'Aprovado':
             return 'bg-green-600';
+        case 'Concretizado':
+            return 'bg-violet-600';
         case 'Recusado':
         case 'Declinado':
         case 'Cancelado':
@@ -238,6 +265,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
     const [statusFilter, setStatusFilter] = useState<string>('Todos');
     const [sortAprovadosPorDataAprovacao, setSortAprovadosPorDataAprovacao] = useState(false);
+    const [sortConcretizadosPorDataVenda, setSortConcretizadosPorDataVenda] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Orcamentos'));
 
@@ -282,6 +310,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
     // Estado para PDF Customization
     const [showPDFCustomization, setShowPDFCustomization] = useState(false);
     const [orcamentoForPDF, setOrcamentoForPDF] = useState<Orcamento | null>(null);
+    const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
+    const [vendaRedirectLoadingId, setVendaRedirectLoadingId] = useState<string | null>(null);
 
     // Modal Atualizar dados cliente (CPF/CNPJ e endereço de cobrança para NF)
     const [showModalAtualizarCliente, setShowModalAtualizarCliente] = useState(false);
@@ -822,7 +852,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
     // Função para verificar se um orçamento está expirado
     const isOrcamentoExpirado = (orcamento: Orcamento): boolean => {
         if (!orcamento.validade) return false;
-        if (orcamento.status === 'Aprovado') return false; // Orçamentos aprovados não expiram
+        if (orcamento.status === 'Aprovado' || orcamento.status === 'Concretizado') return false;
 
         const dataValidade = new Date(orcamento.validade);
         const hoje = new Date();
@@ -886,8 +916,10 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 if (orc.status === 'Declinado') return false;
                 if (orc.status === 'Cancelado') return false;
                 if (isOrcamentoExpirado(orc)) return false;
-                // Aplicar filtro de status
-                return statusFilter === 'Todos' || orc.status === statusFilter;
+                if (statusFilter === 'Todos') return true;
+                if (statusFilter === 'Concretizado') return isOrcamentoConcretizado(orc);
+                if (statusFilter === 'Aprovado') return orc.status === 'Aprovado' && !orc.venda?.id;
+                return orc.status === statusFilter;
             })
             .filter(orc => {
                 const term = searchTerm.toLowerCase();
@@ -901,14 +933,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 if (statusFilter === 'Aprovado' && sortAprovadosPorDataAprovacao) {
                     const dateA = a.aprovedAt ? new Date(a.aprovedAt).getTime() : 0;
                     const dateB = b.aprovedAt ? new Date(b.aprovedAt).getTime() : 0;
-                    return dateB - dateA; // Mais recente primeiro (sem data vai para o fim)
+                    return dateB - dateA;
+                }
+                if (statusFilter === 'Concretizado' && sortConcretizadosPorDataVenda) {
+                    return getVendaGeracaoTimestamp(b) - getVendaGeracaoTimestamp(a);
                 }
                 // Ordenar por data de criação (mais recente primeiro)
                 const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
                 const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
                 return dateB - dateA; // Mais recente primeiro
             });
-    }, [orcamentos, statusFilter, searchTerm, abaAtiva, orcamentosExpirados, orcamentosDeclinados, sortAprovadosPorDataAprovacao]);
+    }, [orcamentos, statusFilter, searchTerm, abaAtiva, orcamentosExpirados, orcamentosDeclinados, sortAprovadosPorDataAprovacao, sortConcretizadosPorDataVenda]);
 
     // Calcular totais do orçamento (NOVA LÓGICA)
     const calculosOrcamento = useMemo(() => {
@@ -2017,6 +2052,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
     // Excluir orçamento
     const [orcamentoToDelete, setOrcamentoToDelete] = useState<Orcamento | null>(null);
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+    const [orcamentoRegredir, setOrcamentoRegredir] = useState<Orcamento | null>(null);
+    const [regredirLoading, setRegredirLoading] = useState(false);
     const [deletePermanent, setDeletePermanent] = useState(false); // true = permanente, false = soft delete
 
     const handleDeleteOrcamento = async () => {
@@ -2066,6 +2103,34 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             success: (message) => message,
             error: (err) => err.message || 'Erro ao alterar status'
         });
+    };
+
+    const regredirStatusTargets = useMemo(() => {
+        if (!orcamentoRegredir) return [] as OrcamentoRegredirTarget[];
+        const hasVenda = Boolean(orcamentoRegredir.venda?.id);
+        const statusParaRegredir = isOrcamentoConcretizado(orcamentoRegredir)
+            ? 'Concretizado'
+            : orcamentoRegredir.status;
+        return getRegredirStatusTargets(statusParaRegredir, hasVenda);
+    }, [orcamentoRegredir]);
+
+    const handleRegredirStatus = async (novoStatus: OrcamentoRegredirTarget) => {
+        if (!orcamentoRegredir) return;
+        setRegredirLoading(true);
+        try {
+            const response = await orcamentosService.regredirStatus(orcamentoRegredir.id, novoStatus);
+            if (response.success) {
+                toast.success(response.message || `Status regredido para ${novoStatus}`);
+                setOrcamentoRegredir(null);
+                await loadData();
+            } else {
+                toast.error(response.error || 'Erro ao regredir status');
+            }
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Erro ao regredir status');
+        } finally {
+            setRegredirLoading(false);
+        }
     };
 
     // Preparar dados do orçamento para PDF customizado
@@ -2145,9 +2210,34 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
     // Abrir modal de customização de PDF
     const handlePersonalizarPDF = (orcamento: Orcamento) => {
-        setOrcamentoForPDF(orcamento);
-        setShowPDFCustomization(true);
+        setPdfLoadingId(orcamento.id);
+        requestAnimationFrame(() => {
+            setOrcamentoForPDF(orcamento);
+            setShowPDFCustomization(true);
+        });
     };
+
+    const handleGerarPedidoVenda = (orcamentoId: string) => {
+        if (!orcamentoId || vendaRedirectLoadingId) return;
+        setVendaRedirectLoadingId(orcamentoId);
+        const token = String(Date.now());
+        try {
+            localStorage.setItem('s3e_venda_orcamento_id', orcamentoId);
+        } catch (_) {
+            // ignore
+        }
+        navigate(`/vendas?orcamentoId=${encodeURIComponent(orcamentoId)}&fromOrcamentoAt=${token}`, {
+            state: { orcamentoId, fromOrcamentoAt: token }
+        });
+        setOrcamentoToView(null);
+        setTimeout(() => setVendaRedirectLoadingId(null), 1200);
+    };
+
+    useEffect(() => {
+        if (!showPDFCustomization || !pdfLoadingId) return;
+        const timer = window.setTimeout(() => setPdfLoadingId(null), 200);
+        return () => window.clearTimeout(timer);
+    }, [showPDFCustomization, pdfLoadingId]);
 
     // Removido: "Gerar PDF profissional" via /pdf/preview (evita fluxos paralelos e confusão com envio no WhatsApp CRM)
 
@@ -2199,6 +2289,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             case 'Pendente': return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200';
             case 'Enviado ao Cliente': return 'bg-blue-100 text-blue-800 ring-1 ring-blue-200';
             case 'Aprovado': return 'bg-green-100 text-green-800 ring-1 ring-green-200';
+            case 'Concretizado': return 'bg-violet-100 text-violet-800 ring-1 ring-violet-200';
             case 'Recusado': return 'bg-red-100 text-red-800 ring-1 ring-red-200';
             case 'Declinado': return 'bg-gray-900 text-white ring-1 ring-gray-800';
             case 'Cancelado': return 'bg-gray-100 text-gray-800 ring-1 ring-gray-200';
@@ -2459,14 +2550,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                         <div className="flex flex-wrap items-center gap-2">
                             <select
                                 value={statusFilter}
-                                onChange={(e) => setStatusFilter(e.target.value)}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setStatusFilter(v);
+                                    if (v !== 'Aprovado') setSortAprovadosPorDataAprovacao(false);
+                                    if (v !== 'Concretizado') setSortConcretizadosPorDataVenda(false);
+                                }}
                                 className="w-full min-w-[180px] px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500"
                             >
-                                <option value="Todos">Todos os Status</option>
-                                <option value="Pendente">Pendente</option>
-                                <option value="Enviado ao Cliente">Enviado ao Cliente</option>
-                                <option value="Aprovado">Aprovado</option>
-                                <option value="Recusado">Recusado</option>
+                                {ORCAMENTO_STATUS_FILTERS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label === 'Todos' ? 'Todos os Status' : opt.label}</option>
+                                ))}
                             </select>
                             {statusFilter === 'Aprovado' && (
                                 <button
@@ -2481,6 +2575,21 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                 >
                                     <ArrowsUpDownIcon className="w-5 h-5" />
                                     {sortAprovadosPorDataAprovacao ? 'Mais recentes aprovados' : 'Por data de aprovação'}
+                                </button>
+                            )}
+                            {statusFilter === 'Concretizado' && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSortConcretizadosPorDataVenda(prev => !prev)}
+                                    className={`inline-flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium whitespace-nowrap transition-colors ${
+                                        sortConcretizadosPorDataVenda
+                                            ? 'bg-violet-600 text-white border-violet-600'
+                                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                    title={sortConcretizadosPorDataVenda ? 'Ordenar por sequência (padrão)' : 'Ordenar pelo pedido de venda gerado mais recentemente'}
+                                >
+                                    <ArrowsUpDownIcon className="w-5 h-5" />
+                                    {sortConcretizadosPorDataVenda ? 'Último PV gerado' : 'Por último PV gerado'}
                                 </button>
                             )}
                         </div>
@@ -2525,7 +2634,11 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Aprovado: {orcamentos.filter(o => o.status === 'Aprovado').length}</span>
+                            <span className="text-xs text-gray-600">Aprovado: {orcamentos.filter(o => o.status === 'Aprovado' && !o.venda?.id).length}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 bg-violet-500 rounded-full"></div>
+                            <span className="text-xs text-gray-600">Concretizado: {orcamentos.filter(o => isOrcamentoConcretizado(o)).length}</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 bg-red-500 rounded-full"></div>
@@ -2576,7 +2689,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredOrcamentos.map((orcamento) => {
-                        const stripeClass = getOrcamentoCardStripeClass(orcamento.status, abaAtiva);
+                        const statusVisual = isOrcamentoConcretizado(orcamento) ? 'Concretizado' : orcamento.status;
+                        const stripeClass = getOrcamentoCardStripeClass(statusVisual, abaAtiva);
                         return (
                         <div
                             key={orcamento.id}
@@ -2606,12 +2720,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     </div>
                                 </div>
                                 <div className="flex flex-col items-end gap-1">
-                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(orcamento.status)}`}>
-                                        {orcamento.status === 'Pendente' && '⏳ '}
-                                        {orcamento.status === 'Aprovado' && '✅ '}
-                                        {orcamento.status === 'Recusado' && '❌ '}
-                                        {orcamento.status}
+                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(statusVisual)}`}>
+                                        {statusVisual === 'Pendente' && '⏳ '}
+                                        {statusVisual === 'Aprovado' && '✅ '}
+                                        {statusVisual === 'Concretizado' && '📦 '}
+                                        {statusVisual}
                                     </span>
+                                    {isOrcamentoConcretizado(orcamento) && orcamento.venda?.numeroSequencial && (
+                                        <span className="px-2 py-1 text-xs font-bold rounded-lg bg-violet-50 text-violet-800 ring-1 ring-violet-200">
+                                            PV #{orcamento.venda.numeroSequencial}
+                                        </span>
+                                    )}
                                     {isOrcamentoExpirado(orcamento) && (
                                         <span className="px-2 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
                                             ⏰ Expirado
@@ -2648,7 +2767,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     })()}
                                 </div>
                                 {/* Validade - apenas para orçamentos não aprovados */}
-                                {orcamento.status !== 'Aprovado' && (
+                                {statusVisual !== 'Aprovado' && statusVisual !== 'Concretizado' && (
                                     <div className={`flex items-center gap-2 text-sm ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 font-semibold' : 'text-gray-600'}`}>
                                         <span>📅</span>
                                         <span>
@@ -2659,10 +2778,19 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     </div>
                                 )}
                                 {/* Quando aprovado, mostrar data de aprovação ao invés de validade */}
-                                {orcamento.status === 'Aprovado' && orcamento.aprovedAt && (
+                                {statusVisual === 'Aprovado' && orcamento.aprovedAt && (
                                     <div className="flex items-center gap-2 text-sm text-green-600">
                                         <span>✅</span>
-                                        <span>Aprovado em: {orcamento.aprovedAt ? new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR') : ''}</span>
+                                        <span>Aprovado em: {new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR')}</span>
+                                    </div>
+                                )}
+                                {statusVisual === 'Concretizado' && orcamento.venda && (
+                                    <div className="flex items-center gap-2 text-sm text-violet-700">
+                                        <span>📦</span>
+                                        <span>
+                                            PV #{orcamento.venda.numeroSequencial ?? '—'} em{' '}
+                                            {new Date(orcamento.venda.createdAt || orcamento.venda.dataVenda || orcamento.updatedAt).toLocaleDateString('pt-BR')}
+                                        </span>
                                     </div>
                                 )}
                                 <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -2707,13 +2835,21 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     </button>
                                     <button
                                         onClick={() => handlePersonalizarPDF(orcamento)}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-lg hover:from-purple-200 hover:to-indigo-200 transition-all text-sm font-semibold shadow-sm"
+                                        disabled={pdfLoadingId === orcamento.id}
+                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-lg hover:from-purple-200 hover:to-indigo-200 transition-all text-sm font-semibold shadow-sm disabled:opacity-70 disabled:cursor-wait"
                                         title="Personalizar e gerar PDF"
                                     >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                                        </svg>
-                                        PDF
+                                        {pdfLoadingId === orcamento.id ? (
+                                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                                            </svg>
+                                        ) : (
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                                            </svg>
+                                        )}
+                                        {pdfLoadingId === orcamento.id ? 'Abrindo…' : 'PDF'}
                                     </button>
                                     <button
                                         onClick={() => handleOpenModal(orcamento)}
@@ -2816,7 +2952,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         </button>
                                     </div>
                                 )}
-                                {orcamento.status === 'Aprovado' && (
+                                {orcamento.status === 'Aprovado' && !isOrcamentoConcretizado(orcamento) && (
                                     <button
                                         onClick={() => handleDeclinarOrcamento(orcamento)}
                                         className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-lg hover:from-orange-700 hover:to-orange-600 transition-all font-semibold shadow-md text-sm"
@@ -2850,9 +2986,11 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {filteredOrcamentos.map((orcamento, index) => (
+                                {filteredOrcamentos.map((orcamento, index) => {
+                                    const statusVisual = isOrcamentoConcretizado(orcamento) ? 'Concretizado' : orcamento.status;
+                                    return (
                                     <tr key={orcamento.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className={`px-6 py-4 text-center ${getOrcamentoRowLateralBorderClass(orcamento.status, abaAtiva)}`}>
+                                        <td className={`px-6 py-4 text-center ${getOrcamentoRowLateralBorderClass(statusVisual, abaAtiva)}`}>
 
                                             <span className="text-sm font-semibold text-gray-600">{orcamento.numeroSequencial || index + 1}</span>
                                         </td>
@@ -2884,7 +3022,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                             })()}
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            {orcamento.status === 'Aprovado' ? (
+                                            {statusVisual === 'Concretizado' ? (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <p className="text-xs text-violet-600 font-semibold">PV gerado</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {new Date(orcamento.venda?.createdAt || orcamento.venda?.dataVenda || orcamento.updatedAt).toLocaleDateString('pt-BR')}
+                                                    </p>
+                                                    {orcamento.venda?.numeroSequencial && (
+                                                        <span className="text-xs font-bold text-violet-700">#{orcamento.venda.numeroSequencial}</span>
+                                                    )}
+                                                </div>
+                                            ) : statusVisual === 'Aprovado' ? (
                                                 <div className="flex flex-col items-center gap-1">
                                                     <p className="text-xs text-gray-400 italic">Histórico</p>
                                                     <p className="text-xs text-gray-500">{new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}</p>
@@ -2902,15 +3050,21 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <div className="flex flex-col items-center gap-1">
-                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(orcamento.status)}`}>
-                                                    {orcamento.status === 'Pendente' && '⏳ '}
-                                                    {orcamento.status === 'Enviado ao Cliente' && '📤 '}
-                                                    {orcamento.status === 'Aprovado' && '✅ '}
-                                                    {orcamento.status === 'Recusado' && '❌ '}
-                                                    {orcamento.status === 'Declinado' && '🔻 '}
-                                                    {orcamento.status === 'Cancelado' && '🚫 '}
-                                                    {orcamento.status}
+                                                <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusClass(statusVisual)}`}>
+                                                    {statusVisual === 'Pendente' && '⏳ '}
+                                                    {statusVisual === 'Enviado ao Cliente' && '📤 '}
+                                                    {statusVisual === 'Aprovado' && '✅ '}
+                                                    {statusVisual === 'Concretizado' && '📦 '}
+                                                    {statusVisual === 'Recusado' && '❌ '}
+                                                    {statusVisual === 'Declinado' && '🔻 '}
+                                                    {statusVisual === 'Cancelado' && '🚫 '}
+                                                    {statusVisual}
                                                 </span>
+                                                {isOrcamentoConcretizado(orcamento) && orcamento.venda?.numeroSequencial && (
+                                                    <span className="px-2 py-0.5 text-xs font-bold rounded bg-violet-100 text-violet-800">
+                                                        PV #{orcamento.venda.numeroSequencial}
+                                                    </span>
+                                                )}
                                                 {isOrcamentoExpirado(orcamento) && (
                                                     <span className="px-2 py-0.5 text-xs font-bold rounded bg-orange-100 text-orange-800">
                                                         ⏰ Expirado
@@ -2998,16 +3152,36 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                                             variant: 'default'
                                                         },
                                                         {
-                                                            label: 'PDF',
+                                                            label: pdfLoadingId === orcamento.id ? 'Abrindo…' : 'PDF',
                                                             icon: (
                                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
                                                                 </svg>
                                                             ),
                                                             onClick: () => handlePersonalizarPDF(orcamento),
+                                                            loading: pdfLoadingId === orcamento.id,
+                                                            closeOnClick: false,
                                                             variant: 'default'
                                                         },
                                                         // Ações de status
+                                                        {
+                                                            label: 'Regredir status',
+                                                            icon: (
+                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                                                                </svg>
+                                                            ),
+                                                            onClick: () => setOrcamentoRegredir(orcamento),
+                                                            variant: 'default',
+                                                            show:
+                                                                canRegredirOrcamentoStatus(user) &&
+                                                                getRegredirStatusTargets(
+                                                                    isOrcamentoConcretizado(orcamento)
+                                                                        ? 'Concretizado'
+                                                                        : orcamento.status,
+                                                                    Boolean(orcamento.venda?.id)
+                                                                ).length > 0
+                                                        },
                                                         {
                                                             label: 'Enviado-Cliente',
                                                             icon: (
@@ -3028,7 +3202,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                                             ),
                                                             onClick: () => handleDeclinarOrcamento(orcamento),
                                                             variant: 'danger',
-                                                            show: orcamento.status === 'Aprovado'
+                                                            show: statusVisual === 'Aprovado' && !isOrcamentoConcretizado(orcamento)
                                                         },
                                                         {
                                                             label: 'Excluir Permanentemente',
@@ -3046,7 +3220,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -4521,6 +4696,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                             {orcamentoToView.status === 'Pendente' && '⏳ '}
                                             {orcamentoToView.status === 'Enviado ao Cliente' && '📤 '}
                                             {orcamentoToView.status === 'Aprovado' && '✅ '}
+                                            {orcamentoToView.status === 'Concretizado' && '📦 '}
                                             {orcamentoToView.status === 'Recusado' && '❌ '}
                                             {orcamentoToView.status === 'Declinado' && '🔻 '}
                                             {orcamentoToView.status === 'Cancelado' && '🚫 '}
@@ -4844,6 +5020,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                 <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-2">
                                         <div className={`w-3 h-3 rounded-full ${orcamentoToView.status === 'Aprovado' ? 'bg-green-500' :
+                                                orcamentoToView.status === 'Concretizado' ? 'bg-violet-500' :
                                                 orcamentoToView.status === 'Pendente' ? 'bg-yellow-500' :
                                                     orcamentoToView.status === 'Enviado ao Cliente' ? 'bg-blue-500' :
                                                         orcamentoToView.status === 'Declinado' ? 'bg-gray-900' :
@@ -4914,20 +5091,24 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     {orcamentoToView.status === 'Aprovado' && !orcamentoToView.venda?.id && !orcamentoToView.pedidoFaturado && (
                                         <>
                                             <button
-                                                onClick={() => {
-                                                    // Navegar para página de vendas com orçamento pré-selecionado
-                                                    navigate('/vendas', { state: { orcamentoId: orcamentoToView.id } });
-                                                    setOrcamentoToView(null);
-                                                }}
-                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                                                onClick={() => handleGerarPedidoVenda(orcamentoToView.id)}
+                                                disabled={vendaRedirectLoadingId === orcamentoToView.id}
+                                                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold disabled:opacity-70 disabled:cursor-wait"
                                             >
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.5v15m7.5-7.5h-15" />
-                                                </svg>
+                                                {vendaRedirectLoadingId === orcamentoToView.id ? (
+                                                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                                                    </svg>
+                                                ) : (
+                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.5v15m7.5-7.5h-15" />
+                                                    </svg>
+                                                )}
                                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
                                                 </svg>
-                                                Gerar Pedido de Venda
+                                                {vendaRedirectLoadingId === orcamentoToView.id ? 'Abrindo...' : 'Gerar Pedido de Venda'}
                                             </button>
                                             <button
                                                 onClick={() => handleDeclinarOrcamento(orcamentoToView, true)}
@@ -4997,6 +5178,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     onClose={() => {
                         setShowPDFCustomization(false);
                         setOrcamentoForPDF(null);
+                        setPdfLoadingId(null);
                     }}
                     orcamentoId={orcamentoForPDF.id}
                     orcamentoData={prepararDadosParaPDF(orcamentoForPDF)}
@@ -5035,6 +5217,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         {orcamentoToView.status === 'Pendente' && '⏳ '}
                                         {orcamentoToView.status === 'Enviado ao Cliente' && '📤 '}
                                         {orcamentoToView.status === 'Aprovado' && '✅ '}
+                                        {orcamentoToView.status === 'Concretizado' && '📦 '}
                                         {orcamentoToView.status === 'Recusado' && '❌ '}
                                         {orcamentoToView.status === 'Declinado' && '🔻 '}
                                         {orcamentoToView.status === 'Cancelado' && '🚫 '}
@@ -5559,7 +5742,6 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 variant="warning"
             />
 
-            {/* AlertDialog de Confirmação de Exclusão */}
             <AlertDialog
                 isOpen={showDeleteDialog}
                 onClose={() => {
@@ -5577,6 +5759,27 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 confirmText={deletePermanent ? "Excluir Permanentemente" : "Cancelar Orçamento"}
                 cancelText="Voltar"
                 variant={deletePermanent ? "danger" : "warning"}
+            />
+
+            <OrcamentoRegredirStatusModal
+                open={Boolean(orcamentoRegredir)}
+                onClose={() => !regredirLoading && setOrcamentoRegredir(null)}
+                orcamentoLabel={`#${orcamentoRegredir?.numeroSequencial ?? orcamentoRegredir?.id?.substring(0, 8) ?? ''}`}
+                currentStatus={
+                    orcamentoRegredir
+                        ? isOrcamentoConcretizado(orcamentoRegredir)
+                            ? 'Concretizado'
+                            : orcamentoRegredir.status
+                        : ''
+                }
+                options={regredirStatusTargets}
+                showConcretizadoWarning={
+                    orcamentoRegredir
+                        ? isOrcamentoConcretizadoVisual(orcamentoRegredir.status, Boolean(orcamentoRegredir.venda?.id))
+                        : false
+                }
+                loading={regredirLoading}
+                onSelect={handleRegredirStatus}
             />
         </div>
     );

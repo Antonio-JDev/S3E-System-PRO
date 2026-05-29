@@ -265,6 +265,29 @@ app.get('/api/configuracoes/public/logo-login', async (req, res) => {
   }
 });
 
+// ROTA PÚBLICA: Buscar URL do portfólio (sem autenticação)
+app.get('/api/configuracoes/public/portfolio-url', async (_req, res) => {
+  const fallbackPortfolioUrl = 'https://antonio-jdev.github.io/portfolio-01/';
+  try {
+    const configuracaoServiceModule = await import('./services/configuracao.service');
+    const configuracaoService = configuracaoServiceModule.default;
+    const configuracoes = await configuracaoService.getConfiguracoes();
+    const portfolioUrl = (configuracoes as any)?.portfolioUrl;
+    res.status(200).json({
+      success: true,
+      data: {
+        portfolioUrl: portfolioUrl || fallbackPortfolioUrl
+      }
+    });
+  } catch (error: any) {
+    console.error('Erro ao buscar URL de portfólio pública:', error);
+    res.status(200).json({
+      success: true,
+      data: { portfolioUrl: fallbackPortfolioUrl }
+    });
+  }
+});
+
 // Servir arquivos estáticos (uploads) com CORS habilitado
 // Em produção (Docker), process.cwd() será /app e o volume está mapeado em /app/uploads
 // Em desenvolvimento local, usamos apenas uploads (não backend/uploads)
@@ -492,9 +515,17 @@ app.use('/api/movimentacoes-caixa', movimentacoesCaixaRoutes);
 app.use('/api/external/receita', receitaRoutes);
 
 // Error handling middleware
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err.stack);
-  res.status(500).json({ 
+app.use((err: Error & { type?: string; status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err.stack || err);
+  if (err.type === 'entity.too.large' || err.status === 413) {
+    res.status(413).json({
+      success: false,
+      error: 'Corpo da requisição muito grande. Para PDF no WhatsApp, o arquivo é gerado no servidor — não envie base64 pelo navegador.'
+    });
+    return;
+  }
+  res.status(500).json({
+    success: false,
     error: 'Internal Server Error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
   });

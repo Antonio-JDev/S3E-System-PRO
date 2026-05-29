@@ -10,6 +10,7 @@ const mockGet = vi.fn();
 const mockPost = vi.fn();
 const mockPut = vi.fn();
 const mockDelete = vi.fn();
+const mockUpload = vi.fn();
 
 vi.mock('../axiosApi', () => ({
   axiosApiService: {
@@ -17,6 +18,7 @@ vi.mock('../axiosApi', () => ({
     post: (...args: unknown[]) => mockPost(...args),
     put: (...args: unknown[]) => mockPut(...args),
     delete: (...args: unknown[]) => mockDelete(...args),
+    upload: (...args: unknown[]) => mockUpload(...args),
   },
 }));
 
@@ -70,7 +72,7 @@ describe('atendimentoCrmService (Funil de Atendimento)', () => {
         createdAt: '2026-03-09T12:00:00Z',
         updatedAt: '2026-03-09T12:00:00Z',
       };
-      mockGet.mockResolvedValue({ data: { success: true, data: lead } });
+      mockGet.mockResolvedValue({ success: true, data: lead });
 
       const result = await atendimentoCrmService.getById('lead-1');
 
@@ -92,7 +94,7 @@ describe('atendimentoCrmService (Funil de Atendimento)', () => {
         createdAt: '2026-03-09T12:00:00Z',
         updatedAt: '2026-03-09T12:00:00Z',
       };
-      mockPost.mockResolvedValue({ data: { success: true, data: created } });
+      mockPost.mockResolvedValue({ success: true, data: created });
 
       const result = await atendimentoCrmService.criar({
         nome: 'Novo Lead',
@@ -122,7 +124,7 @@ describe('atendimentoCrmService (Funil de Atendimento)', () => {
         createdAt: '2026-03-09T12:00:00Z',
         updatedAt: '2026-03-09T12:05:00Z',
       };
-      mockPut.mockResolvedValue({ data: { success: true, data: updated } });
+      mockPut.mockResolvedValue({ success: true, data: updated });
 
       const result = await atendimentoCrmService.atualizar('lead-1', {
         nome: 'Lead Atualizado',
@@ -151,12 +153,12 @@ describe('atendimentoCrmService (Funil de Atendimento)', () => {
         createdAt: '2026-03-09T12:00:00Z',
         updatedAt: '2026-03-09T12:00:00Z',
       };
-      mockPost.mockResolvedValue({ success: true, data: lead });
+      mockUpload.mockResolvedValue({ success: true, data: lead });
 
       const result = await atendimentoCrmService.uploadContaEnergia('lead-1', [file]);
 
-      expect(mockPost).toHaveBeenCalledWith('/api/atendimento-crm/lead-1/upload-conta', expect.any(FormData));
-      const formData = mockPost.mock.calls[0][1] as FormData;
+      expect(mockUpload).toHaveBeenCalledWith('/api/atendimento-crm/lead-1/upload-conta', expect.any(FormData));
+      const formData = mockUpload.mock.calls[0][1] as FormData;
       expect(formData.get('contaEnergia')).toBe(file);
       expect(result.success).toBe(true);
       expect(result.data!.contaEnergiaUrl).toBe('/uploads/contato-lead/conta-123.pdf');

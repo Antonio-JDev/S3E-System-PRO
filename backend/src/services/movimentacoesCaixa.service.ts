@@ -13,7 +13,7 @@ export interface MovimentacaoCaixaItem {
   valorDesconto?: number;
   meioPagamento: string | null;
   origem: 'conta_receber' | 'conta_pagar';
-  referenciaId: string;
+  referenciaId: string | null;
   tipoCategoria?: string; // FORNECEDOR, RH, etc. para saídas (edição)
   observacoes?: string | null; // Justificativa/descrição do pagamento (ex.: desconto por falta)
   /** true quando a entrada é um recebimento parcial (cada parcial tem sua data/valor; edição/desfazer é feita em Contas a Receber) */
@@ -157,7 +157,11 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
     const clienteNome = c.venda?.cliente?.nome || 'Cliente';
     const titulo = c.venda?.orcamento?.titulo || c.descricao;
     const descricao = `${clienteNome} - ${titulo}${c.numeroParcela ? ` (Parcela ${c.numeroParcela}/${c.totalParcelas || 1})` : ''}`;
-    const valor = valorEfetivo(c.valorParcela, (c as any).valorJuros, (c as any).valorDesconto);
+    const jurosC = (c as any).valorJuros ?? 0;
+    const descontoC = (c as any).valorDesconto ?? 0;
+    // valorParcela já é o valor líquido recebido; juros/desconto são informativos (conciliação)
+    const valor = c.valorParcela;
+    const valorBase = valor + descontoC - jurosC;
     return {
       id: c.id,
       tipo: 'ENTRADA',
@@ -165,9 +169,9 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
       descricao,
       categoria: 'Venda',
       valor,
-      valorBase: c.valorParcela,
-      valorJuros: (c as any).valorJuros ?? 0,
-      valorDesconto: (c as any).valorDesconto ?? 0,
+      valorBase: valorBase > 0 ? valorBase : valor,
+      valorJuros: jurosC,
+      valorDesconto: descontoC,
       meioPagamento: c.meioPagamento ? labelMeioPagamento(c.meioPagamento) : null,
       origem: 'conta_receber',
       referenciaId: c.vendaId
@@ -180,6 +184,9 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
     const titulo = c.venda?.orcamento?.titulo || c.descricao;
     const parcelaLabel = c.numeroParcela ? ` (Parcela ${c.numeroParcela}/${c.totalParcelas || 1})` : '';
     const descricao = `${clienteNome} - ${titulo}${parcelaLabel} - Recebimento parcial`;
+    const rpJuros = (rp as any).valorJuros ?? 0;
+    const rpDesconto = (rp as any).valorDesconto ?? 0;
+    const valorBaseRp = rp.valorPago + rpDesconto - rpJuros;
     return {
       id: rp.id,
       tipo: 'ENTRADA',
@@ -187,9 +194,9 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
       descricao,
       categoria: 'Venda',
       valor: rp.valorPago,
-      valorBase: rp.valorPago,
-      valorJuros: 0,
-      valorDesconto: 0,
+      valorBase: valorBaseRp > 0 ? valorBaseRp : rp.valorPago,
+      valorJuros: rpJuros,
+      valorDesconto: rpDesconto,
       meioPagamento: rp.meioPagamento ? labelMeioPagamento(rp.meioPagamento) : null,
       origem: 'conta_receber',
       referenciaId: c.vendaId ?? c.id,

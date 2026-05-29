@@ -41,9 +41,10 @@ export function mapItensOrcamentoParaCopia(items: any[] | null | undefined): Orc
         cotacaoId: item.cotacaoId ?? undefined,
         servicoNome: item.servicoNome ?? undefined,
 
-        // Backend nem sempre garante `nome` e `unidadeMedida` diretamente no item,
-        // então fazemos fallback pelos relacionamentos.
+        // OrcamentoItem no banco não possui campo `nome`; muitas rotas retornam apenas `descricao`.
+        // Por isso, priorizamos `descricao` antes dos relacionamentos para manter cópias estáveis.
         nome: item.nome ||
+            item.descricao ||
             item.material?.nome ||
             item.kit?.nome ||
             item.cotacao?.nome ||

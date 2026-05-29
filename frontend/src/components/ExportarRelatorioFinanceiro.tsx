@@ -1,7 +1,13 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
-import { API_CONFIG, getUploadUrl } from '../config/api';
+import { getUploadUrl } from '../config/api';
+import {
+  SystemPdfPage,
+  resolveSystemPdfLetterhead,
+  renderSystemPdfDocument,
+  downloadPdfBlob,
+} from '../pdf';
 
 interface ExportarRelatorioFinanceiroProps {
   setAbaAtiva: (aba: string) => void;
@@ -145,252 +151,200 @@ const ExportarRelatorioFinanceiro: React.FC<ExportarRelatorioFinanceiroProps> = 
     }
   };
 
+  const TABLE_ROWS_PER_PAGE = 20;
+
+  const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+    if (!arr.length) return [];
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  };
+
+  const fmtMoney = (n: number) =>
+    (n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
   const handleGerarRelatorioHTML = async () => {
     try {
       setGerando(true);
+      toast.loading('Gerando PDF...', { id: 'relatorio-pdf' });
 
-      // Buscar dados do período
       const params = new URLSearchParams({
         tipo: formState.tipoRelatorio,
         dataInicio: formState.dataInicio,
-        dataFim: formState.dataFim
+        dataFim: formState.dataFim,
       });
 
       const response = await axiosApiService.get(`/api/relatorios/financeiro/dados?${params}`);
 
       if (!response.success || !response.data) {
-        toast.error('Erro ao carregar dados do relatório');
+        toast.error('Erro ao carregar dados do relatório', { id: 'relatorio-pdf' });
         return;
       }
 
       const dados: DadosRelatorio = response.data;
-
-      // Obter URL completa do logo
+      const letterhead = await resolveSystemPdfLetterhead();
       const logoUrl = getUploadUrl('/uploads/logos/logo-nome-azul.png');
+      const periodo = `${new Date(formState.dataInicio).toLocaleDateString('pt-BR')} até ${new Date(formState.dataFim).toLocaleDateString('pt-BR')}`;
+      const geradoEm = `${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`;
 
-      // Abrir nova janela
-      const relatorioWindow = window.open('', '_blank');
-      
-      if (!relatorioWindow) {
-        toast.error('❌ Bloqueador de pop-ups ativado. Permita pop-ups para gerar o relatório.');
-        return;
-      }
+      const pageNodes: React.ReactNode[] = [];
 
-      const html = `
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Relatório Financeiro - S3E Engenharia</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: 'Segoe UI', Arial, sans-serif;
-              padding: 40px;
-              background: #fff;
-              color: #333;
-            }
-            .header {
-              text-align: center;
-              margin-bottom: 40px;
-              padding-bottom: 20px;
-              border-bottom: 3px solid #10B981;
-            }
-            .header img {
-              display: block;
-              margin: 0 auto 15px auto;
-              max-width: 300px;
-              height: auto;
-            }
-            .header h1 {
-              color: #10B981;
-              font-size: 32px;
-              margin-bottom: 10px;
-            }
-            .header p {
-              color: #666;
-              font-size: 14px;
-              margin-top: 5px;
-            }
-            .section {
-              margin-bottom: 30px;
-              page-break-inside: avoid;
-            }
-            .section h2 {
-              color: #1E293B;
-              font-size: 20px;
-              margin-bottom: 15px;
-              padding-bottom: 8px;
-              border-bottom: 2px solid #E5E7EB;
-            }
-            .metrics {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 20px;
-              margin-bottom: 30px;
-            }
-            .metric-card {
-              padding: 20px;
-              border: 2px solid #E5E7EB;
-              border-radius: 8px;
-              text-align: center;
-            }
-            .metric-card .value {
-              font-size: 28px;
-              font-weight: bold;
-              margin-bottom: 8px;
-            }
-            .metric-card .label {
-              font-size: 14px;
-              color: #666;
-            }
-            .positive { color: #10B981; }
-            .negative { color: #EF4444; }
-            .neutral { color: #3B82F6; }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 15px;
-            }
-            table th, table td {
-              padding: 12px;
-              text-align: left;
-              border-bottom: 1px solid #E5E7EB;
-            }
-            table th {
-              background: #F3F4F6;
-              font-weight: 600;
-              color: #374151;
-            }
-            .footer {
-              margin-top: 50px;
-              padding-top: 20px;
-              border-top: 2px solid #E5E7EB;
-              text-align: center;
-              color: #666;
-              font-size: 12px;
-            }
-            @media print {
-              body { padding: 20px; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <img src="${logoUrl}" alt="S3E Engenharia" style="max-width: 300px; height: auto; margin-bottom: 20px;" onerror="this.style.display='none';" />
-            <h1>💰 S3E Engenharia</h1>
-            <p><strong>Relatório Financeiro</strong></p>
-            <p>Período: ${new Date(formState.dataInicio).toLocaleDateString('pt-BR')} até ${new Date(formState.dataFim).toLocaleDateString('pt-BR')}</p>
-            <p>Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+      pageNodes.push(
+        <SystemPdfPage
+          key="capa"
+          folhaTimbradaUrl={letterhead.folhaTimbradaDataUrl}
+          opacidade={letterhead.opacidade}
+          compact
+        >
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <img
+              src={logoUrl}
+              alt="S3E Engenharia"
+              style={{ maxWidth: 260, height: 'auto', margin: '0 auto 12px', display: 'block' }}
+            />
+            <h1 style={{ color: '#10B981', fontSize: 22, margin: '0 0 8px' }}>Relatório Financeiro</h1>
+            <p style={{ fontSize: 11, color: '#666', margin: 4 }}>Período: {periodo}</p>
+            <p style={{ fontSize: 11, color: '#666', margin: 4 }}>Gerado em: {geradoEm}</p>
           </div>
-
-          <div class="section">
-            <h2>📊 Métricas Principais</h2>
-            <div class="metrics">
-              <div class="metric-card">
-                <div class="value positive">R$ ${(dados.totalReceber || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Total a Receber</div>
+          <h2 style={{ fontSize: 14, color: '#1E293B', borderBottom: '2px solid #E5E7EB', paddingBottom: 6, marginBottom: 12 }}>
+            Métricas principais
+          </h2>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 10,
+              fontSize: 10,
+            }}
+          >
+            {[
+              { label: 'Total a Receber', value: dados.totalReceber ?? 0, color: '#10B981' },
+              { label: 'Total a Pagar', value: dados.totalPagar ?? 0, color: '#EF4444' },
+              {
+                label: 'Saldo Previsto',
+                value: dados.saldoPrevisto ?? 0,
+                color: (dados.saldoPrevisto ?? 0) >= 0 ? '#10B981' : '#EF4444',
+              },
+              { label: 'Total Faturado', value: dados.totalFaturado ?? 0, color: '#3B82F6' },
+              { label: 'Total Pago', value: dados.totalPago ?? 0, color: '#3B82F6' },
+              {
+                label: 'Lucro Líquido',
+                value: dados.lucroLiquido ?? 0,
+                color: (dados.lucroLiquido ?? 0) >= 0 ? '#10B981' : '#EF4444',
+              },
+            ].map((m) => (
+              <div
+                key={m.label}
+                style={{ border: '2px solid #E5E7EB', borderRadius: 6, padding: 10, textAlign: 'center' }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: m.color, marginBottom: 4 }}>
+                  R$ {fmtMoney(m.value)}
+                </div>
+                <div style={{ color: '#666' }}>{m.label}</div>
               </div>
-              <div class="metric-card">
-                <div class="value negative">R$ ${(dados.totalPagar || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Total a Pagar</div>
-              </div>
-              <div class="metric-card">
-                <div class="value ${(dados.saldoPrevisto || 0) >= 0 ? 'positive' : 'negative'}">R$ ${(dados.saldoPrevisto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Saldo Previsto</div>
-              </div>
-              <div class="metric-card">
-                <div class="value neutral">R$ ${(dados.totalFaturado || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Total Faturado</div>
-              </div>
-              <div class="metric-card">
-                <div class="value neutral">R$ ${(dados.totalPago || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Total Pago</div>
-              </div>
-              <div class="metric-card">
-                <div class="value ${(dados.lucroLiquido || 0) >= 0 ? 'positive' : 'negative'}">R$ ${(dados.lucroLiquido || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-                <div class="label">Lucro Líquido</div>
-              </div>
-            </div>
+            ))}
           </div>
-
-          ${formState.incluirDetalhes && dados.contasReceber && dados.contasReceber.length > 0 ? `
-          <div class="section">
-            <h2>📈 Contas a Receber</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th>Vencimento</th>
-                  <th>Status</th>
-                  <th style="text-align: right;">Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${dados.contasReceber.map((conta: any) => `
-                  <tr>
-                    <td>${conta.descricao || 'Sem descrição'}</td>
-                    <td>${conta.dataVencimento ? new Date(conta.dataVencimento).toLocaleDateString('pt-BR') : 'N/A'}</td>
-                    <td>${conta.status}</td>
-                    <td style="text-align: right; color: #10B981; font-weight: 600;">R$ ${(conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
-
-          ${formState.incluirDetalhes && dados.contasPagar && dados.contasPagar.length > 0 ? `
-          <div class="section">
-            <h2>📉 Contas a Pagar</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th>Vencimento</th>
-                  <th>Status</th>
-                  <th style="text-align: right;">Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${dados.contasPagar.map((conta: any) => `
-                  <tr>
-                    <td>${conta.descricao || 'Sem descrição'}</td>
-                    <td>${conta.dataVencimento ? new Date(conta.dataVencimento).toLocaleDateString('pt-BR') : 'N/A'}</td>
-                    <td>${conta.status}</td>
-                    <td style="text-align: right; color: #EF4444; font-weight: 600;">R$ ${(conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-          ` : ''}
-
-          <div class="footer">
-            <p><strong>S3E Engenharia</strong> - Sistema de Gestão Empresarial Elétrica</p>
-            <p>Relatório gerado automaticamente pelo sistema</p>
-            <p class="no-print" style="margin-top: 20px;">
-              <button onclick="window.print()" style="padding: 12px 24px; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">
-                🖨️ Imprimir / Salvar como PDF
-              </button>
-              <button onclick="window.close()" style="padding: 12px 24px; background: #6B7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; margin-left: 10px;">
-                ✖️ Fechar
-              </button>
+          <div style={{ marginTop: 32, textAlign: 'center', fontSize: 10, color: '#666' }}>
+            <p>
+              <strong>S3E Engenharia</strong> — Sistema de Gestão Empresarial Elétrica
             </p>
           </div>
-        </body>
-        </html>
-      `;
-      
-      relatorioWindow.document.write(html);
-      relatorioWindow.document.close();
-      
-      toast.success('✅ Relatório aberto em nova aba!');
-    } catch (error: any) {
+        </SystemPdfPage>
+      );
+
+      const renderContasTable = (
+        title: string,
+        contas: Conta[],
+        valueColor: string,
+        keyPrefix: string
+      ) => {
+        const chunks = chunkArray(contas, TABLE_ROWS_PER_PAGE);
+        chunks.forEach((chunk, i) => {
+          pageNodes.push(
+            <SystemPdfPage
+              key={`${keyPrefix}-${i}`}
+              folhaTimbradaUrl={letterhead.folhaTimbradaDataUrl}
+              opacidade={letterhead.opacidade}
+              compact
+            >
+              <h2 style={{ fontSize: 14, marginBottom: 10, color: '#1E293B' }}>{title}</h2>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                <thead>
+                  <tr>
+                    {['Descrição', 'Vencimento', 'Status', 'Valor'].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          padding: 8,
+                          textAlign: h === 'Valor' ? 'right' : 'left',
+                          background: '#F3F4F6',
+                          borderBottom: '1px solid #E5E7EB',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {chunk.map((conta, idx) => (
+                    <tr key={`${keyPrefix}-row-${i}-${idx}`}>
+                      <td style={{ padding: 8, borderBottom: '1px solid #E5E7EB' }}>
+                        {conta.descricao || 'Sem descrição'}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: '1px solid #E5E7EB' }}>
+                        {conta.dataVencimento
+                          ? new Date(conta.dataVencimento).toLocaleDateString('pt-BR')
+                          : 'N/A'}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: '1px solid #E5E7EB' }}>{conta.status}</td>
+                      <td
+                        style={{
+                          padding: 8,
+                          borderBottom: '1px solid #E5E7EB',
+                          textAlign: 'right',
+                          color: valueColor,
+                          fontWeight: 600,
+                        }}
+                      >
+                        R$ {fmtMoney(conta.valor)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SystemPdfPage>
+          );
+        });
+      };
+
+      if (formState.incluirDetalhes && dados.contasReceber?.length) {
+        renderContasTable('Contas a Receber', dados.contasReceber, '#10B981', 'receber');
+      }
+      if (formState.incluirDetalhes && dados.contasPagar?.length) {
+        renderContasTable('Contas a Pagar', dados.contasPagar, '#EF4444', 'pagar');
+      }
+
+      const totalPages = pageNodes.length;
+      const numberedPages = pageNodes.map((node, index) => {
+        if (!React.isValidElement(node)) return node;
+        return React.cloneElement(node as React.ReactElement, {
+          pageNumber: index + 1,
+          totalPages,
+        });
+      });
+
+      const { blob, filename } = await renderSystemPdfDocument({
+        filename: `relatorio-financeiro-${formState.dataInicio}-${formState.dataFim}.pdf`,
+        letterhead,
+        document: <>{numberedPages}</>,
+      });
+
+      downloadPdfBlob(blob, filename);
+      toast.success('PDF exportado com sucesso!', { id: 'relatorio-pdf' });
+    } catch (error: unknown) {
       console.error('Erro ao gerar relatório:', error);
-      toast.error('❌ Erro ao gerar relatório');
+      toast.error('Erro ao gerar relatório PDF', { id: 'relatorio-pdf' });
     } finally {
       setGerando(false);
     }

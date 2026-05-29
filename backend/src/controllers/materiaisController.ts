@@ -1376,9 +1376,9 @@ export const atualizarValoresVenda = async (req: Request, res: Response) => {
           const novoValorVenda = roundMoney(material.preco * markup);
           
           // Calcular custos específicos por unidade de medida
-          let valorVendaM = null;
-          let valorVendaCM = null;
-          let custoCM = null;
+          let valorVendaM: number | null = null;
+          let valorVendaCM: number | null = null;
+          let custoCM: number | null = null;
 
           if (material.unidadeMedida === 'M' || material.unidadeMedida === 'KG/M') {
             valorVendaM = novoValorVenda;

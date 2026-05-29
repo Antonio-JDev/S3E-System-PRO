@@ -98,11 +98,18 @@ class AlocacaoService {
   /**
    * Verificar conflitos de alocação antes de criar
    */
-  async verificarConflitos(equipeId: string, dataInicio: string, dataFim: string): Promise<ApiResponse<ConflictCheck>> {
+  async verificarConflitos(
+    equipeId: string,
+    dataInicio: string,
+    dataFim: string,
+    options?: { obraId?: string; tarefaId?: string }
+  ): Promise<ApiResponse<ConflictCheck>> {
     const res = await axiosApiService.get<any>('/api/alocacoes/verificar-conflitos', {
       equipeId,
       dataInicio,
-      dataFim
+      dataFim,
+      ...(options?.obraId ? { obraId: options.obraId } : {}),
+      ...(options?.tarefaId ? { tarefaId: options.tarefaId } : {})
     });
     return this.unwrap<ConflictCheck>(res);
   }

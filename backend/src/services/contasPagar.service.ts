@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { ContaStatus } from '../types/index';
 import { RhService } from './rh.service';
 import { LancamentoFolhaCategoria } from '@prisma/client';
+import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
 
 export interface ContaPagarPayload {
     fornecedorId?: string;
@@ -17,6 +18,8 @@ export interface ContaPagarPayload {
     descontoFolhaReferenciaMes?: number;
     descricao: string;
     valorParcela: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     dataVencimento: Date;
     numeroParcela?: number;
     totalParcelas?: number;
@@ -90,6 +93,8 @@ export class ContasPagarService {
             descontoFolhaReferenciaMes,
             descricao,
             valorParcela,
+            valorJuros,
+            valorDesconto,
             dataVencimento,
             numeroParcela,
             totalParcelas,
@@ -99,10 +104,11 @@ export class ContasPagarService {
 
         const tipoFinal = ((tipo || 'FORNECEDOR') as TipoContaPagar);
 
-        // Validações
-        if (valorParcela <= 0) {
-            throw new Error('Valor da parcela deve ser maior que zero');
-        }
+        const { valorARegistrar } = validarValoresFinanceiros(
+            valorParcela,
+            valorJuros,
+            valorDesconto
+        );
 
         if (tipoFinal === 'FORNECEDOR') {
             const origem = origemCadastro || (fornecedorId ? 'FORNECEDOR_CADASTRADO' : 'FORNECEDOR_NOVO');
@@ -145,7 +151,7 @@ export class ContasPagarService {
                 descontoFolhaReferenciaAno: descontoFolhaReferenciaAno || undefined,
                 descontoFolhaReferenciaMes: descontoFolhaReferenciaMes || undefined,
                 descricao,
-                valorParcela,
+                valorParcela: valorARegistrar,
                 dataVencimento,
                 numeroParcela,
                 totalParcelas,
@@ -460,7 +466,9 @@ export class ContasPagarService {
         dataPagamento?: string | Date,
         valorPago?: number,
         observacoes?: string,
-        meioPagamento?: string
+        meioPagamento?: string,
+        valorJuros?: number,
+        valorDesconto?: number
     ) {
         const conta = await prisma.contaPagar.findUnique({
             where: { id }
@@ -495,10 +503,17 @@ export class ContasPagarService {
             dataPagamentoFinal = new Date();
         }
 
-        // Permitir pagamento com desconto (ex.: funcionário – faltas): persistir valorJuros/valorDesconto
         let valorJurosUpdate: number | undefined;
         let valorDescontoUpdate: number | undefined;
-        if (valorPago != null && typeof valorPago === 'number') {
+        let valorEfetivoPago = valorPago ?? conta.valorParcela;
+
+        if (valorJuros != null || valorDesconto != null) {
+            const base = valorPago != null ? parseMoney(valorPago) : conta.valorParcela;
+            const validado = validarValoresFinanceiros(base, valorJuros, valorDesconto);
+            valorEfetivoPago = validado.valorARegistrar;
+            valorJurosUpdate = validado.valorJuros;
+            valorDescontoUpdate = validado.valorDesconto;
+        } else if (valorPago != null && typeof valorPago === 'number') {
             if (valorPago < conta.valorParcela) {
                 valorDescontoUpdate = conta.valorParcela - valorPago;
             } else if (valorPago > conta.valorParcela) {
@@ -1141,9 +1156,20 @@ export class ContasPagarService {
             throw new Error('Conta a pagar não encontrada');
         }
 
-        // Verificar se a parcela está paga
+        const contaManual = !conta.compraId && !conta.despesaFixaId;
+
+        // ✅ Regra nova: contas manuais podem ser excluídas (sem exigir status Pago)
+        if (contaManual) {
+            await prisma.contaPagar.delete({
+                where: { id }
+            });
+            return { message: 'Conta manual excluída com sucesso' };
+        }
+
+        // Para contas com origem (compra/despesa fixa), manter regra anterior:
+        // só excluir quando estiver paga e a origem tiver sido removida
         if (conta.status !== 'Pago') {
-            throw new Error('Só é possível excluir parcelas que já foram pagas');
+            throw new Error('Só é possível excluir parcelas com origem quando já estiverem pagas');
         }
 
         // Verificar se a origem foi excluída
@@ -1166,8 +1192,6 @@ export class ContasPagarService {
                 throw new Error('Não é possível excluir a parcela: a despesa fixa que gerou esta parcela ainda existe');
             }
         }
-        // Se não tem nem compraId nem despesaFixaId, é uma conta manual e pode excluir se estiver paga
-
         // Excluir a parcela
         await prisma.contaPagar.delete({
             where: { id }

@@ -31,13 +31,25 @@ import {
   Star,
   X,
   LayoutGrid,
-  ClipboardList
+  ClipboardList,
+  Table2
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { dashboardService, type DashboardCompleto } from '../services/dashboardService';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
+import {
+  dashboardService,
+  type DashboardCardsMetricas,
+  type DashboardCompleto,
+} from '../services/dashboardService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { useAuth } from '../hooks/useAuth';
@@ -54,6 +66,7 @@ interface MetricCard {
   change: number;
   icon: React.ReactNode;
   trend: 'up' | 'down';
+  hint?: string;
 }
 
 const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNavigate }) => {
@@ -77,6 +90,18 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const [filtroEstoque, setFiltroEstoque] = useState<'todos' | 'criticos' | 'abaixo-minimo'>('todos');
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [filtroFornecedor, setFiltroFornecedor] = useState<string>('todos');
+  const [cardsMetricas, setCardsMetricas] = useState<DashboardCardsMetricas | null>(null);
+  const [kpiModalOpen, setKpiModalOpen] = useState(false);
+  const [kpiModalLoading, setKpiModalLoading] = useState(false);
+  const [kpiModalData, setKpiModalData] = useState<{
+    titulo?: string;
+    bucket?: string;
+    legenda?: Array<{ kpi: string; significado: string; termoPaginaOs: string }>;
+    resumo?: Record<string, number>;
+    linhas?: Array<Record<string, string | number>>;
+    nota?: string;
+  } | null>(null);
+  const [kpiModalBucket, setKpiModalBucket] = useState('');
   
   // Detectar tema efetivo (igual ao que o ThemeContext aplica no <html>)
   const themeContext = useContext(ThemeContext);
@@ -87,6 +112,40 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   const userName = user?.name?.split(' ')[0] || 'Usuário';
 
   // Carregar dados do dashboard
+  const loadCardsMetricas = async () => {
+    try {
+      const result = await dashboardService.getCardsMetricas();
+      if (result.success && result.data) {
+        setCardsMetricas(result.data);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar métricas dos cards:', err);
+    }
+  };
+
+  const abrirDetalheKpis = async (grafico: string, bucket?: string) => {
+    setKpiModalOpen(true);
+    setKpiModalLoading(true);
+    setKpiModalBucket(bucket || '');
+    setKpiModalData(null);
+    try {
+      const periodoApi =
+        selectedPeriod === 'annual' ? 'annual' : selectedPeriod === 'semester' ? 'semester' : 'monthly';
+      const result = await dashboardService.getDetalheKpis({
+        grafico,
+        periodo: periodoApi,
+        bucket,
+      });
+      if (result.success && result.data) {
+        setKpiModalData(result.data as typeof kpiModalData);
+      }
+    } catch (err) {
+      console.error('Erro ao abrir detalhe KPIs:', err);
+    } finally {
+      setKpiModalLoading(false);
+    }
+  };
+
   const loadDashboardData = async () => {
     try {
       setLoading(true);
@@ -774,12 +833,14 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
   useEffect(() => {
     loadDashboardData();
+    loadCardsMetricas();
     loadQuadrosData('monthly');
     loadMateriaisCriticos();
     loadFornecedores();
 
     const interval = setInterval(() => {
       loadDashboardData();
+      loadCardsMetricas();
       loadMateriaisCriticos();
     }, 5 * 60 * 1000);
 
@@ -815,50 +876,67 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     setPiePedidosActiveIndex(0);
   }, [selectedPeriod, piePedidosPorPeriodo.length]);
 
-  const osEmAndamentoAtual = useMemo(() => {
-    const rows = graficosExec?.evolucaoOrdensServico ?? [];
-    if (!rows.length) return 0;
-    const last = rows[rows.length - 1] as any;
-    const v = Number(last?.emAndamento ?? 0);
-    return Number.isFinite(v) ? v : 0;
-  }, [graficosExec?.evolucaoOrdensServico]);
+  const tendenciaDir = (n: number): 'up' | 'down' => (n >= 0 ? 'up' : 'down');
 
-  // Métricas principais usando dados reais da API
+  // Métricas principais — valores e tendências da API /api/dashboard/cards-metricas
   const metricsData: MetricCard[] = [
     {
       title: 'Obras Ativas',
-      value: dashboardData?.estatisticas?.projetos?.ativos?.toString() || '0',
-      change: 28.4,
+      value: (
+        cardsMetricas?.obrasAtivas.valor ??
+        dashboardData?.estatisticas?.projetos?.ativos ??
+        0
+      ).toString(),
+      change: cardsMetricas?.obrasAtivas.tendencia ?? 0,
       icon: <Building2 className="w-5 h-5" />,
-      trend: 'up'
+      trend: tendenciaDir(cardsMetricas?.obrasAtivas.tendencia ?? 0),
+      hint: 'OS com status Em Execução',
     },
     {
       title: 'OS em andamento',
-      value: osEmAndamentoAtual.toString(),
-      change: 0,
+      value: (cardsMetricas?.osEmAndamento.valor ?? 0).toString(),
+      change: cardsMetricas?.osEmAndamento.tendencia ?? 0,
       icon: <ClipboardList className="w-5 h-5" />,
-      trend: 'up'
+      trend: tendenciaDir(cardsMetricas?.osEmAndamento.tendencia ?? 0),
+      hint: cardsMetricas?.osEmAndamento.descricao ?? 'Progresso entre 1% e 99% (barra da OS)',
     },
     {
       title: 'Equipes Ativas',
-      value: dashboardData?.estatisticas?.equipes?.ativas?.toString() || '0',
-      change: -12.6,
+      value: (
+        cardsMetricas?.equipesAtivas.valor ??
+        dashboardData?.estatisticas?.equipes?.ativas ??
+        0
+      ).toString(),
+      change: cardsMetricas?.equipesAtivas.tendencia ?? 0,
       icon: <Users className="w-5 h-5" />,
-      trend: 'down'
+      trend: tendenciaDir(cardsMetricas?.equipesAtivas.tendencia ?? 0),
     },
     {
-      title: 'Quadros Produzidos',
-      value: (quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0)).toString(),
-      change: 3.1,
+      title: 'Quadros produzidos',
+      value: (
+        cardsMetricas?.quadrosProduzidos.valor ??
+        quadrosData.reduce((sum, item) => sum + (item.producao || 0), 0)
+      ).toString(),
+      change: cardsMetricas?.quadrosProduzidos.tendencia ?? 0,
       icon: <Zap className="w-5 h-5" />,
-      trend: 'up'
+      trend: tendenciaDir(cardsMetricas?.quadrosProduzidos.tendencia ?? 0),
+      hint:
+        cardsMetricas?.quadrosProduzidos.fonte ??
+        'OS criadas no mês com Quadro/Painel no título',
     },
     {
-      title: 'Clientes Ativos',
-      value: dashboardData?.estatisticas?.clientes?.ativos?.toString() || '0',
-      change: 11.3,
+      title: 'Clientes atendidos',
+      value: (
+        cardsMetricas?.clientesAtendidos.valor ??
+        dashboardData?.estatisticas?.clientes?.ativos ??
+        0
+      ).toString(),
+      change: cardsMetricas?.clientesAtendidos.tendencia ?? 0,
       icon: <Star className="w-5 h-5" />,
-      trend: 'up'
+      trend: tendenciaDir(cardsMetricas?.clientesAtendidos.tendencia ?? 0),
+      hint:
+        cardsMetricas?.clientesAtendidos.descricao ??
+        'Clientes com orçamento aprovado',
     },
   ];
 
@@ -932,10 +1010,109 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
               <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
                 {metric.title}
               </p>
+              {metric.hint ? (
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-tight" title={metric.hint}>
+                  {metric.hint.length > 72 ? `${metric.hint.slice(0, 72)}…` : metric.hint}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      <Dialog open={kpiModalOpen} onOpenChange={setKpiModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{kpiModalData?.titulo ?? 'Detalhamento dos KPIs'}</DialogTitle>
+            <DialogDescription>
+              {kpiModalData?.nota ??
+                'Termos alinhados à página Ordem de Serviços. Período dos gráficos: '}
+              {kpiModalBucket ? ` · Recorte: ${kpiModalBucket}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {kpiModalLoading ? (
+            <p className="text-sm text-gray-500 py-8 text-center">Carregando…</p>
+          ) : kpiModalData ? (
+            <div className="space-y-4">
+              {kpiModalData.legenda && kpiModalData.legenda.length > 0 && (
+                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 dark:bg-slate-800">
+                      <tr>
+                        <th className="text-left p-2 font-semibold">KPI no gráfico</th>
+                        <th className="text-left p-2 font-semibold">Significado</th>
+                        <th className="text-left p-2 font-semibold">Na página OS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kpiModalData.legenda.map((row) => (
+                        <tr key={row.kpi} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="p-2 font-medium">{row.kpi}</td>
+                          <td className="p-2 text-gray-600 dark:text-gray-300">{row.significado}</td>
+                          <td className="p-2 text-gray-600 dark:text-gray-300">{row.termoPaginaOs}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {kpiModalData.resumo && (
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {[
+                    ['concluido', 'Concluído'],
+                    ['comProgresso', 'Com progresso'],
+                    ['aguardando', 'Aguardando (0%)'],
+                    ['proposta', 'Proposta'],
+                    ['validado', 'Validado'],
+                    ['aprovado', 'Aprovado'],
+                    ['emExecucao', 'Em Execução'],
+                  ].map(([key, label]) => {
+                    const v = (kpiModalData.resumo as Record<string, number>)[key];
+                    if (typeof v !== 'number') return null;
+                    return (
+                      <Badge key={key} variant="outline" className="font-mono">
+                        {label}: {v}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+              {kpiModalData.linhas && kpiModalData.linhas.length > 0 && (
+                <div className="overflow-x-auto max-h-[50vh] rounded-lg border border-gray-200 dark:border-dark-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 dark:bg-slate-800 sticky top-0">
+                      <tr>
+                        <th className="text-left p-2">OS</th>
+                        <th className="text-left p-2">Título</th>
+                        <th className="text-left p-2">Status (página)</th>
+                        <th className="text-right p-2">Progresso</th>
+                        <th className="text-left p-2">No gráfico</th>
+                        <th className="text-left p-2">Criado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kpiModalData.linhas.map((linha, i) => (
+                        <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                          <td className="p-2 font-mono">{linha.os}</td>
+                          <td className="p-2 max-w-[200px] truncate" title={String(linha.titulo)}>
+                            {linha.titulo}
+                          </td>
+                          <td className="p-2">{linha.statusPagina}</td>
+                          <td className="p-2 text-right font-mono">{linha.progressoPct}%</td>
+                          <td className="p-2">{linha.classificacaoGrafico}</td>
+                          <td className="p-2 whitespace-nowrap">{linha.criadoEm}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">Nenhum dado disponível.</p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Painel analítico — período global */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -958,8 +1135,24 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Evolução de orçamentos</CardTitle>
-            <CardDescription>Criados, aprovados e em análise (por data de criação)</CardDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg">Evolução de orçamentos</CardTitle>
+                <CardDescription>Criados, aprovados e em análise (por data de criação)</CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1 text-xs"
+                onClick={() => void abrirDetalheKpis('orcamentos')}
+                disabled
+                title="Em breve"
+              >
+                <Table2 className="w-3.5 h-3.5" />
+                KPIs
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={240}>
@@ -992,12 +1185,35 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Evolução de ordens de serviço</CardTitle>
-            <CardDescription>Projetos / OS por status (cadastro no período)</CardDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg">Evolução de ordens de serviço</CardTitle>
+                <CardDescription>
+                  OS criadas no período — Concluído, Com progresso (barra 1–99%) e Aguardando (0%)
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1 text-xs"
+                onClick={() => void abrirDetalheKpis('ordens-servico')}
+              >
+                <Table2 className="w-3.5 h-3.5" />
+                Ver KPIs
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={graficosExec?.evolucaoOrdensServico ?? []} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+              <LineChart
+                data={graficosExec?.evolucaoOrdensServico ?? []}
+                margin={{ top: 20, right: 8, left: 0, bottom: 0 }}
+                onClick={(state) => {
+                  const label = (state as { activeLabel?: string })?.activeLabel;
+                  if (label) void abrirDetalheKpis('ordens-servico', String(label));
+                }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
                 <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
                 <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
@@ -1010,18 +1226,18 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="concluidas" name="Concluídas" stroke="#8B5CF6" strokeWidth={2.5} dot={{ r: 4, fill: '#8B5CF6' }} activeDot={{ r: 6 }}>
+                <Line type="monotone" dataKey="concluido" name="Concluído" stroke="#8B5CF6" strokeWidth={2.5} dot={{ r: 4, fill: '#8B5CF6' }} activeDot={{ r: 6 }}>
                   <LabelList
-                    dataKey="concluidas"
+                    dataKey="concluido"
                     position="top"
                     fontSize={10}
                     fill={isDark ? '#E2E8F0' : '#475569'}
                     formatter={(v: number) => (v > 0 ? v : '')}
                   />
                 </Line>
-                <Line type="monotone" dataKey="emAndamento" name="Em andamento" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3, fill: '#3B82F6' }}>
+                <Line type="monotone" dataKey="comProgresso" name="Com progresso (1–99%)" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3, fill: '#3B82F6' }}>
                   <LabelList
-                    dataKey="emAndamento"
+                    dataKey="comProgresso"
                     position="top"
                     offset={12}
                     fontSize={10}
@@ -1029,9 +1245,9 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     formatter={(v: number) => (v > 0 ? v : '')}
                   />
                 </Line>
-                <Line type="monotone" dataKey="planejadas" name="Planejamento" stroke="#10B981" strokeWidth={2} dot={{ r: 3, fill: '#10B981' }}>
+                <Line type="monotone" dataKey="aguardando" name="Aguardando (0%)" stroke="#10B981" strokeWidth={2} dot={{ r: 3, fill: '#10B981' }}>
                   <LabelList
-                    dataKey="planejadas"
+                    dataKey="aguardando"
                     position="top"
                     offset={24}
                     fontSize={10}
@@ -1046,8 +1262,16 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Evolução de obras (Kanban)</CardTitle>
-            <CardDescription>Obras de campo por status (cadastro no período)</CardDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <CardTitle className="text-lg">Evolução de obras (Kanban)</CardTitle>
+                <CardDescription>Obras de campo por status (cadastro no período)</CardDescription>
+              </div>
+              <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1 text-xs" disabled title="Em breve">
+                <Table2 className="w-3.5 h-3.5" />
+                KPIs
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={260}>

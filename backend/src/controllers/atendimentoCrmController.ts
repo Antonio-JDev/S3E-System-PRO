@@ -69,6 +69,16 @@ function normalizeAnexosUrls(lead: {
 
 export type ContatoLeadStatus = 'AGUARDANDO_DOCUMENTO' | 'EM_ANALISE_TECNICA' | 'PRONTO_PARA_ORCAR' | 'NAO_ATENDE' | 'CONVERTIDO';
 
+const leadListInclude = {
+  cliente: { select: { id: true, nome: true, cpfCnpj: true } },
+  _count: { select: { orcamentos: true } },
+  orcamentos: {
+    select: { numeroSequencial: true },
+    orderBy: { numeroSequencial: 'desc' as const },
+    take: 1,
+  },
+};
+
 export async function list(req: Request, res: Response): Promise<void> {
   try {
     const { status, etapa } = req.query;
@@ -78,10 +88,7 @@ export async function list(req: Request, res: Response): Promise<void> {
 
     const leads = await prisma.contatoLead.findMany({
       where,
-      include: {
-        cliente: { select: { id: true, nome: true, cpfCnpj: true } },
-        _count: { select: { orcamentos: true } },
-      },
+      include: leadListInclude,
       orderBy: { updatedAt: 'desc' },
     });
     res.json({ success: true, data: leads });
@@ -96,10 +103,7 @@ export async function getById(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
     const lead = await prisma.contatoLead.findUnique({
       where: { id },
-      include: {
-        cliente: { select: { id: true, nome: true, cpfCnpj: true } },
-        _count: { select: { orcamentos: true } },
-      },
+      include: leadListInclude,
     });
     if (!lead) {
       res.status(404).json({ success: false, error: 'Lead não encontrado' });
@@ -183,6 +187,31 @@ export async function update(req: Request, res: Response): Promise<void> {
       cidade?: string;
       estado?: string;
     };
+    const existing = await prisma.contatoLead.findUnique({
+      where: { id },
+      include: { _count: { select: { orcamentos: true } } },
+    });
+    if (!existing) {
+      res.status(404).json({ success: false, error: 'Lead não encontrado' });
+      return;
+    }
+
+    let statusToSave = body.status as ContatoLeadStatus | undefined;
+    let etapaToSave = body.etapa;
+    const temOrcamento = (existing._count?.orcamentos ?? 0) > 0;
+    if (
+      temOrcamento &&
+      statusToSave !== undefined &&
+      statusToSave !== 'CONVERTIDO' &&
+      statusToSave !== 'NAO_ATENDE'
+    ) {
+      statusToSave = 'CONVERTIDO';
+      etapaToSave = Math.max(Number(existing.etapa) || 3, Number(etapaToSave) || 3, 3);
+    }
+    if (existing.status === 'CONVERTIDO' && statusToSave !== undefined && statusToSave !== 'CONVERTIDO' && statusToSave !== 'NAO_ATENDE') {
+      statusToSave = 'CONVERTIDO';
+    }
+
     const lead = await prisma.contatoLead.update({
       where: { id },
       data: {
@@ -196,8 +225,8 @@ export async function update(req: Request, res: Response): Promise<void> {
         ...(body.viabilidadeTecnica !== undefined && { viabilidadeTecnica: body.viabilidadeTecnica }),
         ...(body.condicoesNaoAtender !== undefined && { condicoesNaoAtender: body.condicoesNaoAtender?.trim() || null }),
         ...(body.observacoes !== undefined && { observacoes: body.observacoes?.trim() || null }),
-        ...(body.status !== undefined && { status: body.status as ContatoLeadStatus }),
-        ...(body.etapa !== undefined && { etapa: Number(body.etapa) }),
+        ...(statusToSave !== undefined && { status: statusToSave }),
+        ...(etapaToSave !== undefined && { etapa: Number(etapaToSave) }),
         ...(body.clienteId !== undefined && { clienteId: body.clienteId || null }),
         ...(body.logradouro !== undefined && { logradouro: body.logradouro?.trim() || null }),
         ...(body.numero !== undefined && { numero: body.numero?.trim() || null }),
@@ -205,7 +234,8 @@ export async function update(req: Request, res: Response): Promise<void> {
         ...(body.cep !== undefined && { cep: body.cep?.trim() || null }),
         ...(body.cidade !== undefined && { cidade: body.cidade?.trim() || null }),
         ...(body.estado !== undefined && { estado: body.estado?.trim() || null })
-      }
+      },
+      include: leadListInclude,
     });
     res.json({ success: true, data: lead });
   } catch (e: any) {

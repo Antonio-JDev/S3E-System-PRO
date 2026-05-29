@@ -1,13 +1,27 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus } from '../types/index';
+import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
 
 export interface CriarContaReceberManualPayload {
   tipo: 'ENTRADA' | 'OUTRAS_RECEITAS';
   pagadorNome?: string;
   descricao: string;
   valorParcela: number;
+  valorJuros?: number;
+  valorDesconto?: number;
   dataVencimento: Date;
   observacoes?: string;
+}
+
+export interface AtualizarContaReceberPayload {
+  tipo?: 'ENTRADA' | 'OUTRAS_RECEITAS';
+  pagadorNome?: string | null;
+  descricao?: string;
+  valorParcela?: number;
+  valorJuros?: number;
+  valorDesconto?: number;
+  dataVencimento?: Date;
+  observacoes?: string | null;
 }
 
 export class ContasReceberService {
@@ -15,18 +29,21 @@ export class ContasReceberService {
    * Cria uma conta a receber manual (receita não vinculada a venda)
    */
   static async criarContaReceberManual(data: CriarContaReceberManualPayload) {
-    const { tipo, pagadorNome, descricao, valorParcela, dataVencimento, observacoes } = data;
-
-    if (valorParcela <= 0) {
-      throw new Error('Valor deve ser maior que zero');
-    }
+    const { tipo, pagadorNome, descricao, dataVencimento, observacoes } = data;
+    const { valorJuros, valorDesconto, valorARegistrar } = validarValoresFinanceiros(
+      data.valorParcela,
+      data.valorJuros,
+      data.valorDesconto
+    );
 
     const createData = {
         vendaId: null,
         tipo,
         pagadorNome: pagadorNome || null,
         descricao,
-        valorParcela,
+        valorParcela: valorARegistrar,
+        valorJuros: valorJuros > 0 ? valorJuros : null,
+        valorDesconto: valorDesconto > 0 ? valorDesconto : null,
         dataVencimento,
         observacoes: observacoes || null,
         status: ContaStatus.Pendente,
@@ -91,5 +108,59 @@ export class ContasReceberService {
       },
       recebimentos
     };
+  }
+
+  static async atualizarContaReceber(id: string, payload: AtualizarContaReceberPayload) {
+    const conta = await prisma.contaReceber.findUnique({ where: { id } });
+    if (!conta) {
+      throw new Error('Conta a receber não encontrada');
+    }
+
+    // Evita inconsistências com contas originadas de venda
+    if (conta.vendaId) {
+      throw new Error('Não é permitido editar conta vinculada a venda');
+    }
+
+    const dataUpdate: any = {
+      updatedAt: new Date()
+    };
+
+    if (payload.tipo !== undefined) dataUpdate.tipo = payload.tipo;
+    if (payload.pagadorNome !== undefined) dataUpdate.pagadorNome = payload.pagadorNome || null;
+    if (payload.descricao !== undefined) dataUpdate.descricao = payload.descricao;
+    if (payload.observacoes !== undefined) dataUpdate.observacoes = payload.observacoes || null;
+    if (payload.dataVencimento !== undefined) dataUpdate.dataVencimento = payload.dataVencimento;
+    if (payload.valorParcela !== undefined) {
+      const juros = payload.valorJuros !== undefined ? parseMoney(payload.valorJuros) : parseMoney((conta as any).valorJuros);
+      const desconto = payload.valorDesconto !== undefined ? parseMoney(payload.valorDesconto) : parseMoney((conta as any).valorDesconto);
+      const { valorARegistrar, valorJuros: j, valorDesconto: d } = validarValoresFinanceiros(
+        payload.valorParcela,
+        juros,
+        desconto
+      );
+      dataUpdate.valorParcela = valorARegistrar;
+      dataUpdate.valorJuros = j > 0 ? j : null;
+      dataUpdate.valorDesconto = d > 0 ? d : null;
+    }
+
+    return prisma.contaReceber.update({
+      where: { id },
+      data: dataUpdate
+    });
+  }
+
+  static async excluirContaReceber(id: string) {
+    const conta = await prisma.contaReceber.findUnique({ where: { id } });
+    if (!conta) {
+      throw new Error('Conta a receber não encontrada');
+    }
+
+    // Evita apagar registros financeiros de vendas
+    if (conta.vendaId) {
+      throw new Error('Não é permitido excluir conta vinculada a venda');
+    }
+
+    await prisma.contaReceber.delete({ where: { id } });
+    return { message: 'Conta a receber excluída com sucesso' };
   }
 }

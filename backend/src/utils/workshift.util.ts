@@ -19,6 +19,7 @@ export const WORK_SHIFT_TEMPLATES_44H: WorkShiftTemplate[] = [
   { nome: '44h - 07:00/12:12/17:00', entrada1: '07:00', saida1: '12:12', entrada2: '12:12', saida2: '17:00' },
   { nome: '44h - 07:15/11:45/17:18', entrada1: '07:15', saida1: '11:45', entrada2: '13:00', saida2: '17:18' },
   { nome: '44h - 07:30/12:00/17:18', entrada1: '07:30', saida1: '12:00', entrada2: '13:00', saida2: '17:18' },
+  { nome: '44h - 07:30/12:00/17:30', entrada1: '07:30', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
   { nome: '44h - 07:30/12:00/17:48', entrada1: '07:30', saida1: '12:00', entrada2: '13:30', saida2: '17:48' },
   { nome: '44h - 07:42/12:00/17:30', entrada1: '07:42', saida1: '12:00', entrada2: '13:00', saida2: '17:30' },
   { nome: '44h - 07:42/12:00/18:00', entrada1: '07:42', saida1: '12:00', entrada2: '13:30', saida2: '18:00' },

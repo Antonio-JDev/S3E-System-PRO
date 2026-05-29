@@ -55,6 +55,11 @@ export const isAdmin = (user: User | null | undefined): boolean => {
   return role === 'admin' || role === 'administrador';
 };
 
+/** Admin ou desenvolvedor — regressão manual de status de orçamento. */
+export const canRegredirOrcamentoStatus = (user: User | null | undefined): boolean => {
+  return isAdmin(user) || isDeveloper(user);
+};
+
 /**
  * Verifica se o usuário tem uma permissão específica
  * @param user - Usuário a verificar

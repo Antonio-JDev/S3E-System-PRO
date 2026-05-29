@@ -8,9 +8,6 @@ echo "📦 Versão da aplicação: $(node -e "console.log(require('./package.jso
 echo "🗄️  Executando migrações do banco..."
 npx prisma migrate deploy
 
-echo "🌱 Executando seed do banco..."
-npx tsx prisma/seed.ts
-
 echo "✅ Setup concluído com sucesso!"
 echo "🎯 Iniciando aplicação Node.js..."
 exec node dist/app.js

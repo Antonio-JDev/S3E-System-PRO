@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { isProtectedAccount } from '../utils/userProtection.util';
 
 export interface ConfiguracaoData {
   temaPreferido?: string; // 'light' | 'dark' | 'system'
@@ -8,6 +9,7 @@ export interface ConfiguracaoData {
   nomeEmpresa?: string;
   emailContato?: string;
   telefoneContato?: string;
+  portfolioUrl?: string;
   multiplicadorVenda?: number; // legado
   percentualImpostoPadrao?: number; // legado
   aliquotaImpostoPadrao?: number; // Alíquota % sobre valor de venda (DAS), default 8
@@ -22,6 +24,9 @@ export interface UsuarioFiltros {
 }
 
 export class ConfiguracaoService {
+  private isDeveloperRole(role?: string | null): boolean {
+    return String(role || '').toLowerCase() === 'desenvolvedor';
+  }
   private normalizeMesReferencia(mes?: string): string {
     const d = new Date();
     const y = d.getFullYear();
@@ -147,6 +152,7 @@ export class ConfiguracaoService {
           nomeEmpresa: nomeEmpresaNormalized,
           emailContato: data.emailContato,
           telefoneContato: data.telefoneContato,
+          portfolioUrl: data.portfolioUrl,
           multiplicadorVenda: data.multiplicadorVenda ?? data.markupFabricante ?? 1.55,
           percentualImpostoPadrao: data.percentualImpostoPadrao ?? data.aliquotaImpostoPadrao ?? 8,
           aliquotaImpostoPadrao: data.aliquotaImpostoPadrao ?? 8,
@@ -194,6 +200,7 @@ export class ConfiguracaoService {
           email: true,
           role: true,
           isAdmin: true,
+          contaProtegida: true,
           active: true,
           createdAt: true,
           updatedAt: true
@@ -223,6 +230,14 @@ export class ConfiguracaoService {
       
       if (!rolesPermitidos.includes(newRole)) {
         throw new Error(`Role inválido: ${newRole}. Permitidos: ${rolesPermitidos.join(', ')}`);
+      }
+
+      const atual = await prisma.user.findUnique({ where: { id: userId } });
+      if (!atual) {
+        throw new Error('Usuário não encontrado');
+      }
+      if (isProtectedAccount(atual)) {
+        throw new Error('Conta protegida do sistema — função não pode ser alterada');
       }
 
       const usuario = await prisma.user.update({
@@ -255,6 +270,14 @@ export class ConfiguracaoService {
    */
   async toggleUsuarioStatus(userId: string, active: boolean) {
     try {
+      const atual = await prisma.user.findUnique({ where: { id: userId } });
+      if (!atual) {
+        throw new Error('Usuário não encontrado');
+      }
+      if (isProtectedAccount(atual)) {
+        throw new Error('Conta protegida do sistema — status não pode ser alterado');
+      }
+
       const usuario = await prisma.user.update({
         where: { id: userId },
         data: { 
@@ -284,6 +307,14 @@ export class ConfiguracaoService {
    * Atualiza o flag isAdmin de um usuário (acesso a módulo Financeiro e todos os módulos)
    */
   async atualizarUsuarioIsAdmin(userId: string, isAdmin: boolean) {
+    const atual = await prisma.user.findUnique({ where: { id: userId } });
+    if (!atual) {
+      throw new Error('Usuário não encontrado');
+    }
+    if (isProtectedAccount(atual)) {
+      throw new Error('Conta protegida do sistema — permissão de admin não pode ser alterada');
+    }
+
     const usuario = await prisma.user.update({
       where: { id: userId },
       data: { isAdmin, updatedAt: new Date() },
@@ -372,6 +403,10 @@ export class ConfiguracaoService {
 
       if (!usuario) {
         throw new Error('Usuário não encontrado');
+      }
+
+      if (isProtectedAccount(usuario)) {
+        throw new Error('Conta protegida do sistema — não pode ser excluída');
       }
 
       // Não permitir que o usuário exclua a si mesmo (proteção adicional)

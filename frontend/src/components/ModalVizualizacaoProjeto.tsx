@@ -27,6 +27,13 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import UserSearchMultiSelect from './ui/UserSearchMultiSelect';
+import {
+  agregarItensFaltantesParaCompra,
+  montarPresetCompraAvulsaOs,
+} from '../utils/compraAvulsaFaltantes';
+import KitComposicaoDisponibilidadeModal, {
+  type ComposicaoDisponibilidadeData,
+} from './KitComposicaoDisponibilidadeModal';
 
 type ProjetoStatus = 'PROPOSTA' | 'VALIDADO' | 'APROVADO' | 'EXECUCAO' | 'CONCLUIDO';
 
@@ -195,6 +202,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   
   // IDs/keys de nós de kit que foram expandidos na aba Materiais (suporta kit raiz e kits aninhados)
   const [kitsDesunificados, setKitsDesunificados] = useState<Set<string>>(new Set());
+  const [kitDispCache, setKitDispCache] = useState<Record<string, ComposicaoDisponibilidadeData>>({});
+  const [kitComposicaoModal, setKitComposicaoModal] = useState<{
+    open: boolean;
+    loading: boolean;
+    data: ComposicaoDisponibilidadeData | null;
+  }>({ open: false, loading: false, data: null });
   const [modalVinculacaoOpen, setModalVinculacaoOpen] = useState(false);
   const [itemParaVincular, setItemParaVincular] = useState<OrcamentoItemRef | null>(null);
   const [parentKitParaVinculacao, setParentKitParaVinculacao] = useState<OrcamentoItemRef | null>(null); // Para sub-itens de kit unificado
@@ -410,6 +423,9 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         // Se houver obra vinculada, carregar materiais alocados e atualizar estado
         if (obraVinculada?.id) {
           await carregarMateriaisAlocados(obraVinculada.id);
+        }
+        if (activeTab === 'Materiais') {
+          void prefetchKitsDisponibilidade(items as OrcamentoItemRef[]);
         }
       }
     } catch (error) {
@@ -712,13 +728,80 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     });
   };
 
+  const cacheKeyKitDisp = (kitId: string, qtd: number, orcamentoItemId?: string) =>
+    orcamentoItemId ? `item:${orcamentoItemId}` : `kit:${kitId}:${qtd}`;
+
+  const fetchKitDisponibilidade = async (
+    kitId: string,
+    quantidade: number,
+    orcamentoItemId?: string,
+  ): Promise<ComposicaoDisponibilidadeData | null> => {
+    const key = cacheKeyKitDisp(kitId, quantidade, orcamentoItemId);
+    if (kitDispCache[key]) return kitDispCache[key];
+    try {
+      let data: ComposicaoDisponibilidadeData | null = null;
+      if (orcamentoItemId && projeto.id) {
+        const r = await axiosApiService.get<ComposicaoDisponibilidadeData>(
+          `/api/projetos/${projeto.id}/bom/itens/${orcamentoItemId}/kit-disponibilidade`,
+        );
+        if (r.success && r.data) data = r.data as ComposicaoDisponibilidadeData;
+      }
+      if (!data) {
+        const r = await axiosApiService.get<ComposicaoDisponibilidadeData>(
+          `/api/kits/${kitId}/composicao-disponibilidade?quantidade=${quantidade}`,
+        );
+        if (r.success && r.data) data = r.data as ComposicaoDisponibilidadeData;
+      }
+      if (data) {
+        setKitDispCache((prev) => ({ ...prev, [key]: data }));
+      }
+      return data;
+    } catch (e) {
+      console.error('Erro ao verificar kit:', e);
+      return null;
+    }
+  };
+
+  const prefetchKitsDisponibilidade = async (itensSource?: OrcamentoItemRef[]) => {
+    const itens = (itensSource ||
+      orcamentoCompleto?.items ||
+      projeto.orcamento?.items ||
+      []) as OrcamentoItemRef[];
+    const jobs: Promise<void>[] = [];
+    for (const item of itens) {
+      if ((item.tipo || '').toUpperCase() !== 'KIT' || !item.kitId) continue;
+      const qtd = Number(item.quantidade) || 1;
+      jobs.push(
+        fetchKitDisponibilidade(item.kitId, qtd, item.id).then(() => undefined),
+      );
+      const subs = Array.isArray((item as any).itensDoKit) ? (item as any).itensDoKit : [];
+      for (const sub of subs) {
+        if (sub?.kitId && String(sub.tipo || '').toUpperCase() === 'KIT') {
+          jobs.push(fetchKitDisponibilidade(sub.kitId, Number(sub.quantidade) || 1).then(() => undefined));
+        }
+      }
+    }
+    await Promise.allSettled(jobs);
+  };
+
+  const abrirComposicaoKit = async (
+    kitId: string,
+    quantidade: number,
+    orcamentoItemId?: string,
+  ) => {
+    setKitComposicaoModal({ open: true, loading: true, data: null });
+    const data = await fetchKitDisponibilidade(kitId, quantidade, orcamentoItemId);
+    setKitComposicaoModal({ open: true, loading: false, data });
+  };
+
   // Itens planos para exibição: expande kits (unificado e catálogo) desunificados; serviços não contam estoque e não entram no PDF
   const itensParaExibicao = useMemo(() => {
     const itens = (orcamentoCompleto?.items || projeto.orcamento?.items || []) as OrcamentoItemRef[];
     const resultado: Array<{ item: OrcamentoItemRef & { material?: MaterialRef | null; cotacao?: CotacaoRef | null }; isSubItem: boolean; parentKit?: OrcamentoItemRef; isFirstSubItem?: boolean; itensDoKitIndex?: number; expandKey?: string }> = [];
 
     const ehKitUnificado = (i: OrcamentoItemRef) => (i.tipo || '').toUpperCase() === 'KIT' && !i.kitId && (i as any).itensDoKit && Array.isArray((i as any).itensDoKit) && (i as any).itensDoKit.length > 0;
-    const ehKitCatalogo = (i: OrcamentoItemRef) => (i.tipo || '').toUpperCase() === 'KIT' && !!(i as any).kitId && (i as any).kit?.items?.length > 0;
+    const ehKitCatalogo = (i: OrcamentoItemRef) =>
+      (i.tipo || '').toUpperCase() === 'KIT' && !!(i as any).kitId;
 
     for (const item of itens) {
       const desunificadoUnificado = ehKitUnificado(item) && kitsDesunificados.has(item.id);
@@ -860,6 +943,35 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       return nome.includes(termo) || sku.includes(termo) || ncm.includes(termo);
     });
   }, [itensParaExibicao, buscaMateriaisAba]);
+
+  function handleComprarFaltantes() {
+    const items = agregarItensFaltantesParaCompra(kitDispCache, itensParaExibicao, {
+      vinculacoesBancoFrio,
+      materiaisEstoque,
+    });
+
+    if (items.length === 0) {
+      toast.info('Nenhum item pendente', {
+        description: 'Todos os materiais estão com estoque suficiente.',
+      });
+      return;
+    }
+
+    const numeroOS = (projeto as any).orcamento?.numeroSequencial;
+    const preset = montarPresetCompraAvulsaOs({
+      projetoId: projeto.id,
+      projetoTitulo: projeto.titulo,
+      clienteNome: projeto.cliente?.nome,
+      numeroSequencial: numeroOS,
+      items,
+    });
+
+    sessionStorage.setItem('s3e_compra_avulsa_preset', JSON.stringify(preset));
+    window.dispatchEvent(new CustomEvent('s3e-navigate-compras-avulsa'));
+    toast.success('Abrindo compra avulsa', {
+      description: `${items.length} item(ns) sugeridos para esta OS.`,
+    });
+  }
 
   // Gerar PDF com lista de itens com estoque insuficiente (para solicitação de compra)
   async function handleGerarPDFItensFaltantes() {
@@ -2328,6 +2440,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     Materiais do Projeto (BOM)
                   </h3>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleComprarFaltantes}
+                    className="px-4 py-2 bg-orange-600 text-white font-semibold rounded-xl hover:bg-orange-700 transition-all flex items-center gap-2"
+                  >
+                    Comprar faltantes
+                  </button>
                   <button 
                     onClick={handleGerarPDFItensFaltantes}
                     className="px-4 py-2 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700 transition-all flex items-center gap-2"
@@ -2381,11 +2500,22 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                       ) : itensFiltradosPorBusca.map((row, idx) => {
                         const item = row.item;
                         const ehKitUnificadoItem = !row.isSubItem && (item.tipo || '').toUpperCase() === 'KIT' && !item.kitId && (item as any).itensDoKit && Array.isArray((item as any).itensDoKit);
-                        const ehKitCatalogoItem = !row.isSubItem && (item.tipo || '').toUpperCase() === 'KIT' && !!(item as any).kitId && (item as any).kit?.items?.length > 0;
-                        const ehKitCatalogoSubItem = row.isSubItem && (item.tipo || '').toUpperCase() === 'KIT' && !!(item as any).kitId;
+                        const ehKitCatalogoItem =
+                          !row.isSubItem &&
+                          (item.tipo || '').toUpperCase() === 'KIT' &&
+                          !!(item as any).kitId;
+                        const ehKitCatalogoSubItem =
+                          row.isSubItem &&
+                          (item.tipo || '').toUpperCase() === 'KIT' &&
+                          !!(item as any).kitId;
+                        const kitIdCatalogo = (item as any).kitId as string | undefined;
 
                         const nodeKey = (row as any).expandKey || item.id;
-                        const mostrarBotaoDesunificar = (ehKitUnificadoItem || ehKitCatalogoItem || ehKitCatalogoSubItem) && !kitsDesunificados.has(nodeKey);
+                        const kitExpanded = kitsDesunificados.has(nodeKey);
+                        const mostrarBotaoDesunificar =
+                          (ehKitUnificadoItem || ehKitCatalogoItem || ehKitCatalogoSubItem) &&
+                          !kitExpanded;
+                        const mostrarBotaoComposicao = !!(kitIdCatalogo && !kitExpanded);
                         const mostrarBotaoUnificar = row.isSubItem && row.isFirstSubItem && row.parentKit;
 
                         // Identificar tipo do item
@@ -2409,34 +2539,57 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         const estoqueFormatado = estoqueDisponivel.toLocaleString('pt-BR', { minimumFractionDigits: Number.isInteger(estoqueDisponivel) ? 0 : 2 });
 
                         const isKit = (item.tipo || '').toUpperCase() === 'KIT';
-                        const kitExpanded = kitsDesunificados.has(nodeKey);
 
-                        // Para kit recolhido, validar pela composição (worst-case)
                         let possuiEstoqueKit: boolean | null = null;
-                        if (isKit && !kitExpanded) {
-                          const composicao = Array.isArray((item as any).itensDoKit) ? ((item as any).itensDoKit as any[]) : null;
+                        let kitDispInfo: ComposicaoDisponibilidadeData | null = null;
+                        if (isKit && !kitExpanded && kitIdCatalogo) {
+                          const dispKey = cacheKeyKitDisp(
+                            kitIdCatalogo,
+                            quantidadeNecessaria || 1,
+                            row.isSubItem ? undefined : item.id,
+                          );
+                          kitDispInfo = kitDispCache[dispKey] ?? null;
+                          if (kitDispInfo) {
+                            possuiEstoqueKit = kitDispInfo.completo;
+                          }
+                        }
+                        if (isKit && !kitExpanded && possuiEstoqueKit == null) {
+                          const composicao = Array.isArray((item as any).itensDoKit)
+                            ? ((item as any).itensDoKit as any[])
+                            : null;
                           if (composicao && composicao.length > 0) {
                             const multKit = Number(item.quantidade ?? 1);
                             let ok = true;
                             for (const sub of composicao) {
                               const tipoSub = String(sub?.tipo || '').toUpperCase();
-                              const ehServicoSub = tipoSub === 'SERVICO' || !!sub?.servicoId;
-                              if (ehServicoSub) continue;
-
+                              if (tipoSub === 'SERVICO' || !!sub?.servicoId) continue;
+                              const subKitId = sub?.kitId as string | undefined;
+                              if (subKitId) {
+                                const subKey = cacheKeyKitDisp(subKitId, Number(sub.quantidade) || 1);
+                                const subDisp = kitDispCache[subKey];
+                                if (subDisp && !subDisp.completo) {
+                                  ok = false;
+                                  break;
+                                }
+                                if (subDisp?.completo) continue;
+                              }
                               const qtdNec = Number(sub?.quantidade ?? 0) * multKit;
                               if (!(qtdNec > 0)) continue;
-
                               const isBancoFrioSub = tipoSub === 'COTACAO' || !!sub?.cotacaoId;
-                              const materialVinculadoIdSub = (sub?.materialVinculadoId as string | null | undefined) || null;
+                              const materialVinculadoIdSub =
+                                (sub?.materialVinculadoId as string | null | undefined) || null;
                               const materialIdSub = (sub?.materialId as string | null | undefined) || null;
-
-                              const materialVinculadoSub = materialVinculadoIdSub ? materiaisEstoque.find(m => m.id === materialVinculadoIdSub) : null;
-                              const materialSub = materialIdSub ? materiaisEstoque.find(m => m.id === materialIdSub) : null;
-
+                              const materialVinculadoSub = materialVinculadoIdSub
+                                ? materiaisEstoque.find((m) => m.id === materialVinculadoIdSub)
+                                : null;
+                              const materialSub = materialIdSub
+                                ? materiaisEstoque.find((m) => m.id === materialIdSub)
+                                : null;
                               const estoqueSub = isBancoFrioSub
-                                ? (materialVinculadoSub ? Number(materialVinculadoSub.estoque ?? 0) : 0)
+                                ? materialVinculadoSub
+                                  ? Number(materialVinculadoSub.estoque ?? 0)
+                                  : 0
                                 : Number(materialSub?.estoque ?? 0);
-
                               if (estoqueSub < qtdNec) {
                                 ok = false;
                                 break;
@@ -2492,18 +2645,34 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                             <td className="px-6 py-4 text-sm text-gray-900 dark:text-white font-semibold align-top">
                               <div className="flex items-start justify-between gap-2">
                                 <span>{nomeMaterial}</span>
-                                {mostrarBotaoDesunificar && (
-                                  <button
-                                    onClick={() => toggleKitDesunificado(nodeKey)}
-                                    className="shrink-0 px-3 py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1"
-                                    title="Desunificar para ver os itens individuais e fazer baixa de estoque"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-                                    </svg>
-                                    Desunificar
-                                  </button>
-                                )}
+                                <div className="flex flex-col gap-1 shrink-0">
+                                  {mostrarBotaoComposicao && kitIdCatalogo && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void abrirComposicaoKit(
+                                          kitIdCatalogo,
+                                          quantidadeNecessaria || 1,
+                                          row.isSubItem ? undefined : item.id,
+                                        )
+                                      }
+                                      className="px-3 py-1.5 bg-teal-600 text-white text-xs font-semibold rounded-lg hover:bg-teal-700 transition-all"
+                                      title="Ver composição completa do kit do catálogo"
+                                    >
+                                      Ver composição
+                                    </button>
+                                  )}
+                                  {mostrarBotaoDesunificar && (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleKitDesunificado(nodeKey)}
+                                      className="px-3 py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1"
+                                      title="Desunificar para ver os itens individuais na tabela"
+                                    >
+                                      Desunificar
+                                    </button>
+                                  )}
+                                </div>
                                 {mostrarBotaoUnificar && row.parentKit && (
                                   <button
                                     onClick={() => toggleKitDesunificado(row.parentKit!.id)}
@@ -2616,8 +2785,29 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                     </p>
                                   )}
                                 </div>
+                              ) : isKit && !kitExpanded && kitIdCatalogo ? (
+                                <div className="space-y-1">
+                                  <div
+                                    className={`flex items-center gap-2 font-semibold ${
+                                      possuiEstoque
+                                        ? 'text-green-600 dark:text-green-400'
+                                        : 'text-red-600 dark:text-red-400'
+                                    }`}
+                                  >
+                                    {possuiEstoque ? '✅ Kit completo' : '⚠️ Kit incompleto'}
+                                  </div>
+                                  {!possuiEstoque && (
+                                    <p className="text-xs text-red-500 dark:text-red-300">
+                                      Abra &quot;Ver composição&quot; para ver itens em falta (estoque / banco frio).
+                                    </p>
+                                  )}
+                                  {kitDispInfo && kitDispInfo.faltantes.length > 0 && (
+                                    <p className="text-xs text-gray-500">
+                                      {kitDispInfo.faltantes.length} item(ns) pendente(s)
+                                    </p>
+                                  )}
+                                </div>
                               ) : (
-                                // Material normal - verificação padrão de estoque
                                 <div>
                                   <div className={`flex items-center gap-2 font-semibold ${possuiEstoque ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                                     {possuiEstoque ? '✅ Em estoque' : '⚠️ Comprar / receber'}
@@ -4010,6 +4200,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         )}
 
       </div>
+
+      <KitComposicaoDisponibilidadeModal
+        open={kitComposicaoModal.open}
+        onClose={() => setKitComposicaoModal({ open: false, loading: false, data: null })}
+        loading={kitComposicaoModal.loading}
+        data={kitComposicaoModal.data}
+      />
     </div>
   );
 };
