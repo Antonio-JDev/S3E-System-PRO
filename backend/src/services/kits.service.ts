@@ -47,6 +47,27 @@ export interface KitUpdateInput {
 }
 
 export class KitsService {
+    /** Banco frio = cotações em itensFaltantes; serviços não contam. */
+    static deriveTemItensCotacao(itensFaltantes: any[] | null | undefined): boolean {
+        if (!itensFaltantes?.length) return false;
+        return itensFaltantes.some((i) => String(i?.tipo || 'COTACAO').toUpperCase() === 'COTACAO');
+    }
+
+    private static parseItensFaltantesRaw(raw: unknown): any[] {
+        if (!raw) return [];
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === 'string') {
+            try {
+                const parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+            } catch {
+                return [];
+            }
+        }
+        if (typeof raw === 'object') return [raw];
+        return [];
+    }
+
     private static kitIncludeBase = {
         items: {
             include: {
@@ -98,26 +119,11 @@ export class KitsService {
 
         // Processar itensFaltantes para cada kit (garantir que seja sempre um array)
         return kits.map(kit => {
-            let itensFaltantesProcessados: any[] = [];
-            if (kit.itensFaltantes) {
-                if (typeof kit.itensFaltantes === 'string') {
-                    try {
-                        const parsed = JSON.parse(kit.itensFaltantes);
-                        itensFaltantesProcessados = Array.isArray(parsed) ? parsed : [parsed];
-                    } catch (e) {
-                        console.error('Erro ao fazer parse de itensFaltantes:', e);
-                        itensFaltantesProcessados = [];
-                    }
-                } else if (Array.isArray(kit.itensFaltantes)) {
-                    itensFaltantesProcessados = kit.itensFaltantes;
-                } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
-                    itensFaltantesProcessados = [kit.itensFaltantes];
-                }
-            }
-            
+            const itensFaltantesProcessados = this.parseItensFaltantesRaw(kit.itensFaltantes);
             return {
                 ...kit,
-                itensFaltantes: itensFaltantesProcessados
+                itensFaltantes: itensFaltantesProcessados,
+                temItensCotacao: this.deriveTemItensCotacao(itensFaltantesProcessados),
             };
         });
     }
@@ -143,31 +149,15 @@ export class KitsService {
             
             // Garantir que itensFaltantes seja sempre um array
             // O Prisma retorna JSON como objeto JavaScript, mas pode ser null
-            let itensFaltantesProcessados: any[] = [];
-            if (kit.itensFaltantes) {
-                if (typeof kit.itensFaltantes === 'string') {
-                    try {
-                        const parsed = JSON.parse(kit.itensFaltantes);
-                        itensFaltantesProcessados = Array.isArray(parsed) ? parsed : [parsed];
-                    } catch (e) {
-                        console.error('Erro ao fazer parse de itensFaltantes:', e);
-                        itensFaltantesProcessados = [];
-                    }
-                } else if (Array.isArray(kit.itensFaltantes)) {
-                    itensFaltantesProcessados = kit.itensFaltantes;
-                } else if (typeof kit.itensFaltantes === 'object' && kit.itensFaltantes !== null) {
-                    // Se for um objeto único, converter para array
-                    itensFaltantesProcessados = [kit.itensFaltantes];
-                }
-            }
+            const itensFaltantesProcessados = this.parseItensFaltantesRaw(kit.itensFaltantes);
             
             console.log(`   - ItensFaltantes (processed):`, itensFaltantesProcessados);
             console.log(`   - ItensFaltantes (length):`, itensFaltantesProcessados.length);
             
-            // Retornar kit com itensFaltantes processado como array
             return {
                 ...kit,
-                itensFaltantes: itensFaltantesProcessados
+                itensFaltantes: itensFaltantesProcessados,
+                temItensCotacao: this.deriveTemItensCotacao(itensFaltantesProcessados),
             };
         }
 
@@ -247,8 +237,8 @@ export class KitsService {
         // IMPORTANTE: statusEstoque deve ser calculado apenas baseado em itens de estoque real
         // Cotações não afetam o statusEstoque - serão validadas apenas na ordem de serviço quando vinculadas
         // Serviços não afetam o status de estoque - não provêm de estoque
-        const temItensBancoFrio = itensBancoFrio && itensBancoFrio.some(i => i.tipo === 'COTACAO');
         const temServicos = itensBancoFrio && itensBancoFrio.some(i => i.tipo === 'SERVICO');
+        const temItensCotacaoDerivado = (itensBancoFrio || []).some(i => i.tipo === 'COTACAO');
         
         // Validar estoque apenas para itens de estoque real (não cotações, não serviços)
         // Por enquanto, não validamos estoque ao criar kit - apenas salvamos
@@ -274,7 +264,7 @@ export class KitsService {
                 descricao,
                 tipo,
                 preco: roundMoney(preco),
-                temItensCotacao: temItensCotacao || false,
+                temItensCotacao: temItensCotacaoDerivado,
                 // Salvar itens do banco frio E serviços como JSON para referência (valores com 2 decimais)
                 itensFaltantes: todosItensExtras.length > 0 ? JSON.parse(JSON.stringify(todosItensExtras)) : null,
                 statusEstoque: statusEstoque, // Apenas informativo, não bloqueia criação
@@ -337,12 +327,11 @@ export class KitsService {
                 ...(tipo !== undefined && { tipo }),
                 ...(preco !== undefined && { preco: roundMoney(preco) }),
                 ...(ativo !== undefined && { ativo }),
-                ...(temItensCotacao !== undefined && { temItensCotacao }),
-                ...(itensBancoFrio !== undefined && { 
-                    // itensFaltantes com precoUnit sempre 2 decimais
+                ...(itensBancoFrio !== undefined && {
+                    temItensCotacao: KitsService.deriveTemItensCotacao(itensBancoFrio),
                     itensFaltantes: itensBancoFrio.length > 0
                         ? JSON.parse(JSON.stringify(itensBancoFrio.map((i: any) => ({ ...i, precoUnit: roundMoney(i.precoUnit ?? 0) }))))
-                        : null 
+                        : null,
                 }),
                 ...((itensBancoFrio !== undefined || items !== undefined) && {
                     // statusEstoque deve ser calculado apenas baseado em itens de estoque real

@@ -191,11 +191,16 @@ export async function updateLabel(
 
 export async function deleteLabel(
   id: string,
-  userId: string,
-  opts?: LabelMutationOptions
+  userId: string
 ): Promise<boolean> {
-  const existing = await findLabelMutable(id, userId, opts);
+  // Regra de negócio: somente o criador pode excluir a lista
+  // (incluindo listas globais "para todos").
+  const existing = await prisma.whatsappChatLabel.findUnique({
+    where: { id },
+    include: { memberships: true }
+  });
   if (!existing) return false;
+  if (existing.userId !== userId) return false;
   await prisma.whatsappChatLabel.delete({ where: { id } });
   return true;
 }

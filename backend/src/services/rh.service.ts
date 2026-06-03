@@ -25,6 +25,12 @@ import { minutosMeiaNoiteBrasilia, splitMinutosJornadaSegSex } from '../utils/au
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
 import { decomporExcessoBancoHoras } from '../utils/banco-horas-excesso.util';
 import { calculateMonthlyTotal } from '../utils/workshift.util';
+import {
+  aplicarClassificacaoNosMinutos,
+  minutosAbonadosParaHorasTrabalhadas,
+  parseClassificacaoJustificativa,
+  type ClassificacaoJustificativaPonto,
+} from '../utils/justificativaPonto.util';
 
 interface CalcularFolhaMesParams {
   funcionarioId: string;
@@ -62,6 +68,7 @@ export interface ConferenciaPontoDia {
   justificativaParcial?: {
     id: string;
     tipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+    classificacao: ClassificacaoJustificativaPonto;
     horaInicio: string | null;
     horaFim: string | null;
     descricao: string | null;
@@ -75,6 +82,10 @@ export interface ConferenciaPontoDia {
   intervaloAlmocoInicio?: string | null;
   /** Intervalo de almoço explícito (manual), formato "HH:mm" */
   intervaloAlmocoFim?: string | null;
+  /** Observação do responsável RH (motivo, parecer aprovar/reprovar) */
+  comentarioRh?: string | null;
+  /** Decisão do RH sobre o dia (justificativa/falta); PENDENTE até revisão */
+  decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
 }
 
 export interface FolhaMesResumo {
@@ -243,6 +254,14 @@ export const RhService = {
           },
           include: { dias: true },
         },
+        comentariosConferenciaPonto: {
+          where: {
+            dataReferencia: {
+              gte: inicio,
+              lte: fim,
+            },
+          },
+        },
       },
     });
 
@@ -350,6 +369,7 @@ export const RhService = {
           chaveDiaUtc(o.dataReferencia),
           {
             id: o.id,
+            status: o.status,
             descricao: o.descricao ?? null,
             documentoAnexoUrl: (o as { documentoAnexoUrl?: string | null }).documentoAnexoUrl ?? null,
             documentoAnexoNome: (o as { documentoAnexoNome?: string | null }).documentoAnexoNome ?? null,
@@ -358,14 +378,6 @@ export const RhService = {
     );
     const faltasJustificadasSet = new Set(faltasJustificadasMap.keys());
 
-    const hhmmToMin = (hhmm: string | null | undefined): number => {
-      const m = String(hhmm ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
-      if (!m) return 0;
-      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-    };
-    const intervaloMin = (ini: string | null, fim: string | null): number =>
-      Math.max(0, hhmmToMin(fim) - hhmmToMin(ini));
-
     const justificativasParciaisMap = new Map(
       ocorrenciasRh
         .filter((o) => (o as any).tipo === ('JUSTIFICATIVA_PARCIAL' as any) && o.status !== 'REPROVADO')
@@ -373,7 +385,9 @@ export const RhService = {
           chaveDiaUtc(o.dataReferencia),
           {
             id: o.id,
+            status: o.status,
             tipo: String((o as any).justificativaTipo ?? '') as 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA',
+            classificacao: parseClassificacaoJustificativa((o as any).classificacaoJustificativa),
             horaInicio: ((o as any).horaInicio ?? null) as string | null,
             horaFim: ((o as any).horaFim ?? null) as string | null,
             descricao: o.descricao ?? null,
@@ -392,6 +406,16 @@ export const RhService = {
     );
     const compensacaoMap = new Map(
       compensacaoDias.map((d) => [d.key, d] as const),
+    );
+
+    const comentariosRhMap = new Map(
+      (funcionario.comentariosConferenciaPonto ?? []).map((c) => [
+        chaveDiaUtc(c.dataReferencia),
+        {
+          comentario: c.comentario ?? null,
+          decisaoRh: c.decisaoRh,
+        },
+      ]),
     );
 
     let valorHoraBase = 0;
@@ -639,6 +663,13 @@ export const RhService = {
       const faltaJustificada = faltasJustificadasSet.has(chave);
       const faltaInfo = faltasJustificadasMap.get(chave);
       const justParcial = justificativasParciaisMap.get(chave) ?? null;
+      const minutosAbonoHoras = justParcial
+        ? minutosAbonadosParaHorasTrabalhadas({
+            classificacao: justParcial.classificacao,
+            horaInicio: justParcial.horaInicio,
+            horaFim: justParcial.horaFim,
+          })
+        : 0;
 
       let situacao: SituacaoPontoDia = 'Sem registro';
       if (reg) {
@@ -647,16 +678,40 @@ export const RhService = {
         } else if (faltaJustificada) {
           situacao = 'OK';
         } else {
-          const minTrab = Number((reg as { minutosTrabalhados?: number }).minutosTrabalhados ?? 0);
+          const minTrab =
+            Number((reg as { minutosTrabalhados?: number }).minutosTrabalhados ?? 0) +
+            minutosAbonoHoras;
           const meta = minutosPrevistosDia;
           situacao = minTrab >= meta ? 'OK' : 'OK_PARCIAL';
         }
       } else if (faltaJustificada) {
         situacao = 'OK';
+      } else if (!reg && justParcial && minutosAbonoHoras > 0) {
+        situacao = minutosAbonoHoras >= minutosPrevistosDia ? 'OK' : 'OK_PARCIAL';
       }
       const compDia = compensacaoMap.get(chave);
+      const comentarioDia = comentariosRhMap.get(chave);
+      const decisaoOcorrencia =
+        justParcial != null
+          ? justParcial.status
+          : faltaJustificada && faltaInfo
+            ? faltaInfo.status
+            : null;
+      const decisaoRh =
+        comentarioDia?.decisaoRh ??
+        (decisaoOcorrencia === 'PENDENTE' ||
+        decisaoOcorrencia === 'APROVADO_RH' ||
+        decisaoOcorrencia === 'REPROVADO'
+          ? decisaoOcorrencia
+          : null);
       if (!reg && !ehFds && !ehFer && !faltaJustificada) {
-        minutosFaltaSemRegistro += Math.max(0, minutosPrevistosDia);
+        if (justParcial?.classificacao === 'ABONAR' && minutosAbonoHoras >= minutosPrevistosDia) {
+          /* falta do dia abonada integralmente */
+        } else if (justParcial?.classificacao === 'ABONAR' && minutosAbonoHoras > 0) {
+          minutosFaltaSemRegistro += Math.max(0, minutosPrevistosDia - minutosAbonoHoras);
+        } else {
+          minutosFaltaSemRegistro += Math.max(0, minutosPrevistosDia);
+        }
       }
 
       let batidasDia: string[] = [];
@@ -680,7 +735,12 @@ export const RhService = {
         ehFeriado: ehFer,
         nomeFeriado: nomeFer,
         temRegistro: !!reg,
-        horasLiquidas: reg ? reg.horasNormais + reg.horasExtras50 + reg.horasExtras100 : 0,
+        horasLiquidas: reg
+          ? reg.horasNormais +
+            reg.horasExtras50 +
+            reg.horasExtras100 +
+            minutosAbonoHoras / 60
+          : minutosAbonoHoras / 60,
         entrada: reg ? formatHoraBrasilia(reg.entrada) : null,
         saida: reg ? formatHoraBrasilia(reg.saida) : null,
         batidas: batidasDia,
@@ -688,14 +748,29 @@ export const RhService = {
         statusConsistencia: reg?.statusConsistencia ?? null,
         situacao,
         minutosAtraso: (() => {
-          const bruto = reg && !ehFer ? Number((reg as any).minutosAtraso ?? 0) : 0;
-          if (justParcial?.tipo !== 'ENTRADA_ATRASADA') return bruto;
-          return Math.max(0, bruto - intervaloMin(justParcial.horaInicio, justParcial.horaFim));
+          const bruto = reg && !ehFer && !ehFds ? Number((reg as any).minutosAtraso ?? 0) : 0;
+          if (!justParcial) return bruto;
+          return aplicarClassificacaoNosMinutos({
+            bruto,
+            campo: 'ATRASO',
+            justificativaTipo: justParcial.tipo,
+            classificacao: justParcial.classificacao,
+            horaInicio: justParcial.horaInicio,
+            horaFim: justParcial.horaFim,
+          });
         })(),
         minutosHorasDevidas: (() => {
-          const bruto = reg && !ehFer ? Number((reg as any).minutosHorasDevidas ?? 0) : 0;
-          if (justParcial?.tipo !== 'SAIDA_ANTECIPADA') return bruto;
-          return Math.max(0, bruto - intervaloMin(justParcial.horaInicio, justParcial.horaFim));
+          const bruto =
+            reg && !ehFer && !ehFds ? Number((reg as any).minutosHorasDevidas ?? 0) : 0;
+          if (!justParcial) return bruto;
+          return aplicarClassificacaoNosMinutos({
+            bruto,
+            campo: 'SAIDA',
+            justificativaTipo: justParcial.tipo,
+            classificacao: justParcial.classificacao,
+            horaInicio: justParcial.horaInicio,
+            horaFim: justParcial.horaFim,
+          });
         })(),
         minutosExtra20: reg ? Number((reg as any).minutosExtra20 ?? 0) : 0,
         faltaJustificada,
@@ -707,6 +782,7 @@ export const RhService = {
           ? {
             id: justParcial.id,
             tipo: justParcial.tipo,
+            classificacao: justParcial.classificacao,
             horaInicio: justParcial.horaInicio,
             horaFim: justParcial.horaFim,
             descricao: justParcial.descricao,
@@ -719,6 +795,8 @@ export const RhService = {
         compensacaoDiaId: compDia?.id ?? null,
         intervaloAlmocoInicio: reg ? (reg as any).intervaloAlmocoInicio ?? null : null,
         intervaloAlmocoFim: reg ? (reg as any).intervaloAlmocoFim ?? null : null,
+        comentarioRh: comentarioDia?.comentario ?? null,
+        decisaoRh,
       });
     }
 
@@ -744,7 +822,10 @@ export const RhService = {
       .filter((d) => !d.ehFimDeSemana && !d.ehFeriado && !d.faltaJustificada && !d.temRegistro)
       .map((d) => ({ dia: d.dia, diaSemanaLabel: d.diaSemanaLabel }));
     const diasFaltados = diasFaltadosDetalhe.length;
-    const horasTrabalhadas = conferenciaPonto.reduce((sum, d) => sum + (d.temRegistro ? d.horasLiquidas : 0), 0);
+    const horasTrabalhadas = conferenciaPonto.reduce(
+      (sum, d) => sum + (d.temRegistro || d.horasLiquidas > 0 ? d.horasLiquidas : 0),
+      0,
+    );
 
     const totalSemBonusDescontos =
       funcionario.tipoContrato === TipoContratoFuncionario.REGISTRADO

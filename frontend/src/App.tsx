@@ -42,7 +42,7 @@ const ClientesAPI = lazy(() => import('./components/ClientesAPI'));
 const ClientesModerno = lazy(() => import('./components/ClientesModerno'));
 const Projetos = lazy(() => import('./components/Projetos'));
 const ProjetosAPI = lazy(() => import('./components/ProjetosAPI'));
-const ProjetosModerno = lazy(() => import('./components/ProjetosModerno'));
+const OrdemServicosHub = lazy(() => import('./components/OrdemServicosHub'));
 const Obras = lazy(() => import('./components/Obras'));
 const Servicos = lazy(() => import('./components/Servicos'));
 const Financeiro = lazy(() => import('./components/Financeiro'));
@@ -56,6 +56,7 @@ const DetalhesTarefaInterna = lazy(() => import('./pages/DetalhesTarefaInterna')
 const FunilAtendimentoPage = lazy(() => import('./pages/FunilAtendimentoPage'));
 const WhatsAppChatPage = lazy(() => import('./pages/WhatsAppChatPage'));
 const ContatosS3ePage = lazy(() => import('./pages/ContatosS3ePage'));
+const DocumentacaoSistemaPage = lazy(() => import('./pages/DocumentacaoSistemaPage'));
 
 /** Error boundary para a área principal: evita tela branca se um módulo lazy quebrar */
 class MainContentErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -186,6 +187,8 @@ const MainApp: React.FC = () => {
       } else {
         setActiveView('Tarefas Internas');
       }
+    } else if (pathname === '/documentacao-sistema') {
+      setActiveView('Documentação API');
     } else if (pathname === '/' || pathname === '') {
       setActiveView('Dashboard');
     }
@@ -195,7 +198,14 @@ const MainApp: React.FC = () => {
     setIsSidebarOpen(!isSidebarOpen);
   };
   
+  const navigate = useNavigate();
+
   const handleNavigate = (view: string, ...args: any[]) => {
+    if (view === 'Documentação API') {
+      navigate('/documentacao-sistema');
+      if (window.innerWidth < 1024) setIsSidebarOpen(false);
+      return;
+    }
     if (view === 'Chat WhatsApp' && typeof args[0] === 'string' && args[0].length > 0 && typeof args[1] === 'string') {
       setInitialWhatsappChat({ chatId: args[0], title: args[1] });
     }
@@ -340,7 +350,7 @@ const MainApp: React.FC = () => {
           <TarefasInternasKanban toggleSidebar={toggleSidebar} onNavigate={handleNavigate} onViewTarefaInterna={handleViewTarefaInterna} />
         );
       case 'Ordem De Serviços':
-        return <ProjetosModerno 
+        return <OrdemServicosHub 
                  toggleSidebar={toggleSidebar} 
                  onNavigate={handleNavigate}
                  onViewBudget={handleViewBudget}
@@ -561,6 +571,16 @@ const App: React.FC = () => {
                   <ProtectedRoute>
                     <StandalonePageWrapper activeView="Orçamentos">
                       <EditarOrcamentoPage toggleSidebar={() => {}} />
+                    </StandalonePageWrapper>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/documentacao-sistema"
+                element={
+                  <ProtectedRoute>
+                    <StandalonePageWrapper activeView="Documentação API">
+                      <DocumentacaoSistemaPage />
                     </StandalonePageWrapper>
                   </ProtectedRoute>
                 }

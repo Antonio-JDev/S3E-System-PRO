@@ -121,8 +121,11 @@ function extractEngineMediaHints(raw: Record<string, unknown>): {
   if (topType === 'ptt' || topType === 'audio' || topType === 'voice') {
     out.mediaType = 'audio';
     out.mediaMimetype = 'audio/ogg';
-  } else if (topType === 'image' || topType === 'sticker') {
+  } else if (topType === 'image') {
     out.mediaType = 'image';
+  } else if (topType === 'sticker') {
+    out.mediaType = 'sticker';
+    out.mediaMimetype = out.mediaMimetype || 'image/webp';
   } else if (topType === 'video') {
     out.mediaType = 'video';
   } else if (topType === 'document') {
@@ -139,7 +142,10 @@ function extractEngineMediaHints(raw: Record<string, unknown>): {
   }
   const m = message as Record<string, unknown>;
 
-  const pick = (node: Record<string, unknown> | undefined, kind: 'audio' | 'image' | 'video' | 'document'): void => {
+  const pick = (
+    node: Record<string, unknown> | undefined,
+    kind: 'audio' | 'image' | 'video' | 'document' | 'sticker'
+  ): void => {
     if (!node || typeof node !== 'object') return;
     const url = node.url;
     if (typeof url === 'string' && url.length > 0) out.mediaUrl = url;
@@ -162,7 +168,8 @@ function extractEngineMediaHints(raw: Record<string, unknown>): {
   } else if (m.documentMessage && typeof m.documentMessage === 'object') {
     pick(m.documentMessage as Record<string, unknown>, 'document');
   } else if (m.stickerMessage && typeof m.stickerMessage === 'object') {
-    pick(m.stickerMessage as Record<string, unknown>, 'image');
+    pick(m.stickerMessage as Record<string, unknown>, 'sticker');
+    out.mediaMimetype = out.mediaMimetype || 'image/webp';
   }
 
   return out;

@@ -80,12 +80,18 @@ import brasilApiNcmRoutes from './routes/brasilApiNcm.routes';
 import webhooksRoutes from './routes/webhooks.routes';
 import whatsappRoutes from './routes/whatsapp.routes';
 import contatosS3eRoutes from './routes/contatosS3e.routes';
+import docsRoutes from './routes/docs.routes';
+import { registerApiDocumentation } from './swagger/setupSwagger';
 import { healthCheck } from './controllers/logsController';
 import { setSocketServer } from './lib/socket';
 import { verifyToken } from './services/jwt.service';
+import { auditLogger, auditUnhandledError } from './middlewares/auditLogger';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// IP real do cliente atrás de nginx/Traefik (x-forwarded-for)
+app.set('trust proxy', process.env.TRUST_PROXY === 'false' ? false : 1);
 
 // Tentativa segura de garantir colunas/índices esperados pela migration "add_audit_logs".
 // Não faz alterações destrutivas: apenas cria colunas/indexes se não existirem.
@@ -96,15 +102,23 @@ const PORT = process.env.PORT || 3001;
     const statements = [
       `CREATE EXTENSION IF NOT EXISTS "pgcrypto"`,
       `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS user_id uuid`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS user_name text`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS user_role text`,
       `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS entity_id text`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS ip_address text`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS user_agent text`,
       `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS chain_id text`,
       `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS created_at timestamptz`,
+      `ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS previous_hash text`,
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)`,
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`,
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity)`,
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_entityid ON audit_logs(entity, entity_id)`,
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_chain_id ON audit_logs(chain_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)`,
+      `ALTER TABLE IF EXISTS recebimentos_parciais ADD COLUMN IF NOT EXISTS "valorDiferenca" DOUBLE PRECISION`,
+      `ALTER TABLE IF EXISTS recebimentos_parciais ADD COLUMN IF NOT EXISTS "motivoDiferenca" TEXT`,
+      `ALTER TABLE IF EXISTS contas_receber ADD COLUMN IF NOT EXISTS "valorDiferenca" DOUBLE PRECISION`,
     ];
 
     for (const stmt of statements) {
@@ -189,6 +203,7 @@ app.use(helmet({
 }));
 app.use(cors(corsOptions));
 app.use(morgan('dev'));
+app.use(auditLogger);
 
 // ROTA DELETE: Deletar logos (DEVE VIR ANTES da rota GET para ter prioridade)
 // Esta rota requer autenticação de admin
@@ -335,23 +350,33 @@ const uploadRoutes = [
   '/api/whatsapp/send-file', // Multipart envio WhatsApp (multer)
 ];
 
+const API_JSON_LIMIT = process.env.API_JSON_LIMIT || '50mb';
+const WEBHOOK_JSON_LIMIT = process.env.WEBHOOK_JSON_LIMIT || '100mb';
+
+// Webhooks ANTES do parser global — Evolution/EvoGo envia JSON grande (mídia em base64)
+app.use(
+  '/api/webhooks',
+  express.json({ limit: WEBHOOK_JSON_LIMIT }),
+  webhooksRoutes
+);
+
 // Body parsers COM EXCEÇÃO para rotas de upload (apenas se for multipart/form-data)
 app.use((req, res, next) => {
-  // Verificar se a rota está na lista de uploads
+  if (req.path.startsWith('/api/webhooks')) {
+    return next();
+  }
+
   const isUploadRoute = uploadRoutes.some(route => req.url.includes(route.split('/api')[1]));
-  
-  // Se for rota de upload E o Content-Type for multipart/form-data, pula body parsers
-  // Caso contrário, aplica body parsers normalmente (para JSON, etc)
+
   const contentType = req.headers['content-type'] || '';
   if (isUploadRoute && contentType.includes('multipart/form-data')) {
     console.log(`⚠️  PULANDO body parsers para rota de upload (multipart): ${req.url}`);
     return next();
   }
-  
-  // Aplica body parsers normalmente (para JSON e outros tipos)
-  express.json({ limit: '50mb' })(req, res, (err) => {
+
+  express.json({ limit: API_JSON_LIMIT })(req, res, (err) => {
     if (err) return next(err);
-    express.urlencoded({ extended: true, limit: '50mb' })(req, res, next);
+    express.urlencoded({ extended: true, limit: API_JSON_LIMIT })(req, res, next);
   });
 });
 
@@ -359,8 +384,9 @@ app.use((req, res, next) => {
 app.get('/api/health', healthCheck);
 app.get('/health', healthCheck);
 
-// Webhooks públicos (provedor WhatsApp → backend; opcional X-Webhook-Secret)
-app.use('/api/webhooks', webhooksRoutes);
+// Documentação OpenAPI / Swagger (público para leitura do spec; rotas da API exigem JWT)
+registerApiDocumentation(app);
+app.use('/api/docs', docsRoutes);
 
 // API routes
 app.get('/api', (_req, res) => {
@@ -515,8 +541,13 @@ app.use('/api/movimentacoes-caixa', movimentacoesCaixaRoutes);
 app.use('/api/external/receita', receitaRoutes);
 
 // Error handling middleware
-app.use((err: Error & { type?: string; status?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { type?: string; status?: number }, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err.stack || err);
+  try {
+    auditUnhandledError(req, err);
+  } catch (auditErr) {
+    console.warn('Falha ao registrar erro na auditoria:', auditErr);
+  }
   if (err.type === 'entity.too.large' || err.status === 413) {
     res.status(413).json({
       success: false,

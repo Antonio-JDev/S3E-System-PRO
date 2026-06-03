@@ -81,10 +81,15 @@ ps: ## Listar containers em execução
 stats: ## Mostrar estatísticas dos containers
 	docker stats
 
-backup: ## Fazer backup do banco de dados
+backup: ## Fazer backup do banco de dados (dev)
 	@mkdir -p ./backups
 	@docker-compose exec -T postgres pg_dump -U s3e_user s3e_db > ./backups/backup_$$(date +%Y%m%d_%H%M%S).sql
 	@echo "$(GREEN)Backup criado em ./backups/$(NC)"
+
+backup-prod: ## Backup produção (script cron — TrueNAS)
+	@chmod +x ./backups/backup_cron.sh 2>/dev/null || true
+	@./backups/backup_cron.sh
+	@echo "$(GREEN)Ver logs em ./backups/backup.log$(NC)"
 
 restore: ## Restaurar backup do banco de dados (use BACKUP_FILE=nome_do_arquivo)
 	@docker-compose exec -T postgres psql -U s3e_user -d s3e_db < $(BACKUP_FILE)

@@ -7,7 +7,14 @@ import { AuthContext } from '../contexts/AuthContext';
 import { getUploadUrl } from '../config/api';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
-import { calcValorARegistrar, calcValorBaseFromEfetivo, formatBRL, parseMoney } from '../utils/financeiroValor';
+import {
+    calcEntradaCaixaComDiferenca,
+    calcValorARegistrar,
+    calcValorBaseFromEfetivo,
+    formatBRL,
+    parseMoney,
+} from '../utils/financeiroValor';
+import ParcelasVendaAuditoriaTable from './financeiro/ParcelasVendaAuditoriaTable';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -200,6 +207,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [descontoBaixa, setDescontoBaixa] = useState('0');
     const [observacoesBaixa, setObservacoesBaixa] = useState('');
     const [meioPagamentoBaixa, setMeioPagamentoBaixa] = useState<string>('PIX');
+    const [receberComDiferencaBaixa, setReceberComDiferencaBaixa] = useState(false);
+    const [valorDiferencaBaixa, setValorDiferencaBaixa] = useState('0');
+    const [motivoDiferencaBaixa, setMotivoDiferencaBaixa] = useState('Retenção de imposto');
     
     // Modal de Visualização de Venda (usando o mesmo formato do componente Vendas)
     const [isVisualizarModalOpen, setIsVisualizarModalOpen] = useState(false);
@@ -491,6 +501,9 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setDataPagamento(new Date().toISOString().split('T')[0]);
         setObservacoesBaixa('');
         setMeioPagamentoBaixa('PIX');
+        setReceberComDiferencaBaixa(false);
+        setValorDiferencaBaixa('0');
+        setMotivoDiferencaBaixa('Retenção de imposto');
         setIsBaixaModalOpen(true);
     };
 
@@ -501,12 +514,22 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setJurosBaixa('0');
         setDescontoBaixa('0');
         setObservacoesBaixa('');
+        setReceberComDiferencaBaixa(false);
+        setValorDiferencaBaixa('0');
+        setMotivoDiferencaBaixa('Retenção de imposto');
     };
 
-    const valorARegistrarBaixa = useMemo(
-        () => calcValorARegistrar(valorRecebido, jurosBaixa, descontoBaixa),
-        [valorRecebido, jurosBaixa, descontoBaixa]
-    );
+    const saldoRestanteBaixa = useMemo(() => {
+        if (!contaSelecionada) return 0;
+        return Math.max(0, contaSelecionada.valor - (contaSelecionada.valorRecebido || 0));
+    }, [contaSelecionada]);
+
+    const valorARegistrarBaixa = useMemo(() => {
+        if (receberComDiferencaBaixa) {
+            return parseMoney(valorRecebido);
+        }
+        return calcValorARegistrar(valorRecebido, jurosBaixa, descontoBaixa);
+    }, [receberComDiferencaBaixa, valorRecebido, jurosBaixa, descontoBaixa]);
 
     const valorARegistrarNovaConta = useMemo(
         () => calcValorARegistrar(novaContaValor, novaContaJuros, novaContaDesconto),
@@ -682,12 +705,71 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const handleBaixaRecebimento = async () => {
         if (!contaSelecionada) return;
 
+        const saldoRestante = saldoRestanteBaixa;
+
+        if (receberComDiferencaBaixa) {
+            const entrada = parseMoney(valorRecebido);
+            const diferenca = parseMoney(valorDiferencaBaixa);
+            if (entrada <= 0) {
+                toast.error('Informe a entrada em caixa (valor líquido recebido).');
+                return;
+            }
+            if (diferenca <= 0) {
+                toast.error('Informe o valor da diferença (ex.: retenção de imposto).');
+                return;
+            }
+            if (Math.abs(entrada + diferenca - saldoRestante) > 0.01) {
+                toast.error('Entrada em caixa + diferença deve igualar o saldo da parcela.', {
+                    description: `Saldo: R$ ${formatBRL(saldoRestante)} • Caixa: R$ ${formatBRL(entrada)} • Diferença: R$ ${formatBRL(diferenca)}`,
+                });
+                return;
+            }
+
+            try {
+                const response = await financeiroService.darBaixaRecebimento(contaSelecionada.id, {
+                    dataPagamento,
+                    valorRecebido: entrada,
+                    receberComDiferenca: true,
+                    valorEntradaCaixa: entrada,
+                    valorDiferenca: diferenca,
+                    motivoDiferenca: motivoDiferencaBaixa.trim() || 'Retenção de imposto',
+                    observacoes: observacoesBaixa,
+                    meioPagamento: meioPagamentoBaixa,
+                });
+
+                if (response.success) {
+                    toast.success('✅ Recebimento com diferença registrado!', {
+                        description: `Título R$ ${formatBRL(saldoRestante)} • Caixa R$ ${formatBRL(entrada)} • Diferença R$ ${formatBRL(diferenca)}`,
+                    });
+                    handleCloseBaixaModal();
+                    await loadContasReceber();
+                } else {
+                    toast.error('❌ Erro ao registrar recebimento', {
+                        description: response.error || 'Tente novamente.',
+                    });
+                }
+            } catch (error) {
+                console.error('❌ Erro ao dar baixa com diferença:', error);
+                toast.error('❌ Erro ao registrar recebimento', {
+                    description: 'Erro de conexão com o servidor.',
+                });
+            }
+            return;
+        }
+
         const base = parseMoney(valorRecebido);
         const juros = parseMoney(jurosBaixa);
         const desconto = parseMoney(descontoBaixa);
         const total = calcValorARegistrar(base, juros, desconto);
+        const abateParcela = Math.max(0, base - desconto);
         if (total <= 0) {
             toast.error('Valor a registrar deve ser maior que zero.');
+            return;
+        }
+        if (abateParcela > saldoRestante + 0.01) {
+            toast.error('Valor do principal excede o saldo da parcela.', {
+                description: `Saldo restante: R$ ${formatBRL(saldoRestante)}. Juros por atraso podem ser acrescentados sem limite ao saldo.`,
+            });
             return;
         }
 
@@ -1754,92 +1836,12 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                             </div>
                                         </div>
 
-                                        {/* Tabela de Entrada e Parcelas (Contas a Receber) */}
                                         {detalhesVenda.contasReceber && detalhesVenda.contasReceber.length > 0 && (
-                                            <div className="mt-4">
-                                                <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                                                    📋 Detalhamento da Entrada e Parcelas
-                                                </h5>
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full border-collapse bg-white dark:bg-gray-800 rounded-lg">
-                                                        <thead>
-                                                            <tr className="bg-purple-100 dark:bg-purple-900/50">
-                                                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Parcela
-                                                                </th>
-                                                                <th className="px-4 py-2 text-right text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Valor
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Vencimento
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Status
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Data Pagamento
-                                                                </th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {detalhesVenda.contasReceber
-                                                                .sort((a: any, b: any) => {
-                                                                    // Ordenar: entrada (numeroParcela = 0) primeiro, depois parcelas normais
-                                                                    const parcelaA = a.numeroParcela || 0;
-                                                                    const parcelaB = b.numeroParcela || 0;
-                                                                    return parcelaA - parcelaB;
-                                                                })
-                                                                .map((conta: any, index: number) => {
-                                                                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
-                                                                    const isPago = conta.status === 'Pago' || conta.status === 'Recebido';
-                                                                    const isAtrasado = !isPago && new Date(conta.dataVencimento) < new Date();
-                                                                    const statusClass = isPago
-                                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                                                        : isAtrasado
-                                                                            ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                                                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-                                                                    const statusText = isPago ? 'Pago' : isAtrasado ? 'Atrasado' : 'Pendente';
-                                                                    const totalParcelas = detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 
-                                                                        detalhesVenda.contasReceber.filter((c: any) => (c.numeroParcela || 0) > 0).length;
-                                                                    
-                                                                    return (
-                                                                        <tr key={conta.id || index} className={`hover:bg-purple-50 dark:hover:bg-purple-900/20 ${isEntrada ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
-                                                                            <td className="px-4 py-2 text-sm font-semibold text-gray-900 dark:text-white border border-purple-200 dark:border-purple-700">
-                                                                                {isEntrada ? (
-                                                                                    <span className="flex items-center gap-1">
-                                                                                        <span className="text-blue-600 dark:text-blue-400">💰</span>
-                                                                                        <span>Entrada</span>
-                                                                                    </span>
-                                                                                ) : (
-                                                                                    `Parcela ${conta.numeroParcela || index + 1}${totalParcelas ? `/${totalParcelas}` : ''}`
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm font-bold text-gray-900 dark:text-white text-right border border-purple-200 dark:border-purple-700">
-                                                                                R$ {(conta.valorParcela || conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
-                                                                                {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-center border border-purple-200 dark:border-purple-700">
-                                                                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${statusClass}`}>
-                                                                                    {isPago && '✅ '}
-                                                                                    {isAtrasado && '⚠️ '}
-                                                                                    {!isPago && !isAtrasado && '⏳ '}
-                                                                                    {statusText}
-                                                                                </span>
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
-                                                                                {conta.dataPagamento 
-                                                                                    ? new Date(conta.dataPagamento).toLocaleDateString('pt-BR')
-                                                                                    : '-'}
-                                                                            </td>
-                                                                        </tr>
-                                                                    );
-                                                                })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
+                                            <ParcelasVendaAuditoriaTable
+                                                contas={detalhesVenda.contasReceber}
+                                                numeroParcelas={detalhesVenda.numeroParcelas}
+                                                parcelas={detalhesVenda.parcelas}
+                                            />
                                         )}
 
                                         {/* Condições Especiais (se houver) */}
@@ -1943,7 +1945,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     <p className="text-xs text-blue-800 mt-2 pt-2 border-t border-blue-200">
                                         Previsto na conta:{' '}
                                         {(contaSelecionada.valorJuros ?? 0) > 0 && (
-                                            <span>+ R$ {formatBRL(contaSelecionada.valorJuros!)} juros </span>
+                                            <span>+ R$ {formatBRL(contaSelecionada.valorJuros!)} juros por atraso </span>
                                         )}
                                         {(contaSelecionada.valorDesconto ?? 0) > 0 && (
                                             <span>- R$ {formatBRL(contaSelecionada.valorDesconto!)} desconto </span>
@@ -1955,6 +1957,42 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
 
                             {/* Formulário */}
                             <div className="space-y-4">
+                                <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4">
+                                    <label className="flex items-start gap-3 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={receberComDiferencaBaixa}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setReceberComDiferencaBaixa(checked);
+                                                if (checked) {
+                                                    setJurosBaixa('0');
+                                                    setDescontoBaixa('0');
+                                                    setValorDiferencaBaixa('0');
+                                                    setValorRecebido(saldoRestanteBaixa.toFixed(2));
+                                                } else if (contaSelecionada) {
+                                                    const saldo = saldoRestanteBaixa;
+                                                    const valorBaseSaldo = calcValorBaseFromEfetivo(
+                                                        saldo > 0 ? saldo : contaSelecionada.valor,
+                                                        contaSelecionada.valorJuros ?? 0,
+                                                        contaSelecionada.valorDesconto ?? 0
+                                                    );
+                                                    setValorRecebido(valorBaseSaldo > 0 ? valorBaseSaldo.toFixed(2) : '0');
+                                                }
+                                            }}
+                                            className="mt-1 h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                                        />
+                                        <span>
+                                            <span className="block text-sm font-bold text-amber-900">
+                                                Receber com diferença (retenção / imposto)
+                                            </span>
+                                            <span className="block text-xs text-amber-800 mt-1">
+                                                Quita o título pelo valor total; a diferença não entra no caixa — só o valor líquido recebido.
+                                            </span>
+                                        </span>
+                                    </label>
+                                </div>
+
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Data do Recebimento *
@@ -1968,6 +2006,75 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     />
                                 </div>
 
+                                {receberComDiferencaBaixa ? (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Valor do título (saldo a quitar)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                value={formatBRL(saldoRestanteBaixa)}
+                                                className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-100 text-gray-800 font-semibold"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Diferença — retenção / imposto (R$) *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                inputMode="decimal"
+                                                value={valorDiferencaBaixa}
+                                                onChange={(e) => {
+                                                    setValorDiferencaBaixa(e.target.value);
+                                                    const entrada = calcEntradaCaixaComDiferenca(
+                                                        saldoRestanteBaixa,
+                                                        e.target.value
+                                                    );
+                                                    setValorRecebido(entrada > 0 ? entrada.toFixed(2) : '0');
+                                                }}
+                                                min="0"
+                                                step="0.01"
+                                                className="w-full px-4 py-3 border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                                            />
+                                            <p className="text-xs text-amber-700 mt-1">
+                                                Não entra no caixa (ex.: R$ 1.000,00 de imposto retido).
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Motivo da diferença
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={motivoDiferencaBaixa}
+                                                onChange={(e) => setMotivoDiferencaBaixa(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-amber-500"
+                                                placeholder="Ex.: Retenção de imposto na fonte"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Entrada em caixa (R$) *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                inputMode="decimal"
+                                                value={valorRecebido}
+                                                onChange={(e) => setValorRecebido(e.target.value)}
+                                                min="0"
+                                                step="0.01"
+                                                required
+                                                className="w-full px-4 py-3 border border-green-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 font-semibold"
+                                            />
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Valor líquido creditado (ex.: R$ 14.000,00).
+                                            </p>
+                                        </div>
+                                    </>
+                                ) : (
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Valor Recebido (R$) *
@@ -1990,6 +2097,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         )}
                                     </p>
                                 </div>
+                                )}
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -2009,10 +2117,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                     </select>
                                 </div>
 
+                                {!receberComDiferencaBaixa && (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                            Juros (R$)
+                                            Juros por atraso (R$)
                                         </label>
                                         <input
                                             type="number"
@@ -2022,7 +2131,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                             min="0"
                                             step="0.01"
                                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                            title="Não entra no saldo da parcela — soma ao valor em caixa"
                                         />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Somado ao recebimento; não reduz o saldo da parcela.
+                                        </p>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -2039,6 +2152,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         />
                                     </div>
                                 </div>
+                                )}
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -2055,19 +2169,42 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             </div>
 
                             {/* Resumo */}
-                            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 p-4 rounded-xl">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-sm font-semibold text-green-700">Valor a Registrar:</span>
-                                    <span className="text-2xl font-bold text-green-700">
-                                        R$ {formatBRL(valorARegistrarBaixa)}
-                                    </span>
-                                </div>
-                                {(parseMoney(jurosBaixa) > 0 || parseMoney(descontoBaixa) > 0) && (
-                                    <p className="text-xs text-green-600 mt-1">
-                                        {formatBRL(parseMoney(valorRecebido))}
-                                        {parseMoney(jurosBaixa) > 0 ? ` + ${formatBRL(parseMoney(jurosBaixa))} (juros)` : ''}
-                                        {parseMoney(descontoBaixa) > 0 ? ` - ${formatBRL(parseMoney(descontoBaixa))} (desconto)` : ''}
-                                    </p>
+                            <div className={`p-4 rounded-xl border-2 ${
+                                receberComDiferencaBaixa
+                                    ? 'bg-gradient-to-r from-amber-50 to-green-50 border-amber-300'
+                                    : 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-300'
+                            }`}>
+                                {receberComDiferencaBaixa ? (
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold text-gray-700">Título (quitado):</span>
+                                            <span className="font-bold text-gray-900">R$ {formatBRL(saldoRestanteBaixa)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold text-amber-800">Diferença (não entra no caixa):</span>
+                                            <span className="font-bold text-amber-900">R$ {formatBRL(parseMoney(valorDiferencaBaixa))}</span>
+                                        </div>
+                                        <div className="flex justify-between border-t border-green-200 pt-2">
+                                            <span className="font-semibold text-green-700">Entrada em caixa:</span>
+                                            <span className="text-2xl font-bold text-green-700">R$ {formatBRL(valorARegistrarBaixa)}</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-sm font-semibold text-green-700">Valor a Registrar:</span>
+                                            <span className="text-2xl font-bold text-green-700">
+                                                R$ {formatBRL(valorARegistrarBaixa)}
+                                            </span>
+                                        </div>
+                                        {(parseMoney(jurosBaixa) > 0 || parseMoney(descontoBaixa) > 0) && (
+                                            <p className="text-xs text-green-600 mt-1">
+                                                {formatBRL(parseMoney(valorRecebido))}
+                                                {parseMoney(jurosBaixa) > 0 ? ` + ${formatBRL(parseMoney(jurosBaixa))} (juros por atraso)` : ''}
+                                                {parseMoney(descontoBaixa) > 0 ? ` - ${formatBRL(parseMoney(descontoBaixa))} (desconto)` : ''}
+                                            </p>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -2155,6 +2292,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                                 </td>
                                                                 <td className="px-4 py-3 text-right font-semibold text-green-700 dark:text-green-400">
                                                                     R$ {Number(rec.valorPago).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                    {(rec.valorDiferenca ?? 0) > 0 && (
+                                                                        <span className="block text-xs font-normal text-amber-700 dark:text-amber-400">
+                                                                            + dif. R$ {Number(rec.valorDiferenca).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                                        </span>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{rec.meioPagamento || '-'}</td>
                                                                 <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-[200px] truncate" title={rec.observacoes}>{rec.observacoes || '-'}</td>
@@ -2428,11 +2570,25 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                             )}
                             {confirmDialogTipo === 'receber' && contaSelecionada && (
                                 <>
-                                    Confirmar o recebimento de{' '}
-                                    <span className="font-bold text-green-600">
-                                        R$ {formatBRL(valorARegistrarBaixa)}
-                                    </span>
-                                    {' '}de {contaSelecionada.clienteNome}?
+                                    {receberComDiferencaBaixa ? (
+                                        <>
+                                            Confirmar quitação de{' '}
+                                            <span className="font-bold">R$ {formatBRL(saldoRestanteBaixa)}</span>
+                                            {' '}de {contaSelecionada.clienteNome}?
+                                            <span className="block mt-2 text-sm">
+                                                Caixa: <strong className="text-green-600">R$ {formatBRL(valorARegistrarBaixa)}</strong>
+                                                {' '}• Diferença: <strong className="text-amber-700">R$ {formatBRL(parseMoney(valorDiferencaBaixa))}</strong>
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            Confirmar o recebimento de{' '}
+                                            <span className="font-bold text-green-600">
+                                                R$ {formatBRL(valorARegistrarBaixa)}
+                                            </span>
+                                            {' '}de {contaSelecionada.clienteNome}?
+                                        </>
+                                    )}
                                 </>
                             )}
                         </AlertDialogDescription>

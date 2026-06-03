@@ -12,6 +12,7 @@ router.use(authenticate);
 router.get('/folha/:funcionarioId/:mes', RhController.folhaMes);
 router.get('/folha/:funcionarioId/:mes/pdf', RhController.folhaPdf);
 router.post('/sincronizar-parcela', RhController.sincronizarParcela);
+router.post('/registro-ponto/manual', RhController.criarRegistroPontoManual);
 router.put('/registro-ponto/:id', RhController.atualizarRegistroPonto);
 router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarIntervaloAlmoco);
 router.post('/banco-horas/converter-folga', RhController.converterFolga);
@@ -27,12 +28,20 @@ router.put(
   uploadFaltaJustificadaDocumento.single('documento'),
   RhController.atualizarFaltaJustificada,
 );
+router.delete('/falta-justificada/:id', RhController.excluirFaltaJustificada);
 router.delete('/falta-justificada/:id/anexo', RhController.deletarAnexoFaltaJustificada);
 router.post(
   '/justificativa-parcial',
   uploadFaltaJustificadaDocumento.single('documento'),
   RhController.registrarJustificativaParcial,
 );
+router.put(
+  '/justificativa-parcial/:id',
+  uploadFaltaJustificadaDocumento.single('documento'),
+  RhController.atualizarJustificativaParcial,
+);
+router.delete('/justificativa-parcial/:id', RhController.excluirJustificativaParcial);
+router.put('/conferencia-ponto/comentario', RhController.salvarComentarioConferencia);
 router.post('/divida-horas/propor', RhController.proporDividaHoras);
 router.get('/divida-horas/:funcionarioId/:mes', RhController.listarDividaHoras);
 router.post('/divida-horas/dia/:diaId/aprovar', RhController.aprovarDiaDivida);

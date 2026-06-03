@@ -13,6 +13,11 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {
+  toStickerWebpFromBuffer,
+  WHATSAPP_STICKER_FILENAME,
+  WHATSAPP_STICKER_MIMETYPE
+} from '../utils/whatsappSticker.util';
 
 /** Diretório base onde os arquivos inbound são persistidos no disco. */
 export const WHATSAPP_INBOUND_MEDIA_DIR = path.resolve(
@@ -73,6 +78,9 @@ export interface SaveInboundMediaResult {
   mediaUrl: string;
   /** Tamanho real gravado em bytes (útil para popular `fileSize`). */
   byteLength: number;
+  /** Preenchido quando `normalizeAsSticker` normalizou o arquivo. */
+  mimetype?: string;
+  filename?: string;
 }
 
 /**
@@ -83,11 +91,17 @@ export interface SaveInboundMediaResult {
  *  - base64 estiver vazio/ausente;
  *  - decodificação falhar (não loga; o caller decide o que fazer).
  */
+export interface SaveInboundMediaOptions {
+  /** Normaliza para WebP 512×512 (figurinhas recebidas/enviadas). */
+  normalizeAsSticker?: boolean;
+}
+
 export async function saveInboundMediaBase64ToDisk(
   messageId: string,
   base64: string,
   mimetype: string | undefined,
-  filename: string | undefined
+  filename: string | undefined,
+  options?: SaveInboundMediaOptions
 ): Promise<SaveInboundMediaResult | null> {
   if (!messageId || !base64) return null;
   // Algumas variações do payload trazem o prefixo "data:image/jpeg;base64,";
@@ -100,15 +114,29 @@ export async function saveInboundMediaBase64ToDisk(
     return null;
   }
   if (buf.length === 0) return null;
+
+  const normalizeAsSticker = options?.normalizeAsSticker === true;
+  if (normalizeAsSticker) {
+    try {
+      buf = await toStickerWebpFromBuffer(buf);
+    } catch (e) {
+      console.warn('[whatsappInboundMedia] falha ao normalizar figurinha:', e);
+      return null;
+    }
+  }
+
   await ensureInboundDir();
-  const ext = extensionFromHints(mimetype, filename);
-  const safeName = `${messageId}.${ext}`;
+  const ext = normalizeAsSticker ? 'webp' : extensionFromHints(mimetype, filename);
+  const safeName = normalizeAsSticker ? `${messageId}.webp` : `${messageId}.${ext}`;
   const filePath = path.join(WHATSAPP_INBOUND_MEDIA_DIR, safeName);
   await fs.writeFile(filePath, buf);
   return {
     filePath,
     mediaUrl: `${LOCAL_INBOUND_URL_PREFIX}${safeName}`,
-    byteLength: buf.length
+    byteLength: buf.length,
+    ...(normalizeAsSticker
+      ? { mimetype: WHATSAPP_STICKER_MIMETYPE, filename: WHATSAPP_STICKER_FILENAME }
+      : {})
   };
 }
 

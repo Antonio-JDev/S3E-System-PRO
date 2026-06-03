@@ -50,6 +50,14 @@ coverage/
 *.tmp
 .cache/
 
+# Backups locais / produção (manter script versionado)
+backups/*.sql
+backups/*.sql.gz
+backups/*.tar.gz
+backups/backup.log
+!backups/backup_cron.sh
+!backups/.gitkeep
+
 # Optional npm cache directory
 .npm
 

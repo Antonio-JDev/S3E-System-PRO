@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
+import { calcAbateParcela } from '../utils/financeiroValor.util';
 
 export interface MovimentacaoCaixaItem {
   id: string;
@@ -159,9 +160,9 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
     const descricao = `${clienteNome} - ${titulo}${c.numeroParcela ? ` (Parcela ${c.numeroParcela}/${c.totalParcelas || 1})` : ''}`;
     const jurosC = (c as any).valorJuros ?? 0;
     const descontoC = (c as any).valorDesconto ?? 0;
-    // valorParcela já é o valor líquido recebido; juros/desconto são informativos (conciliação)
-    const valor = c.valorParcela;
-    const valorBase = valor + descontoC - jurosC;
+    const principalRec = Number(c.valorRecebido ?? c.valorParcela);
+    const valor = valorEfetivo(principalRec, jurosC, descontoC);
+    const valorBase = principalRec;
     return {
       id: c.id,
       tipo: 'ENTRADA',
@@ -169,7 +170,7 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
       descricao,
       categoria: 'Venda',
       valor,
-      valorBase: valorBase > 0 ? valorBase : valor,
+      valorBase: valorBase,
       valorJuros: jurosC,
       valorDesconto: descontoC,
       meioPagamento: c.meioPagamento ? labelMeioPagamento(c.meioPagamento) : null,
@@ -283,7 +284,12 @@ async function sincronizarContaReceberAposParciais(tx: any, contaId: string) {
     where: { contaReceberId: contaId },
     orderBy: { dataPagamento: 'desc' }
   });
-  const sumParciais = parciais.reduce((s, r) => s + r.valorPago, 0);
+  const sumParciais = parciais.reduce((s, r) => {
+    const j = Number((r as any).valorJuros ?? 0);
+    const d = Number((r as any).valorDesconto ?? 0);
+    return s + Math.max(0, Number(r.valorPago) + d - j);
+  }, 0);
+  const sumJurosAtraso = parciais.reduce((s, r) => s + Number((r as any).valorJuros ?? 0), 0);
 
   let novoStatus: string;
   let dataPagamento: Date | null = null;
@@ -307,6 +313,7 @@ async function sincronizarContaReceberAposParciais(tx: any, contaId: string) {
     where: { id: contaId },
     data: {
       valorRecebido: sumParciais,
+      ...(sumJurosAtraso > 0 && { valorJuros: sumJurosAtraso }),
       status: novoStatus,
       dataPagamento,
       meioPagamento,
@@ -450,14 +457,27 @@ export async function atualizarMovimentacao(
     if (novoValorPago <= 0) {
       throw new Error('O valor efetivo do recebimento deve ser maior que zero');
     }
-    const outros = await prisma.recebimentoParcial.aggregate({
-      where: { contaReceberId: conta.id, id: { not: recebimentoParcial.id } },
-      _sum: { valorPago: true }
+    const outrosParciais = await prisma.recebimentoParcial.findMany({
+      where: { contaReceberId: conta.id, id: { not: recebimentoParcial.id } }
     });
-    const somaOutros = Number(outros._sum.valorPago ?? 0);
-    if (somaOutros + novoValorPago > conta.valorParcela + 0.02) {
+    const somaOutros = outrosParciais.reduce(
+      (s, r) =>
+        s +
+        calcAbateParcela(r.valorPago, (r as any).valorJuros, (r as any).valorDesconto),
+      0
+    );
+    const jurosRp =
+      payload.valorJuros !== undefined
+        ? Number(payload.valorJuros)
+        : Number((recebimentoParcial as any).valorJuros ?? 0);
+    const descontoRp =
+      payload.valorDesconto !== undefined
+        ? Number(payload.valorDesconto)
+        : Number((recebimentoParcial as any).valorDesconto ?? 0);
+    const abateNovo = calcAbateParcela(novoValorPago, jurosRp, descontoRp);
+    if (somaOutros + abateNovo > conta.valorParcela + 0.02) {
       throw new Error(
-        `O total recebido (R$ ${(somaOutros + novoValorPago).toFixed(2)}) não pode exceder o valor da parcela (R$ ${conta.valorParcela.toFixed(2)})`
+        `O principal recebido (R$ ${(somaOutros + abateNovo).toFixed(2)}) não pode exceder o valor da parcela (R$ ${conta.valorParcela.toFixed(2)}). Juros por atraso não entram no saldo.`
       );
     }
 

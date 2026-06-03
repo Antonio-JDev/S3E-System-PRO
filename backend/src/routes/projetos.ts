@@ -5,6 +5,7 @@ import {
   createProjeto,
   updateProjeto,
   updateProjetoStatus,
+  reverterProjetoStatus,
   deleteProjeto,
   criarProjetoDeOrcamento,
   listarProjetosAvancado,
@@ -30,6 +31,20 @@ import {
   uploadDocumento
 } from '../controllers/projetoDocumentosController';
 import { getQualidade, putQualidade, aprovarInspecao } from '../controllers/qualidadeController';
+import {
+  listarEngenharia,
+  listarResumoTarefasEngenharia,
+  getInfoAtribuicaoEngenharia,
+  patchEngenharia,
+  atribuirEngenharia,
+} from '../controllers/projetosEngenhariaController';
+import {
+  listarDocumentosReferencia,
+  criarDocumentoReferencia,
+  visualizarDocumentoReferencia,
+  deletarDocumentoReferencia,
+  uploadDocumentoReferencia,
+} from '../controllers/engenhariaDocumentosReferenciaController';
 import { authenticate } from '../middlewares/auth';
 import PDFDocument from 'pdfkit';
 import path from 'path';
@@ -62,6 +77,30 @@ router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUs
 router.get('/busca', buscarProjetos);
 
 /**
+ * @route GET /api/projetos/engenharia
+ * @desc Listagem da aba Projetos de Engenharia
+ */
+router.get('/engenharia', listarEngenharia);
+router.get('/engenharia/info-atribuicao', getInfoAtribuicaoEngenharia);
+router.get('/engenharia/resumo-tarefas', listarResumoTarefasEngenharia);
+router.get('/engenharia/documentos-referencia', listarDocumentosReferencia);
+router.post('/engenharia/documentos-referencia', uploadDocumentoReferencia, criarDocumentoReferencia);
+router.get('/engenharia/documentos-referencia/:documentoId/visualizar', visualizarDocumentoReferencia);
+router.delete('/engenharia/documentos-referencia/:documentoId', deletarDocumentoReferencia);
+
+/**
+ * @route PATCH /api/projetos/:id/engenharia
+ * @desc Atualiza metadados Notion da engenharia
+ */
+router.patch('/:id/engenharia', patchEngenharia);
+
+/**
+ * @route PATCH /api/projetos/:id/engenharia/atribuir
+ * @desc Atribui OS manualmente ao setor de engenharia
+ */
+router.patch('/:id/engenharia/atribuir', atribuirEngenharia);
+
+/**
  * @route GET /api/projetos/:id
  * @desc Buscar projeto específico com relacionamentos
  * @access Private
@@ -91,6 +130,12 @@ router.put('/:id', updateProjeto);
  * @access Private
  */
 router.put('/:id/status', updateProjetoStatus);
+
+/**
+ * @route PUT /api/projetos/:id/reverter-status
+ * @desc Reverte status da OS (admin) — remove obra se necessário
+ */
+router.put('/:id/reverter-status', reverterProjetoStatus);
 
 /**
  * @route DELETE /api/projetos/:id

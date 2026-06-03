@@ -151,7 +151,15 @@ export function calcularMetricasRegistro(params: {
   let minutosExtra100 = 0;
   const minutosTrabalhados = Math.max(0, minutos);
 
-  if (tipoContrato === 'REGISTRADO' && workShift && batidas.length >= 2 && !ehFer) {
+  if (
+    tipoContrato === 'REGISTRADO' &&
+    workShift &&
+    batidas.length >= 2 &&
+    !ehFer &&
+    !ehSabado &&
+    dow >= 1 &&
+    dow <= 5
+  ) {
     const diff = calculateTimeDifference({
       batidaEntrada: entrada,
       batidaSaida: saida,
@@ -433,4 +441,86 @@ export async function atualizarRegistroBatidas(registroId: string, batidasInput:
   await sincronizarExcessoCompetencia(func.id, ano, mes);
 
   return updated;
+}
+
+/**
+ * Cria registro de ponto manual (RH) em dia sem marcação no relógio.
+ */
+export async function criarRegistroBatidasManual(params: {
+  funcionarioId: string;
+  referenciaAno: number;
+  referenciaMes: number;
+  dia: number;
+  batidasInput: string[];
+}) {
+  const batidas = params.batidasInput.map((s) => String(s).trim()).filter((s) => s.length > 0);
+  if (batidas.length === 0) {
+    throw new Error('Informe ao menos uma batida');
+  }
+
+  const func = await prisma.funcionario.findUnique({ where: { id: params.funcionarioId } });
+  if (!func) throw new Error('Funcionário não encontrado');
+
+  const { referenciaAno: ano, referenciaMes: mes, dia } = params;
+  const dataRef = dataReferenciaDiaCivilUtc(ano, mes, dia);
+
+  const existente = await prisma.registroPonto.findUnique({
+    where: {
+      funcionarioId_dataReferencia: {
+        funcionarioId: params.funcionarioId,
+        dataReferencia: dataRef,
+      },
+    },
+  });
+  if (existente) {
+    return atualizarRegistroBatidas(existente.id, batidas);
+  }
+
+  const cfg = await prisma.configuracaoPonto.findUnique({
+    where: { funcionarioId: func.id },
+    include: { workShift: true },
+  });
+
+  const calc = calcularMetricasRegistro({
+    batidas,
+    ano,
+    mes,
+    dia,
+    tipoContrato: func.tipoContrato,
+    toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
+    workShift: cfg?.workShift ?? null,
+  });
+
+  const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
+  const eh100 = ehDomingoOuFeriado(ano, mes, dia);
+  const permitirHE100 = func.permitirHorasExtras100 === true;
+  const aplicar100 = eh100 && (func.tipoContrato === 'AUTONOMO' || permitirHE100);
+
+  const criado = await prisma.registroPonto.create({
+    data: {
+      funcionarioId: func.id,
+      dataReferencia: dataRef,
+      entrada: calc.entrada,
+      saida: calc.saida,
+      horasNormais: aplicar100 ? 0 : eh100 ? calc.minutosTrabalhados / 60 : calc.horasNormais,
+      horasExtras50: calc.horasExtras50,
+      horasExtras100: aplicar100 ? calc.horasExtras100 : 0,
+      ehFimDeSemana,
+      batidasBrutas: batidas as any,
+      statusConsistencia: calc.status,
+      origemImportacao: ORIGEM_MANUAL,
+      minutosTrabalhados: calc.minutosTrabalhados,
+      minutosAtraso: calc.minutosAtraso,
+      minutosHorasDevidas: calc.minutosHorasDevidas,
+      minutosExtra50: calc.minutosExtra50,
+      minutosExtra100: aplicar100 ? calc.minutosExtra100 : 0,
+      minutosExtra20: calc.minutosExtra20,
+    },
+  });
+
+  await vincularFaltaJustificadaAoRegistro(func.id, dataRef, criado.id);
+  await vincularJustificativaParcialAoRegistro(func.id, dataRef, criado.id);
+  await sincronizarExcessoCompetencia(func.id, ano, mes);
+
+  return criado;
 }

@@ -123,6 +123,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     // Pesquisa e visualização
     const [pesquisa, setPesquisa] = useState('');
     const [pesquisaKit, setPesquisaKit] = useState('');
+    const [filtroCategoria, setFiltroCategoria] = useState<string>('Todos');
+    const [filtroEstoque, setFiltroEstoque] = useState<'Todos' | 'Disponivel' | 'SemEstoque'>('Todos');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Ferramentas'));
     const [viewModeKit, setViewModeKit] = useState<'grid' | 'list'>(loadViewMode('Kits'));
     
@@ -216,18 +218,40 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     }, []);
 
     // Filtrar ferramentas por pesquisa
+    const categoriasFerramenta = useMemo(() => {
+        return Array.from(
+            new Set(
+                ferramentas
+                    .map((f) => f.categoria?.trim())
+                    .filter((c): c is string => Boolean(c))
+            )
+        ).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    }, [ferramentas]);
+
     const ferramentasFiltradas = useMemo(() => {
-        if (!pesquisa.trim()) return ferramentas;
-        
-        const termoBusca = pesquisa.toLowerCase();
-        return ferramentas.filter(f => 
-            f.nome.toLowerCase().includes(termoBusca) ||
-            f.codigo.toLowerCase().includes(termoBusca) ||
-            f.categoria.toLowerCase().includes(termoBusca) ||
-            f.marca?.toLowerCase().includes(termoBusca) ||
-            f.modelo?.toLowerCase().includes(termoBusca)
-        );
-    }, [ferramentas, pesquisa]);
+        const termoBusca = pesquisa.toLowerCase().trim();
+
+        return ferramentas.filter((f) => {
+            const matchBusca =
+                !termoBusca ||
+                f.nome.toLowerCase().includes(termoBusca) ||
+                f.codigo.toLowerCase().includes(termoBusca) ||
+                f.categoria.toLowerCase().includes(termoBusca) ||
+                f.marca?.toLowerCase().includes(termoBusca) ||
+                f.modelo?.toLowerCase().includes(termoBusca);
+
+            const matchCategoria =
+                filtroCategoria === 'Todos' || f.categoria === filtroCategoria;
+
+            const quantidade = f.quantidade || 0;
+            const matchEstoque =
+                filtroEstoque === 'Todos' ||
+                (filtroEstoque === 'Disponivel' && quantidade > 0) ||
+                (filtroEstoque === 'SemEstoque' && quantidade <= 0);
+
+            return matchBusca && matchCategoria && matchEstoque;
+        });
+    }, [ferramentas, pesquisa, filtroCategoria, filtroEstoque]);
 
     const kitsFiltrados = useMemo(() => {
         if (!pesquisaKit.trim()) return kits;
@@ -851,7 +875,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 animate-fade-in">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div className="flex items-center gap-4">
                     <button 
                         onClick={toggleSidebar} 
@@ -860,10 +884,10 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                         <Bars3Icon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-dark-text tracking-tight">
-                            🔧 Gestão de Ferramentas
+                        <h1 className="text-2xl sm:text-4xl font-bold text-gray-900 dark:text-white tracking-tight">
+                            Gestão de Ferramentas
                         </h1>
-                        <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">
+                        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">
                             Gerencie ferramentas e kits para eletricistas
                         </p>
                     </div>
@@ -872,7 +896,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     {activeTab === 'ferramentas' ? (
                         <button 
                             onClick={() => setModalNovaFerramenta(true)}
-                            className="flex items-center justify-center bg-gradient-to-r from-blue-600 to-blue-500 text-white font-semibold px-6 py-3 rounded-xl shadow-medium hover:from-blue-700 hover:to-blue-600 transition-all duration-200"
+                            className="flex items-center justify-center bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl shadow-soft hover:bg-blue-700 transition-all duration-200"
                         >
                             <PlusIcon className="w-5 h-5 mr-2" />
                             Nova Ferramenta
@@ -880,7 +904,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                     ) : (
                         <button 
                             onClick={() => setModalNovoKit(true)}
-                            className="flex items-center justify-center bg-gradient-to-r from-green-600 to-green-500 text-white font-semibold px-6 py-3 rounded-xl shadow-medium hover:from-green-700 hover:to-green-600 transition-all duration-200"
+                            className="flex items-center justify-center bg-blue-600 text-white font-semibold px-6 py-3 rounded-xl shadow-soft hover:bg-blue-700 transition-all duration-200"
                         >
                             <PlusIcon className="w-5 h-5 mr-2" />
                             Montar Novo Kit
@@ -922,42 +946,42 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {/* Estatísticas - Aba Ferramentas */}
             {activeTab === 'ferramentas' && estatisticas && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-2xl shadow-medium text-white">
+                    <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border p-6 rounded-2xl shadow-soft hover:shadow-medium transition-all">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-blue-100 text-sm font-semibold mb-1">Total de Ferramentas</p>
-                                <p className="text-3xl font-bold">{estatisticas.totalFerramentas || 0}</p>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Total de Ferramentas</p>
+                                <p className="text-3xl font-bold text-gray-900 dark:text-white">{estatisticas.totalFerramentas || 0}</p>
                             </div>
-                            <WrenchIcon className="w-12 h-12 text-blue-200 opacity-50" />
+                            <WrenchIcon className="w-8 h-8 text-blue-500 dark:text-blue-400" />
                         </div>
                     </div>
-                    <div className="bg-gradient-to-br from-green-500 to-green-600 p-6 rounded-2xl shadow-medium text-white">
+                    <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border p-6 rounded-2xl shadow-soft hover:shadow-medium transition-all">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-green-100 text-sm font-semibold mb-1">Em Estoque</p>
-                                <p className="text-3xl font-bold">{estatisticas.totalEmEstoque || 0}</p>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Em Estoque</p>
+                                <p className="text-3xl font-bold text-gray-900 dark:text-white">{estatisticas.totalEmEstoque || 0}</p>
                             </div>
-                            <svg className="w-12 h-12 text-green-200 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-8 h-8 text-emerald-500 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                             </svg>
                         </div>
                     </div>
-                    <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-2xl shadow-medium text-white">
+                    <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border p-6 rounded-2xl shadow-soft hover:shadow-medium transition-all">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-purple-100 text-sm font-semibold mb-1">Em Uso</p>
-                                <p className="text-3xl font-bold">{estatisticas.totalFerramentasEmUso || 0}</p>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Em Uso</p>
+                                <p className="text-3xl font-bold text-gray-900 dark:text-white">{estatisticas.totalFerramentasEmUso || 0}</p>
                             </div>
-                            <BriefcaseIcon className="w-12 h-12 text-purple-200 opacity-50" />
+                            <BriefcaseIcon className="w-8 h-8 text-violet-500 dark:text-violet-400" />
                         </div>
                     </div>
-                    <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-6 rounded-2xl shadow-medium text-white">
+                    <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border p-6 rounded-2xl shadow-soft hover:shadow-medium transition-all">
                         <div className="flex items-center justify-between">
                             <div>
-                                <p className="text-orange-100 text-sm font-semibold mb-1">Valor Total</p>
-                                <p className="text-2xl font-bold">R$ {(estatisticas.valorTotalEstoque || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Valor Total</p>
+                                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">R$ {(estatisticas.valorTotalEstoque || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                             </div>
-                            <svg className="w-12 h-12 text-orange-200 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-8 h-8 text-amber-500 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
@@ -967,8 +991,8 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
 
             {/* Filtros */}
             {activeTab === 'ferramentas' && (
-                <div className="bg-white p-6 rounded-2xl shadow-soft border border-gray-100 mb-6">
-                    <div className="grid grid-cols-1 gap-4">
+                <div className="bg-white dark:bg-dark-card p-6 rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="relative">
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                             <input
@@ -976,14 +1000,35 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                 placeholder="Buscar por nome, código, categoria, marca..."
                                 value={pesquisa}
                                 onChange={(e) => setPesquisa(e.target.value)}
-                                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-white dark:bg-dark-bg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             />
                         </div>
+                        <select
+                            value={filtroCategoria}
+                            onChange={(e) => setFiltroCategoria(e.target.value as any)}
+                            className="px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-white dark:bg-dark-bg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                            <option value="Todos">Todas as Categorias</option>
+                            {categoriasFerramenta.map((categoria) => (
+                                <option key={categoria} value={categoria}>
+                                    {categoria}
+                                </option>
+                            ))}
+                        </select>
+                        <select
+                            value={filtroEstoque}
+                            onChange={(e) => setFiltroEstoque(e.target.value as any)}
+                            className="px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl bg-white dark:bg-dark-bg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                            <option value="Todos">Todos os Estoques</option>
+                            <option value="Disponivel">Disponível</option>
+                            <option value="SemEstoque">Sem Estoque</option>
+                        </select>
                     </div>
 
                     <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
-                        <p className="text-sm text-gray-600">
-                            Exibindo <span className="font-bold text-gray-900">{ferramentasFiltradas.filter(f => f.ativo).length}</span> de <span className="font-bold text-gray-900">{ferramentas.filter(f => f.ativo).length}</span> ferramentas
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Exibindo <span className="font-bold text-gray-900 dark:text-white">{ferramentasFiltradas.filter(f => f.ativo).length}</span> de <span className="font-bold text-gray-900 dark:text-white">{ferramentas.filter(f => f.ativo).length}</span> ferramentas
                         </p>
                         <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                     </div>
@@ -1105,23 +1150,23 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                         }
                         </div>
                     ) : (
-                        <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden animate-fade-in">
+                        <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-2xl overflow-hidden shadow-soft">
                             <div className="overflow-x-auto">
                                 <table className="w-full">
-                                    <thead className="bg-gray-50 border-b border-gray-200">
+                                    <thead className="bg-gray-50 dark:bg-dark-bg border-b border-gray-200 dark:border-dark-border">
                                         <tr>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Ferramenta</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Código</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Categoria</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Marca/Modelo</th>
-                                            <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">Estoque</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Valor</th>
-                                            <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Ações</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Ferramenta</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Código</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Categoria</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Marca/Modelo</th>
+                                            <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Estoque</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Valor</th>
+                                            <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Ações</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
+                                    <tbody className="bg-white dark:bg-dark-card divide-y divide-gray-200 dark:divide-dark-border">
                                         {ferramentasFiltradas.filter(f => f.ativo).map((ferramenta) => (
-                                            <tr key={ferramenta.id} className="hover:bg-gray-50 transition-colors">
+                                            <tr key={ferramenta.id} className="hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors">
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <div className="flex items-center gap-3">
                                                         {ferramenta.imagemUrl && (
@@ -1242,26 +1287,26 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                             </button>
                         </div>
                     ) : viewModeKit === 'grid' ? (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">{
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{
                             kitsFiltrados.filter(k => k.ativo).map((kit) => (
-                                <div key={kit.id} className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft hover:shadow-medium hover:border-green-300 transition-all duration-200">
+                                <div key={kit.id} className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-2xl p-4 shadow-soft hover:shadow-medium transition-all duration-200">
                                     {/* Header do Card */}
-                                    <div className="flex justify-between items-start mb-4">
+                                    <div className="flex justify-between items-start mb-3">
                                         <div className="flex-1">
-                                            <h3 className="font-bold text-lg text-gray-900 mb-1">{kit.nome}</h3>
+                                            <h3 className="font-bold text-base text-gray-900 dark:text-white mb-1 truncate">{kit.nome}</h3>
                                             <div className="flex items-center gap-2">
-                                                <span className="px-3 py-1 text-xs font-bold rounded-lg bg-green-100 text-green-800 ring-1 ring-green-200">
-                                                    📦 Kit
+                                                <span className="px-2 py-0.5 text-[11px] font-semibold rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                                    Kit
                                                 </span>
                                             </div>
                                         </div>
                                     </div>
 
                                     {/* Informações */}
-                                    <div className="space-y-2 mb-4">
+                                    <div className="space-y-1.5 mb-3">
                                         <div className="flex items-center gap-2 text-sm text-gray-600">
                                             <span>👤</span>
-                                            <span className="font-semibold text-gray-900">{kit.eletricistaNome}</span>
+                                            <span className="font-semibold text-gray-900 dark:text-white truncate">{kit.eletricistaNome}</span>
                                         </div>
                                         <div className="flex items-center gap-2 text-sm text-gray-600">
                                             <span>📅</span>
@@ -1274,61 +1319,64 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
                                     </div>
 
                                     {kit.descricao && (
-                                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
-                                            <p className="text-xs text-gray-600">{kit.descricao}</p>
+                                        <div className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-lg p-2.5 mb-3">
+                                            <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">{kit.descricao}</p>
                                         </div>
                                     )}
 
                                     {/* Preview de Itens */}
-                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+                                    <div className="bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-lg p-2.5 mb-3">
                                         <h4 className="text-xs font-semibold text-gray-700 mb-2">Ferramentas do Kit:</h4>
                                         <div className="space-y-1">
-                                            {kit.itens.slice(0, 3).map((item) => (
+                                            {kit.itens.slice(0, 2).map((item) => (
                                                 <div key={item.id} className="flex justify-between items-center text-xs">
                                                     <span className="text-gray-700">{item.ferramenta.nome}</span>
                                                     <span className="text-gray-500">x{item.quantidade}</span>
                                                 </div>
                                             ))}
-                                            {kit.itens.length > 3 && (
+                                            {kit.itens.length > 2 && (
                                                 <p className="text-xs text-gray-500 italic">
-                                                    + {kit.itens.length - 3} mais...
+                                                    + {kit.itens.length - 2} mais...
                                                 </p>
                                             )}
                                         </div>
                                     </div>
 
                                     {/* Botões de Ação */}
-                                    <div className="flex gap-2 pt-4 border-t border-gray-100">
+                                    <div className="grid grid-cols-4 gap-2 pt-3 border-t border-gray-100 dark:border-dark-border">
                                         <button
                                             onClick={() => handleVisualizarKit(kit)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors text-xs font-semibold"
+                                            title="Ver kit"
+                                            aria-label="Ver kit"
                                         >
                                             <EyeIcon className="w-4 h-4" />
-                                            Ver
                                         </button>
                                         <button
                                             onClick={() => handleEditarKit(kit)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors text-xs font-semibold"
+                                            title="Editar kit"
+                                            aria-label="Editar kit"
                                         >
                                             <PencilIcon className="w-4 h-4" />
-                                            Editar
                                         </button>
                                         <button
                                             onClick={() => handleGerarRecibo(kit)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm font-semibold"
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors text-xs font-semibold"
+                                            title="Gerar PDF do kit"
+                                            aria-label="Gerar PDF do kit"
                                         >
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                             </svg>
-                                            PDF
                                         </button>
                                         <button
                                             onClick={() => handleExcluirKit(kit)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
+                                            className="flex items-center justify-center gap-1 px-2 py-1.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors text-xs font-semibold"
                                             title="Excluir kit"
+                                            aria-label="Excluir kit"
                                         >
                                             <TrashIcon className="w-4 h-4" />
-                                            Excluir
                                         </button>
                                     </div>
                                 </div>
@@ -1580,7 +1628,7 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalEditarFerramenta && ferramentaEditando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500 dark:from-purple-700 dark:to-purple-600">
+                        <div className="modal-header bg-gradient-to-r from-blue-600 to-blue-500 dark:from-blue-700 dark:to-blue-600">
                             <div className="flex justify-between items-center w-full">
                                 <h2 className="text-2xl font-bold text-white">✏️ Editar Ferramenta</h2>
                                 <button
@@ -2033,11 +2081,11 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalVisualizarFerramenta && ferramentaVisualizando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-purple-600 to-purple-500 dark:from-purple-700 dark:to-purple-600">
+                        <div className="modal-header bg-gradient-to-r from-blue-600 to-blue-500 dark:from-blue-700 dark:to-blue-600">
                             <div className="flex justify-between items-center w-full">
                                 <div>
                                     <h2 className="text-2xl font-bold text-white">🔧 Detalhes da Ferramenta</h2>
-                                    <p className="text-purple-100 dark:text-purple-200 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
+                                    <p className="text-blue-100 dark:text-blue-200 text-sm mt-1">{ferramentaVisualizando.codigo}</p>
                                 </div>
                                 <button
                                     onClick={() => {
@@ -2142,11 +2190,11 @@ const Ferramentas: React.FC<FerramentasProps> = ({ toggleSidebar }) => {
             {modalVisualizarKit && kitVisualizando && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="modal-header bg-gradient-to-r from-green-600 to-green-500 dark:from-green-700 dark:to-green-600">
+                        <div className="modal-header bg-gradient-to-r from-blue-600 to-blue-500 dark:from-blue-700 dark:to-blue-600">
                             <div className="flex justify-between items-center w-full">
                                 <div>
                                     <h2 className="text-2xl font-bold text-white">📦 Detalhes do Kit</h2>
-                                    <p className="text-green-100 dark:text-green-200 text-sm mt-1">{kitVisualizando.nome}</p>
+                                    <p className="text-blue-100 dark:text-blue-200 text-sm mt-1">{kitVisualizando.nome}</p>
                                 </div>
                                 <button
                                     onClick={() => {

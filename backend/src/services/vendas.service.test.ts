@@ -483,7 +483,7 @@ describe('VendasService', () => {
       expect(mockPrisma.contaReceber.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            valorRecebido: 960,
+            valorRecebido: 950,
             valorJuros: 10,
             valorDesconto: 50,
           }),
@@ -491,7 +491,104 @@ describe('VendasService', () => {
       );
     });
 
-    it('deve rejeitar quando valor a registrar excede saldo restante', async () => {
+    it('deve aceitar juros por atraso quando valor a registrar excede saldo da parcela', async () => {
+      const conta = {
+        id: 'conta-1',
+        vendaId: 'venda-123',
+        valorParcela: 1200,
+        valorRecebido: 0,
+        valorJuros: null,
+        status: ContaStatus.Pendente,
+        observacoes: null,
+      };
+
+      mockPrisma.contaReceber.findUnique.mockResolvedValue(conta);
+      mockPrisma.recebimentoParcial.create.mockResolvedValue({ id: 'rp-1' });
+      mockPrisma.contaReceber.update.mockResolvedValue({
+        ...conta,
+        status: ContaStatus.Pago,
+        valorRecebido: 1200,
+        valorJuros: 25.6,
+      });
+      mockPrisma.contaReceber.findMany.mockResolvedValue([
+        { id: 'conta-1', status: ContaStatus.Pago },
+      ]);
+      mockPrisma.venda.update.mockResolvedValue({ id: 'venda-123', status: VendaStatus.Concluida });
+
+      await VendasService.pagarConta('conta-1', {
+        valorRecebido: 1200,
+        valorJuros: 25.6,
+        valorDesconto: 0,
+        meioPagamento: 'PIX',
+      });
+
+      expect(mockPrisma.recebimentoParcial.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          valorPago: 1225.6,
+          valorJuros: 25.6,
+        }),
+      });
+      expect(mockPrisma.contaReceber.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            valorRecebido: 1200,
+            valorJuros: 25.6,
+          }),
+        })
+      );
+    });
+
+    it('deve quitar parcela com recebimento com diferença (caixa menor que título)', async () => {
+      const conta = {
+        id: 'conta-1',
+        vendaId: 'venda-123',
+        valorParcela: 15000,
+        valorRecebido: 0,
+        valorDiferenca: null,
+        status: ContaStatus.Pendente,
+        observacoes: null,
+      };
+
+      mockPrisma.contaReceber.findUnique.mockResolvedValue(conta);
+      mockPrisma.recebimentoParcial.create.mockResolvedValue({ id: 'rp-1' });
+      mockPrisma.contaReceber.update.mockResolvedValue({
+        ...conta,
+        status: ContaStatus.Pago,
+        valorRecebido: 15000,
+        valorDiferenca: 1000,
+      });
+      mockPrisma.contaReceber.findMany.mockResolvedValue([
+        { id: 'conta-1', status: ContaStatus.Pago },
+      ]);
+      mockPrisma.venda.update.mockResolvedValue({ id: 'venda-123', status: VendaStatus.Concluida });
+
+      await VendasService.pagarConta('conta-1', {
+        receberComDiferenca: true,
+        valorEntradaCaixa: 14000,
+        valorDiferenca: 1000,
+        motivoDiferenca: 'Retenção de imposto',
+        meioPagamento: 'PIX',
+      });
+
+      expect(mockPrisma.recebimentoParcial.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          valorPago: 14000,
+          valorDiferenca: 1000,
+          motivoDiferenca: 'Retenção de imposto',
+        }),
+      });
+      expect(mockPrisma.contaReceber.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            valorRecebido: 15000,
+            status: ContaStatus.Pago,
+            valorDiferenca: 1000,
+          }),
+        })
+      );
+    });
+
+    it('deve rejeitar quando principal excede saldo restante (mesmo com juros)', async () => {
       mockPrisma.contaReceber.findUnique.mockResolvedValue({
         id: 'conta-1',
         valorParcela: 100,
@@ -502,11 +599,11 @@ describe('VendasService', () => {
 
       await expect(
         VendasService.pagarConta('conta-1', {
-          valorRecebido: 100,
-          valorJuros: 50,
+          valorRecebido: 150,
+          valorJuros: 10,
           valorDesconto: 0,
         })
-      ).rejects.toThrow('não pode ser maior que o saldo restante');
+      ).rejects.toThrow('saldo restante');
     });
   });
 

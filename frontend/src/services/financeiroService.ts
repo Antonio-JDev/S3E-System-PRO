@@ -384,6 +384,10 @@ class FinanceiroService {
   async darBaixaRecebimento(contaId: string, data: {
     dataPagamento: string;
     valorRecebido: number;
+    valorEntradaCaixa?: number;
+    valorDiferenca?: number;
+    motivoDiferenca?: string;
+    receberComDiferenca?: boolean;
     valorJuros?: number;
     valorDesconto?: number;
     observacoes?: string;

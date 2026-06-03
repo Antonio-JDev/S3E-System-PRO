@@ -69,6 +69,20 @@ interface LogsProps {
     toggleSidebar: () => void;
 }
 
+function resolveLogIp(log: AuditLog): string | undefined {
+    const net = log.metadata?.network;
+    return (
+        log.ipAddress ||
+        (typeof net?.clientIp === 'string' ? net.clientIp : undefined) ||
+        (typeof log.metadata?.ipAddress === 'string' ? log.metadata.ipAddress : undefined)
+    );
+}
+
+function resolveLogPath(log: AuditLog): string | undefined {
+    const p = log.metadata?.path;
+    return typeof p === 'string' ? p : undefined;
+}
+
 const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const authContext = useContext(AuthContext);
     const user = authContext?.user;
@@ -79,6 +93,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [stats, setStats] = useState<SystemStats>({ totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 });
+    const [auditUnavailable, setAuditUnavailable] = useState(false);
     const [loading, setLoading] = useState(true);
     const [backendStatus, setBackendStatus] = useState<'online' | 'offline' | 'checking'>('checking');
     const [searchTerm, setSearchTerm] = useState('');
@@ -88,6 +103,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
     const [backfillLoading, setBackfillLoading] = useState(false);
     const [portfolioUrl, setPortfolioUrl] = useState('https://antonio-jdev.github.io/portfolio-01/');
     const [portfolioSaving, setPortfolioSaving] = useState(false);
+    const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
     // Probe Socket.io somente na aba Health (DEV)
     useWhatsAppSocket(
@@ -111,14 +127,21 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
             if (!opts?.silent) {
                 setLoading(true);
             }
-            const response = await axiosApiService.get<{ logs?: AuditLog[]; stats?: SystemStats }>(
-                '/api/logs/audit',
-                { limit: 300, offset: 0 }
-            );
+            const response = await axiosApiService.get<{
+                logs?: AuditLog[];
+                stats?: SystemStats;
+                auditAvailable?: boolean;
+            }>('/api/logs/audit', { limit: 500, offset: 0 });
             if (response.success && response.data) {
-                const payload = response.data as { logs?: AuditLog[]; stats?: SystemStats };
-                setLogs(payload.logs || []);
-                setStats((s) => payload.stats || s);
+                const raw = response.data as Record<string, unknown>;
+                const payload = (raw.data && typeof raw.data === 'object' ? raw.data : raw) as {
+                    logs?: AuditLog[];
+                    stats?: SystemStats;
+                    auditAvailable?: boolean;
+                };
+                setLogs(Array.isArray(payload.logs) ? payload.logs : []);
+                if (payload.stats) setStats(payload.stats);
+                setAuditUnavailable(payload.auditAvailable === false);
             }
         } catch (error) {
             console.error('Erro ao carregar logs:', error);
@@ -234,12 +257,23 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
         }
     };
 
+    const entityOptions = Array.from(
+        new Set(logs.map((l) => l.entity).filter((e): e is string => Boolean(e)))
+    ).sort();
+
     // Filtrar logs
     const filteredLogs = logs.filter(log => {
-        const matchesSearch = 
-            log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.userName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.action.toLowerCase().includes(searchTerm.toLowerCase());
+        const term = searchTerm.toLowerCase();
+        const ip = resolveLogIp(log)?.toLowerCase() || '';
+        const path = resolveLogPath(log)?.toLowerCase() || '';
+        const matchesSearch = !term ||
+            log.description.toLowerCase().includes(term) ||
+            log.userName?.toLowerCase().includes(term) ||
+            log.action.toLowerCase().includes(term) ||
+            log.entity?.toLowerCase().includes(term) ||
+            log.entityId?.toLowerCase().includes(term) ||
+            ip.includes(term) ||
+            path.includes(term);
         
         const matchesAction = actionFilter === 'Todos' || log.action === actionFilter;
         const matchesEntity = entityFilter === 'Todos' || log.entity === entityFilter;
@@ -327,6 +361,18 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                     </div>
                 </div>
             </header>
+
+            {auditUnavailable && (
+                <div className="mb-6 rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 text-amber-900 dark:border-amber-600 dark:bg-amber-900/20 dark:text-amber-100">
+                    <p className="font-semibold">Auditoria indisponível no banco</p>
+                    <p className="mt-1 text-sm">
+                        A tabela <code className="rounded bg-amber-100 px-1 dark:bg-amber-950">audit_logs</code> está ausente,
+                        incompleta ou com schema incompatível. Rode as migrations pendentes no backend e confira se{' '}
+                        <code className="rounded bg-amber-100 px-1 dark:bg-amber-950">DISABLE_AUDIT_LOGS</code> não está
+                        como <strong>true</strong> no servidor.
+                    </p>
+                </div>
+            )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -420,11 +466,15 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                                 >
                                     <option value="Todos">Todas as Ações</option>
                                     <option value="LOGIN">Login</option>
+                                    <option value="LOGIN_FAILED">Login falhou</option>
                                     <option value="LOGOUT">Logout</option>
-                                    <option value="CREATE">Create</option>
-                                    <option value="UPDATE">Update</option>
-                                    <option value="DELETE">Delete</option>
-                                    <option value="ACCESS">Access</option>
+                                    <option value="CREATE">Criação</option>
+                                    <option value="UPDATE">Atualização</option>
+                                    <option value="UPDATE_USER">Atualização usuário</option>
+                                    <option value="UPDATE_PROFILE">Perfil</option>
+                                    <option value="DELETE">Exclusão</option>
+                                    <option value="VIEW">Consulta</option>
+                                    <option value="ERROR">Erro HTTP / falha</option>
                                 </select>
                                 <select
                                     value={entityFilter}
@@ -432,11 +482,9 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                                     className="select-field"
                                 >
                                     <option value="Todos">Todas as Entidades</option>
-                                    <option value="Projeto">Projeto</option>
-                                    <option value="Orcamento">Orçamento</option>
-                                    <option value="Cliente">Cliente</option>
-                                    <option value="Material">Material</option>
-                                    <option value="Usuario">Usuário</option>
+                                    {entityOptions.map((e) => (
+                                        <option key={e} value={e}>{e}</option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -456,33 +504,91 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                                 </div>
                             ) : (
                                 <div className="space-y-2">
-                                    {filteredLogs.map((log) => (
-                                        <div key={log.id} className="card-secondary rounded-xl p-4 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors border border-gray-200 dark:border-dark-border">
+                                    {filteredLogs.map((log) => {
+                                        const ip = resolveLogIp(log);
+                                        const path = resolveLogPath(log);
+                                        const net = log.metadata?.network;
+                                        const statusCode = log.metadata?.statusCode;
+                                        const isError = log.action === 'ERROR' || log.action === 'LOGIN_FAILED';
+                                        const isExpanded = expandedLogId === log.id;
+
+                                        return (
+                                        <div
+                                            key={log.id}
+                                            className={`card-secondary rounded-xl p-4 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors border ${
+                                                isError
+                                                    ? 'border-orange-300 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-950/20'
+                                                    : 'border-gray-200 dark:border-dark-border'
+                                            }`}
+                                        >
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-3 mb-2 flex-wrap">
                                                         <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                            log.action === 'ERROR' ? 'bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-200' :
                                                             log.action === 'DELETE' || log.action === 'DELETE_PERMANENT' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
                                                             log.action === 'CREATE' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' :
-                                                            log.action === 'UPDATE' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
+                                                            log.action === 'UPDATE' || log.action.startsWith('UPDATE') ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
                                                             log.action === 'LOGIN' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300' :
                                                             log.action === 'LOGIN_FAILED' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
                                                             'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                                                         }`}>
                                                             {log.action}
+                                                            {statusCode != null && (
+                                                                <span className="ml-1 opacity-80">({statusCode})</span>
+                                                            )}
                                                         </span>
                                                         {log.entity && (
-                                                            <span className="text-sm font-medium text-gray-700 dark:text-dark-text">{log.entity}</span>
+                                                            <span className="text-sm font-medium text-gray-700 dark:text-dark-text">
+                                                                {log.entity}{log.entityId ? ` · ${log.entityId}` : ''}
+                                                            </span>
                                                         )}
                                                         <span className="text-sm text-gray-500 dark:text-dark-text-secondary">•</span>
                                                         <span className="text-sm text-gray-600 dark:text-dark-text-secondary">{log.userName || 'Sistema'}</span>
                                                         <span className="text-xs text-gray-400 dark:text-gray-500">({log.userRole || 'N/A'})</span>
                                                     </div>
                                                     <p className="text-sm text-gray-700 dark:text-dark-text">{log.description}</p>
-                                                    {log.ipAddress && (
-                                                        <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
-                                                            <span className="font-mono">IP: {log.ipAddress}</span>
+                                                    {path && (
+                                                        <p className="text-xs font-mono text-gray-500 dark:text-dark-text-secondary mt-1 truncate" title={path}>
+                                                            Rota: {path}
                                                         </p>
+                                                    )}
+                                                    <div className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1 space-y-0.5">
+                                                        {ip && (
+                                                            <p><span className="font-semibold">IP cliente:</span> <span className="font-mono">{ip}</span></p>
+                                                        )}
+                                                        {net?.ipChain?.length > 1 && (
+                                                            <p><span className="font-semibold">Cadeia proxy:</span> <span className="font-mono">{net.ipChain.join(' → ')}</span></p>
+                                                        )}
+                                                        {(net?.origin || net?.referer || net?.host) && (
+                                                            <p className="truncate">
+                                                                {net.host && <span>Host: {net.host} · </span>}
+                                                                {net.origin && <span>Origem: {net.origin} · </span>}
+                                                                {net.referer && <span>Referer: {net.referer}</span>}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    {(log.metadata?.errorMessage || log.metadata?.stack) && (
+                                                        <p className="text-xs text-orange-800 dark:text-orange-300 mt-2 font-mono break-all">
+                                                            {log.metadata.errorMessage}
+                                                            {Array.isArray(log.metadata.stack)
+                                                                ? `\n${(log.metadata.stack as string[]).join('\n')}`
+                                                                : typeof log.metadata.stack === 'string'
+                                                                    ? `\n${log.metadata.stack}`
+                                                                    : ''}
+                                                        </p>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedLogId(isExpanded ? null : log.id)}
+                                                        className="text-xs text-red-600 dark:text-red-400 mt-2 hover:underline"
+                                                    >
+                                                        {isExpanded ? 'Ocultar detalhes técnicos' : 'Ver detalhes técnicos (debug)'}
+                                                    </button>
+                                                    {isExpanded && log.metadata && (
+                                                        <pre className="mt-2 p-2 text-[10px] leading-tight bg-gray-900 text-green-300 rounded-lg overflow-x-auto max-h-48">
+                                                            {JSON.stringify(log.metadata, null, 2)}
+                                                        </pre>
                                                     )}
                                                 </div>
                                                 <span className="text-xs text-gray-500 dark:text-dark-text-secondary whitespace-nowrap">
@@ -490,7 +596,8 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                                                 </span>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -504,7 +611,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
                                 <h4 className="font-bold text-lg text-gray-900 dark:text-dark-text mb-4">📈 Ações mais Frequentes</h4>
                                 <div className="space-y-3">
-                                    {['LOGIN', 'CREATE', 'UPDATE', 'DELETE', 'ACCESS'].map((action, idx) => {
+                                    {['LOGIN', 'CREATE', 'UPDATE', 'DELETE', 'ERROR'].map((action, idx) => {
                                         const count = logs.filter(l => l.action === action).length;
                                         const percentage = logs.length > 0 ? (count / logs.length) * 100 : 0;
                                         

@@ -6,7 +6,10 @@
 import {
   parseMoney,
   calcValorARegistrar,
+  calcAbateParcela,
+  calcAbateParcelaFromBase,
   validarValoresFinanceiros,
+  validarRecebimentoComDiferenca,
 } from './financeiroValor.util';
 
 describe('financeiroValor.util', () => {
@@ -65,6 +68,32 @@ describe('financeiroValor.util', () => {
     it('permite base zero quando exigirBasePositivo é false', () => {
       const r = validarValoresFinanceiros(0, 100, 0, { exigirBasePositivo: false });
       expect(r.valorARegistrar).toBe(100);
+    });
+  });
+
+  describe('calcAbateParcela', () => {
+    it('extrai principal do total em caixa (ex.: parcela + juros por atraso)', () => {
+      expect(calcAbateParcela(1225.6, 25.6, 0)).toBe(1200);
+    });
+
+    it('calcAbateParcelaFromBase subtrai desconto do principal', () => {
+      expect(calcAbateParcelaFromBase(1000, 50)).toBe(950);
+    });
+  });
+
+  describe('validarRecebimentoComDiferenca', () => {
+    it('aceita título 15000 com caixa 14000 e diferença 1000', () => {
+      const r = validarRecebimentoComDiferenca(15000, 14000, 1000);
+      expect(r.valorEntradaCaixa).toBe(14000);
+      expect(r.valorDiferenca).toBe(1000);
+      expect(r.abateParcela).toBe(15000);
+      expect(r.valorARegistrar).toBe(14000);
+    });
+
+    it('rejeita quando soma não fecha o saldo', () => {
+      expect(() => validarRecebimentoComDiferenca(15000, 14000, 500)).toThrow(
+        'deve igualar o saldo'
+      );
     });
   });
 });

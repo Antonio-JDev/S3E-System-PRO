@@ -129,19 +129,37 @@ function escapeHtmlAttr(value: string): string {
   return value.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function paginateKitItems(
+  items: any[],
+  regularPageCapacity = 22,
+  lastPageCapacity = 14
+): any[][] {
+  if (items.length <= lastPageCapacity) {
+    return [items];
+  }
+
+  const pages: any[][] = [];
+  let cursor = 0;
+
+  while (items.length - cursor > lastPageCapacity) {
+    const remaining = items.length - cursor;
+    const take = Math.min(regularPageCapacity, remaining - lastPageCapacity);
+    pages.push(items.slice(cursor, cursor + take));
+    cursor += take;
+  }
+
+  pages.push(items.slice(cursor));
+  return pages;
+}
+
 /**
  * Função auxiliar para gerar HTML do recibo com folha timbrada (A4, margens + timbre opaco).
  */
 function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string): string {
   const folha = (folhaTimbradaUrl || '').trim();
   const folhaEsc = folha ? escapeHtmlAttr(folha) : '';
-  const letterheadBlock = folha
-    ? `<div class="pdf-page">
-        <div class="watermark-background custom-letterhead">
-          <img class="letterhead-img" src="${folhaEsc}" alt="" />
-        </div>
-        <div class="recibo-page-content">`
-    : `<div class="pdf-page"><div class="recibo-page-content">`;
+  const itemPages = paginateKitItems(Array.isArray(kit.itens) ? kit.itens : []);
+  const totalPages = itemPages.length;
 
   const html = `
 <!DOCTYPE html>
@@ -169,12 +187,18 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string): s
         .pdf-page {
             position: relative;
             width: 210mm;
-            min-height: 297mm;
             height: 297mm;
             margin: 0 auto;
             background: white;
             overflow: hidden;
             box-sizing: border-box;
+            page-break-after: always;
+            break-after: page;
+        }
+
+        .pdf-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
         }
 
         .watermark-background {
@@ -324,6 +348,18 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string): s
             border-top: 1px solid #e5e7eb;
             padding-top: 8px;
         }
+
+        .page-indicator {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2;
+            font-size: 9pt;
+            color: #374151;
+            font-weight: 600;
+        }
+
         .print-button {
             position: fixed;
             top: 20px;
@@ -366,102 +402,119 @@ function gerarHTMLReciboComFolhaTimbrada(kit: any, folhaTimbradaUrl?: string): s
     </style>
 </head>
 <body>
-    ${letterheadBlock}
     <button type="button" class="print-button" onclick="window.print()">🖨️ Imprimir</button>
+    ${itemPages.map((itemsPage: any[], pageIndex: number) => {
+      const itemOffset = itemPages
+        .slice(0, pageIndex)
+        .reduce((sum: number, pageItems: any[]) => sum + pageItems.length, 0);
+      const isLastPage = pageIndex === itemPages.length - 1;
 
-    <div class="header">
-        <h1>RECIBO DE ENTREGA DE KIT DE FERRAMENTAS</h1>
-        <p class="subtitle">S3E Engenharia Elétrica - Sistema de Gestão</p>
-    </div>
+      return `
+      <div class="pdf-page">
+        ${folha ? `
+        <div class="watermark-background custom-letterhead">
+          <img class="letterhead-img" src="${folhaEsc}" alt="" />
+        </div>` : ''}
+        <div class="recibo-page-content">
+          <div class="header">
+              <h1>RECIBO DE ENTREGA DE KIT DE FERRAMENTAS</h1>
+              <p class="subtitle">S3E Engenharia Elétrica - Sistema de Gestão</p>
+          </div>
 
-    <div class="info-grid">
-        <div class="info-item">
-            <span class="info-label">Kit:</span>
-            <span class="info-value">${kit.nome}</span>
+          <div class="info-grid">
+              <div class="info-item">
+                  <span class="info-label">Kit:</span>
+                  <span class="info-value">${kit.nome}</span>
+              </div>
+              <div class="info-item">
+                  <span class="info-label">Recibo:</span>
+                  <span class="info-value">#${kit.id.substring(0, 8).toUpperCase()}</span>
+              </div>
+              <div class="info-item">
+                  <span class="info-label">Eletricista:</span>
+                  <span class="info-value">${kit.eletricistaNome}</span>
+              </div>
+              <div class="info-item">
+                  <span class="info-label">Data de Entrega:</span>
+                  <span class="info-value">${new Date(kit.dataEntrega).toLocaleDateString('pt-BR')}</span>
+              </div>
+          </div>
+
+          <h3 class="section-title">
+            Ferramentas Incluídas (${kit.itens.length} itens)
+            ${pageIndex > 0 ? ` - Continuação (${pageIndex + 1}/${totalPages})` : ''}
+          </h3>
+          
+          <table class="items-table">
+              <thead>
+                  <tr>
+                      <th style="width: 5%">#</th>
+                      <th style="width: 45%">Ferramenta</th>
+                      <th style="width: 20%">Código</th>
+                      <th style="width: 15%">Categoria</th>
+                      <th style="width: 10%">Qtd</th>
+                      <th style="width: 15%">Estado</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  ${itemsPage.map((item: any, index: number) => `
+                  <tr>
+                      <td style="text-align: center; font-weight: bold;">${itemOffset + index + 1}</td>
+                      <td>
+                          <div class="item-nome">${item.ferramenta.nome}</div>
+                          ${item.ferramenta.marca || item.ferramenta.modelo ? `
+                          <div class="item-detalhes">
+                              ${item.ferramenta.marca ? `${item.ferramenta.marca}` : ''}
+                              ${item.ferramenta.modelo ? ` - ${item.ferramenta.modelo}` : ''}
+                          </div>
+                          ` : ''}
+                      </td>
+                      <td>${item.ferramenta.codigo}</td>
+                      <td>${item.ferramenta.categoria}</td>
+                      <td style="text-align: center; font-weight: bold;">${item.quantidade}</td>
+                      <td style="font-size: 8pt;">${item.estadoEntrega}</td>
+                  </tr>
+                  `).join('')}
+              </tbody>
+          </table>
+
+          ${isLastPage ? `
+          <div class="termo-box">
+              <p>
+                  Eu, <strong>${kit.eletricistaNome}</strong>, afirmo que recebi os itens descritos acima em perfeito estado. 
+                  Comprometo-me a zelar pelo bom uso e conservação das ferramentas, devolvendo-as quando solicitado ou ao 
+                  término do meu vínculo com a empresa. Estou ciente de que sou responsável por qualquer dano, perda ou 
+                  extravio das ferramentas sob minha responsabilidade.
+              </p>
+          </div>
+
+          <p style="text-align: right; margin: 10px 0; font-size: 9pt;">
+              <strong>Itajaí, ${new Date(kit.dataEntrega).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong>
+          </p>
+
+          <div class="signatures">
+              <div class="signature-block">
+                  <div class="signature-line">
+                      <div class="signature-name">${kit.eletricistaNome}</div>
+                      <div class="signature-label">Assinatura do Eletricista</div>
+                  </div>
+              </div>
+              <div class="signature-block">
+                  <div class="signature-line">
+                      <div class="signature-name">____________________</div>
+                      <div class="signature-label">Assinatura do Administrador</div>
+                  </div>
+              </div>
+          </div>
+
+          <div class="footer">
+              <p><strong>S3E Engenharia Elétrica</strong> | Sistema de Gestão de Ferramentas</p>
+              <p>Gerado em: ${new Date().toLocaleString('pt-BR')} | ID: ${kit.id.substring(0, 8)}</p>
+          </div>` : ''}
         </div>
-        <div class="info-item">
-            <span class="info-label">Recibo:</span>
-            <span class="info-value">#${kit.id.substring(0, 8).toUpperCase()}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">Eletricista:</span>
-            <span class="info-value">${kit.eletricistaNome}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">Data de Entrega:</span>
-            <span class="info-value">${new Date(kit.dataEntrega).toLocaleDateString('pt-BR')}</span>
-        </div>
-    </div>
-
-    <h3 class="section-title">Ferramentas Incluídas (${kit.itens.length} itens)</h3>
-    
-    <table class="items-table">
-        <thead>
-            <tr>
-                <th style="width: 5%">#</th>
-                <th style="width: 45%">Ferramenta</th>
-                <th style="width: 20%">Código</th>
-                <th style="width: 15%">Categoria</th>
-                <th style="width: 10%">Qtd</th>
-                <th style="width: 15%">Estado</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${kit.itens.map((item: any, index: number) => `
-            <tr>
-                <td style="text-align: center; font-weight: bold;">${index + 1}</td>
-                <td>
-                    <div class="item-nome">${item.ferramenta.nome}</div>
-                    ${item.ferramenta.marca || item.ferramenta.modelo ? `
-                    <div class="item-detalhes">
-                        ${item.ferramenta.marca ? `${item.ferramenta.marca}` : ''}
-                        ${item.ferramenta.modelo ? ` - ${item.ferramenta.modelo}` : ''}
-                    </div>
-                    ` : ''}
-                </td>
-                <td>${item.ferramenta.codigo}</td>
-                <td>${item.ferramenta.categoria}</td>
-                <td style="text-align: center; font-weight: bold;">${item.quantidade}</td>
-                <td style="font-size: 8pt;">${item.estadoEntrega}</td>
-            </tr>
-            `).join('')}
-        </tbody>
-    </table>
-
-    <div class="termo-box">
-        <p>
-            Eu, <strong>${kit.eletricistaNome}</strong>, afirmo que recebi os itens descritos acima em perfeito estado. 
-            Comprometo-me a zelar pelo bom uso e conservação das ferramentas, devolvendo-as quando solicitado ou ao 
-            término do meu vínculo com a empresa. Estou ciente de que sou responsável por qualquer dano, perda ou 
-            extravio das ferramentas sob minha responsabilidade.
-        </p>
-    </div>
-
-    <p style="text-align: right; margin: 10px 0; font-size: 9pt;">
-        <strong>Itajaí, ${new Date(kit.dataEntrega).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong>
-    </p>
-
-    <div class="signatures">
-        <div class="signature-block">
-            <div class="signature-line">
-                <div class="signature-name">${kit.eletricistaNome}</div>
-                <div class="signature-label">Assinatura do Eletricista</div>
-            </div>
-        </div>
-        <div class="signature-block">
-            <div class="signature-line">
-                <div class="signature-name">____________________</div>
-                <div class="signature-label">Assinatura do Administrador</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="footer">
-        <p><strong>S3E Engenharia Elétrica</strong> | Sistema de Gestão de Ferramentas</p>
-        <p>Gerado em: ${new Date().toLocaleString('pt-BR')} | ID: ${kit.id.substring(0, 8)}</p>
-    </div>
-    </div>
-    </div>
+        <div class="page-indicator">Página ${pageIndex + 1} de ${totalPages}</div>
+      </div>`;
+    }).join('\n')}
     <script>
       window.addEventListener('load', function () {
         setTimeout(function () { window.print(); }, 400);

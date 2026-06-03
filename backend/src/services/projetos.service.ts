@@ -1,5 +1,18 @@
 import { ProjetoStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import obraService from './obra.service';
+import { validarConclusaoOsEngenharia } from './projetosEngenharia.service';
+
+const ORDEM_STATUS_OS: Record<string, number> = {
+  PROPOSTA: 0,
+  VALIDADO: 1,
+  APROVADO: 2,
+  EXECUCAO: 3,
+  CONCLUIDO: 4,
+};
+
+const STATUS_ROLLBACK_PERMITIDOS = ['PROPOSTA', 'VALIDADO', 'APROVADO'] as const;
+export type StatusRollbackOs = (typeof STATUS_ROLLBACK_PERMITIDOS)[number];
 
 export class ProjetosService {
   /**
@@ -57,6 +70,11 @@ export class ProjetosService {
     });
     
     if (!projeto) throw new Error('Projeto não encontrado');
+
+    if (novoStatus === 'CONCLUIDO') {
+      const bloqueio = await validarConclusaoOsEngenharia(projetoId);
+      if (bloqueio) throw new Error(bloqueio);
+    }
 
     const updateData: any = { status: novoStatus };
     if (novoStatus === 'CONCLUIDO') {
@@ -260,6 +278,51 @@ export class ProjetosService {
     }
 
     return atualizado;
+  }
+
+  /**
+   * Reverte status da OS para etapa anterior (admin).
+   * Ao sair de EXECUCAO/CONCLUIDO, remove a obra vinculada e estorna baixa de estoque da obra.
+   */
+  async reverterStatus(projetoId: string, novoStatus: StatusRollbackOs) {
+    if (!STATUS_ROLLBACK_PERMITIDOS.includes(novoStatus)) {
+      throw new Error('Status de destino inválido para rollback. Use: PROPOSTA, VALIDADO ou APROVADO');
+    }
+
+    const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
+    if (!projeto) throw new Error('Projeto não encontrado');
+
+    const statusAtual = String(projeto.status);
+    if (statusAtual === 'CANCELADO') {
+      throw new Error('Não é possível reverter uma OS cancelada');
+    }
+
+    const rankAtual = ORDEM_STATUS_OS[statusAtual] ?? -1;
+    const rankNovo = ORDEM_STATUS_OS[novoStatus] ?? -1;
+
+    if (rankNovo >= rankAtual) {
+      throw new Error('O status de destino deve ser anterior ao status atual da OS');
+    }
+
+    const obra = await prisma.obra.findUnique({ where: { projetoId } });
+    const precisaRemoverObra =
+      !!obra && (statusAtual === 'EXECUCAO' || statusAtual === 'CONCLUIDO' || rankNovo < ORDEM_STATUS_OS.EXECUCAO);
+
+    if (precisaRemoverObra && obra) {
+      await obraService.deletarObraParaRollback(obra.id);
+    }
+
+    const updateData: { status: ProjetoStatus; dataFim?: null } = {
+      status: novoStatus as ProjetoStatus,
+    };
+    if (statusAtual === 'CONCLUIDO') {
+      updateData.dataFim = null;
+    }
+
+    return prisma.projeto.update({
+      where: { id: projetoId },
+      data: updateData,
+    });
   }
 
   // REMOVIDO: criarEquipePlaceholder - equipes devem ser criadas manualmente pelo usuário

@@ -31,6 +31,8 @@ model User {
   // Relacionamentos
   pdfTemplates        PDFTemplate[]
   projetosResponsavel Projeto[]               @relation("ProjetoResponsavel")
+  projetosEngenhariaResponsavel ProjetoEngenharia[] @relation("ProjetoEngenhariaResponsavel")
+  engenhariaDocumentosReferencia EngenhariaDocumentoReferencia[]
   auditLogs           AuditLog[]
   alocacoes           AlocacaoObra[]          @relation("AlocacaoEletricista")
   registrosAtividade  RegistroAtividade[]     @relation("RegistrosAtividade")
@@ -185,23 +187,23 @@ model Notificacao {
 // Log de Auditoria do Sistema
 model AuditLog {
   id          String   @id @default(uuid())
-  userId      String?  @map("userId")
-  userName    String?  @map("userName")
-  userRole    String?  @map("userRole")
+  userId      String?  @map("user_id")
+  userName    String?  @map("user_name")
+  userRole    String?  @map("user_role")
   action      String // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, ACCESS, etc
-  entity      String?  @map("entity")
-  entityId    String?  @map("entityId")
+  entity      String?
+  entityId    String?  @map("entity_id")
   description String
-  ipAddress   String?  @map("ipAddress")
-  userAgent   String?  @map("userAgent")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
   metadata    Json? // Dados adicionais em JSON
-  createdAt   DateTime @default(now()) @map("createdAt")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   // Campos adicionais para auditoria imutável em cadeia (ex: NF-e)
   hash         String? // Hash SHA-256 deste registro
-  previousHash String? @map("previousHash") // Hash do registro anterior na mesma cadeia
-  chainId      String? @map("chainId") // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
-  sequence     Int?    @map("sequence") // Ordem dentro da cadeia (1, 2, 3, ...)
+  previousHash String? @map("previous_hash") // Hash do registro anterior na mesma cadeia
+  chainId      String? @map("chain_id") // Identificador lógico da cadeia (ex: chave de acesso da NF-e)
+  sequence     Int? // Ordem dentro da cadeia (1, 2, 3, ...)
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -526,6 +528,9 @@ model Servico {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
+  orcamentoItems OrcamentoItem[]
+
+  @@index([codigo])
   @@map("servicos")
 }
 
@@ -634,6 +639,7 @@ model OrcamentoItem {
   materialId        String?
   kitId             String?
   cotacaoId         String? // Novo: material do banco de cotações (banco frio)
+  servicoId         String? // FK catálogo de serviços
   servicoNome       String? // Para serviços avulsos
   descricao         String? // Descrição adicional do item
   quantidade        Float
@@ -659,8 +665,10 @@ model OrcamentoItem {
   material  Material? @relation(fields: [materialId], references: [id])
   kit       Kit?      @relation(fields: [kitId], references: [id])
   cotacao   Cotacao?  @relation(fields: [cotacaoId], references: [id]) // Novo
+  servico   Servico?  @relation(fields: [servicoId], references: [id])
 
   @@index([cotacaoId])
+  @@index([servicoId])
   @@map("orcamento_items")
 }
 
@@ -736,6 +744,7 @@ model Projeto {
   obra         Obra? // Relação 1:1 com Obra (quando projeto vai para execução)
   documentos   ProjetoDocumento[]
   qualidade    ProjetoQualidade? // Aba Qualidade: visita técnica, checklist, inspeções
+  engenharia   ProjetoEngenharia? // Aba Projetos de Engenharia (Notion)
   compras          Compra[] // Compras avulsas classificadas para esta OS
   reservasMaterial ReservaMaterialProjeto[]
 
@@ -759,6 +768,49 @@ model ProjetoQualidade {
 
   @@index([projetoId])
   @@map("projeto_qualidade")
+}
+
+// Metadados da aba Projetos de Engenharia (estilo Notion)
+model ProjetoEngenharia {
+  id                        String   @id @default(uuid())
+  projetoId                 String   @unique
+  nomeProjeto               String?
+  tiposProjeto              Json?    // ["Entrada", "Interno"]
+  statusEngenharia          String   @default("Em Andamento") // Em Andamento, Pausado, Concluído
+  statusCelesc              Json?    // ["ENROLADO", "PEGAR DOCUMENTOS", ...]
+  comentarioEngenharia      String?  @db.Text
+  prioridade                String   @default("Média") // Alta, Média, Baixa
+  responsavelEngenhariaId   String?
+  atribuidoSetorEngenharia  Boolean  @default(false)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  projeto               Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  responsavelEngenharia User?   @relation("ProjetoEngenhariaResponsavel", fields: [responsavelEngenhariaId], references: [id], onDelete: SetNull)
+
+  @@index([projetoId])
+  @@index([responsavelEngenhariaId])
+  @@map("projeto_engenharia")
+}
+
+// Biblioteca pessoal de PDFs/normas (aba Projetos — por usuário)
+model EngenhariaDocumentoReferencia {
+  id          String   @id @default(uuid())
+  userId      String
+  titulo      String
+  categoria   String   @default("PDF") // PDF, NORMA, OUTRO
+  nome        String
+  nomeArquivo String
+  url         String
+  tamanho     Int?
+  mimeType    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("engenharia_documentos_referencia")
 }
 
 model EtapaAdmin {
@@ -1176,6 +1228,10 @@ model ContaReceber {
   meioPagamento  String? // PIX, CARTAO_CREDITO, CARTAO_DEBITO, BOLETO, TRANSFERENCIA, DINHEIRO
   valorJuros     Float? // Juros no pagamento (conciliação bancária)
   valorDesconto  Float? // Desconto no pagamento (conciliação bancária)
+  /**
+   * Retenção/diferença aceita no recebimento (ex.: imposto) — não entra no caixa; soma com valorRecebido para quitar
+   */
+  valorDiferenca Float? @map("valorDiferenca")
   status         String    @default("Pendente") // Pendente, Recebido Parcial, Pago, Atrasado, Cancelado
   /**
    * Soma dos valores já recebidos (pagamentos parciais). Quando >= valorParcela, conta fica Pago
@@ -1203,6 +1259,8 @@ model RecebimentoParcial {
   valorPago      Float
   valorJuros     Float? // Juros deste recebimento (conciliação)
   valorDesconto  Float? // Desconto deste recebimento (conciliação)
+  valorDiferenca Float? @map("valorDiferenca") // Retenção/imposto — não entra no caixa
+  motivoDiferenca String? @map("motivoDiferenca")
   dataPagamento  DateTime
   observacoes    String?
   meioPagamento  String? // PIX, CARTAO_CREDITO, BOLETO, etc.
@@ -1724,6 +1782,7 @@ model Funcionario {
   lancamentosFolha              LancamentoFolha[]
   bancoHorasExcessoCompetencias BancoHorasExcessoCompetencia[]
   ocorrenciasPontoRh            OcorrenciaPontoRh[]
+  comentariosConferenciaPonto   ComentarioConferenciaPontoRh[]
   workShiftCompensacoes         CompensacaoHorasRh[]
 
   @@map("funcionarios")
@@ -1906,6 +1965,8 @@ model OcorrenciaPontoRh {
   justificativaTipo      String?
   horaInicio             String?
   horaFim                String?
+  /// ABONAR | DESCONTAR_BANCO | DESCONTAR_HORAS_DEVIDAS
+  classificacaoJustificativa String?
   minutos                Int                      @default(0)
   modoQuitacao           ModoQuitacaoHorasNegativas?
   periodoCompensacao     PeriodoCompensacaoHoras?
@@ -1920,6 +1981,23 @@ model OcorrenciaPontoRh {
   @@index([registroPontoId])
   @@unique([funcionarioId, dataReferencia, tipo])
   @@map("ocorrencias_ponto_rh")
+}
+
+/// Comentário e decisão do RH por dia na conferência de ponto (independente de registro/justificativa).
+model ComentarioConferenciaPontoRh {
+  id             String            @id @default(uuid())
+  funcionarioId  String
+  dataReferencia DateTime
+  comentario     String?           @db.Text
+  decisaoRh      StatusAprovacaoRh @default(PENDENTE)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+
+  @@unique([funcionarioId, dataReferencia])
+  @@index([funcionarioId, dataReferencia])
+  @@map("comentarios_conferencia_ponto_rh")
 }
 
 model CompensacaoHorasRh {

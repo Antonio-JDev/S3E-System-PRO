@@ -77,6 +77,7 @@ import {
   isLocalInboundMediaUrl,
   resolveLocalInboundMediaPath
 } from '../services/whatsappInboundMedia.service';
+import { toStickerWebpFromBuffer } from '../utils/whatsappSticker.util';
 import { createReadStream } from 'node:fs';
 import { stat as fsStat } from 'node:fs/promises';
 
@@ -122,6 +123,15 @@ function mimetypeToProviderMediaType(mimetype: string, originalname: string): Wh
 
 function isTruthyQueryFlag(v: unknown): boolean {
   return typeof v === 'string' && (v === '1' || v.toLowerCase() === 'true');
+}
+
+function stripDataUrlPrefix(b64: string): string {
+  const trimmed = (b64 || '').trim();
+  const idx = trimmed.indexOf('base64,');
+  if (trimmed.toLowerCase().startsWith('data:') && idx >= 0) {
+    return trimmed.slice(idx + 'base64,'.length).replace(/\s/g, '');
+  }
+  return trimmed.replace(/\s/g, '');
 }
 
 async function refreshProviderContactsCache(): Promise<void> {
@@ -1295,9 +1305,23 @@ export async function postWhatsappSendFile(req: AuthRequest, res: Response): Pro
       res.status(400).json({ success: false, error: 'chatId e arquivo (field file) são obrigatórios' });
       return;
     }
-    const mimetype = file.mimetype || 'application/octet-stream';
-    const mediaType = mimetypeToProviderMediaType(mimetype, file.originalname || '');
-    const base64Data = file.buffer.toString('base64');
+    const wantsSticker =
+      req.body?.asSticker === '1' ||
+      req.body?.asSticker === 'true' ||
+      req.body?.mediaType === 'sticker';
+    let mimetype = file.mimetype || 'application/octet-stream';
+    let mediaType: WhatsappProviderMediaType = mimetypeToProviderMediaType(mimetype, file.originalname || '');
+    let filename = file.originalname || undefined;
+    let dataBuffer = file.buffer;
+    if (wantsSticker) {
+      dataBuffer = await toStickerWebpFromBuffer(file.buffer);
+      mimetype = 'image/webp';
+      mediaType = 'sticker';
+      filename = 'sticker.webp';
+    }
+    const base64Data = dataBuffer.toString('base64');
+    const quotedMessageId =
+      typeof req.body?.quotedMessageId === 'string' ? req.body.quotedMessageId.trim() : undefined;
     const created = await sendMediaMessageFromUser({
       chatId,
       userId,
@@ -1305,9 +1329,10 @@ export async function postWhatsappSendFile(req: AuthRequest, res: Response): Pro
       mediaType,
       base64Data,
       mimetype,
-      filename: file.originalname || undefined,
+      filename,
       caption: caption || undefined,
-      fileSize: file.size
+      fileSize: dataBuffer.length,
+      quotedMessageId
     });
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
@@ -1406,7 +1431,7 @@ export async function getWhatsappProviderMediaProxy(req: AuthRequest, res: Respo
   }
 }
 
-const ALLOWED_MEDIA_TYPES = new Set(['image', 'voice', 'video', 'file']);
+const ALLOWED_MEDIA_TYPES = new Set(['image', 'voice', 'video', 'file', 'sticker']);
 const MAX_BASE64_LENGTH = 50 * 1024 * 1024;
 
 export async function postWhatsappSendMedia(req: AuthRequest, res: Response): Promise<void> {
@@ -1428,7 +1453,7 @@ export async function postWhatsappSendMedia(req: AuthRequest, res: Response): Pr
       return;
     }
     if (!ALLOWED_MEDIA_TYPES.has(mediaType)) {
-      res.status(400).json({ success: false, error: 'mediaType deve ser image, voice, video ou file' });
+      res.status(400).json({ success: false, error: 'mediaType deve ser image, voice, video, file ou sticker' });
       return;
     }
     if (!base64Data || base64Data.length < 100) {
@@ -1444,17 +1469,30 @@ export async function postWhatsappSendMedia(req: AuthRequest, res: Response): Pr
       return;
     }
 
-    const approxSize = Math.min(Math.floor((base64Data.length * 3) / 4), MAX_BASE64_LENGTH);
+    let normalizedBase64Data = base64Data;
+    let normalizedMimetype = mimetype;
+    let normalizedFilename = filename;
+    if (mediaType === 'sticker') {
+      const inputBuffer = Buffer.from(stripDataUrlPrefix(base64Data), 'base64');
+      const stickerBuffer = await toStickerWebpFromBuffer(inputBuffer);
+      normalizedBase64Data = stickerBuffer.toString('base64');
+      normalizedMimetype = 'image/webp';
+      normalizedFilename = 'sticker.webp';
+    }
+    const approxSize = Math.min(Math.floor((normalizedBase64Data.length * 3) / 4), MAX_BASE64_LENGTH);
+    const quotedMessageId =
+      typeof req.body?.quotedMessageId === 'string' ? req.body.quotedMessageId.trim() : undefined;
     const created = await sendMediaMessageFromUser({
       chatId,
       userId,
       userName: req.user?.name,
       mediaType: mediaType as WhatsappProviderMediaType,
-      base64Data,
-      mimetype,
-      filename,
+      base64Data: normalizedBase64Data,
+      mimetype: normalizedMimetype,
+      filename: normalizedFilename,
       caption,
-      fileSize: approxSize
+      fileSize: approxSize,
+      quotedMessageId
     });
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
@@ -1474,6 +1512,8 @@ export async function postWhatsappSend(req: AuthRequest, res: Response): Promise
     }
     const chatId = typeof req.body?.chatId === 'string' ? req.body.chatId.trim() : '';
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    const quotedMessageId =
+      typeof req.body?.quotedMessageId === 'string' ? req.body.quotedMessageId.trim() : undefined;
     if (!chatId || !text) {
       res.status(400).json({ success: false, error: 'chatId e text são obrigatórios' });
       return;
@@ -1482,7 +1522,8 @@ export async function postWhatsappSend(req: AuthRequest, res: Response): Promise
       chatId,
       text,
       userId,
-      userName: req.user?.name
+      userName: req.user?.name,
+      quotedMessageId
     });
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {

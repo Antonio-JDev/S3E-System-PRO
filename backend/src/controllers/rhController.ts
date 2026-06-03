@@ -4,7 +4,7 @@ import { ModoQuitacaoHorasNegativas, PeriodoCompensacaoHoras } from '@prisma/cli
 import { prisma } from '../lib/prisma';
 import { RhService } from '../services/rh.service';
 import { ContasPagarService } from '../services/contasPagar.service';
-import { atualizarRegistroBatidas } from '../services/ponto.service';
+import { atualizarRegistroBatidas, criarRegistroBatidasManual } from '../services/ponto.service';
 import { gerarBufferPdfConferenciaPonto } from '../services/rhConferenciaPdf.service';
 import { resolveLetterheadForUser, readLetterheadImageBuffer } from '../services/pdfLetterhead.service';
 import {
@@ -18,11 +18,15 @@ import {
   criarFaltaJustificada,
   atualizarFaltaJustificada,
   criarJustificativaParcial,
+  atualizarJustificativaParcial,
+  excluirJustificativaParcial,
+  excluirFaltaJustificada,
   removerAnexoFaltaJustificada,
   listarCompensacoesCompetencia,
   listarWorkShifts,
 } from '../services/rhJornada.service';
 import { buildContentDisposition } from '../utils/filename.util';
+import { salvarComentarioConferenciaDia } from '../services/rhComentarioConferencia.service';
 
 export const RhController = {
   /**
@@ -176,6 +180,33 @@ export const RhController = {
     } catch (error: any) {
       console.error('❌ Erro PDF conferência:', error);
       return res.status(500).json({ success: false, message: error?.message ?? 'Erro ao gerar PDF' });
+    }
+  },
+
+  /** POST /api/rh/registro-ponto/manual — cria registro em dia sem batidas */
+  async criarRegistroPontoManual(req: Request, res: Response) {
+    try {
+      const { funcionarioId, referenciaAno, referenciaMes, dia, batidas } = req.body ?? {};
+      if (!funcionarioId || !referenciaAno || !referenciaMes || !dia) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno, referenciaMes e dia são obrigatórios',
+        });
+      }
+      if (!Array.isArray(batidas)) {
+        return res.status(400).json({ success: false, message: 'Informe batidas (array de HH:mm)' });
+      }
+      const strs = batidas.map((b) => String(b).trim()).filter(Boolean);
+      const row = await criarRegistroBatidasManual({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: Number(referenciaAno),
+        referenciaMes: Number(referenciaMes),
+        dia: Number(dia),
+        batidasInput: strs,
+      });
+      return res.status(201).json({ success: true, data: row });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao criar registro' });
     }
   },
 
@@ -373,6 +404,20 @@ export const RhController = {
     }
   },
 
+  /** DELETE /api/rh/falta-justificada/:id — exclui a justificativa de falta */
+  async excluirFaltaJustificada(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ success: false, message: 'id é obrigatório' });
+      const data = await excluirFaltaJustificada(id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao excluir justificativa' });
+    }
+  },
+
   /** DELETE /api/rh/falta-justificada/:id/anexo — remove somente o anexo */
   async deletarAnexoFaltaJustificada(req: Request, res: Response) {
     try {
@@ -390,8 +435,17 @@ export const RhController = {
   /** POST /api/rh/justificativa-parcial */
   async registrarJustificativaParcial(req: Request, res: Response) {
     try {
-      const { funcionarioId, referenciaAno, referenciaMes, dia, descricao, justificativaTipo, horaInicio, horaFim } =
-        req.body ?? {};
+      const {
+        funcionarioId,
+        referenciaAno,
+        referenciaMes,
+        dia,
+        descricao,
+        justificativaTipo,
+        horaInicio,
+        horaFim,
+        classificacaoJustificativa,
+      } = req.body ?? {};
       const desc = String(descricao ?? '').trim();
       const tipo = String(justificativaTipo ?? '').trim();
       const ini = String(horaInicio ?? '').trim();
@@ -427,12 +481,128 @@ export const RhController = {
         justificativaTipo: tipo as any,
         horaInicio: ini,
         horaFim: fim,
+        classificacaoJustificativa: classificacaoJustificativa
+          ? String(classificacaoJustificativa)
+          : undefined,
         documentoAnexoUrl,
         documentoAnexoNome,
       });
       return res.status(201).json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao registrar justificativa' });
+    }
+  },
+
+  /** PUT /api/rh/justificativa-parcial/:id */
+  async atualizarJustificativaParcial(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const body = req.body ?? {};
+      const desc = String(body.descricao ?? '').trim();
+      const tipo = String(body.justificativaTipo ?? '').trim();
+      const ini = String(body.horaInicio ?? '').trim();
+      const fim = String(body.horaFim ?? '').trim();
+      const classificacaoJustificativa = body.classificacaoJustificativa;
+      const removerAnexo =
+        body.removerAnexo === 'true' || body.removerAnexo === true;
+
+      if (!id || !desc) {
+        return res.status(400).json({ success: false, message: 'id e descricao são obrigatórios' });
+      }
+      if (tipo !== 'ENTRADA_ATRASADA' && tipo !== 'SAIDA_ANTECIPADA') {
+        return res.status(400).json({ success: false, message: 'justificativaTipo inválido' });
+      }
+      if (!/^\d{1,2}:\d{2}$/.test(ini) || !/^\d{1,2}:\d{2}$/.test(fim)) {
+        return res.status(400).json({ success: false, message: 'horaInicio/horaFim devem ser HH:mm' });
+      }
+
+      const file = req.file as Express.Multer.File | undefined;
+      let documentoAnexoUrl: string | null | undefined;
+      let documentoAnexoNome: string | null | undefined;
+      if (file) {
+        documentoAnexoUrl = `/uploads/rh-faltas/${file.filename}`;
+        documentoAnexoNome = file.originalname;
+      }
+
+      const data = await atualizarJustificativaParcial(id, {
+        descricao: desc,
+        justificativaTipo: tipo as any,
+        horaInicio: ini,
+        horaFim: fim,
+        classificacaoJustificativa: classificacaoJustificativa
+          ? String(classificacaoJustificativa)
+          : undefined,
+        removerAnexo: removerAnexo && !file,
+        ...(file ? { documentoAnexoUrl, documentoAnexoNome } : {}),
+      });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao atualizar justificativa' });
+    }
+  },
+
+  /** DELETE /api/rh/justificativa-parcial/:id — exclui justificativa (falta do dia ou meio período) */
+  async excluirJustificativaParcial(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      if (!id) return res.status(400).json({ success: false, message: 'id é obrigatório' });
+      const data = await excluirJustificativaParcial(id);
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao excluir justificativa' });
+    }
+  },
+
+  /** PUT /api/rh/conferencia-ponto/comentario */
+  async salvarComentarioConferencia(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const {
+        funcionarioId,
+        referenciaAno,
+        referenciaMes,
+        dia,
+        comentario,
+        decisaoRh,
+        justificativaOcorrenciaId,
+        faltaJustificadaOcorrenciaId,
+      } = body as {
+        funcionarioId?: unknown;
+        referenciaAno?: unknown;
+        referenciaMes?: unknown;
+        dia?: unknown;
+        comentario?: unknown;
+        decisaoRh?: unknown;
+        justificativaOcorrenciaId?: unknown;
+        faltaJustificadaOcorrenciaId?: unknown;
+      };
+      if (!funcionarioId || referenciaAno == null || referenciaMes == null || dia == null) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno, referenciaMes e dia são obrigatórios',
+        });
+      }
+      const data = await salvarComentarioConferenciaDia({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: parseInt(String(referenciaAno), 10),
+        referenciaMes: parseInt(String(referenciaMes), 10),
+        dia: parseInt(String(dia), 10),
+        comentario: comentario != null ? String(comentario) : null,
+        decisaoRh: decisaoRh != null ? String(decisaoRh) : null,
+        justificativaOcorrenciaId:
+          justificativaOcorrenciaId != null ? String(justificativaOcorrenciaId) : null,
+        faltaJustificadaOcorrenciaId:
+          faltaJustificadaOcorrenciaId != null ? String(faltaJustificadaOcorrenciaId) : null,
+      });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao salvar comentário' });
     }
   },
 

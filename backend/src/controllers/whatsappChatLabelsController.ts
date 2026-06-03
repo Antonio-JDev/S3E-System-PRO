@@ -107,7 +107,7 @@ export async function deleteChatLabelController(req: Request, res: Response): Pr
       return;
     }
     const { id } = req.params;
-    const ok = await labelsService.deleteLabel(id, ctx.userId, { isAdmin: ctx.isAdmin });
+    const ok = await labelsService.deleteLabel(id, ctx.userId);
     if (!ok) {
       res.status(404).json({ success: false, error: 'Lista não encontrada ou sem permissão' });
       return;

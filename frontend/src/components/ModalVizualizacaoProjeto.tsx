@@ -14,6 +14,7 @@ import { alocacaoMateriaisService } from '../services/alocacaoMateriaisService';
 import * as qualidadeService from '../services/qualidadeService';
 import { AuthContext } from '../contexts/AuthContext';
 import { isAdmin, isDeveloper } from '../utils/permissions';
+import { getStatusEngenhariaStyle } from '../constants/engenhariaProjeto';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import {
@@ -34,6 +35,13 @@ import {
 import KitComposicaoDisponibilidadeModal, {
   type ComposicaoDisponibilidadeData,
 } from './KitComposicaoDisponibilidadeModal';
+import {
+  createVirtualCatalogKitHeader,
+  expandItensDoKitHierarquia,
+  flattenKitEntityToComposicao,
+  parseKitIdFromExpandKey,
+  resolveComposicaoCatalogoKit,
+} from '../utils/bomKitExpand';
 
 type ProjetoStatus = 'PROPOSTA' | 'VALIDADO' | 'APROVADO' | 'EXECUCAO' | 'CONCLUIDO';
 
@@ -86,17 +94,44 @@ export interface ProjetoDetalhe {
 
 type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Qualidade';
 
+const MSG_BLOQUEIO_CONCLUSAO_ENG =
+  'Essa ordem de serviço não pode ser concluída pois o projeto ainda não está concluído. Pressione a equipe de projetos!';
+
+function mensagemErroConclusaoOs(erro?: string | null): string {
+  const text = (erro || '').trim();
+  if (
+    text.includes('engenharia') ||
+    text.includes('não pode ser concluída') ||
+    text.includes('Não é possível concluir') ||
+    text === 'Erro ao atualizar status do projeto' ||
+    text === 'Erro ao concluir ordem de serviço'
+  ) {
+    if (text.length > 20 && !text.startsWith('Erro ao atualizar status')) {
+      return text;
+    }
+    return MSG_BLOQUEIO_CONCLUSAO_ENG;
+  }
+  return text || 'Não foi possível concluir a ordem de serviço. Verifique os requisitos e tente novamente.';
+}
+
 interface ModalVizualizacaoProjetoProps {
   projeto: ProjetoDetalhe;
   isOpen: boolean;
   onClose: () => void;
   initialTab?: Aba;
-  onRefresh?: () => void; // chamado após alterações (ex: mudança de status)
+  onRefresh?: () => void | Promise<void>; // chamado após alterações (ex: mudança de status)
   onViewBudget?: (budgetId: string) => void; // navegar para orçamento
   onViewClient?: (clientId: string) => void; // navegar para cliente
   onViewSale?: (saleId: string) => void; // navegar para venda
   onViewObra?: (obraId: string) => void; // navegar para obra
   onNavigate?: (view: string, ...args: any[]) => void; // navegar para outras páginas
+  engenhariaAtribuicao?: {
+    precisaEquipeEngenharia: boolean;
+    atribuido: boolean;
+    responsavelNome?: string | null;
+    statusEngenharia?: string | null;
+  };
+  onAtribuirEngenharia?: () => void;
 }
 
 const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Qualidade'];
@@ -109,7 +144,7 @@ function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisId
   return nomes.length ? nomes.join(', ') : 'Não atribuído';
 }
 
-const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate }) => {
+const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate, engenhariaAtribuicao, onAtribuirEngenharia }) => {
   const { user } = useContext(AuthContext) || {};
   const [activeTab, setActiveTab] = useState<Aba>(initialTab);
   const [loadingAcao, setLoadingAcao] = useState(false);
@@ -183,6 +218,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     description: '',
     onConfirm: () => {}
   });
+  const [aprovacaoNegadaOpen, setAprovacaoNegadaOpen] = useState(false);
+  const [aprovacaoNegadaDetalhe, setAprovacaoNegadaDetalhe] = useState<string | null>(null);
+
+  function abrirModalAprovacaoNegada(detalhe?: string) {
+    setAprovacaoNegadaDetalhe(detalhe || null);
+    setAprovacaoNegadaOpen(true);
+  }
 
   // Estados para alocação de materiais
   const [materialParaAlocar, setMaterialParaAlocar] = useState<{
@@ -202,6 +244,8 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   
   // IDs/keys de nós de kit que foram expandidos na aba Materiais (suporta kit raiz e kits aninhados)
   const [kitsDesunificados, setKitsDesunificados] = useState<Set<string>>(new Set());
+  const [kitComposicaoPlanoCache, setKitComposicaoPlanoCache] = useState<Record<string, any[]>>({});
+  const [kitsComposicaoCarregando, setKitsComposicaoCarregando] = useState<Set<string>>(new Set());
   const [kitDispCache, setKitDispCache] = useState<Record<string, ComposicaoDisponibilidadeData>>({});
   const [kitComposicaoModal, setKitComposicaoModal] = useState<{
     open: boolean;
@@ -226,6 +270,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     observacoes: ''
   });
   const [savingQualidade, setSavingQualidade] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'Kanban') {
@@ -719,11 +769,45 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   }
 
   // Expansão/recolhimento de qualquer nó de kit (raiz ou aninhado)
-  const toggleKitDesunificado = (key: string) => {
-    setKitsDesunificados(prev => {
+  const fetchKitComposicaoPlano = async (kitId: string): Promise<any[]> => {
+    if (kitComposicaoPlanoCache[kitId]?.length) return kitComposicaoPlanoCache[kitId];
+    setKitsComposicaoCarregando((prev) => {
+      if (prev.has(kitId)) return prev;
+      return new Set(prev).add(kitId);
+    });
+    try {
+      const r = await axiosApiService.get<any>(`/api/kits/${kitId}/composicao?depth=4`);
+      if (r.success && r.data) {
+        const flat = flattenKitEntityToComposicao(r.data, kitId);
+        setKitComposicaoPlanoCache((prev) =>
+          prev[kitId]?.length ? prev : { ...prev, [kitId]: flat },
+        );
+        return flat;
+      }
+    } catch (e) {
+      console.error('Erro ao carregar composição do kit:', e);
+    } finally {
+      setKitsComposicaoCarregando((prev) => {
+        const next = new Set(prev);
+        next.delete(kitId);
+        return next;
+      });
+    }
+    return [];
+  };
+
+  const toggleKitDesunificado = (key: string, kitId?: string) => {
+    setKitsDesunificados((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      const adding = !next.has(key);
+      if (adding) next.add(key);
+      else next.delete(key);
+      if (adding) {
+        const idFromKey = kitId || parseKitIdFromExpandKey(key);
+        if (idFromKey) {
+          void fetchKitComposicaoPlano(idFromKey);
+        }
+      }
       return next;
     });
   };
@@ -762,25 +846,41 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     }
   };
 
+  const collectKitsParaDisponibilidade = (itensSource: OrcamentoItemRef[]) => {
+    const jobs: Array<{ kitId: string; qtd: number; orcamentoItemId?: string }> = [];
+    const seen = new Set<string>();
+
+    const add = (kitId: string, qtd: number, orcamentoItemId?: string) => {
+      const key = orcamentoItemId ? `item:${orcamentoItemId}` : `kit:${kitId}:${qtd}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      jobs.push({ kitId, qtd, orcamentoItemId });
+    };
+
+    for (const item of itensSource) {
+      if ((item.tipo || '').toUpperCase() === 'KIT' && item.kitId) {
+        const qtd = Number(item.quantidade) || 1;
+        add(item.kitId, qtd, item.id);
+      }
+      const subs = Array.isArray((item as any).itensDoKit) ? (item as any).itensDoKit : [];
+      const multPai = Number(item.quantidade) || 1;
+      for (const sub of subs) {
+        if (sub?.kitId && String(sub.tipo || '').toUpperCase() === 'KIT') {
+          add(sub.kitId, (Number(sub.quantidade) || 1) * multPai);
+        }
+      }
+    }
+    return jobs;
+  };
+
   const prefetchKitsDisponibilidade = async (itensSource?: OrcamentoItemRef[]) => {
     const itens = (itensSource ||
       orcamentoCompleto?.items ||
       projeto.orcamento?.items ||
       []) as OrcamentoItemRef[];
-    const jobs: Promise<void>[] = [];
-    for (const item of itens) {
-      if ((item.tipo || '').toUpperCase() !== 'KIT' || !item.kitId) continue;
-      const qtd = Number(item.quantidade) || 1;
-      jobs.push(
-        fetchKitDisponibilidade(item.kitId, qtd, item.id).then(() => undefined),
-      );
-      const subs = Array.isArray((item as any).itensDoKit) ? (item as any).itensDoKit : [];
-      for (const sub of subs) {
-        if (sub?.kitId && String(sub.tipo || '').toUpperCase() === 'KIT') {
-          jobs.push(fetchKitDisponibilidade(sub.kitId, Number(sub.quantidade) || 1).then(() => undefined));
-        }
-      }
-    }
+    const jobs = collectKitsParaDisponibilidade(itens).map(({ kitId, qtd, orcamentoItemId }) =>
+      fetchKitDisponibilidade(kitId, qtd, orcamentoItemId).then(() => undefined),
+    );
     await Promise.allSettled(jobs);
   };
 
@@ -817,36 +917,41 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           const subKitId = sub.kitId;
           const ehServico = !!(sub.servicoId || ((sub.tipo || '').toUpperCase() === 'SERVICO'));
           if (subKitId) {
-            // Sub-item é kit do catálogo: expandir usando o kit do orçamento (encontrar item com kitId)
-            const kitRef = itens.find((x: any) => x.kitId === subKitId);
-            const kitItems = kitRef && (kitRef as any).kit?.items;
-            if (kitItems && kitItems.length > 0) {
-              const mult = (sub.quantidade ?? 1) * qtdKit;
-              kitItems.forEach((ki: any, kiIdx: number) => {
-                const qtdSub = (ki.quantidade ?? 1) * mult;
-                const materialRef = ki.materialId ? materiaisEstoque.find(m => m.id === ki.materialId) : (ki.material ? ki.material : null);
-                const virtualItem: OrcamentoItemRef & { material?: MaterialRef | null; cotacao?: CotacaoRef | null; codigo?: string } = {
-                  id: `${item.id}-sub-${subIdx++}`,
-                  quantidade: qtdSub,
-                  subtotal: 0,
-                  tipo: 'MATERIAL',
-                  descricao: materialRef?.nome || ki.material?.nome || sub.nome,
-                  material: materialRef || undefined,
-                  materialVinculadoId: null,
-                  codigo: (materialRef as any)?.sku
-                };
-                resultado.push({ item: virtualItem, isSubItem: true, parentKit: item, isFirstSubItem: i === 0 && kiIdx === 0 });
+            const qtdSubKit = (Number(sub.quantidade) || 1) * qtdKit;
+            const composicaoSub = resolveComposicaoCatalogoKit(
+              sub,
+              subKitId,
+              itens as any[],
+              kitComposicaoPlanoCache,
+            );
+            const { item: headerItem, expandKey } = createVirtualCatalogKitHeader({
+              parentItemId: item.id,
+              sub,
+              subKitId,
+              qtdKitMult: qtdKit,
+              itensDoKit: composicaoSub,
+            });
+            resultado.push({
+              item: headerItem as OrcamentoItemRef,
+              isSubItem: true,
+              parentKit: item,
+              isFirstSubItem: i === 0,
+              expandKey,
+            });
+            if (kitsDesunificados.has(expandKey) && composicaoSub.length > 0) {
+              const nested = expandItensDoKitHierarquia({
+                composicao: composicaoSub,
+                rootKitId: subKitId,
+                parentOrcamentoItem: item as any,
+                parentKitForRows: headerItem,
+                qtdKitMult: qtdSubKit,
+                kitsDesunificados,
+                materiaisEstoque,
+                idPrefix: `${item.id}-sub-${subKitId}`,
               });
-            } else {
-              const qtdSub = (sub.quantidade ?? 1) * qtdKit;
-              const virtualItem: OrcamentoItemRef & { material?: MaterialRef | null; cotacao?: CotacaoRef | null; codigo?: string; servico?: { nome?: string } } = {
-                id: `${item.id}-sub-${subIdx++}`,
-                quantidade: qtdSub,
-                subtotal: (sub.subtotal ?? (sub.valorVenda ?? 0) * (sub.quantidade ?? 1)) * qtdKit,
-                tipo: 'KIT',
-                descricao: sub.nome
-              };
-              resultado.push({ item: virtualItem, isSubItem: true, parentKit: item, isFirstSubItem: i === 0 });
+              for (const row of nested) {
+                resultado.push(row as typeof resultado[0]);
+              }
             }
           } else {
             const qtdSub = (sub.quantidade ?? 1) * qtdKit;
@@ -873,63 +978,44 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           }
         }
       } else if (desunificadoCatalogo) {
-        // Kit do catálogo: expandir composição materializada (itensDoKit) respeitando expansão por nó (até 4 camadas)
         const qtdKit = Number(item.quantidade ?? 1);
-        const composicao = Array.isArray((item as any).itensDoKit) ? ((item as any).itensDoKit as any[]) : [];
-
-        const byParent = composicao.reduce((acc: Record<string, any[]>, sub: any, idx: number) => {
-          const p = String(sub.parentKitId || item.kitId || '__root__');
-          acc[p] = acc[p] || [];
-          acc[p].push({ ...sub, __idx: idx });
-          return acc;
-        }, {});
-
-        const pushNode = (parentKitId: string, depth: number) => {
-          const arr = byParent[parentKitId] || [];
-          for (let i = 0; i < arr.length; i++) {
-            const sub = arr[i];
-            const tipo = String(sub.tipo || '').toUpperCase();
-            const ehKit = tipo === 'KIT' && !!sub.kitId;
-            const ehServico = tipo === 'SERVICO' || !!sub.servicoId;
-            const isBancoFrio = tipo === 'COTACAO' || !!sub.cotacaoId;
-
-            const materialRef = sub.materialId ? materiaisEstoque.find(m => m.id === sub.materialId) : null;
-            const syntheticId = `${item.id}-cat-node-${parentKitId}-${i}-${sub.kitId || sub.materialId || sub.cotacaoId || sub.servicoId || 'x'}`;
-            const expandKey = ehKit ? `${item.id}::kit::${sub.kitId}` : undefined;
-
-            const virtualItem: any = {
-              id: syntheticId,
-              quantidade: Number(sub.quantidade ?? 0) * qtdKit,
-              subtotal: (sub.subtotal ?? (sub.valorVenda ?? 0) * (sub.quantidade ?? 0)) * qtdKit,
-              tipo: ehKit ? 'KIT' : ehServico ? 'SERVICO' : materialRef ? 'MATERIAL' : isBancoFrio ? 'COTACAO' : 'MATERIAL',
-              descricao: sub.nome || sub.descricao || 'Item',
-              material: materialRef || undefined,
-              materialVinculadoId: sub.materialVinculadoId || null,
-              cotacao: isBancoFrio ? { id: sub.cotacaoId, nome: sub.nome, ncm: sub.ncm || sub.codigo || undefined } : undefined,
-              cotacaoId: sub.cotacaoId || undefined,
-              servico: ehServico ? { nome: sub.nome } : undefined,
-              servicoId: sub.servicoId || undefined,
-              codigo: sub.codigo || sub.sku,
-              kitId: sub.kitId || undefined,
-              kit: ehKit ? { id: sub.kitId, nome: sub.nome } : undefined
-            };
-
-            resultado.push({ item: virtualItem, isSubItem: true, parentKit: item, isFirstSubItem: false, itensDoKitIndex: sub.__idx, expandKey });
-
-            if (ehKit && expandKey && kitsDesunificados.has(expandKey) && depth < 4) {
-              pushNode(String(sub.kitId), depth + 1);
-            }
-          }
-        };
-
-        // Renderiza primeiro nível
-        pushNode(String(item.kitId), 0);
+        const kitIdRoot = String((item as any).kitId);
+        let composicao = Array.isArray((item as any).itensDoKit)
+          ? ((item as any).itensDoKit as any[])
+          : [];
+        if (composicao.length === 0 && (item as any).kit) {
+          composicao = flattenKitEntityToComposicao((item as any).kit, kitIdRoot);
+        }
+        if (composicao.length === 0 && kitComposicaoPlanoCache[kitIdRoot]?.length) {
+          composicao = kitComposicaoPlanoCache[kitIdRoot];
+        }
+        const nested = expandItensDoKitHierarquia({
+          composicao,
+          rootKitId: kitIdRoot,
+          parentOrcamentoItem: item as any,
+          parentKitForRows: item as any,
+          qtdKitMult: qtdKit,
+          kitsDesunificados,
+          materiaisEstoque,
+          idPrefix: `${item.id}-cat`,
+        });
+        for (const row of nested) {
+          resultado.push(row as typeof resultado[0]);
+        }
       } else {
         resultado.push({ item, isSubItem: false });
       }
     }
     return resultado;
-  }, [orcamentoCompleto?.items, projeto.orcamento?.items, kitsDesunificados, materiaisEstoque]);
+  }, [orcamentoCompleto?.items, projeto.orcamento?.items, kitsDesunificados, materiaisEstoque, kitComposicaoPlanoCache]);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'Materiais') return;
+    const itens = (orcamentoCompleto?.items || projeto.orcamento?.items) as OrcamentoItemRef[] | undefined;
+    if (!itens?.length) return;
+    void prefetchKitsDisponibilidade(itens);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, activeTab, orcamentoCompleto?.items, projeto.orcamento?.items, kitsDesunificados]);
 
   // Lista filtrada pela busca da aba Materiais (cada caractere digitado filtra em tempo real)
   const itensFiltradosPorBusca = useMemo(() => {
@@ -977,48 +1063,52 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   async function handleGerarPDFItensFaltantes() {
     let toastId: string | number | undefined;
     try {
+      const hasEstoqueInsuficienteParaLinha = (row: typeof itensParaExibicao[number]) => {
+        const item = row.item;
+        const tipoItem = String(item.tipo || '').toUpperCase();
+        const isServico = tipoItem === 'SERVICO' || !!item.servico;
+        if (isServico) return false;
+
+        if (!!(item as any).vendaDiretaFornecedor) return false;
+
+        const quantidadeNecessaria = Number(item.quantidade ?? 0);
+        if (quantidadeNecessaria <= 0) return false;
+
+        const isBancoFrio = tipoItem === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
+        const materialVinculadoId = vinculacoesBancoFrio[item.id] || item.materialVinculadoId;
+
+        // Banco frio sem vinculação sempre precisa de ação
+        if (isBancoFrio && !materialVinculadoId) return true;
+
+        const isKit = tipoItem === 'KIT';
+        const kitIdCatalogo = (item as any).kitId as string | undefined;
+        if (isKit && kitIdCatalogo) {
+          const dispKey = cacheKeyKitDisp(
+            kitIdCatalogo,
+            quantidadeNecessaria || 1,
+            row.isSubItem ? undefined : item.id,
+          );
+          const kitDispInfo = kitDispCache[dispKey] ?? null;
+          if (kitDispInfo) {
+            // Kit de catálogo completo NÃO deve entrar no PDF de faltantes
+            return !kitDispInfo.completo;
+          }
+        }
+
+        const materialVinculado = materialVinculadoId
+          ? materiaisEstoque.find((m) => m.id === materialVinculadoId)
+          : null;
+        const estoqueDisponivel = materialVinculado
+          ? Number(materialVinculado.estoque ?? 0)
+          : (isBancoFrio ? 0 : Number(item.material?.estoque ?? 0));
+
+        return estoqueDisponivel < quantidadeNecessaria;
+      };
+
       // Usar a mesma lista plana da tabela (inclui sub-itens de kits desunificados)
       // Regra: mostrar todos com estoque insuficiente + todos os itens do banco frio não vinculados
       const itensComEstoqueInsuficiente = itensParaExibicao
-        .filter(row => {
-          const item = row.item;
-          const isServico = (item.tipo || '').toUpperCase() === 'SERVICO' || !!item.servico;
-          if (isServico) return false;
-
-          // Regra: itens marcados como venda direta do fornecedor não entram na lista de compras/faltas.
-          if (!!(item as any).vendaDiretaFornecedor) return false;
-
-          const quantidadeNecessaria = Number(item.quantidade ?? 0);
-          if (quantidadeNecessaria <= 0) return false;
-
-          const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
-          const materialVinculadoId = vinculacoesBancoFrio[item.id] || item.materialVinculadoId;
-          
-          // ✅ REGRA PRINCIPAL: Itens do banco frio SEM vinculação sempre devem aparecer
-          if (isBancoFrio && !materialVinculadoId) {
-            console.log('🔥 Item banco frio NÃO vinculado incluído no PDF:', item.descricao || item.nome);
-            return true; // Sempre incluir banco frio não vinculado
-          }
-
-          const materialVinculado = materialVinculadoId ? materiaisEstoque.find(m => m.id === materialVinculadoId) : null;
-          // Banco frio sem vinculação: não existe no estoque → sempre 0. Com vinculação: usar estoque do material vinculado.
-          const estoqueDisponivel = materialVinculado
-            ? Number(materialVinculado.estoque ?? 0)
-            : (isBancoFrio ? 0 : Number(item.material?.estoque ?? 0));
-
-          // Excluir apenas: banco frio já vinculado a um material do estoque E com quantidade suficiente (não precisa comprar)
-          if (isBancoFrio && materialVinculadoId && estoqueDisponivel >= quantidadeNecessaria) {
-            console.log('🟢 Item banco frio vinculado com estoque suficiente EXCLUÍDO do PDF:', item.descricao || item.nome);
-            return false;
-          }
-          
-          // Incluir todos os que estão com estoque insuficiente (inclui material normal e banco frio vinculado com falta)
-          const incluir = estoqueDisponivel < quantidadeNecessaria;
-          if (incluir) {
-            console.log(`📦 Item com estoque insuficiente incluído no PDF: ${item.descricao || item.nome} (${estoqueDisponivel}/${quantidadeNecessaria})`);
-          }
-          return incluir;
-        })
+        .filter((row) => hasEstoqueInsuficienteParaLinha(row))
         .map(row => {
           const item = row.item;
           const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
@@ -1252,10 +1342,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
             
             // Verificar se é erro de items frios
             if (mensagemErro.includes('BLOQUEADA') || mensagemErro.includes('sem estoque')) {
-              toast.error('⚠️ Aprovação Bloqueada!', {
-                description: mensagemErro,
-                duration: 10000
-              });
+              abrirModalAprovacaoNegada(mensagemErro);
             } else {
               toast.error('❌ Erro ao aprovar projeto', {
                 description: mensagemErro
@@ -1267,16 +1354,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           
           // Verificar se é erro de items frios
           if (mensagemErro.includes('BLOQUEADA') || mensagemErro.includes('sem estoque')) {
-            toast.error('⚠️ Aprovação Bloqueada!', {
-              description: mensagemErro,
-              duration: 10000,
-              action: {
-                label: 'Ver Detalhes',
-                onClick: () => {
-                  alert(mensagemErro);
-                }
-              }
-            });
+            abrirModalAprovacaoNegada(mensagemErro);
           } else {
             toast.error('❌ Erro ao aprovar projeto', {
               description: mensagemErro
@@ -1559,14 +1637,14 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       const res = await axiosApiService.put(`/api/projetos/${projeto.id}/status`, { status: 'CONCLUIDO' });
       if (res.success) {
         toast.success('Ordem de serviço marcada como CONCLUÍDA');
-        if (onRefresh) onRefresh();
+        if (onRefresh) await onRefresh();
         setConcluirModalOpen(false);
       } else {
-        toast.error('Erro ao concluir ordem de serviço');
+        toast.error(mensagemErroConclusaoOs(res.error), { duration: 10000 });
       }
     } catch (err: any) {
       console.error('Erro ao concluir OS:', err);
-      toast.error(err?.response?.data?.error || 'Erro ao concluir ordem de serviço');
+      toast.error(mensagemErroConclusaoOs(err?.message), { duration: 10000 });
     }
   }
 
@@ -1576,7 +1654,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       // ✅ Verificar se há itens do banco frio não vinculados
       const itens = orcamentoCompleto?.items || projeto.orcamento?.items || [];
       const itensBancoFrioNaoVinculados = itens.filter(item => {
-        const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao;
+        const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
         // Regra: banco frio marcado como venda direta não precisa (nem deve) ser vinculado ao estoque.
         if (!!(item as any).vendaDiretaFornecedor) return false;
         const materialVinculadoId = vinculacoesBancoFrio[item.id] || item.materialVinculadoId;
@@ -1961,6 +2039,59 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     </p>
                   </div>
                 </div>
+
+                {engenhariaAtribuicao?.precisaEquipeEngenharia && (
+                  <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
+                    <div
+                      className={
+                        engenhariaAtribuicao.atribuido
+                          ? 'flex flex-col items-center text-center gap-3'
+                          : 'flex items-center justify-between gap-4 flex-wrap'
+                      }
+                    >
+                      <div className={engenhariaAtribuicao.atribuido ? 'w-full' : ''}>
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+                          📐 Setor de Engenharia
+                        </h3>
+                        {engenhariaAtribuicao.atribuido ? (
+                          <>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Projetista responsável:{' '}
+                              <strong className="text-gray-900 dark:text-white">
+                                {engenhariaAtribuicao.responsavelNome || 'Atribuído'}
+                              </strong>
+                              . Para trocar o responsável, use o menu da OS (Alterar projetista).
+                            </p>
+                            <p className="mt-4 text-base font-semibold text-gray-800 dark:text-gray-100 tracking-wide">
+                              STATUS :{' '}
+                              <span
+                                className={`inline-block ml-1 px-3 py-1 rounded-lg text-sm font-bold ${getStatusEngenhariaStyle(
+                                  engenhariaAtribuicao.statusEngenharia || 'A fazer',
+                                )}`}
+                              >
+                                {engenhariaAtribuicao.statusEngenharia || 'A fazer'}
+                              </span>
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Inclua esta OS na aba Projetos de Engenharia para acompanhamento do setor (metadados
+                            estilo Notion).
+                          </p>
+                        )}
+                      </div>
+                      {!engenhariaAtribuicao.atribuido && onAtribuirEngenharia && (
+                        <button
+                          type="button"
+                          onClick={onAtribuirEngenharia}
+                          className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold whitespace-nowrap"
+                        >
+                          Atribuir à Engenharia
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Botão Validar Proposta */}
                 {podeValidar && (
@@ -2520,7 +2651,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
 
                         // Identificar tipo do item
                         const isServico = (item.tipo || '').toUpperCase() === 'SERVICO' || !!item.servico;
-                        const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao;
+                        const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
                         const isMaterial = (item.tipo || '').toUpperCase() === 'MATERIAL' && !!item.material;
                         
                         const nomeMaterial = item.material?.nome || item.kit?.nome || item.servico?.nome || item.cotacao?.nome || item.descricao || 'Item sem identificação';
@@ -2542,7 +2673,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
 
                         let possuiEstoqueKit: boolean | null = null;
                         let kitDispInfo: ComposicaoDisponibilidadeData | null = null;
-                        if (isKit && !kitExpanded && kitIdCatalogo) {
+                        if (isKit && kitIdCatalogo) {
                           const dispKey = cacheKeyKitDisp(
                             kitIdCatalogo,
                             quantidadeNecessaria || 1,
@@ -2553,31 +2684,47 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                             possuiEstoqueKit = kitDispInfo.completo;
                           }
                         }
-                        if (isKit && !kitExpanded && possuiEstoqueKit == null) {
+                        if (isKit && kitIdCatalogo && possuiEstoqueKit == null) {
                           const composicao = Array.isArray((item as any).itensDoKit)
                             ? ((item as any).itensDoKit as any[])
                             : null;
                           if (composicao && composicao.length > 0) {
                             const multKit = Number(item.quantidade ?? 1);
                             let ok = true;
-                            for (const sub of composicao) {
+                            for (const [subIndex, sub] of composicao.entries()) {
                               const tipoSub = String(sub?.tipo || '').toUpperCase();
                               if (tipoSub === 'SERVICO' || !!sub?.servicoId) continue;
                               const subKitId = sub?.kitId as string | undefined;
                               if (subKitId) {
-                                const subKey = cacheKeyKitDisp(subKitId, Number(sub.quantidade) || 1);
-                                const subDisp = kitDispCache[subKey];
+                                const qtdSubKit = (Number(sub.quantidade) || 1) * multKit;
+                                const subDisp = kitDispCache[cacheKeyKitDisp(subKitId, qtdSubKit)]
+                                  ?? kitDispCache[cacheKeyKitDisp(subKitId, Number(sub.quantidade) || 1)];
                                 if (subDisp && !subDisp.completo) {
                                   ok = false;
                                   break;
                                 }
                                 if (subDisp?.completo) continue;
+                                // Sem cache do kit filho: não marcar como falta para evitar falso-positivo.
+                                // A conferência detalhada ocorrerá ao expandir o kit filho.
+                                continue;
                               }
                               const qtdNec = Number(sub?.quantidade ?? 0) * multKit;
                               if (!(qtdNec > 0)) continue;
                               const isBancoFrioSub = tipoSub === 'COTACAO' || !!sub?.cotacaoId;
+                              const parentKitToken = String(sub?.parentKitId || kitIdCatalogo || 'root');
+                              const tokenSub = sub.kitId || sub.materialId || sub.cotacaoId || sub.servicoId || 'x';
+                              const syntheticIdRoot = `${item.id}-cat-node-${parentKitToken}-${subIndex}-${tokenSub}`;
+                              const parentMatch = String(item.id || '').match(/^(.*)-sub-kit-(.*)$/);
+                              const syntheticIdNested = parentMatch
+                                ? `${parentMatch[1]}-sub-${parentMatch[2]}-node-${parentKitToken}-${subIndex}-${tokenSub}`
+                                : null;
+                              const vinculoPorSyntheticId =
+                                vinculacoesBancoFrio[syntheticIdRoot] ||
+                                (syntheticIdNested ? vinculacoesBancoFrio[syntheticIdNested] : null);
                               const materialVinculadoIdSub =
-                                (sub?.materialVinculadoId as string | null | undefined) || null;
+                                (sub?.materialVinculadoId as string | null | undefined) ||
+                                vinculoPorSyntheticId ||
+                                null;
                               const materialIdSub = (sub?.materialId as string | null | undefined) || null;
                               const materialVinculadoSub = materialVinculadoIdSub
                                 ? materiaisEstoque.find((m) => m.id === materialVinculadoIdSub)
@@ -2599,9 +2746,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                           }
                         }
 
+                        const kitEstoquePendente = isKit && !!kitIdCatalogo && possuiEstoqueKit == null;
                         const possuiEstoque = possuiEstoqueKit != null
                           ? possuiEstoqueKit
-                          : (quantidadeNecessaria <= 0 ? estoqueDisponivel > 0 : estoqueDisponivel >= quantidadeNecessaria);
+                          : isKit && kitIdCatalogo
+                            ? true
+                            : (quantidadeNecessaria <= 0 ? estoqueDisponivel > 0 : estoqueDisponivel >= quantidadeNecessaria);
                         const dataCotacao = item.cotacao?.dataAtualizacao ? new Date(item.cotacao.dataAtualizacao).toLocaleDateString('pt-BR') : null;
 
                         const isKitCatalogo = isKit && !!(item as any).kitId;
@@ -2665,7 +2815,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                   {mostrarBotaoDesunificar && (
                                     <button
                                       type="button"
-                                      onClick={() => toggleKitDesunificado(nodeKey)}
+                                      onClick={() => toggleKitDesunificado(nodeKey, kitIdCatalogo)}
                                       className="px-3 py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-all flex items-center gap-1"
                                       title="Desunificar para ver os itens individuais na tabela"
                                     >
@@ -2694,7 +2844,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-800'
                                         : 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-900/20 dark:text-gray-200 dark:border-gray-700'
                                     }`}>
-                                      {kitExpanded ? 'KIT (expandido)' : 'KIT (recolhido) — clique em Desunificar'}
+                                      {kitExpanded
+                                        ? 'KIT (expandido)'
+                                        : isKitCatalogo
+                                          ? 'KIT (recolhido) — Desunificar ou Ver composição'
+                                          : 'KIT (recolhido) — clique em Desunificar'}
                                     </span>
                                     <span className="px-2 py-0.5 rounded border text-[11px] font-semibold bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-200 dark:border-purple-800">
                                       {isKitCatalogo ? 'Kit do Catálogo' : isKitOrcamento ? 'Kit do Orçamento' : 'Kit'}
@@ -2705,6 +2859,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                   <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-50/80 text-purple-600 dark:bg-purple-900/20 dark:text-purple-300 text-xs">
                                     ↳ Componente de: {row.parentKit.descricao || row.parentKit.kit?.nome || 'Kit'}
                                   </div>
+                                )}
+                                {isKit && kitExpanded && kitIdCatalogo && kitsComposicaoCarregando.has(kitIdCatalogo) && (
+                                  <p className="text-[11px] text-teal-600 dark:text-teal-300 animate-pulse">
+                                    Carregando micro-peças do kit…
+                                  </p>
                                 )}
                                 {isBancoFrio && (
                                   <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-200 dark:border-yellow-800">
@@ -2785,18 +2944,24 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                                     </p>
                                   )}
                                 </div>
-                              ) : isKit && !kitExpanded && kitIdCatalogo ? (
+                              ) : isKit && kitIdCatalogo ? (
                                 <div className="space-y-1">
                                   <div
                                     className={`flex items-center gap-2 font-semibold ${
-                                      possuiEstoque
-                                        ? 'text-green-600 dark:text-green-400'
-                                        : 'text-red-600 dark:text-red-400'
+                                      kitEstoquePendente
+                                        ? 'text-gray-600 dark:text-gray-400'
+                                        : possuiEstoque
+                                          ? 'text-green-600 dark:text-green-400'
+                                          : 'text-red-600 dark:text-red-400'
                                     }`}
                                   >
-                                    {possuiEstoque ? '✅ Kit completo' : '⚠️ Kit incompleto'}
+                                    {kitEstoquePendente
+                                      ? '⏳ Verificando kit…'
+                                      : possuiEstoque
+                                        ? '✅ Kit completo'
+                                        : '⚠️ Kit incompleto'}
                                   </div>
-                                  {!possuiEstoque && (
+                                  {!kitEstoquePendente && !possuiEstoque && (
                                     <p className="text-xs text-red-500 dark:text-red-300">
                                       Abra &quot;Ver composição&quot; para ver itens em falta (estoque / banco frio).
                                     </p>
@@ -3947,6 +4112,48 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {aprovacaoNegadaOpen && (
+          <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-xl bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden border border-red-200 dark:border-red-900/40">
+              <div className="relative px-6 py-4 bg-gradient-to-r from-red-600 to-red-500">
+                <h3 className="text-xl font-bold text-white">Aprovação Negada!</h3>
+                <button
+                  type="button"
+                  onClick={() => setAprovacaoNegadaOpen(false)}
+                  className="absolute top-3 right-3 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-all"
+                  aria-label="Fechar alerta de aprovação negada"
+                  title="Fechar"
+                >
+                  <XMarkIcon className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-6 py-5 space-y-3">
+                <p className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
+                  Confira os materiais na aba Materiais e veja o que está com estoque insuficiente, somente ao ter todos os itens equivalentes à necessidade, possivelmente seja necessário comprar materiais.
+                </p>
+                {aprovacaoNegadaDetalhe && (
+                  <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                    <p className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">Detalhe técnico</p>
+                    <p className="text-xs text-red-700 dark:text-red-200 break-words">{aprovacaoNegadaDetalhe}</p>
+                  </div>
+                )}
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('Materiais');
+                      setAprovacaoNegadaOpen(false);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all text-sm font-semibold"
+                  >
+                    Ir para aba Materiais
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -3,7 +3,14 @@
 }
 
 .whatsapp-composer-editor .ProseMirror {
+  width: 100%;
+  max-width: none;
+  margin: 0;
   min-height: 40px;
+  height: 100%;
+  background: transparent;
+  box-shadow: none;
+  border: 0;
   max-height: calc(1.35em * 8);
   overflow-x: hidden;
   overflow-y: hidden;
@@ -65,4 +72,103 @@
     opacity: 1;
     transform: translate(-50%, -100%);
   }
+}
+
+/* Barra de resposta no composer (espelha WhatsApp Web). */
+.whatsapp-composer-reply {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 2px 4px 0;
+  box-sizing: border-box;
+}
+
+.whatsapp-composer-reply__body {
+  flex: 1;
+  min-width: 0;
+  margin-left: 8px;
+  padding: 2px 0 4px 12px;
+  border-left: 4px solid #06cf9c;
+}
+
+.whatsapp-composer-reply--group .whatsapp-composer-reply__body {
+  border-left-color: #53bdeb;
+}
+
+.whatsapp-composer-reply__author {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  color: #06cf9c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whatsapp-composer-reply--group .whatsapp-composer-reply__author {
+  color: #53bdeb;
+}
+
+.whatsapp-composer-reply__snippet {
+  margin: 0;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #667781;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.dark .whatsapp-composer-reply__snippet {
+  color: #8696a0;
+}
+
+.whatsapp-composer-reply__dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8696a0;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.whatsapp-composer-reply__dismiss:hover {
+  background: rgba(11, 20, 26, 0.06);
+}
+
+.dark .whatsapp-composer-reply__dismiss:hover {
+  background: rgba(233, 237, 239, 0.08);
+}
+
+.whatsapp-composer-reply-divider {
+  flex-shrink: 0;
+  height: 1px;
+  margin: 0 12px 2px;
+  background: #e9edef;
+}
+
+.dark .whatsapp-composer-reply-divider {
+  background: #3b4a54;
+}
+
+/* Figurinha na bolha do chat (exibição compacta; arquivo servido em 512×512 WebP). */
+.wa-chat-sticker-img {
+  width: 180px;
+  height: 180px;
+  max-width: 180px;
+  max-height: 180px;
+  object-fit: contain;
+  display: block;
 }

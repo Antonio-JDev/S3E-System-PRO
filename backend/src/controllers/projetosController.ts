@@ -449,10 +449,63 @@ export const updateProjetoStatus = async (req: Request, res: Response): Promise<
     res.json({ success: true, data: atualizado, message: `Status atualizado para ${status}` });
   } catch (error) {
     console.error('Erro ao atualizar status do projeto:', error);
-    res.status(500).json({ 
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Erro ao atualizar status do projeto';
+    const bloqueioEngenharia =
+      message.includes('não pode ser concluída') ||
+      message.includes('Não é possível concluir') ||
+      message.includes('projeto de engenharia');
+    res.status(bloqueioEngenharia ? 400 : 500).json({
       success: false,
-      error: 'Erro ao atualizar status do projeto' 
+      error: message,
     });
+  }
+};
+
+/** Rollback de status da OS (admin): pode remover obra e estornar estoque. */
+export const reverterProjetoStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body as { status: string };
+    const user = (req as any).user;
+    const role = String(user?.role || '').toLowerCase();
+    const isAdminUser = user?.isAdmin === true;
+
+    if (role !== 'desenvolvedor' && role !== 'admin' && role !== 'administrador' && !isAdminUser) {
+      res.status(403).json({
+        success: false,
+        error: 'Apenas administradores podem reverter o status da ordem de serviço.',
+      });
+      return;
+    }
+
+    if (!['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(status))) {
+      res.status(400).json({
+        success: false,
+        error: 'Status de destino inválido. Use: PROPOSTA (pendente), VALIDADO ou APROVADO',
+      });
+      return;
+    }
+
+    const atualizado = await projetosService.reverterStatus(
+      id,
+      status as 'PROPOSTA' | 'VALIDADO' | 'APROVADO',
+    );
+
+    res.json({
+      success: true,
+      data: atualizado,
+      message: `Status revertido para ${status}`,
+    });
+  } catch (error: any) {
+    console.error('Erro ao reverter status do projeto:', error);
+    const msg = error?.message || 'Erro ao reverter status do projeto';
+    const statusCode = msg.includes('inválido') || msg.includes('anterior') || msg.includes('cancelada')
+      ? 400
+      : 500;
+    res.status(statusCode).json({ success: false, error: msg });
   }
 };
 

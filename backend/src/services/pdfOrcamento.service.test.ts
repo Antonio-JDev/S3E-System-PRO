@@ -104,6 +104,8 @@ describe('PDFOrcamentoService', () => {
             expect(html).toContain('padding-top: 95px');
             expect(html).toContain('padding-bottom: 100px');
             expect(html).toContain('container-fechamento');
+            expect(html).toContain('page-number');
+            expect(html).toMatch(/<div class="page-number">\s*1 \/ \d+\s*<\/div>/);
         });
 
         it('deve incluir número sequencial no formato correto', async () => {

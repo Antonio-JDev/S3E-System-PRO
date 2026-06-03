@@ -579,6 +579,10 @@ const RHView: React.FC = () => {
     const [batidasEdicao, setBatidasEdicao] = useState<Record<number, string[]>>({});
     const skipBatidasSyncRef = useRef(false);
     const [salvandoBatidasDia, setSalvandoBatidasDia] = useState<number | null>(null);
+    const [comentariosRhEdicao, setComentariosRhEdicao] = useState<
+        Record<number, { comentario: string; decisaoRh: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' }>
+    >({});
+    const [salvandoComentarioRhDia, setSalvandoComentarioRhDia] = useState<number | null>(null);
     const [faltaJustificadaModal, setFaltaJustificadaModal] = useState<{
         dia: number;
         modo: 'criar' | 'editar';
@@ -590,6 +594,7 @@ const RHView: React.FC = () => {
     const [faltaJustificadaArquivo, setFaltaJustificadaArquivo] = useState<File | null>(null);
     const [faltaJustificadaRemoverAnexo, setFaltaJustificadaRemoverAnexo] = useState(false);
     const [salvandoFaltaJustificada, setSalvandoFaltaJustificada] = useState(false);
+    const [excluindoFaltaJustificada, setExcluindoFaltaJustificada] = useState(false);
     const [removendoAnexoFalta, setRemovendoAnexoFalta] = useState(false);
 
     const handleExcluirAnexoFaltaJustificada = async () => {
@@ -771,6 +776,28 @@ const RHView: React.FC = () => {
     }, [folhaDetalhada]);
 
     useEffect(() => {
+        if (!folhaDetalhada?.conferenciaPonto) {
+            setComentariosRhEdicao({});
+            return;
+        }
+        const next: Record<
+            number,
+            { comentario: string; decisaoRh: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' }
+        > = {};
+        for (const row of folhaDetalhada.conferenciaPonto as Array<{
+            dia: number;
+            comentarioRh?: string | null;
+            decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
+        }>) {
+            next[row.dia] = {
+                comentario: row.comentarioRh ?? '',
+                decisaoRh: row.decisaoRh ?? 'PENDENTE',
+            };
+        }
+        setComentariosRhEdicao(next);
+    }, [folhaDetalhada]);
+
+    useEffect(() => {
         setValorSimuladoBanco(null);
         setBancoHorasConverterInput('');
         setModoIncluirBanco('total');
@@ -877,32 +904,92 @@ const RHView: React.FC = () => {
         }
     };
 
-    const handleSalvarBatidasDia = async (dia: number, registroPontoId: string, batidasOverride?: string[]) => {
+    const handleSalvarBatidasDia = async (
+        dia: number,
+        registroPontoId: string | null,
+        batidasOverride?: string[],
+    ) => {
         const bat = batidasOverride ?? batidasEdicao[dia];
-        if (!registroPontoId || !bat) return;
+        if (!bat) return;
         const filtradas = bat.map((s) => String(s).trim()).filter(Boolean);
         if (filtradas.length === 0) {
             toast.error('Informe ao menos uma batida (horário)');
             return;
         }
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia) return;
         setSalvandoBatidasDia(dia);
         try {
-            const r = await rhService.atualizarRegistroPonto(registroPontoId, filtradas);
+            const r = registroPontoId
+                ? await rhService.atualizarRegistroPonto(registroPontoId, filtradas)
+                : await rhService.criarRegistroPontoManual({
+                      funcionarioId: funcionarioFolha.id,
+                      referenciaAno: folhaDetalhada.referencia.ano,
+                      referenciaMes: folhaDetalhada.referencia.mes,
+                      dia,
+                      batidas: filtradas,
+                  });
             if (!r.success) {
                 toast.error(
-                    typeof (r as { error?: string }).error === 'string'
-                        ? (r as { error: string }).error
-                        : 'Erro ao salvar batidas',
+                    typeof (r as { message?: string; error?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : typeof (r as { error?: string }).error === 'string'
+                          ? (r as { error: string }).error
+                          : 'Erro ao salvar batidas',
                 );
                 return;
             }
-            toast.success('Batidas salvas — horas recalculadas');
-            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
+            toast.success(
+                registroPontoId ? 'Batidas salvas — horas recalculadas' : 'Registro criado com batidas manuais',
+            );
+            setBatidasEdicao((prev) => {
+                const next = { ...prev };
+                delete next[dia];
+                return next;
+            });
+            await recarregarFolhaAberta({ preservarBatidasEdicao: false });
         } catch (e) {
             console.error(e);
             toast.error('Erro ao salvar batidas');
         } finally {
             setSalvandoBatidasDia(null);
+        }
+    };
+
+    const handleSalvarComentarioRh = async (dia: number) => {
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia) return;
+        const row = (folhaDetalhada.conferenciaPonto as Array<{
+            dia: number;
+            justificativaParcial?: { id: string } | null;
+            faltaJustificadaOcorrenciaId?: string | null;
+        }> | undefined)?.find((r) => r.dia === dia);
+        const ed = comentariosRhEdicao[dia];
+        setSalvandoComentarioRhDia(dia);
+        try {
+            const r = await rhService.salvarComentarioConferenciaPonto({
+                funcionarioId: funcionarioFolha.id,
+                referenciaAno: folhaDetalhada.referencia.ano,
+                referenciaMes: folhaDetalhada.referencia.mes,
+                dia,
+                comentario: (ed?.comentario ?? '').trim() || null,
+                decisaoRh: ed?.decisaoRh ?? 'PENDENTE',
+                justificativaOcorrenciaId: row?.justificativaParcial?.id ?? null,
+                faltaJustificadaOcorrenciaId: row?.faltaJustificadaOcorrenciaId ?? null,
+            });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao salvar comentário',
+                );
+                return;
+            }
+            toast.success('Comentário RH salvo');
+            await recarregarFolhaAberta();
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao salvar comentário RH');
+        } finally {
+            setSalvandoComentarioRhDia(null);
         }
     };
 
@@ -998,22 +1085,121 @@ const RHView: React.FC = () => {
         }
     };
 
-    const [justificativaParcialModal, setJustificativaParcialModal] = useState<{ dia: number } | null>(null);
+    const handleExcluirFaltaJustificadaCompleta = async () => {
+        if (!faltaJustificadaModal?.ocorrenciaId) return;
+        const ok = window.confirm(
+            'Excluir esta justificativa de falta? O dia voltará a aparecer como falta sem justificativa na folha.',
+        );
+        if (!ok) return;
+        setExcluindoFaltaJustificada(true);
+        try {
+            const resp = await rhService.excluirFaltaJustificada(faltaJustificadaModal.ocorrenciaId);
+            if (!resp.success) {
+                toast.error(
+                    typeof (resp as { message?: string }).message === 'string'
+                        ? (resp as { message: string }).message
+                        : 'Não foi possível excluir a justificativa',
+                );
+                return;
+            }
+            toast.success('Justificativa de falta excluída');
+            setFaltaJustificadaModal(null);
+            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao excluir justificativa');
+        } finally {
+            setExcluindoFaltaJustificada(false);
+        }
+    };
+
+    type ClassificacaoJustificativaPonto = 'ABONAR' | 'DESCONTAR_BANCO' | 'DESCONTAR_HORAS_DEVIDAS';
+
+    const [justificativaParcialModal, setJustificativaParcialModal] = useState<{
+        dia: number;
+        modo: 'criar' | 'editar';
+        contexto: 'falta_dia' | 'meio_periodo';
+        ocorrenciaId?: string;
+        documentoUrl?: string | null;
+        documentoNome?: string | null;
+    } | null>(null);
     const [justificativaParcialTipo, setJustificativaParcialTipo] =
         useState<'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA'>('SAIDA_ANTECIPADA');
+    const [justificativaParcialClassificacao, setJustificativaParcialClassificacao] =
+        useState<ClassificacaoJustificativaPonto>('ABONAR');
     const [justificativaParcialInicio, setJustificativaParcialInicio] = useState('12:00');
     const [justificativaParcialFim, setJustificativaParcialFim] = useState('13:00');
     const [justificativaParcialDescricao, setJustificativaParcialDescricao] = useState('');
     const [justificativaParcialArquivo, setJustificativaParcialArquivo] = useState<File | null>(null);
+    const [justificativaParcialRemoverAnexo, setJustificativaParcialRemoverAnexo] = useState(false);
     const [salvandoJustificativaParcial, setSalvandoJustificativaParcial] = useState(false);
+    const [excluindoJustificativaParcial, setExcluindoJustificativaParcial] = useState(false);
 
-    const abrirModalJustificativaParcial = (dia: number, sugestao?: { tipo?: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA'; ini?: string; fim?: string }) => {
+    const abrirModalJustificativaParcial = (
+        dia: number,
+        sugestao?: {
+            tipo?: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+            ini?: string;
+            fim?: string;
+            contexto?: 'falta_dia' | 'meio_periodo';
+        },
+    ) => {
         setJustificativaParcialDescricao('');
         setJustificativaParcialTipo(sugestao?.tipo ?? 'SAIDA_ANTECIPADA');
+        setJustificativaParcialClassificacao('ABONAR');
         setJustificativaParcialInicio(sugestao?.ini ?? '12:00');
         setJustificativaParcialFim(sugestao?.fim ?? '13:00');
         setJustificativaParcialArquivo(null);
-        setJustificativaParcialModal({ dia });
+        setJustificativaParcialRemoverAnexo(false);
+        setJustificativaParcialModal({
+            dia,
+            modo: 'criar',
+            contexto: sugestao?.contexto ?? 'meio_periodo',
+        });
+    };
+
+    const abrirModalJustificarFaltaDia = (dia: number) => {
+        const j = folhaDetalhada?.jornada;
+        abrirModalJustificativaParcial(dia, {
+            contexto: 'falta_dia',
+            tipo: 'SAIDA_ANTECIPADA',
+            ini: j?.entrada1 ?? '08:00',
+            fim: j?.saida2 ?? '17:30',
+        });
+    };
+
+    const abrirModalEditarJustificativaParcial = (params: {
+        dia: number;
+        ocorrenciaId: string;
+        tipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+        classificacao?: ClassificacaoJustificativaPonto | string | null;
+        horaInicio?: string | null;
+        horaFim?: string | null;
+        descricao?: string | null;
+        documentoUrl?: string | null;
+        documentoNome?: string | null;
+        contexto?: 'falta_dia' | 'meio_periodo';
+    }) => {
+        const cls = String(params.classificacao ?? 'ABONAR').toUpperCase();
+        setJustificativaParcialDescricao(params.descricao ?? '');
+        setJustificativaParcialTipo(params.tipo);
+        setJustificativaParcialClassificacao(
+            cls === 'DESCONTAR_BANCO' || cls === 'DESCONTAR_HORAS_DEVIDAS'
+                ? (cls as ClassificacaoJustificativaPonto)
+                : 'ABONAR',
+        );
+        setJustificativaParcialInicio(params.horaInicio ?? '12:00');
+        setJustificativaParcialFim(params.horaFim ?? '13:00');
+        setJustificativaParcialArquivo(null);
+        setJustificativaParcialRemoverAnexo(false);
+        setJustificativaParcialModal({
+            dia: params.dia,
+            modo: 'editar',
+            contexto: params.contexto ?? 'meio_periodo',
+            ocorrenciaId: params.ocorrenciaId,
+            documentoUrl: params.documentoUrl,
+            documentoNome: params.documentoNome,
+        });
     };
 
     const handleSalvarJustificativaParcial = async () => {
@@ -1025,22 +1211,41 @@ const RHView: React.FC = () => {
         }
         setSalvandoJustificativaParcial(true);
         try {
-            const resp = await rhService.registrarJustificativaParcial({
-                funcionarioId: funcionarioFolha.id,
-                referenciaAno: folhaDetalhada.referencia.ano,
-                referenciaMes: folhaDetalhada.referencia.mes,
-                dia: justificativaParcialModal.dia,
+            const payload = {
                 descricao: desc,
                 justificativaTipo: justificativaParcialTipo,
                 horaInicio: justificativaParcialInicio,
                 horaFim: justificativaParcialFim,
+                classificacaoJustificativa: justificativaParcialClassificacao,
                 documento: justificativaParcialArquivo,
-            });
+            };
+            const isEditar =
+                justificativaParcialModal.modo === 'editar' && !!justificativaParcialModal.ocorrenciaId;
+            const resp = isEditar
+                ? await rhService.atualizarJustificativaParcial(justificativaParcialModal.ocorrenciaId!, {
+                      ...payload,
+                      removerAnexo: justificativaParcialRemoverAnexo && !justificativaParcialArquivo,
+                  })
+                : await rhService.registrarJustificativaParcial({
+                      funcionarioId: funcionarioFolha.id,
+                      referenciaAno: folhaDetalhada.referencia.ano,
+                      referenciaMes: folhaDetalhada.referencia.mes,
+                      dia: justificativaParcialModal.dia,
+                      ...payload,
+                  });
             if (!resp.success) {
-                toast.error((resp as { message?: string }).message ?? 'Não foi possível registrar a justificativa');
+                toast.error((resp as { message?: string }).message ?? 'Não foi possível salvar a justificativa');
                 return;
             }
-            toast.success('Justificativa de meio período registrada');
+            toast.success(
+                isEditar
+                    ? justificativaParcialModal.contexto === 'falta_dia'
+                        ? 'Justificativa da falta atualizada'
+                        : 'Justificativa de meio período atualizada'
+                    : justificativaParcialModal.contexto === 'falta_dia'
+                      ? 'Falta justificada registrada'
+                      : 'Justificativa de meio período registrada',
+            );
             setJustificativaParcialModal(null);
             await recarregarFolhaAberta({ preservarBatidasEdicao: true });
         } catch (e) {
@@ -1048,6 +1253,35 @@ const RHView: React.FC = () => {
             toast.error('Erro ao salvar justificativa');
         } finally {
             setSalvandoJustificativaParcial(false);
+        }
+    };
+
+    const handleExcluirJustificativaParcialModal = async () => {
+        if (!justificativaParcialModal?.ocorrenciaId) return;
+        const msg =
+            justificativaParcialModal.contexto === 'falta_dia'
+                ? 'Excluir a justificativa desta falta? O dia voltará a ser tratado sem abono na folha.'
+                : 'Excluir esta justificativa de meio período? Atraso/saída voltam a ser calculados normalmente.';
+        if (!window.confirm(msg)) return;
+        setExcluindoJustificativaParcial(true);
+        try {
+            const resp = await rhService.excluirJustificativaParcial(justificativaParcialModal.ocorrenciaId);
+            if (!resp.success) {
+                toast.error(
+                    typeof (resp as { message?: string }).message === 'string'
+                        ? (resp as { message: string }).message
+                        : 'Não foi possível excluir a justificativa',
+                );
+                return;
+            }
+            toast.success('Justificativa excluída');
+            setJustificativaParcialModal(null);
+            await recarregarFolhaAberta({ preservarBatidasEdicao: true });
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao excluir justificativa');
+        } finally {
+            setExcluindoJustificativaParcial(false);
         }
     };
 
@@ -3748,7 +3982,7 @@ const RHView: React.FC = () => {
                                                 </span>
                                             </p>
                                             <div className="overflow-x-auto">
-                                                <table className="w-full text-xs border-collapse min-w-[780px]">
+                                                <table className="w-full text-xs border-collapse min-w-[980px]">
                                                     <thead>
                                                         <tr className="bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-gray-300">
                                                             <th className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border w-10">Dia</th>
@@ -3775,6 +4009,12 @@ const RHView: React.FC = () => {
                                                                 Saída ant. / Extra
                                                             </th>
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-24">Situação</th>
+                                                            <th
+                                                                className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border min-w-[200px]"
+                                                                title="Motivo da falta/justificativa e parecer do RH (aprovar ou reprovar)"
+                                                            >
+                                                                Comentário RH
+                                                            </th>
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-24">Ações</th>
                                                         </tr>
                                                     </thead>
@@ -3814,6 +4054,8 @@ const RHView: React.FC = () => {
                                                             minutosExtra20?: number;
                                                             intervaloAlmocoInicio?: string | null;
                                                             intervaloAlmocoFim?: string | null;
+                                                            comentarioRh?: string | null;
+                                                            decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
                                                         }) => {
                                                             const ehFaltaDia =
                                                                 !d.temRegistro &&
@@ -3856,8 +4098,16 @@ const RHView: React.FC = () => {
                                                                 situacaoClass = 'text-orange-600 dark:text-orange-400 font-semibold';
                                                             }
                                                             const regId = d.registroPontoId ?? null;
+                                                            const podeIncluirBatidasManual =
+                                                                !d.faltaJustificada && !regId;
+                                                            const podeEditarBatidas = !!regId || podeIncluirBatidasManual;
+                                                            const diaUtilSemRegistro =
+                                                                !regId &&
+                                                                !d.ehFimDeSemana &&
+                                                                !d.ehFeriado &&
+                                                                !d.faltaJustificada;
                                                             const listaBat =
-                                                                regId && batidasEdicao[d.dia]
+                                                                batidasEdicao[d.dia] !== undefined
                                                                     ? batidasEdicao[d.dia]
                                                                     : Array.isArray(d.batidas)
                                                                       ? d.batidas
@@ -3880,6 +4130,20 @@ const RHView: React.FC = () => {
                                                                     : d.temRegistro && (d.entrada || d.saida)
                                                                       ? [d.entrada, d.saida].filter(Boolean) as string[]
                                                                       : [];
+                                                            const comentarioRhVal =
+                                                                comentariosRhEdicao[d.dia]?.comentario ??
+                                                                d.comentarioRh ??
+                                                                '';
+                                                            const decisaoRhVal =
+                                                                comentariosRhEdicao[d.dia]?.decisaoRh ??
+                                                                d.decisaoRh ??
+                                                                'PENDENTE';
+                                                            const exibirDecisaoRh =
+                                                                !!d.justificativaParcial?.id ||
+                                                                !!d.faltaJustificada ||
+                                                                ehFaltaDia ||
+                                                                !!d.comentarioRh ||
+                                                                (d.decisaoRh != null && d.decisaoRh !== 'PENDENTE');
                                                             return (
                                                                 <tr key={d.dia} className={bgRow}>
                                                                     <td
@@ -3917,9 +4181,9 @@ const RHView: React.FC = () => {
                                                                         )}
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top">
-                                                                        {regId ? (
+                                                                        {podeEditarBatidas ? (
                                                                             <div className="flex flex-wrap items-center gap-1.5">
-                                                                                {listaBat.map((b, idx) => (
+                                                                                {(listaBat.length > 0 ? listaBat : ['']).map((b, idx) => (
                                                                                     <span key={idx} className="inline-flex items-center gap-0.5">
                                                                                         <input
                                                                                             type="text"
@@ -4004,7 +4268,7 @@ const RHView: React.FC = () => {
                                                                         </div>
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-center text-gray-900 dark:text-gray-100 align-top">
-                                                                        {d.temRegistro ? (
+                                                                        {d.temRegistro || (d.horasLiquidas ?? 0) > 0 ? (
                                                                             <span
                                                                                 className="font-mono font-semibold"
                                                                                 title={`Centesimal: ${d.horasLiquidas.toFixed(2)} h`}
@@ -4072,7 +4336,12 @@ const RHView: React.FC = () => {
                                                                                     Atestado anexado
                                                                                 </a>
                                                                             )}
-                                                                            {justificativaParcialLabel && (
+                                                                            {!d.temRegistro && d.justificativaParcial && (
+                                                                                <span className="text-[10px] text-sky-600 dark:text-sky-300 font-medium">
+                                                                                    Falta justificada
+                                                                                </span>
+                                                                            )}
+                                                                            {justificativaParcialLabel && d.temRegistro && (
                                                                                 <span className="text-[10px] text-sky-700 dark:text-sky-300 font-medium">
                                                                                     {justificativaParcialLabel}
                                                                                 </span>
@@ -4081,8 +4350,37 @@ const RHView: React.FC = () => {
                                                                             d.justificativaParcial?.horaFim ? (
                                                                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-200 text-[10px] font-semibold">
                                                                                     JP: {d.justificativaParcial.horaInicio}-{d.justificativaParcial.horaFim}
+                                                                                    {d.justificativaParcial.classificacao === 'DESCONTAR_BANCO'
+                                                                                        ? ' · Banco'
+                                                                                        : d.justificativaParcial.classificacao === 'DESCONTAR_HORAS_DEVIDAS'
+                                                                                          ? ' · Horas devidas'
+                                                                                          : d.justificativaParcial.classificacao === 'ABONAR'
+                                                                                            ? ' · Abonar'
+                                                                                            : ''}
                                                                                 </span>
                                                                             ) : null}
+                                                                            {d.justificativaParcial?.id && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        abrirModalEditarJustificativaParcial({
+                                                                                            dia: d.dia,
+                                                                                            ocorrenciaId: d.justificativaParcial!.id,
+                                                                                            tipo: d.justificativaParcial!.tipo,
+                                                                                            classificacao: d.justificativaParcial!.classificacao,
+                                                                                            horaInicio: d.justificativaParcial!.horaInicio,
+                                                                                            horaFim: d.justificativaParcial!.horaFim,
+                                                                                            descricao: d.justificativaParcial!.descricao,
+                                                                                            documentoUrl: d.justificativaParcial!.documentoAnexoUrl,
+                                                                                            documentoNome: d.justificativaParcial!.documentoAnexoNome,
+                                                                                            contexto: d.temRegistro ? 'meio_periodo' : 'falta_dia',
+                                                                                        })
+                                                                                    }
+                                                                                    className="text-[10px] font-semibold text-violet-700 dark:text-violet-300 hover:underline"
+                                                                                >
+                                                                                    Editar justificativa
+                                                                                </button>
+                                                                            )}
                                                                             {d.justificativaParcial?.documentoAnexoUrl && (
                                                                                 <a
                                                                                     href={getUploadUrl(d.justificativaParcial.documentoAnexoUrl)}
@@ -4118,8 +4416,74 @@ const RHView: React.FC = () => {
                                                                             )}
                                                                         </div>
                                                                     </td>
+                                                                    <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top min-w-[200px]">
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <textarea
+                                                                                rows={2}
+                                                                                value={comentarioRhVal}
+                                                                                onChange={(e) =>
+                                                                                    setComentariosRhEdicao((prev) => ({
+                                                                                        ...prev,
+                                                                                        [d.dia]: {
+                                                                                            comentario: e.target.value,
+                                                                                            decisaoRh:
+                                                                                                prev[d.dia]?.decisaoRh ??
+                                                                                                decisaoRhVal,
+                                                                                        },
+                                                                                    }))
+                                                                                }
+                                                                                placeholder={
+                                                                                    exibirDecisaoRh
+                                                                                        ? 'Ex.: motivo da falta, parecer RH…'
+                                                                                        : 'Observação do dia (opcional)'
+                                                                                }
+                                                                                className="w-full min-w-[160px] rounded border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-card px-1.5 py-1 text-[10px] text-gray-800 dark:text-gray-200 resize-y"
+                                                                            />
+                                                                            {exibirDecisaoRh && (
+                                                                                <select
+                                                                                    value={decisaoRhVal}
+                                                                                    onChange={(e) =>
+                                                                                        setComentariosRhEdicao((prev) => ({
+                                                                                            ...prev,
+                                                                                            [d.dia]: {
+                                                                                                comentario:
+                                                                                                    prev[d.dia]?.comentario ??
+                                                                                                    comentarioRhVal,
+                                                                                                decisaoRh: e.target
+                                                                                                    .value as
+                                                                                                    | 'PENDENTE'
+                                                                                                    | 'APROVADO_RH'
+                                                                                                    | 'REPROVADO',
+                                                                                            },
+                                                                                        }))
+                                                                                    }
+                                                                                    className={`w-full rounded border px-1 py-0.5 text-[10px] font-semibold ${
+                                                                                        decisaoRhVal === 'APROVADO_RH'
+                                                                                            ? 'border-emerald-400 text-emerald-700 dark:text-emerald-300'
+                                                                                            : decisaoRhVal === 'REPROVADO'
+                                                                                              ? 'border-red-400 text-red-700 dark:text-red-300'
+                                                                                              : 'border-amber-400 text-amber-700 dark:text-amber-300'
+                                                                                    }`}
+                                                                                >
+                                                                                    <option value="PENDENTE">Pendente RH</option>
+                                                                                    <option value="APROVADO_RH">Aprovado RH</option>
+                                                                                    <option value="REPROVADO">Reprovado</option>
+                                                                                </select>
+                                                                            )}
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={salvandoComentarioRhDia === d.dia}
+                                                                                onClick={() => void handleSalvarComentarioRh(d.dia)}
+                                                                                className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline disabled:opacity-50 self-start"
+                                                                            >
+                                                                                {salvandoComentarioRhDia === d.dia
+                                                                                    ? 'Salvando…'
+                                                                                    : 'Salvar comentário'}
+                                                                            </button>
+                                                                        </div>
+                                                                    </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border text-center align-top">
-                                                                        {regId ? (
+                                                                        {podeEditarBatidas ? (
                                                                             <div className="flex flex-col items-center gap-1">
                                                                                 <button
                                                                                     type="button"
@@ -4127,33 +4491,54 @@ const RHView: React.FC = () => {
                                                                                     onClick={() => void handleSalvarBatidasDia(d.dia, regId)}
                                                                                     className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 hover:underline disabled:opacity-50"
                                                                                 >
-                                                                                    {salvandoBatidasDia === d.dia ? 'Salvando…' : 'Salvar'}
+                                                                                    {salvandoBatidasDia === d.dia
+                                                                                        ? 'Salvando…'
+                                                                                        : regId
+                                                                                          ? 'Salvar'
+                                                                                          : 'Criar registro'}
                                                                                 </button>
-                                                                                {((d.minutosAtraso ?? 0) > 0 || (d.minutosHorasDevidas ?? 0) > 0) && !d.ehFeriado && (
+                                                                                {diaUtilSemRegistro && !d.justificativaParcial?.id && (
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={() =>
-                                                                                            abrirModalJustificativaParcial(d.dia, {
-                                                                                                tipo: (d.minutosHorasDevidas ?? 0) > 0 ? 'SAIDA_ANTECIPADA' : 'ENTRADA_ATRASADA',
-                                                                                                ini: (d.minutosHorasDevidas ?? 0) > 0 ? '12:00' : '07:30',
-                                                                                                fim: (d.minutosHorasDevidas ?? 0) > 0 ? '13:00' : '08:00',
-                                                                                            })
-                                                                                        }
+                                                                                        onClick={() => abrirModalJustificarFaltaDia(d.dia)}
                                                                                         className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
                                                                                     >
-                                                                                        Justificar meio período
+                                                                                        Justificar falta
                                                                                     </button>
                                                                                 )}
+                                                                                {regId &&
+                                                                                    ((d.minutosAtraso ?? 0) > 0 || (d.minutosHorasDevidas ?? 0) > 0) &&
+                                                                                    !d.ehFeriado &&
+                                                                                    !d.ehFimDeSemana &&
+                                                                                    !d.justificativaParcial?.id && (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() =>
+                                                                                                abrirModalJustificativaParcial(d.dia, {
+                                                                                                    tipo:
+                                                                                                        (d.minutosHorasDevidas ?? 0) > 0
+                                                                                                            ? 'SAIDA_ANTECIPADA'
+                                                                                                            : 'ENTRADA_ATRASADA',
+                                                                                                    ini: (d.minutosHorasDevidas ?? 0) > 0 ? '12:00' : '07:30',
+                                                                                                    fim: (d.minutosHorasDevidas ?? 0) > 0 ? '13:00' : '08:00',
+                                                                                                    contexto: 'meio_periodo',
+                                                                                                })
+                                                                                            }
+                                                                                            className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
+                                                                                        >
+                                                                                            Justificar meio período
+                                                                                        </button>
+                                                                                    )}
                                                                             </div>
                                                                         ) : (
                                                                             <div className="flex flex-col items-center justify-center gap-1">
-                                                                                {!d.ehFimDeSemana && !d.ehFeriado && !d.faltaJustificada && (
+                                                                                {diaUtilSemRegistro && !d.justificativaParcial?.id && (
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={() => abrirModalFaltaJustificada(d.dia)}
+                                                                                        onClick={() => abrirModalJustificarFaltaDia(d.dia)}
                                                                                         className="text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
                                                                                     >
-                                                                                        Falta justificada
+                                                                                        Justificar falta
                                                                                     </button>
                                                                                 )}
                                                                                 {d.faltaJustificada && d.faltaJustificadaOcorrenciaId && (
@@ -4305,27 +4690,45 @@ const RHView: React.FC = () => {
                                     )}
                             </div>
                         </div>
-                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-end gap-2 shrink-0">
-                            <button
-                                type="button"
-                                disabled={salvandoFaltaJustificada}
-                                onClick={() => setFaltaJustificadaModal(null)}
-                                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="button"
-                                disabled={salvandoFaltaJustificada}
-                                onClick={() => void handleConfirmarFaltaJustificada()}
-                                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold disabled:opacity-50"
-                            >
-                                {salvandoFaltaJustificada
-                                    ? 'Salvando…'
-                                    : faltaJustificadaModal.modo === 'editar'
-                                      ? 'Salvar alterações'
-                                      : 'Confirmar justificativa'}
-                            </button>
+                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-between items-center gap-2 shrink-0">
+                            <div>
+                                {faltaJustificadaModal.modo === 'editar' && faltaJustificadaModal.ocorrenciaId && (
+                                    <button
+                                        type="button"
+                                        disabled={
+                                            salvandoFaltaJustificada ||
+                                            excluindoFaltaJustificada ||
+                                            removendoAnexoFalta
+                                        }
+                                        onClick={() => void handleExcluirFaltaJustificadaCompleta()}
+                                        className="px-4 py-2 rounded-lg border border-red-300 dark:border-red-800 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                                    >
+                                        {excluindoFaltaJustificada ? 'Excluindo…' : 'Excluir'}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    disabled={salvandoFaltaJustificada || excluindoFaltaJustificada}
+                                    onClick={() => setFaltaJustificadaModal(null)}
+                                    className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={salvandoFaltaJustificada || excluindoFaltaJustificada}
+                                    onClick={() => void handleConfirmarFaltaJustificada()}
+                                    className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold disabled:opacity-50"
+                                >
+                                    {salvandoFaltaJustificada
+                                        ? 'Salvando…'
+                                        : faltaJustificadaModal.modo === 'editar'
+                                          ? 'Salvar alterações'
+                                          : 'Confirmar justificativa'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -4336,7 +4739,15 @@ const RHView: React.FC = () => {
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong w-full max-w-lg overflow-hidden flex flex-col">
                         <div className="relative p-5 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-indigo-600 to-indigo-700 shrink-0">
-                            <h3 className="text-lg font-bold text-white pr-8">Justificativa — meio período</h3>
+                            <h3 className="text-lg font-bold text-white pr-8">
+                                {justificativaParcialModal.modo === 'editar'
+                                    ? justificativaParcialModal.contexto === 'falta_dia'
+                                        ? 'Editar justificativa da falta'
+                                        : 'Editar justificativa — meio período'
+                                    : justificativaParcialModal.contexto === 'falta_dia'
+                                      ? 'Justificar falta do dia'
+                                      : 'Justificativa — meio período'}
+                            </h3>
                             <p className="text-sm text-indigo-100 mt-0.5">
                                 {funcionarioFolha.nome} — dia{' '}
                                 {String(justificativaParcialModal.dia).padStart(2, '0')}/
@@ -4356,9 +4767,50 @@ const RHView: React.FC = () => {
                         </div>
                         <div className="p-5 space-y-4">
                             <p className="text-xs text-gray-600 dark:text-gray-400">
-                                Use quando houver atraso/saída antecipada por motivo pontual (ex.: dentista). Sem justificativa, o desconto continua.
-                                Essa justificativa permanece salva mesmo se o ponto (XLS) for importado depois.
+                                {justificativaParcialModal.contexto === 'falta_dia'
+                                    ? 'Use em dia útil sem batidas (falta). Informe o período abonado (sugestão: jornada do dia) e a classificação. Com Abonar, as horas do intervalo entram na coluna do dia. A justificativa permanece salva mesmo se o ponto (XLS) for importado depois.'
+                                    : 'Use quando houver atraso/saída antecipada por motivo pontual (ex.: dentista). Escolha como tratar o intervalo justificado. A justificativa permanece salva mesmo se o ponto (XLS) for importado depois.'}
                             </p>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Classificação
+                                </label>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setJustificativaParcialClassificacao('ABONAR')}
+                                        className={`text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                                            justificativaParcialClassificacao === 'ABONAR'
+                                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-200 font-semibold'
+                                                : 'border-gray-300 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover text-gray-700 dark:text-gray-300'
+                                        }`}
+                                    >
+                                        Abonar — não desconta atraso/saída no período informado
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setJustificativaParcialClassificacao('DESCONTAR_BANCO')}
+                                        className={`text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                                            justificativaParcialClassificacao === 'DESCONTAR_BANCO'
+                                                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 text-amber-900 dark:text-amber-200 font-semibold'
+                                                : 'border-gray-300 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover text-gray-700 dark:text-gray-300'
+                                        }`}
+                                    >
+                                        Descontar do banco — debita o intervalo do banco de horas (pode ficar negativo)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setJustificativaParcialClassificacao('DESCONTAR_HORAS_DEVIDAS')}
+                                        className={`text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                                            justificativaParcialClassificacao === 'DESCONTAR_HORAS_DEVIDAS'
+                                                ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 font-semibold'
+                                                : 'border-gray-300 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-hover text-gray-700 dark:text-gray-300'
+                                        }`}
+                                    >
+                                        Descontar horas devidas — mantém atraso/saída antecipada como débito
+                                    </button>
+                                </div>
+                            </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo</label>
@@ -4417,25 +4869,74 @@ const RHView: React.FC = () => {
                                         Arquivo: {justificativaParcialArquivo.name}
                                     </p>
                                 )}
+                                {justificativaParcialModal.modo === 'editar' &&
+                                    justificativaParcialModal.documentoUrl &&
+                                    !justificativaParcialRemoverAnexo && (
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <a
+                                                href={getUploadUrl(justificativaParcialModal.documentoUrl)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-[11px] text-indigo-700 dark:text-indigo-300 hover:underline"
+                                            >
+                                                {justificativaParcialModal.documentoNome ?? 'Ver anexo atual'}
+                                            </a>
+                                            <button
+                                                type="button"
+                                                onClick={() => setJustificativaParcialRemoverAnexo(true)}
+                                                className="text-[11px] text-red-600 dark:text-red-400 hover:underline"
+                                            >
+                                                Remover anexo
+                                            </button>
+                                        </div>
+                                    )}
+                                {justificativaParcialRemoverAnexo && (
+                                    <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                                        O anexo será removido ao salvar.
+                                    </p>
+                                )}
                             </div>
                         </div>
-                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-end gap-2 shrink-0">
-                            <button
-                                type="button"
-                                disabled={salvandoJustificativaParcial}
-                                onClick={() => setJustificativaParcialModal(null)}
-                                className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="button"
-                                disabled={salvandoJustificativaParcial}
-                                onClick={() => void handleSalvarJustificativaParcial()}
-                                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50"
-                            >
-                                {salvandoJustificativaParcial ? 'Salvando…' : 'Confirmar justificativa'}
-                            </button>
+                        <div className="p-5 border-t border-gray-200 dark:border-dark-border flex justify-between items-center gap-2 shrink-0">
+                            <div>
+                                {justificativaParcialModal.modo === 'editar' &&
+                                    justificativaParcialModal.ocorrenciaId && (
+                                        <button
+                                            type="button"
+                                            disabled={
+                                                salvandoJustificativaParcial || excluindoJustificativaParcial
+                                            }
+                                            onClick={() => void handleExcluirJustificativaParcialModal()}
+                                            className="px-4 py-2 rounded-lg border border-red-300 dark:border-red-800 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                                        >
+                                            {excluindoJustificativaParcial ? 'Excluindo…' : 'Excluir'}
+                                        </button>
+                                    )}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    disabled={salvandoJustificativaParcial || excluindoJustificativaParcial}
+                                    onClick={() => setJustificativaParcialModal(null)}
+                                    className="px-4 py-2 rounded-lg border border-gray-300 dark:border-dark-border text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-hover disabled:opacity-50"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={salvandoJustificativaParcial || excluindoJustificativaParcial}
+                                    onClick={() => void handleSalvarJustificativaParcial()}
+                                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50"
+                                >
+                                    {salvandoJustificativaParcial
+                                        ? 'Salvando…'
+                                        : justificativaParcialModal.modo === 'editar'
+                                          ? 'Salvar alterações'
+                                          : justificativaParcialModal.contexto === 'falta_dia'
+                                            ? 'Confirmar justificativa da falta'
+                                            : 'Confirmar justificativa'}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

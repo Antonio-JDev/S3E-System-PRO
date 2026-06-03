@@ -555,6 +555,7 @@ export const createOrcamento = async (req: Request, res: Response): Promise<void
         materialId: item.materialId,
         kitId: item.kitId,
         cotacaoId: item.cotacaoId,
+        servicoId: item.servicoId || null,
         servicoNome: item.servicoNome,
         descricao: item.descricao,
         quantidade: item.quantidade,
@@ -1401,6 +1402,7 @@ export const updateOrcamento = async (req: Request, res: Response): Promise<void
             ? (await materializarComposicaoKitCatalogo(item.kitId, 1)) as any
             : (item.itensDoKit || null),
           cotacaoId: item.cotacaoId,
+          servicoId: item.servicoId || null,
           servicoNome: item.servicoNome,
           descricao: item.descricao,
           quantidade: item.quantidade,

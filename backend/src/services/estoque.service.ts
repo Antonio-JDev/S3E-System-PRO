@@ -101,6 +101,43 @@ export class EstoqueService {
         ]);
     }
 
+    /** Estorna saídas de estoque vinculadas à obra (rollback de OS em execução). */
+    static async estornarBaixaPorObra(obraId: string, projetoId: string) {
+        const movimentacoes = await prisma.movimentacaoEstoque.findMany({
+            where: { referencia: obraId, tipo: 'SAIDA' },
+        });
+
+        for (const mov of movimentacoes) {
+            await this.incrementarEstoque(
+                mov.materialId,
+                mov.quantidade,
+                'DEVOLUCAO',
+                projetoId,
+                `Estorno automático — rollback da OS (obra ${obraId})`,
+            );
+        }
+
+        const projeto = await prisma.projeto.findUnique({
+            where: { id: projetoId },
+            select: { orcamentoId: true },
+        });
+
+        if (projeto?.orcamentoId) {
+            const orcamento = await prisma.orcamento.findUnique({
+                where: { id: projeto.orcamentoId },
+                select: { baixaEstoqueRealizadaEm: true },
+            });
+            if (orcamento?.baixaEstoqueRealizadaEm === 'OBRA') {
+                await prisma.orcamento.update({
+                    where: { id: projeto.orcamentoId },
+                    data: { baixaEstoqueRealizadaEm: null },
+                });
+            }
+        }
+
+        return movimentacoes.length;
+    }
+
     /**
      * Expande um kit e retorna lista de materiais componentes
      */

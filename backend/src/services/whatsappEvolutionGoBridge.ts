@@ -440,13 +440,16 @@ export async function evolutionGoProxyRequest(
   }
 
   if (method === 'POST' && /\/message\/sendText\//.test(path)) {
+    const quoted =
+      b.quoted && typeof b.quoted === 'object' ? (b.quoted as Record<string, unknown>) : undefined;
     const res = await fetch(`${baseUrl()}/send/text`, {
       method: 'POST',
       headers: instanceHeaders(),
       body: JSON.stringify({
         number: normalizeJidForEvoGo(typeof b.number === 'string' ? b.number : ''),
         text: b.text,
-        delay: typeof b.delay === 'number' ? b.delay : 0
+        delay: typeof b.delay === 'number' ? b.delay : 0,
+        ...(quoted ? { quoted } : {})
       })
     });
     const t = await res.text();
@@ -464,6 +467,22 @@ export async function evolutionGoProxyRequest(
     const filename = typeof b.fileName === 'string' ? b.fileName : typeof b.filename === 'string' ? b.filename : 'file';
     const media = typeof b.media === 'string' ? b.media : '';
     const mimetype = typeof b.mimetype === 'string' ? b.mimetype : '';
+    const quoted =
+      b.quoted && typeof b.quoted === 'object' ? (b.quoted as Record<string, unknown>) : undefined;
+    if (mediatype === 'sticker') {
+      const res = await fetch(`${baseUrl()}/send/sticker`, {
+        method: 'POST',
+        headers: instanceHeaders(),
+        body: JSON.stringify({
+          number,
+          sticker: media,
+          ...(typeof b.delay === 'number' ? { delay: b.delay } : {}),
+          ...(quoted ? { quoted } : {})
+        })
+      });
+      const t = await res.text();
+      return new Response(t, { status: res.status, headers: { 'Content-Type': 'application/json' } });
+    }
     // PTT: o caller marca `ptt: true` no body OU usa `mediatype: 'ptt'`. Ambos
     // significam "nota de voz" — repassamos para a EvoGo como `type: 'audio'`
     // com a flag `ptt: true` no body para que o WhatsApp do cliente renderize
@@ -486,6 +505,7 @@ export async function evolutionGoProxyRequest(
     };
     if (ptt) goBody.ptt = true;
     if (mimetype) goBody.mimetype = mimetype;
+    if (quoted) goBody.quoted = quoted;
     const res = await fetch(`${baseUrl()}/send/media`, {
       method: 'POST',
       headers: instanceHeaders(),

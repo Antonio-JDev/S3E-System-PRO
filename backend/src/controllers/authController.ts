@@ -4,6 +4,7 @@ import { LoginInput, RegisterInput } from '../validators/auth.validator';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
 import { isProtectedAccount } from '../utils/userProtection.util';
+import { buildNetworkContext } from '../utils/requestAuditContext.util';
 
 /**
  * Controllers de Autenticação
@@ -44,21 +45,20 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     // Chamar service de autenticação
     const result = await authService.authenticateUser(email, password);
 
-    // Registrar login (serviço de auditoria — DESATIVADO em produção)
     try {
+      const network = buildNetworkContext(req);
       await AuditoriaService.registrarEvento({
         userId: result.user.id,
         userName: result.user.name,
         userRole: result.user.role,
         action: 'LOGIN',
         description: `Usuário ${result.user.name} fez login no sistema`,
-        metadata: {
-          ipAddress: req.ip || req.socket.remoteAddress,
-          userAgent: req.headers['user-agent']
-        }
+        ipAddress: network.clientIp,
+        userAgent: network.userAgent,
+        metadata: { network, email },
       });
     } catch (logError) {
-      console.error('Erro ao registrar login (auditoria stub):', logError);
+      console.error('Erro ao registrar login (auditoria):', logError);
     }
 
     // Retornar sucesso
@@ -71,16 +71,18 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     // Tratamento de erros específicos
     const errorMessage = error instanceof Error ? error.message : 'Erro ao fazer login';
     
-    // Registrar tentativa de login falhada (auditoria stub)
     try {
       const { email } = req.body as LoginInput;
+      const network = buildNetworkContext(req);
       await AuditoriaService.registrarEvento({
         action: 'LOGIN_FAILED',
         description: `Tentativa de login falhada para ${email}: ${errorMessage}`,
-        metadata: { email, error: errorMessage, ipAddress: req.ip || req.socket.remoteAddress, userAgent: req.headers['user-agent'] }
+        ipAddress: network.clientIp,
+        userAgent: network.userAgent,
+        metadata: { email, error: errorMessage, network },
       });
     } catch (logError) {
-      console.error('Erro ao registrar falha de login (auditoria stub):', logError);
+      console.error('Erro ao registrar falha de login (auditoria):', logError);
     }
     
     if (errorMessage === 'Credenciais inválidas') {

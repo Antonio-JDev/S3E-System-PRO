@@ -57,6 +57,11 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
   isCrmAdmin = false
 }) => {
   const isEdit = !!initialLabel;
+  const canDelete =
+    isEdit &&
+    Boolean(initialLabel) &&
+    Boolean(currentUserId) &&
+    initialLabel!.userId === currentUserId;
   const editingAsAdmin =
     isEdit &&
     isCrmAdmin &&
@@ -131,6 +136,10 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
 
   async function handleDelete() {
     if (!isEdit || !initialLabel) return;
+    if (!canDelete) {
+      toast.error('Somente quem criou a lista pode excluí-la.');
+      return;
+    }
     if (!window.confirm(`Remover a lista "${initialLabel.nome}"?`)) return;
     setDeleting(true);
     try {
@@ -167,9 +176,9 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
           <button
             type="button"
             onClick={handleDelete}
-            disabled={deleting}
-            className="rounded-full px-2 py-1 text-[12px] font-medium hover:bg-white/15 disabled:opacity-50"
-            title="Excluir lista"
+            disabled={deleting || !canDelete}
+            className="rounded-full px-2 py-1 text-[12px] font-medium hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
+            title={canDelete ? 'Excluir lista' : 'Somente o criador pode excluir esta lista'}
           >
             {deleting ? 'Removendo…' : 'Excluir'}
           </button>
@@ -238,6 +247,11 @@ const WhatsAppChatLabelEditDrawer: React.FC<WhatsAppChatLabelEditDrawerProps> = 
         ) : initialLabel?.isGlobal && !editingAsAdmin ? (
           <p className="mt-4 rounded-lg bg-[#00a884]/10 px-3 py-2 text-[12px] text-[#008069] dark:text-[#53d4b0]">
             Lista compartilhada com todos os usuários do sistema.
+          </p>
+        ) : null}
+        {isEdit && !canDelete ? (
+          <p className="mt-3 rounded-lg border border-[#e9edef] bg-[#f7f8fa] px-3 py-2 text-[12px] text-[#667781] dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#aebac1]">
+            Apenas o usuário que criou esta lista pode excluí-la.
           </p>
         ) : null}
 

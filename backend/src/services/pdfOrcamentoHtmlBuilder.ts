@@ -248,6 +248,20 @@ function buildSharedStyles(opacidadeMarcaDagua: number): string {
             background: transparent;
         }
 
+        .page-number {
+            position: absolute;
+            bottom: 30.5px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 12px;
+            font-weight: 700;
+            color: #000000;
+            z-index: 2;
+            font-family: Arial, Helvetica, sans-serif;
+            background: transparent;
+            pointer-events: none;
+        }
+
         .page {
             margin: 0;
             padding: 0;
@@ -367,17 +381,79 @@ function buildSharedStyles(opacidadeMarcaDagua: number): string {
             text-align: left;
         }
 
-        .descricao-content, .observacoes-content {
+        .descricao-page-content, .descricao-content, .observacoes-content {
             color: #1e293b;
-            font-size: 11px;
-            line-height: 1.6;
-            margin-top: 8px;
+            font-size: 12pt;
+            line-height: 1.5;
+            font-family: Arial, Helvetica, sans-serif;
         }
-        .descricao-content p.tiptap-empty-paragraph { min-height: 1em; }
-        .descricao-content ul li p, .descricao-content ol li p {
+        .descricao-page-content .section { margin: 0; padding: 0; }
+        .descricao-page-content h1,
+        .descricao-page-content h2,
+        .descricao-page-content h3 {
+            margin: 0 0 0.35em 0;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .descricao-page-content p { margin: 0 0 8pt 0; line-height: 1.5; }
+        .descricao-page-content p.tiptap-empty-paragraph { min-height: 1em; }
+        .descricao-page-content ul,
+        .descricao-page-content ol {
+            margin: 8px 0 8px 20px;
+            padding-left: 1.5em;
+        }
+        .descricao-page-content ul li p,
+        .descricao-page-content ol li p {
             display: inline !important;
             margin: 0 !important;
             padding: 0 !important;
+        }
+        .descricao-page-content img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 8px 0;
+        }
+        .descricao-page-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        .descricao-page-content td,
+        .descricao-page-content th {
+            border: 1px solid #cbd5e1;
+            padding: 6px;
+        }
+        .description-measure-host {
+            position: fixed;
+            left: -99999px;
+            top: 0;
+            width: ${PDF_CONTENT_WIDTH_PX}px;
+            visibility: hidden;
+            pointer-events: none;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            box-sizing: border-box;
+        }
+        .description-measure-host .section { margin: 0; padding: 0; }
+        .description-measure-host h2 { margin: 0 0 0.35em 0; font-weight: 600; }
+        .description-measure-host p { margin: 0 0 8pt 0; }
+        .description-measure-host img {
+            max-width: 100%;
+            height: auto;
+            display: inline-block;
+            margin: 5px;
+        }
+        .description-measure-host ul,
+        .description-measure-host ol {
+            margin: 8px 0 8px 20px;
+            padding-left: 1.5em;
+        }
+        .description-measure-host table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
         }
 
         @media print {
@@ -392,6 +468,9 @@ function buildSharedStyles(opacidadeMarcaDagua: number): string {
                 padding-left: ${PDF_MARGIN_LEFT_PX}px !important;
                 padding-right: ${PDF_MARGIN_RIGHT_PX}px !important;
                 padding-bottom: ${PDF_MARGIN_BOTTOM_PX}px !important;
+            }
+            .page-number {
+                display: block !important;
             }
         }
     `;
@@ -416,13 +495,27 @@ function buildWatermarkHtml(opts: OrcamentoPdfHtmlOptions): string {
     </div>`;
 }
 
-function wrapPdfPage(innerContent: string, opts: OrcamentoPdfHtmlOptions): string {
+function wrapPdfPage(
+  innerContent: string,
+  opts: OrcamentoPdfHtmlOptions,
+  pageNumber?: number,
+  totalPages?: number
+): string {
+  const showPageNumbers =
+    typeof pageNumber === 'number' &&
+    typeof totalPages === 'number' &&
+    totalPages > 0;
+  const pageNumberHtml = showPageNumbers
+    ? `<div class="page-number">${pageNumber} / ${totalPages}</div>`
+    : '';
+
   return `
     <div class="pdf-page">
         ${buildWatermarkHtml(opts)}
         <div class="page-content">
             <div class="page">${innerContent}</div>
         </div>
+        ${pageNumberHtml}
     </div>`;
 }
 
@@ -561,13 +654,67 @@ function buildPagamentoBlock(model: OrcamentoPdfModel, measureAttr?: boolean): s
     </div>`;
 }
 
-function buildDescriptionSection(title: string, html: string): string {
-  const body = normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(html));
-  return `
-    <div class="descricao-section">
-        <div class="section-title">${title}</div>
-        <div class="descricao-content">${body}</div>
-    </div>`;
+function normalizeDescriptionHtml(html: string | null | undefined): string {
+  if (!html?.trim()) return '';
+  return normalizeEmptyParagraphsForPdf(normalizeListItemsForPdf(html));
+}
+
+/** HTML combinado das seções de texto (igual OrcamentoPrintable + PrintRenderer). */
+export function buildDescriptionCombinedHtml(model: OrcamentoPdfModel): string {
+  const partes: string[] = [];
+
+  if (model.descricao?.trim()) {
+    partes.push(`
+      <div class="section">
+        <h2>Descrição Geral</h2>
+        ${normalizeDescriptionHtml(model.descricao)}
+      </div>`);
+  }
+
+  if (model.descricaoProjeto?.trim()) {
+    partes.push(`
+      <div class="section">
+        <h2>Descrição Técnica do Projeto</h2>
+        ${normalizeDescriptionHtml(model.descricaoProjeto)}
+      </div>`);
+  }
+
+  if (model.observacoes?.trim()) {
+    partes.push(`
+      <div class="section">
+        <h2>Observações Importantes</h2>
+        ${normalizeDescriptionHtml(model.observacoes)}
+      </div>`);
+  }
+
+  return partes.join('\n').trim();
+}
+
+export function buildDescriptionMeasureHtml(
+  combinedHtml: string,
+  opts: OrcamentoPdfHtmlOptions
+): string {
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Medição descrição</title>
+    <style>${buildSharedStyles(opts.opacidadeMarcaDagua)}</style>
+</head>
+<body>
+    <div class="description-measure-host">
+        <div data-measure="description-source">${combinedHtml}</div>
+        <div data-measure="description-measure"></div>
+    </div>
+</body>
+</html>`;
+}
+
+/** Conteúdo interno de cada página de descrição (sem envelope pdf-page). */
+export function buildDescriptionPageContents(pageHtmlFragments: string[]): string[] {
+  return pageHtmlFragments.map(
+    (fragment) => `<div class="descricao-page-content">${fragment}</div>`
+  );
 }
 
 function buildMeasureHost(model: OrcamentoPdfModel): string {
@@ -609,34 +756,13 @@ export function buildOrcamentoMeasureHtml(
 </html>`;
 }
 
-function buildDescriptionPages(model: OrcamentoPdfModel, opts: OrcamentoPdfHtmlOptions): string {
-  const pages: string[] = [];
-
-  const pushSection = (title: string, content?: string | null) => {
-    if (!content?.trim()) return;
-    pages.push(wrapPdfPage(buildDescriptionSection(title, content), opts));
-  };
-
-  if (model.descricaoProjeto || (model.descricao && model.descricaoProjeto)) {
-    pushSection('Descrição Geral', model.descricao);
-    pushSection('Descrição Técnica do Projeto', model.descricaoProjeto);
-    pushSection('Observações Importantes', model.observacoes);
-  } else if (model.descricao && !model.descricaoProjeto) {
-    pushSection('Descrição Geral', model.descricao);
-    pushSection('Observações Importantes', model.observacoes);
-  } else if (model.observacoes) {
-    pushSection('Observações Importantes', model.observacoes);
-  }
-
-  return pages.join('\n');
-}
-
 export function buildOrcamentoPaginatedHtml(
   model: OrcamentoPdfModel,
   opts: OrcamentoPdfHtmlOptions,
-  pagination: OrcamentoItemsPagination
+  pagination: OrcamentoItemsPagination,
+  descriptionPageFragments: string[] = []
 ): string {
-  const pagesHtml: string[] = [];
+  const pageContents: string[] = [];
   const { items } = model;
 
   pagination.pages.forEach((indices, pageIdx) => {
@@ -667,19 +793,23 @@ export function buildOrcamentoPaginatedHtml(
       );
     }
 
-    pagesHtml.push(wrapPdfPage(parts.join('\n'), opts));
+    pageContents.push(parts.join('\n'));
   });
 
   if (!pagination.totalsFitOnLast) {
-    pagesHtml.push(
-      wrapPdfPage(
-        `<div class="container-fechamento">${buildTotaisBlock(model)}${buildPagamentoBlock(model)}</div>`,
-        opts
-      )
+    pageContents.push(
+      `<div class="container-fechamento">${buildTotaisBlock(model)}${buildPagamentoBlock(model)}</div>`
     );
   }
 
-  pagesHtml.push(buildDescriptionPages(model, opts));
+  if (descriptionPageFragments.length > 0) {
+    pageContents.push(...buildDescriptionPageContents(descriptionPageFragments));
+  }
+
+  const totalPages = pageContents.length;
+  const pagesHtml = pageContents.map((content, idx) =>
+    wrapPdfPage(content, opts, idx + 1, totalPages)
+  );
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">

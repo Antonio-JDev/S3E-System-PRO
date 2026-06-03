@@ -347,7 +347,9 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
             return;
         }
         
-        if (!formState.internalCode || formState.internalCode.trim() === '') {
+        if (!serviceToEdit) {
+            // CREATE: código gerado no backend — preview local opcional
+        } else if (!formState.internalCode || formState.internalCode.trim() === '') {
             toast.error('Código interno é obrigatório');
             return;
         }
@@ -413,13 +415,12 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
                     toast.error(`Erro ao atualizar: ${errorMsg}`);
                 }
             } else {
-                // Criar novo serviço
+                // Criar novo serviço — código gerado no backend
                 const servicoData: any = {
                     nome: formState.name.trim(),
-                    codigo: formState.internalCode.trim(),
                     descricao: formState.description?.trim() || '',
                     tipo: formState.type,
-                    tipoServico: formState.tipoServico, // ✅ NOVO: Tipo de serviço
+                    tipoServico: formState.tipoServico,
                     preco: priceValue,
                     unidade: formState.unidade || 'un'
                 };
@@ -1181,16 +1182,17 @@ const Servicos: React.FC<ServicosProps> = ({ toggleSidebar }) => {
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                                        Código Interno *
+                                        Código Interno {serviceToEdit ? '*' : '(gerado automaticamente)'}
                                     </label>
                                     <input
                                         type="text"
                                         name="internalCode"
                                         value={formState.internalCode}
                                         onChange={handleInputChange}
-                                        required
-                                        className="input-field"
-                                        placeholder="SRV-001"
+                                        required={!!serviceToEdit}
+                                        readOnly={!serviceToEdit}
+                                        className={`input-field ${!serviceToEdit ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed' : ''}`}
+                                        placeholder={serviceToEdit ? 'SRV-001' : 'Ex: ENG-PRO-076 (preview)'}
                                     />
                                 </div>
 

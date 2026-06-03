@@ -192,7 +192,7 @@ export function ComposerEmojiGifStickerModal({
   return (
     <div
       ref={panelRef}
-      className="absolute bottom-[calc(100%+10px)] left-1/2 z-[125] flex w-[min(400px,calc(100vw-32px))] max-h-[min(520px,70vh)] -translate-x-1/2 flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]"
+      className="absolute bottom-[calc(100%+10px)] left-0 z-[125] flex w-[min(400px,calc(100vw-32px))] max-h-[min(520px,70vh)] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-white shadow-2xl dark:border-[#2a3942] dark:bg-[#202c33]"
       role="dialog"
       aria-modal="true"
       aria-label="Emojis, GIFs e figurinhas"

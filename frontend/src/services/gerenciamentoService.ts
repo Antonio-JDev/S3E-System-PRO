@@ -135,6 +135,16 @@ export const rhService = {
         return await axiosApiService.put(`/api/rh/registro-ponto/${registroId}`, { batidas });
     },
 
+    async criarRegistroPontoManual(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        batidas: string[];
+    }) {
+        return await axiosApiService.post('/api/rh/registro-ponto/manual', data);
+    },
+
     async salvarIntervaloAlmoco(registroId: string, data: { inicio: string; fim: string }) {
         return await axiosApiService.put(`/api/rh/registro-ponto/${registroId}/intervalo-almoco`, data);
     },
@@ -215,6 +225,10 @@ export const rhService = {
         return await axiosApiService.delete(`/api/rh/falta-justificada/${ocorrenciaId}/anexo`);
     },
 
+    async excluirFaltaJustificada(ocorrenciaId: string) {
+        return await axiosApiService.delete(`/api/rh/falta-justificada/${ocorrenciaId}`);
+    },
+
     async registrarJustificativaParcial(data: {
         funcionarioId: string;
         referenciaAno: number;
@@ -224,6 +238,7 @@ export const rhService = {
         justificativaTipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
         horaInicio: string;
         horaFim: string;
+        classificacaoJustificativa?: 'ABONAR' | 'DESCONTAR_BANCO' | 'DESCONTAR_HORAS_DEVIDAS';
         documento?: File | null;
     }) {
         if (data.documento) {
@@ -236,10 +251,59 @@ export const rhService = {
             fd.append('justificativaTipo', data.justificativaTipo);
             fd.append('horaInicio', data.horaInicio);
             fd.append('horaFim', data.horaFim);
+            if (data.classificacaoJustificativa) {
+                fd.append('classificacaoJustificativa', data.classificacaoJustificativa);
+            }
             fd.append('documento', data.documento);
             return await axiosApiService.upload('/api/rh/justificativa-parcial', fd);
         }
         return await axiosApiService.post('/api/rh/justificativa-parcial', data);
+    },
+
+    async atualizarJustificativaParcial(
+        ocorrenciaId: string,
+        data: {
+            descricao: string;
+            justificativaTipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+            horaInicio: string;
+            horaFim: string;
+            classificacaoJustificativa?: 'ABONAR' | 'DESCONTAR_BANCO' | 'DESCONTAR_HORAS_DEVIDAS';
+            documento?: File | null;
+            removerAnexo?: boolean;
+        },
+    ) {
+        const precisaMultipart = !!data.documento || data.removerAnexo === true;
+        if (precisaMultipart) {
+            const fd = new FormData();
+            fd.append('descricao', data.descricao);
+            fd.append('justificativaTipo', data.justificativaTipo);
+            fd.append('horaInicio', data.horaInicio);
+            fd.append('horaFim', data.horaFim);
+            if (data.classificacaoJustificativa) {
+                fd.append('classificacaoJustificativa', data.classificacaoJustificativa);
+            }
+            if (data.removerAnexo) fd.append('removerAnexo', 'true');
+            if (data.documento) fd.append('documento', data.documento);
+            return await axiosApiService.uploadPut(`/api/rh/justificativa-parcial/${ocorrenciaId}`, fd);
+        }
+        return await axiosApiService.put(`/api/rh/justificativa-parcial/${ocorrenciaId}`, data);
+    },
+
+    async excluirJustificativaParcial(ocorrenciaId: string) {
+        return await axiosApiService.delete(`/api/rh/justificativa-parcial/${ocorrenciaId}`);
+    },
+
+    async salvarComentarioConferenciaPonto(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        comentario: string | null;
+        decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
+        justificativaOcorrenciaId?: string | null;
+        faltaJustificadaOcorrenciaId?: string | null;
+    }) {
+        return await axiosApiService.put('/api/rh/conferencia-ponto/comentario', data);
     },
 
     async proporDividaHoras(data: {

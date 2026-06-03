@@ -28,7 +28,7 @@ export function chatIdToEvolutionNumber(chatId: string): string {
 }
 
 export function evolutionMediaType(
-  type: 'image' | 'voice' | 'video' | 'file'
+  type: 'image' | 'voice' | 'video' | 'file' | 'sticker'
 ): { mediatype: string; mimetype: string; fileName: string } {
   switch (type) {
     case 'image':
@@ -46,6 +46,8 @@ export function evolutionMediaType(
     case 'file':
     default:
       return { mediatype: 'document', mimetype: 'application/octet-stream', fileName: 'file.bin' };
+    case 'sticker':
+      return { mediatype: 'sticker', mimetype: 'image/webp', fileName: 'sticker.webp' };
   }
 }
 

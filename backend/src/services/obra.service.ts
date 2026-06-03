@@ -663,6 +663,43 @@ export class ObraService {
   }
 
   /**
+   * Remove obra ao reverter status da OS (admin): ignora tarefas em andamento e estorna estoque.
+   */
+  async deletarObraParaRollback(obraId: string) {
+    const obra = await prisma.obra.findUnique({
+      where: { id: obraId },
+      include: { projeto: true },
+    });
+
+    if (!obra) {
+      return { removida: false };
+    }
+
+    const projetoId = obra.projetoId;
+
+    if (projetoId) {
+      const { EstoqueService } = await import('./estoque.service');
+      await EstoqueService.estornarBaixaPorObra(obraId, projetoId);
+    }
+
+    await prisma.alocacaoEquipe.deleteMany({ where: { obraId } });
+
+    if (projetoId) {
+      await prisma.alocacaoObra.deleteMany({ where: { projetoId } });
+    }
+
+    await prisma.registroAtividade.deleteMany({
+      where: { tarefa: { obraId } },
+    });
+
+    await prisma.tarefaObra.deleteMany({ where: { obraId } });
+
+    await prisma.obra.delete({ where: { id: obraId } });
+
+    return { removida: true, projetoId };
+  }
+
+  /**
    * Deleta uma obra (apenas admin e desenvolvedor)
    * Remove a obra e todas as suas tarefas e registros relacionados
    */

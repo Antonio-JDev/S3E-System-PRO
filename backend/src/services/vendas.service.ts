@@ -1,7 +1,12 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
 import { EstoqueService } from './estoque.service';
-import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import {
+    calcAbateParcelaFromBase,
+    parseMoney,
+    validarRecebimentoComDiferenca,
+    validarValoresFinanceiros,
+} from '../utils/financeiroValor.util';
 import {
   ORCAMENTO_STATUS_APROVADO,
   ORCAMENTO_STATUS_CONCRETIZADO,
@@ -27,8 +32,14 @@ export interface VendaPayload {
 
 interface PagarContaPayload {
     dataPagamento?: string;
-    /** Valor base recebido (sem juros/desconto) */
+    /** Valor base recebido (sem juros/desconto) ou entrada em caixa no modo diferença */
     valorRecebido?: number;
+    /** Líquido que entra no caixa (modo diferença); se omitido, usa valorRecebido */
+    valorEntradaCaixa?: number;
+    /** Retenção/imposto — não entra no caixa, soma com entrada para quitar a parcela */
+    valorDiferenca?: number;
+    motivoDiferenca?: string;
+    receberComDiferenca?: boolean;
     valorJuros?: number;
     valorDesconto?: number;
     observacoes?: string;
@@ -522,7 +533,12 @@ export class VendasService {
                 include: {
                     cliente: true,
                     projeto: true,
-                    contasReceber: true,
+                    contasReceber: {
+                        orderBy: [{ numeroParcela: 'asc' }, { createdAt: 'asc' }],
+                        include: {
+                            recebimentosParciais: { orderBy: { dataPagamento: 'desc' } }
+                        }
+                    },
                     orcamento: {
                         include: {
                             empresaFiscal: { select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true } },
@@ -580,7 +596,12 @@ export class VendasService {
             include: {
                 cliente: true,
                 projeto: true,
-                contasReceber: true,
+                contasReceber: {
+                    orderBy: [{ numeroParcela: 'asc' }, { createdAt: 'asc' }],
+                    include: {
+                        recebimentosParciais: { orderBy: { dataPagamento: 'desc' } }
+                    }
+                },
                 orcamento: {
                     include: {
                         empresaFiscal: { select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true } },
@@ -662,39 +683,68 @@ export class VendasService {
         const valorRecebidoAtual = Number(conta.valorRecebido ?? 0);
         const saldoRestante = conta.valorParcela - valorRecebidoAtual;
 
+        const modoDiferenca =
+            payload?.receberComDiferenca === true || parseMoney(payload?.valorDiferenca) > 0;
+
         const valorBaseInformado = payload?.valorRecebido != null
             ? parseMoney(payload.valorRecebido)
             : saldoRestante;
         const jurosInformado = parseMoney(payload?.valorJuros);
         const descontoInformado = parseMoney(payload?.valorDesconto);
 
-        let valorPago: number;
+        let valorTotalCaixa: number;
+        let abateParcela: number;
         let valorJurosRegistro = 0;
         let valorDescontoRegistro = 0;
+        let valorDiferencaRegistro = 0;
+        let motivoDiferencaRegistro: string | undefined;
+        let observacoesFinais = payload?.observacoes ?? null;
 
-        if (payload?.valorJuros != null || payload?.valorDesconto != null) {
+        if (modoDiferenca) {
+            const entradaCaixa =
+                payload?.valorEntradaCaixa != null
+                    ? parseMoney(payload.valorEntradaCaixa)
+                    : valorBaseInformado;
+            const validado = validarRecebimentoComDiferenca(
+                saldoRestante,
+                entradaCaixa,
+                payload?.valorDiferenca ?? saldoRestante - entradaCaixa
+            );
+            valorTotalCaixa = validado.valorARegistrar;
+            abateParcela = validado.abateParcela;
+            valorDiferencaRegistro = validado.valorDiferenca;
+            motivoDiferencaRegistro =
+                (payload?.motivoDiferenca && String(payload.motivoDiferenca).trim()) ||
+                'Retenção/imposto (diferença aceita no recebimento)';
+            const notaDif = `[Diferença R$ ${valorDiferencaRegistro.toFixed(2)}: ${motivoDiferencaRegistro}]`;
+            observacoesFinais = observacoesFinais
+                ? `${observacoesFinais}\n${notaDif}`
+                : notaDif;
+        } else if (payload?.valorJuros != null || payload?.valorDesconto != null) {
             const validado = validarValoresFinanceiros(
                 valorBaseInformado,
                 jurosInformado,
                 descontoInformado,
                 { exigirBasePositivo: valorBaseInformado > 0 }
             );
-            valorPago = validado.valorARegistrar;
+            valorTotalCaixa = validado.valorARegistrar;
             valorJurosRegistro = validado.valorJuros;
             valorDescontoRegistro = validado.valorDesconto;
+            abateParcela = calcAbateParcelaFromBase(validado.valorBase, validado.valorDesconto);
         } else {
-            valorPago = valorBaseInformado;
-            if (valorPago <= 0) {
+            valorTotalCaixa = valorBaseInformado;
+            abateParcela = valorTotalCaixa;
+            if (valorTotalCaixa <= 0) {
                 throw new Error('Valor recebido deve ser maior que zero');
             }
         }
 
-        if (valorPago <= 0) {
+        if (valorTotalCaixa <= 0) {
             throw new Error('Valor a registrar deve ser maior que zero');
         }
-        if (valorPago > saldoRestante + 0.01) {
+        if (abateParcela > saldoRestante + 0.01) {
             throw new Error(
-                `Valor a registrar (R$ ${valorPago.toFixed(2)}) não pode ser maior que o saldo restante (R$ ${saldoRestante.toFixed(2)})`
+                `Valor do principal (R$ ${abateParcela.toFixed(2)}) não pode ser maior que o saldo restante da parcela (R$ ${saldoRestante.toFixed(2)}). Juros por atraso não entram no saldo da parcela.`
             );
         }
 
@@ -720,18 +770,21 @@ export class VendasService {
         await prisma.recebimentoParcial.create({
             data: {
                 contaReceberId: id,
-                valorPago,
+                valorPago: valorTotalCaixa,
                 valorJuros: valorJurosRegistro > 0 ? valorJurosRegistro : null,
                 valorDesconto: valorDescontoRegistro > 0 ? valorDescontoRegistro : null,
+                valorDiferenca: valorDiferencaRegistro > 0 ? valorDiferencaRegistro : null,
+                motivoDiferenca: motivoDiferencaRegistro ?? null,
                 dataPagamento,
-                observacoes: payload?.observacoes ?? null,
+                observacoes: observacoesFinais,
                 meioPagamento: payload?.meioPagamento ?? null
             }
         });
 
-        const novoValorRecebido = valorRecebidoAtual + valorPago;
+        const novoValorRecebido = valorRecebidoAtual + abateParcela;
         const quitado = novoValorRecebido >= conta.valorParcela - 0.005;
         const novoStatus = quitado ? ContaStatus.Pago : (ContaStatus as any).RecebidoParcial ?? 'Recebido Parcial';
+        const jurosAcumulados = (conta.valorJuros ?? 0) + valorJurosRegistro;
 
         const contaAtualizada = await prisma.contaReceber.update({
             where: { id },
@@ -739,10 +792,13 @@ export class VendasService {
                 valorRecebido: novoValorRecebido,
                 status: novoStatus,
                 dataPagamento: dataPagamento,
-                observacoes: payload?.observacoes ?? conta.observacoes,
+                observacoes: observacoesFinais ?? conta.observacoes,
                 meioPagamento: payload?.meioPagamento ?? undefined,
-                ...(valorJurosRegistro > 0 && { valorJuros: valorJurosRegistro }),
+                ...(valorJurosRegistro > 0 && { valorJuros: jurosAcumulados }),
                 ...(valorDescontoRegistro > 0 && { valorDesconto: valorDescontoRegistro }),
+                ...(valorDiferencaRegistro > 0 && {
+                    valorDiferenca: (Number(conta.valorDiferenca ?? 0) + valorDiferencaRegistro),
+                }),
                 updatedAt: new Date()
             }
         });
@@ -771,8 +827,8 @@ export class VendasService {
             });
             const titulo = quitado ? 'Conta a receber quitada' : 'Recebimento parcial registrado';
             const mensagem = quitado
-                ? `Parcela quitada • Valor: R$ ${conta.valorParcela.toFixed(2)} • Data: ${dataPagamento.toISOString().slice(0, 10)}`
-                : `Recebido R$ ${valorPago.toFixed(2)} • Saldo restante: R$ ${(conta.valorParcela - novoValorRecebido).toFixed(2)}`;
+                ? `Parcela quitada • Principal: R$ ${conta.valorParcela.toFixed(2)}${valorDiferencaRegistro > 0 ? ` • Diferença (retenção): R$ ${valorDiferencaRegistro.toFixed(2)}` : ''}${valorJurosRegistro > 0 ? ` • Juros por atraso: R$ ${valorJurosRegistro.toFixed(2)}` : ''} • Caixa: R$ ${valorTotalCaixa.toFixed(2)} • Data: ${dataPagamento.toISOString().slice(0, 10)}`
+                : `Recebido R$ ${valorTotalCaixa.toFixed(2)} (principal R$ ${abateParcela.toFixed(2)}) • Saldo restante: R$ ${(conta.valorParcela - novoValorRecebido).toFixed(2)}`;
             for (const u of usuarios) {
                 await criarNotificacao({
                     userId: u.id,

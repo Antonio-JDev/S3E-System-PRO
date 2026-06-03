@@ -1027,7 +1027,11 @@ async function evolutionRecoverRecipientNumberForSend(firstNumber: string): Prom
  * função na fila global (whatsappSendQueue) para evitar burst de envios
  * paralelos contra a Evolution Go e race condition na resolução de @lid.
  */
-async function sendWhatsappProviderTextRaw(chatId: string, text: string): Promise<string | null> {
+async function sendWhatsappProviderTextRaw(
+  chatId: string,
+  text: string,
+  options?: { quotedMessageId?: string }
+): Promise<string | null> {
   if (isEvolutionProviderKind()) {
     await ensureEvolutionInstanceReady();
     const inst = session();
@@ -1035,12 +1039,19 @@ async function sendWhatsappProviderTextRaw(chatId: string, text: string): Promis
     await refreshContatoS3eFromWhatsappNumbers(chatId);
     const resolved = await resolvePreferredChatIdForOutbound(chatId);
     let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
-    const buildBody = (n: string): Record<string, unknown> => ({
-      number: n,
-      text,
-      presence: evolutionSendPresence(),
-      delay: evolutionSendDelayMs()
-    });
+    const quotedMessageId = (options?.quotedMessageId || '').trim();
+    const buildBody = (n: string): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        number: n,
+        text,
+        presence: evolutionSendPresence(),
+        delay: evolutionSendDelayMs()
+      };
+      if (quotedMessageId) {
+        body.quoted = { key: { id: quotedMessageId } };
+      }
+      return body;
+    };
     let res = await evolutionApiPost(path, buildBody(number));
     if (!res.ok) {
       let t = await res.text().catch(() => '');
@@ -1079,7 +1090,7 @@ async function sendWhatsappProviderTextRaw(chatId: string, text: string): Promis
   return parseProviderSendTextResponse(data);
 }
 
-export type WhatsappProviderMediaType = 'image' | 'voice' | 'video' | 'file';
+export type WhatsappProviderMediaType = 'image' | 'voice' | 'video' | 'file' | 'sticker';
 
 export interface WhatsappProviderSendMediaPayload {
   chatId: string;
@@ -1089,6 +1100,7 @@ export interface WhatsappProviderSendMediaPayload {
   mimetype: string;
   filename?: string;
   caption?: string;
+  quotedMessageId?: string;
 }
 
 function providerEndpointForMediaType(type: WhatsappProviderMediaType): string {
@@ -1100,6 +1112,8 @@ function providerEndpointForMediaType(type: WhatsappProviderMediaType): string {
     case 'video':
       return '/api/sendVideo';
     case 'file':
+      return '/api/sendFile';
+    case 'sticker':
       return '/api/sendFile';
   }
 }
@@ -1123,6 +1137,7 @@ async function sendWhatsappProviderMediaRaw(
     let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
     const base = evolutionMediaType(payload.type);
     const isVoice = payload.type === 'voice';
+    const isSticker = payload.type === 'sticker';
     let mimetype = (payload.mimetype && payload.mimetype.trim()) || base.mimetype;
     // Voice (PTT) exige `audio/ogg; codecs=opus` para o iOS exibir o player
     // inline. Se o caller passou só `audio/ogg`, anexa `codecs=opus` automaticamente.
@@ -1132,6 +1147,9 @@ async function sendWhatsappProviderMediaRaw(
         mimetype = 'audio/ogg; codecs=opus';
       }
     }
+    if (isSticker) {
+      mimetype = 'image/webp';
+    }
     const rawName = (payload.filename && payload.filename.trim()) || base.fileName;
     const fileName =
       normalizeUserFilename(rawName, 220) || String(rawName).replace(/[/\\]/g, '_') || base.fileName;
@@ -1140,6 +1158,7 @@ async function sendWhatsappProviderMediaRaw(
       mediatype = 'document';
     }
     const caption = (payload.caption && payload.caption.trim()) || '';
+    const quotedMessageId = (payload.quotedMessageId || '').trim();
     const buildBody = (n: string): Record<string, unknown> => {
       // Voice = nota de voz (PTT). Marcamos explicitamente para que o WhatsApp do
       // destinatário exiba a barra de progresso + foto do perfil (estilo "áudio
@@ -1158,6 +1177,9 @@ async function sendWhatsappProviderMediaRaw(
       };
       if (isVoice) {
         body.ptt = true;
+      }
+      if (quotedMessageId) {
+        body.quoted = { key: { id: quotedMessageId } };
       }
       return body;
     };
@@ -1303,8 +1325,14 @@ async function sendWhatsappProviderMediaRaw(
  *
  * Retorna o id da mensagem no provedor quando a API informar.
  */
-export async function sendWhatsappProviderText(chatId: string, text: string): Promise<string | null> {
-  return withWhatsappSendLock({ label: 'sendText' }, () => sendWhatsappProviderTextRaw(chatId, text));
+export async function sendWhatsappProviderText(
+  chatId: string,
+  text: string,
+  options?: { quotedMessageId?: string }
+): Promise<string | null> {
+  return withWhatsappSendLock({ label: 'sendText' }, () =>
+    sendWhatsappProviderTextRaw(chatId, text, options)
+  );
 }
 
 /**

@@ -397,5 +397,195 @@ describe('RhService.calcularFolhaMes', () => {
       expect(dia21?.nomeFeriado).toBe('Tiradentes');
       expect(dia21?.ehFimDeSemana).toBe(false);
     });
+
+    it('justificativa ABONAR reduz minutosHorasDevidas na conferência', async () => {
+      const dataDia = new Date(Date.UTC(2026, 2, 10, 12, 0, 0));
+      mockFindUnique.mockResolvedValue(
+        baseFuncionario({
+          tipoContrato: TipoContratoFuncionario.REGISTRADO,
+          registrosPonto: [
+            {
+              id: 'reg-10',
+              dataReferencia: dataDia,
+              horasNormais: 7,
+              horasExtras50: 0,
+              horasExtras100: 0,
+              ehFimDeSemana: false,
+              entrada: new Date(Date.UTC(2026, 2, 10, 10, 0, 0)),
+              saida: new Date(Date.UTC(2026, 2, 10, 21, 0, 0)),
+              statusConsistencia: StatusConsistenciaPonto.CONSISTENTE,
+              minutosHorasDevidas: 60,
+              minutosAtraso: 0,
+              batidasBrutas: ['07:00', '12:00', '13:00', '16:00'],
+            },
+          ],
+          ocorrenciasPontoRh: [
+            {
+              id: 'jp-1',
+              tipo: 'JUSTIFICATIVA_PARCIAL',
+              status: 'APROVADO_RH',
+              dataReferencia: dataDia,
+              justificativaTipo: 'SAIDA_ANTECIPADA',
+              classificacaoJustificativa: 'ABONAR',
+              horaInicio: '12:00',
+              horaFim: '13:00',
+              descricao: 'Consulta',
+            },
+          ],
+        }),
+      );
+
+      const r = await RhService.calcularFolhaMes({
+        funcionarioId: 'func-1',
+        dataReferencia: new Date(Date.UTC(2026, 2, 1)),
+      });
+
+      const dia10 = r.conferenciaPonto.find((d) => d.dia === 10);
+      expect(dia10?.minutosHorasDevidas).toBe(0);
+      expect(dia10?.justificativaParcial?.classificacao).toBe('ABONAR');
+    });
+
+    it('justificativa ABONAR soma intervalo em horasLiquidas e pode elevar situação para OK', async () => {
+      const dataDia = new Date(Date.UTC(2026, 2, 26, 12, 0, 0));
+      mockFindUnique.mockResolvedValue(
+        baseFuncionario({
+          tipoContrato: TipoContratoFuncionario.REGISTRADO,
+          cargaHorariaMensal: 220,
+          configuracaoPonto: {
+            toleranciaMinutos: 5,
+            workShift: {
+              entrada1: '08:00',
+              saida1: '12:00',
+              entrada2: '13:00',
+              saida2: '17:30',
+              nome: '44h',
+              id: 'ws',
+            },
+          },
+          registrosPonto: [
+            {
+              id: 'reg-26',
+              dataReferencia: dataDia,
+              horasNormais: 8,
+              horasExtras50: 0,
+              horasExtras100: 0,
+              ehFimDeSemana: false,
+              entrada: new Date(Date.UTC(2026, 2, 26, 10, 0, 0)),
+              saida: new Date(Date.UTC(2026, 2, 26, 18, 0, 0)),
+              statusConsistencia: StatusConsistenciaPonto.CONSISTENTE,
+              minutosTrabalhados: 8 * 60,
+              minutosHorasDevidas: 120,
+              minutosAtraso: 0,
+              batidasBrutas: ['07:00', '12:00'],
+            },
+          ],
+          ocorrenciasPontoRh: [
+            {
+              id: 'jp-3',
+              tipo: 'JUSTIFICATIVA_PARCIAL',
+              status: 'APROVADO_RH',
+              dataReferencia: dataDia,
+              justificativaTipo: 'SAIDA_ANTECIPADA',
+              classificacaoJustificativa: 'ABONAR',
+              horaInicio: '12:00',
+              horaFim: '17:30',
+              descricao: 'Saída antecipada abonada',
+            },
+          ],
+        }),
+      );
+
+      const r = await RhService.calcularFolhaMes({
+        funcionarioId: 'func-1',
+        dataReferencia: new Date(Date.UTC(2026, 2, 1)),
+      });
+
+      const dia26 = r.conferenciaPonto.find((d) => d.dia === 26);
+      expect(dia26?.minutosHorasDevidas).toBe(0);
+      expect(dia26?.horasLiquidas).toBeCloseTo(8 + 5.5, 5);
+      expect(dia26?.situacao).toBe('OK');
+    });
+
+    it('justificativa ABONAR em dia útil sem registro preenche horas e situação OK', async () => {
+      const dataDia = new Date(Date.UTC(2026, 2, 18, 12, 0, 0));
+      mockFindUnique.mockResolvedValue(
+        baseFuncionario({
+          tipoContrato: TipoContratoFuncionario.REGISTRADO,
+          cargaHorariaMensal: 220,
+          registrosPonto: [],
+          ocorrenciasPontoRh: [
+            {
+              id: 'jp-falta',
+              tipo: 'JUSTIFICATIVA_PARCIAL',
+              status: 'APROVADO_RH',
+              dataReferencia: dataDia,
+              justificativaTipo: 'SAIDA_ANTECIPADA',
+              classificacaoJustificativa: 'ABONAR',
+              horaInicio: '08:00',
+              horaFim: '17:30',
+              descricao: 'Atestado',
+            },
+          ],
+        }),
+      );
+
+      const r = await RhService.calcularFolhaMes({
+        funcionarioId: 'func-1',
+        dataReferencia: new Date(Date.UTC(2026, 2, 1)),
+      });
+
+      const dia18 = r.conferenciaPonto.find((d) => d.dia === 18);
+      expect(dia18?.temRegistro).toBe(false);
+      expect(dia18?.horasLiquidas).toBeCloseTo(9.5, 5);
+      expect(['OK', 'OK_PARCIAL']).toContain(dia18?.situacao);
+      expect(dia18?.situacao).not.toBe('Sem registro');
+    });
+
+    it('justificativa DESCONTAR_HORAS_DEVIDAS mantém minutosHorasDevidas brutos', async () => {
+      const dataDia = new Date(Date.UTC(2026, 2, 11, 12, 0, 0));
+      mockFindUnique.mockResolvedValue(
+        baseFuncionario({
+          tipoContrato: TipoContratoFuncionario.REGISTRADO,
+          registrosPonto: [
+            {
+              id: 'reg-11',
+              dataReferencia: dataDia,
+              horasNormais: 7,
+              horasExtras50: 0,
+              horasExtras100: 0,
+              ehFimDeSemana: false,
+              entrada: new Date(Date.UTC(2026, 2, 11, 10, 0, 0)),
+              saida: new Date(Date.UTC(2026, 2, 11, 21, 0, 0)),
+              statusConsistencia: StatusConsistenciaPonto.CONSISTENTE,
+              minutosHorasDevidas: 60,
+              minutosAtraso: 0,
+              batidasBrutas: ['07:00', '12:00', '13:00', '16:00'],
+            },
+          ],
+          ocorrenciasPontoRh: [
+            {
+              id: 'jp-2',
+              tipo: 'JUSTIFICATIVA_PARCIAL',
+              status: 'APROVADO_RH',
+              dataReferencia: dataDia,
+              justificativaTipo: 'SAIDA_ANTECIPADA',
+              classificacaoJustificativa: 'DESCONTAR_HORAS_DEVIDAS',
+              horaInicio: '12:00',
+              horaFim: '13:00',
+              descricao: 'Atraso não abonado',
+            },
+          ],
+        }),
+      );
+
+      const r = await RhService.calcularFolhaMes({
+        funcionarioId: 'func-1',
+        dataReferencia: new Date(Date.UTC(2026, 2, 1)),
+      });
+
+      const dia11 = r.conferenciaPonto.find((d) => d.dia === 11);
+      expect(dia11?.minutosHorasDevidas).toBe(60);
+      expect(dia11?.justificativaParcial?.classificacao).toBe('DESCONTAR_HORAS_DEVIDAS');
+    });
   });
 });

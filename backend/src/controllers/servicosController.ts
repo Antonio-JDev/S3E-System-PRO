@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { ServiceCodeGenerator } from '../services/serviceCodeGenerator.service';
 
 /**
  * Normaliza o tipoServico para o formato do enum
@@ -119,24 +120,28 @@ export class ServicosController {
     try {
       const { nome, codigo, descricao, tipo, tipoServico, preco, custo, unidade } = req.body;
 
-      // Validação básica
-      if (!nome || !codigo || !tipo || preco === undefined) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Nome, código, tipo e preço são obrigatórios' 
+      if (!nome || !tipo || preco === undefined) {
+        res.status(400).json({
+          success: false,
+          message: 'Nome, tipo e preço são obrigatórios',
         });
         return;
       }
 
-      // Verificar se código já existe
+      const tipoServicoNormalizado = normalizarTipoServico(tipoServico);
+      const codigoFinal =
+        codigo && String(codigo).trim()
+          ? String(codigo).trim()
+          : await ServiceCodeGenerator.gerarProximoCodigo(tipoServicoNormalizado);
+
       const servicoExistente = await prisma.servico.findUnique({
-        where: { codigo }
+        where: { codigo: codigoFinal },
       });
 
       if (servicoExistente) {
-        res.status(400).json({ 
-          success: false, 
-          message: 'Código do serviço já existe' 
+        res.status(400).json({
+          success: false,
+          message: 'Código do serviço já existe',
         });
         return;
       }
@@ -144,14 +149,14 @@ export class ServicosController {
       const novoServico = await prisma.servico.create({
         data: {
           nome,
-          codigo,
+          codigo: codigoFinal,
           descricao,
           tipo,
-          tipoServico: tipoServico || 'MAO_DE_OBRA', // ✅ NOVO: Tipo de serviço
+          tipoServico: tipoServicoNormalizado,
           preco,
-          custo: custo !== undefined && custo !== null && custo !== '' ? parseFloat(custo) : null, // ✅ NOVO: Custo (aceita vazio, 0 ou valor)
-          unidade: unidade || 'un'
-        } as any
+          custo: custo !== undefined && custo !== null && custo !== '' ? parseFloat(custo) : null,
+          unidade: unidade || 'un',
+        } as any,
       });
 
       res.status(201).json({ success: true, data: novoServico });
@@ -176,31 +181,24 @@ export class ServicosController {
         return;
       }
 
-      // Se mudou o código, verificar se já existe
+      // Código não pode ser alterado após criação
       if (codigo && codigo !== servicoExistente.codigo) {
-        const codigoExistente = await prisma.servico.findUnique({
-          where: { codigo }
+        res.status(400).json({
+          success: false,
+          message: 'O código do serviço não pode ser alterado após a criação',
         });
-
-        if (codigoExistente) {
-          res.status(400).json({ 
-            success: false, 
-            message: 'Código do serviço já existe' 
-          });
-          return;
-        }
+        return;
       }
 
       const servicoAtualizado = await prisma.servico.update({
         where: { id },
         data: {
           nome,
-          codigo,
           descricao,
           tipo,
-          tipoServico: tipoServico !== undefined ? tipoServico : (servicoExistente as any).tipoServico, // ✅ NOVO: Tipo de serviço
+          tipoServico: tipoServico !== undefined ? tipoServico : (servicoExistente as any).tipoServico,
           preco,
-          custo: custo !== undefined ? (custo !== null && custo !== '' ? parseFloat(custo) : null) : (servicoExistente as any).custo, // ✅ NOVO: Custo
+          custo: custo !== undefined ? (custo !== null && custo !== '' ? parseFloat(custo) : null) : (servicoExistente as any).custo,
           unidade,
           ativo
         } as any
@@ -296,14 +294,14 @@ export class ServicosController {
 
         try {
           // Validação
-          if (!servico.codigo || !servico.nome || !servico.tipo || (servico.preco === undefined && servico.preco !== 0)) {
+          if (!servico.nome || !servico.tipo || (servico.preco === undefined && servico.preco !== 0)) {
             resultados.erros++;
             resultados.detalhes.push({
               linha,
               codigo: servico.codigo || 'N/A',
               nome: servico.nome || 'N/A',
               status: 'erro',
-              mensagem: 'Campos obrigatórios faltando (codigo, nome, tipo, preco)'
+              mensagem: 'Campos obrigatórios faltando (nome, tipo, preco)'
             });
             continue;
           }
@@ -339,15 +337,20 @@ export class ServicosController {
           // Normalizar tipo
           const tipoNormalizado = normalizarTipo(servico.tipo);
 
+          const codigoFinal =
+            servico.codigo && String(servico.codigo).trim()
+              ? String(servico.codigo).trim()
+              : await ServiceCodeGenerator.gerarProximoCodigo(tipoServicoNormalizado);
+
           // Verificar se já existe
           const servicoExistente = await prisma.servico.findUnique({
-            where: { codigo: servico.codigo }
+            where: { codigo: codigoFinal }
           });
 
           if (servicoExistente) {
             // Atualizar serviço existente
             await prisma.servico.update({
-              where: { codigo: servico.codigo },
+              where: { codigo: codigoFinal },
               data: {
                 nome: servico.nome,
                 descricao: servico.descricao || null,
@@ -363,7 +366,7 @@ export class ServicosController {
             resultados.sucesso++;
             resultados.detalhes.push({
               linha,
-              codigo: servico.codigo,
+              codigo: codigoFinal,
               nome: servico.nome,
               status: 'sucesso',
               mensagem: 'Serviço atualizado'
@@ -373,7 +376,7 @@ export class ServicosController {
             await prisma.servico.create({
               data: {
                 nome: servico.nome,
-                codigo: servico.codigo,
+                codigo: codigoFinal,
                 descricao: servico.descricao || null,
                 tipo: tipoNormalizado,
                 tipoServico: tipoServicoNormalizado,
@@ -387,7 +390,7 @@ export class ServicosController {
             resultados.sucesso++;
             resultados.detalhes.push({
               linha,
-              codigo: servico.codigo,
+              codigo: codigoFinal,
               nome: servico.nome,
               status: 'sucesso',
               mensagem: 'Serviço criado'

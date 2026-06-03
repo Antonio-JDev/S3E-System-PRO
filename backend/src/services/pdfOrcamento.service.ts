@@ -1,11 +1,16 @@
 import { prisma } from '../lib/prisma';
 import puppeteer from 'puppeteer';
 import {
+  buildDescriptionCombinedHtml,
+  buildDescriptionMeasureHtml,
   buildOrcamentoMeasureHtml,
   buildOrcamentoPaginatedHtml,
   mapPrismaOrcamentoToPdfModel,
   type OrcamentoPdfHtmlOptions,
 } from './pdfOrcamentoHtmlBuilder';
+import {
+  buildMeasureDescriptionPaginationEvalExpression,
+} from './pdfOrcamentoDescriptionPagination.util';
 import {
   buildMeasurePaginationEvalExpression,
   estimateItemsPagination,
@@ -13,8 +18,25 @@ import {
   PDF_RESERVE_PADDING_PX,
   type OrcamentoItemsPagination,
 } from './pdfOrcamentoPagination.util';
+import type { Page } from 'puppeteer';
 
 export { normalizeEmptyParagraphsForPdf, normalizeListItemsForPdf } from './pdfOrcamentoHtml.util';
+
+async function waitForPageImages(page: Page, timeoutMs = 12_000): Promise<void> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const imgs = Array.from(document.images);
+        if (imgs.length === 0) return true;
+        return imgs.every((img) => img.complete);
+      },
+      { timeout: timeoutMs }
+    );
+  } catch {
+    // Segue com o que carregou (URLs quebradas não travam o PDF).
+  }
+  await new Promise((resolve) => setTimeout(resolve, 350));
+}
 
 export class PDFOrcamentoService {
   private static htmlOptions(marcaDaguaConfig?: {
@@ -68,20 +90,43 @@ export class PDFOrcamentoService {
       const measureHtml = buildOrcamentoMeasureHtml(model, opts);
       await page.setContent(measureHtml, {
         waitUntil: 'domcontentloaded',
-        timeout: 15000,
+        timeout: 30_000,
       });
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await waitForPageImages(page);
 
-      // Script em string: callbacks serializados pelo Puppeteer quebram com __name (esbuild/tsx).
       const pagination = (await page.evaluate(
         buildMeasurePaginationEvalExpression(PDF_CONTENT_HEIGHT_PX, PDF_RESERVE_PADDING_PX)
       )) as OrcamentoItemsPagination;
 
-      const finalHtml = buildOrcamentoPaginatedHtml(model, opts, pagination);
+      const combinedDescription = buildDescriptionCombinedHtml(model);
+      let descriptionPageFragments: string[] = [];
+      if (combinedDescription) {
+        const descMeasureHtml = buildDescriptionMeasureHtml(combinedDescription, opts);
+        await page.setContent(descMeasureHtml, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000,
+        });
+        await waitForPageImages(page, 20_000);
+        const descResult = (await page.evaluate(
+          buildMeasureDescriptionPaginationEvalExpression()
+        )) as { pages: string[] };
+        descriptionPageFragments = Array.isArray(descResult?.pages) ? descResult.pages : [];
+        if (descriptionPageFragments.length === 0 && combinedDescription) {
+          descriptionPageFragments = [combinedDescription];
+        }
+      }
+
+      const finalHtml = buildOrcamentoPaginatedHtml(
+        model,
+        opts,
+        pagination,
+        descriptionPageFragments
+      );
       await page.setContent(finalHtml, {
         waitUntil: 'domcontentloaded',
-        timeout: 15000,
+        timeout: 30_000,
       });
+      await waitForPageImages(page, 20_000);
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const pdfBuffer = await page.pdf({
@@ -117,7 +162,14 @@ export class PDFOrcamentoService {
       model.items.length,
       Boolean(model.condicaoPagamento)
     );
-    const html = buildOrcamentoPaginatedHtml(model, opts, pagination);
+    const combinedDescription = buildDescriptionCombinedHtml(model);
+    const descriptionPageFragments = combinedDescription ? [combinedDescription] : [];
+    const html = buildOrcamentoPaginatedHtml(
+      model,
+      opts,
+      pagination,
+      descriptionPageFragments
+    );
     console.log(
       '✅ HTML do orçamento gerado (estrutura pdf-page por página, alinhado ao OrcamentoPrintable)'
     );

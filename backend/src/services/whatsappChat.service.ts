@@ -821,7 +821,8 @@ export async function ingestWhatsappProviderChatMetaUpdate(payload: Record<strin
   });
 }
 
-function mediaLabel(mimetype?: string, filename?: string): string {
+function mediaLabel(mimetype?: string, filename?: string, mediaType?: string | null): string {
+  if ((mediaType || '').toLowerCase() === 'sticker') return '🟩 Figurinha';
   if (!mimetype) return '📎 Mídia';
   const m = mimetype.toLowerCase();
   if (m.startsWith('image/')) return '📷 Imagem';
@@ -1163,7 +1164,7 @@ async function ingestWhatsappProviderMessage(
 
   let content = bodyText;
   if (hasMedia && !content) {
-    content = mediaLabel(pl.mediaMimetype, pl.mediaFilename);
+    content = mediaLabel(pl.mediaMimetype, pl.mediaFilename, pl.mediaType);
   }
 
   const vcardInBody = /BEGIN:VCARD/i.test(content);
@@ -1288,6 +1289,7 @@ async function ingestWhatsappProviderMessage(
     // schema interno `local-inbound:{id}.{ext}` — o `getWhatsappMediaById`
     // detecta esse prefixo e serve direto do disco.
     let finalRow = created;
+    const inboundIsSticker = (storedType || '').toLowerCase() === 'sticker';
     if (
       persistHasMedia &&
       typeof pl.mediaBase64 === 'string' &&
@@ -1299,14 +1301,22 @@ async function ingestWhatsappProviderMessage(
           created.id,
           pl.mediaBase64,
           persistMediaMimetype,
-          persistMediaFilename ?? undefined
+          persistMediaFilename ?? undefined,
+          { normalizeAsSticker: inboundIsSticker }
         );
         if (saved) {
           finalRow = await prisma.chatMessage.update({
             where: { id: created.id },
             data: {
               mediaUrl: saved.mediaUrl,
-              fileSize: persistFileSize ?? saved.byteLength
+              fileSize: persistFileSize ?? saved.byteLength,
+              ...(inboundIsSticker
+                ? {
+                    mediaType: 'sticker',
+                    mediaMimetype: saved.mimetype || 'image/webp',
+                    mediaFilename: saved.filename || 'sticker.webp'
+                  }
+                : {})
             }
           });
         }
@@ -2247,11 +2257,14 @@ export async function sendChatMessageFromUser(params: {
   text: string;
   userId: string;
   userName?: string | null;
+  quotedMessageId?: string;
 }): Promise<ChatMessage> {
   const chatId = canonicalWhatsappChatId(await resolvePreferredChatIdForOutbound(params.chatId));
   const displayName = await resolveOutboundDisplayName(params.userId, params.userName);
   const fullText = formatOutboundPrefix(displayName || 'Usuário', params.text.trim());
-  const providerMsgId = await sendWhatsappProviderText(chatId, fullText);
+  const providerMsgId = await sendWhatsappProviderText(chatId, fullText, {
+    quotedMessageId: params.quotedMessageId
+  });
 
   const clienteId = await resolveClienteIdForChat(chatId);
   const contatoLeadId = await resolveContatoLeadIdForChat(chatId);
@@ -2277,7 +2290,8 @@ const MEDIA_LABELS: Record<WhatsappProviderMediaType, string> = {
   image: '📷 Imagem',
   voice: '🎤 Áudio',
   video: '🎥 Vídeo',
-  file: '📎 Arquivo'
+  file: '📎 Arquivo',
+  sticker: '🟩 Figurinha'
 };
 
 export async function sendMediaMessageFromUser(params: {
@@ -2290,6 +2304,7 @@ export async function sendMediaMessageFromUser(params: {
   filename?: string;
   caption?: string;
   fileSize?: number;
+  quotedMessageId?: string;
 }): Promise<ChatMessage> {
   const chatId = canonicalWhatsappChatId(await resolvePreferredChatIdForOutbound(params.chatId));
   const displayName = await resolveOutboundDisplayName(params.userId, params.userName);
@@ -2307,7 +2322,8 @@ export async function sendMediaMessageFromUser(params: {
     base64Data: params.base64Data,
     mimetype: params.mimetype,
     filename: safeFilename,
-    caption: captionText
+    caption: captionText,
+    quotedMessageId: params.quotedMessageId
   });
 
   const label = MEDIA_LABELS[params.mediaType];
@@ -2332,7 +2348,10 @@ export async function sendMediaMessageFromUser(params: {
       mediaUrl: sendResult.mediaUrl || undefined,
       mediaMimetype: params.mimetype || undefined,
       mediaFilename: safeFilename,
-      mediaType: inferStoredMediaType(params.mimetype || '', safeFilename),
+      mediaType:
+        params.mediaType === 'sticker'
+          ? 'sticker'
+          : inferStoredMediaType(params.mimetype || '', safeFilename),
       fileSize: typeof params.fileSize === 'number' ? params.fileSize : undefined,
       clienteId: clienteId ?? undefined,
       contatoLeadId: contatoLeadId ?? undefined
@@ -2348,14 +2367,22 @@ export async function sendMediaMessageFromUser(params: {
         created.id,
         params.base64Data,
         params.mimetype,
-        safeFilename
+        safeFilename,
+        { normalizeAsSticker: params.mediaType === 'sticker' }
       );
       if (saved) {
         created = await prisma.chatMessage.update({
           where: { id: created.id },
           data: {
             mediaUrl: saved.mediaUrl,
-            fileSize: saved.byteLength
+            fileSize: saved.byteLength,
+            ...(params.mediaType === 'sticker'
+              ? {
+                  mediaType: 'sticker',
+                  mediaMimetype: saved.mimetype || 'image/webp',
+                  mediaFilename: saved.filename || 'sticker.webp'
+                }
+              : {})
           }
         });
       }
@@ -2409,6 +2436,7 @@ function providerMediaTypeFromRow(row: {
   mediaFilename?: string | null;
 }): WhatsappProviderMediaType {
   const st = (row.mediaType || '').toLowerCase().trim();
+  if (st === 'sticker') return 'sticker';
   if (st === 'image') return 'image';
   if (st === 'video') return 'video';
   if (st === 'audio') return 'voice';

@@ -19,6 +19,7 @@ import ContractPDFViewer from './PDFCustomization/ContractPDFViewer';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
 import { calcularValorAReceberDoOrcamento, calcularValorVendaDiretaDoOrcamento } from '../utils/orcamentoValorAReceber';
+import ParcelasVendaAuditoriaTable from './financeiro/ParcelasVendaAuditoriaTable';
 import { canDelete } from '../utils/permissions';
 import {
     AlertDialog as AlertDialogShadcn,
@@ -949,25 +950,36 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
         };
     }, [orcamentoSelecionado, vendaForm.valorEntrada, vendaForm.parcelas, vendaForm.parcelasIguais, vendaForm.valoresParcelas]);
 
-    // Estatísticas calculadas em TEMPO REAL
-    const estatisticasVendas = useMemo(() => {
-        // Calcular do zero baseado nas vendas reais
-        const totalVendas = vendas.reduce((acc: number, venda: any) => acc + (venda.valorTotal || 0), 0);
-        const vendasMesCount = vendas.length;
-        const ticketMedio = vendasMesCount > 0 ? totalVendas / vendasMesCount : 0;
-        
-        // Se tiver dados do dashboard, usar como referência mas sempre calcular
-        const receitaReal = dashboardData?.receitaMes || totalVendas;
-        const vendasReal = dashboardData?.vendasMes || vendasMesCount;
-        
+    /** Faturamento e quantidade apenas do mês calendário atual (meta mensal). */
+    const metricasMesAtual = useMemo(() => {
+        const now = new Date();
+        const vendasNoMes = vendas.filter((v) => {
+            const d = new Date(v.dataVenda || v.createdAt);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        });
+        const faturamento = vendasNoMes.reduce((acc: number, v: any) => acc + (v.valorTotal || 0), 0);
         return {
-            totalVendas: receitaReal,
-            vendasMes: vendasReal,
-            ticketMedio: vendasReal > 0 ? receitaReal / vendasReal : ticketMedio,
-            metaMes: metaMensal, // Usa meta configurável
-            percentualMeta: metaMensal > 0 ? (receitaReal / metaMensal) * 100 : 0
+            faturamento,
+            quantidade: vendasNoMes.length,
+            mesLabel: now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
         };
-    }, [dashboardData, vendas, metaMensal]);
+    }, [vendas]);
+
+    // Estatísticas do dashboard: barra de meta usa só o mês atual; gráfico usa 6 meses (chartDataVendas)
+    const estatisticasVendas = useMemo(() => {
+        const faturamentoMes = dashboardData?.receitaMes ?? metricasMesAtual.faturamento;
+        const vendasMes = dashboardData?.vendasMes ?? metricasMesAtual.quantidade;
+        const ticketMedio = vendasMes > 0 ? faturamentoMes / vendasMes : 0;
+
+        return {
+            faturamentoMes,
+            vendasMes,
+            ticketMedio,
+            metaMes: metaMensal,
+            mesLabel: metricasMesAtual.mesLabel,
+            percentualMeta: metaMensal > 0 ? (faturamentoMes / metaMensal) * 100 : 0,
+        };
+    }, [dashboardData, metricasMesAtual, metaMensal]);
 
     // Dados para gráfico: faturamento nos últimos 6 meses
     const chartDataVendas = useMemo(() => {
@@ -1950,9 +1962,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                             <CircleDollarSign className="w-6 h-6 text-green-600 dark:text-green-400" />
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total em Vendas</p>
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Faturamento do Mês</p>
                             <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                                R$ {(estatisticasVendas.totalVendas || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                R$ {(estatisticasVendas.faturamentoMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                         </div>
                     </div>
@@ -1999,17 +2011,20 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                 </div>
             </div>
 
-            {/* Progress Bar da Meta */}
-            <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">Progresso da Meta Mensal</h3>
-                    <span className={`text-lg font-bold ${estatisticasVendas.percentualMeta >= 100 ? 'text-green-600' : 'text-blue-600'}`}>
+            {/* Progress Bar da Meta — mês atual vs meta do mês (gráfico abaixo continua 6 meses) */}
+            <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text">Progresso da Meta Mensal</h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{estatisticasVendas.mesLabel}</p>
+                    </div>
+                    <span className={`text-lg font-bold ${estatisticasVendas.percentualMeta >= 100 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>
                         {estatisticasVendas.percentualMeta.toFixed(1)}%
                     </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-4">
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-5 mt-3">
                     <div 
-                        className={`h-4 rounded-full transition-all duration-500 ${
+                        className={`h-5 rounded-full transition-all duration-500 ${
                             estatisticasVendas.percentualMeta >= 100 
                                 ? 'bg-gradient-to-r from-green-500 to-green-600' 
                                 : 'bg-gradient-to-r from-blue-500 to-blue-600'
@@ -2017,9 +2032,19 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                         style={{ width: `${Math.min(estatisticasVendas.percentualMeta, 100)}%` }}
                     />
                 </div>
-                <div className="flex justify-between mt-2 text-sm text-gray-600">
-                    <span>R$ {estatisticasVendas.totalVendas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    <span>R$ {estatisticasVendas.metaMes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <div className="flex justify-between mt-3 text-sm">
+                    <span className="text-gray-600 dark:text-gray-300">
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">Faturamento no mês</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">
+                            R$ {estatisticasVendas.faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    </span>
+                    <span className="text-right text-gray-600 dark:text-gray-300">
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">Meta do mês</span>
+                        <span className="font-semibold text-gray-900 dark:text-white">
+                            R$ {estatisticasVendas.metaMes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                    </span>
                 </div>
                 {estatisticasVendas.percentualMeta >= 100 && (
                     <div className="mt-4 bg-green-100 border border-green-300 p-3 rounded-lg dark:bg-green-900/30 dark:border-green-700">
@@ -2141,9 +2166,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
     );
 
     const renderNovaVenda = () => (
-        <div className="bg-white border-2 border-gray-200 rounded-2xl shadow-soft max-w-7xl mx-auto">
+        <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl shadow-soft max-w-7xl mx-auto">
             {/* Header */}
-            <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-blue-700">
+            <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-800 dark:to-slate-900">
                 <div className="flex items-center gap-4">
                     <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
                         {/* Ícone simples (evita bugs de renderização do SVG em alguns ambientes) */}
@@ -2169,23 +2194,23 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                     }
                     setConfirmVendaOpen(true);
                 }}
-                className="p-6 space-y-6"
+                className="p-6 space-y-6 dark:text-dark-text"
             >
                 {/* SEÇÃO 1: Seleção de Orçamento - Layout Otimizado */}
                 <div>
-                    <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                        <span className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">📋</span>
+                    <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-300">📋</span>
                         Seleção do Orçamento/Projeto
                     </h3>
                     
                     {orcamentosAprovados.length === 0 ? (
-                        <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-6 flex items-start gap-3">
+                        <div className="bg-orange-50 dark:bg-orange-950/40 border-2 border-orange-300 dark:border-orange-800 rounded-xl p-6 flex items-start gap-3">
                             <span className="text-2xl">⚠️</span>
                             <div>
-                                <p className="text-sm font-semibold text-orange-900 mb-1">
+                                <p className="text-sm font-semibold text-orange-900 dark:text-orange-200 mb-1">
                                     Nenhum Orçamento Aprovado Disponível
                                 </p>
-                                <p className="text-xs text-orange-700">
+                                <p className="text-xs text-orange-700 dark:text-orange-300/90">
                                     Para criar uma venda, você precisa primeiro aprovar um orçamento na página de <strong>Orçamentos</strong>. Vá até lá, selecione um orçamento em status "Pendente" e aprove-o para que ele apareça aqui.
                                 </p>
                             </div>
@@ -2194,15 +2219,15 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             {/* Painel de Busca e Filtros - Lado Esquerdo */}
                             <div className="lg:col-span-1 space-y-4">
-                                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-5">
-                                    <h4 className="text-sm font-bold text-blue-900 mb-4 flex items-center gap-2">
+                                <div className="bg-slate-50 dark:bg-slate-800/80 border-2 border-blue-200 dark:border-slate-600 rounded-xl p-5">
+                                    <h4 className="text-sm font-bold text-blue-900 dark:text-blue-200 mb-4 flex items-center gap-2">
                                         <MagnifyingGlassIcon className="w-5 h-5" />
                                         Buscar Orçamento
                                     </h4>
                                     
                                     {/* Campo de Busca */}
                                     <div className="mb-4">
-                                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                             🔍 Pesquisar
                                         </label>
                                         <div className="relative">
@@ -2211,22 +2236,22 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 value={buscaOrcamento}
                                                 onChange={(e) => setBuscaOrcamento(e.target.value)}
                                                 placeholder="Título, cliente, número..."
-                                                className="w-full px-4 py-3 pl-10 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                className="w-full px-4 py-3 pl-10 border-2 border-blue-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                             />
-                                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                            <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-gray-500" />
                                         </div>
                                     </div>
 
                                     {/* Filtro por Cliente */}
                                     {clientesUnicos.length > 0 && (
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 👤 Filtrar por Cliente
                                             </label>
                                             <select
                                                 value={filtroCliente}
                                                 onChange={(e) => setFiltroCliente(e.target.value)}
-                                                className="w-full px-4 py-3 border-2 border-blue-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                                                className="w-full px-4 py-3 border-2 border-blue-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                             >
                                                 <option value="">Todos os clientes</option>
                                                 {clientesUnicos.map(cliente => (
@@ -2239,17 +2264,17 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                     )}
 
                                     {/* Estatísticas */}
-                                    <div className="mt-4 pt-4 border-t border-blue-200">
+                                    <div className="mt-4 pt-4 border-t border-blue-200 dark:border-slate-600">
                                         <div className="flex justify-between items-center text-xs">
-                                            <span className="text-gray-600">Total encontrado:</span>
-                                            <span className="font-bold text-blue-700">{orcamentosFiltrados.length} de {orcamentosAprovados.length}</span>
+                                            <span className="text-gray-600 dark:text-gray-400">Total encontrado:</span>
+                                            <span className="font-bold text-blue-700 dark:text-blue-300">{orcamentosFiltrados.length} de {orcamentosAprovados.length}</span>
                                         </div>
                                     </div>
                                 </div>
 
                                 {!vendaForm.orcamentoId && (
-                                    <div className="bg-blue-50 border-2 border-blue-300 rounded-xl p-4">
-                                        <p className="text-xs text-blue-800 font-medium">
+                                    <div className="bg-blue-50 dark:bg-blue-950/30 border-2 border-blue-300 dark:border-blue-800 rounded-xl p-4">
+                                        <p className="text-xs text-blue-800 dark:text-blue-200 font-medium">
                                             💡 <strong>Dica:</strong> Use a busca para encontrar rapidamente o orçamento desejado. Clique em um card para selecionar.
                                         </p>
                                     </div>
@@ -2258,8 +2283,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
 
                             {/* Lista de Orçamentos - Lado Direito */}
                             <div className="lg:col-span-2">
-                                <div className="bg-white border-2 border-gray-200 rounded-xl p-4">
-                                    <h4 className="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                <div className="bg-white dark:bg-slate-800/60 border-2 border-gray-200 dark:border-slate-600 rounded-xl p-4">
+                                    <h4 className="text-sm font-bold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
                                         <span>📋</span>
                                         Orçamentos Aprovados ({orcamentosFiltrados.length})
                                     </h4>
@@ -2278,16 +2303,16 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                     <div
                                                         key={orcamento.id}
                                                         onClick={() => { if (!hasVenda) setVendaForm({...vendaForm, orcamentoId: orcamento.id}); }}
-                                                        className={`p-4 rounded-xl border-2 transition-all ${hasVenda ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-200' : 'cursor-pointer hover:shadow-md'} ${
+                                                        className={`p-4 rounded-xl border-2 transition-all ${hasVenda ? 'opacity-60 cursor-not-allowed bg-gray-100 dark:bg-slate-900 border-gray-200 dark:border-slate-700' : 'cursor-pointer hover:shadow-md'} ${
                                                             isSelecionado
-                                                                ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-400 shadow-md'
-                                                                : (hasVenda ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200 hover:border-green-300')
+                                                                ? 'bg-green-50 dark:bg-green-950/40 border-green-400 dark:border-green-600 shadow-md'
+                                                                : (hasVenda ? 'bg-gray-100 dark:bg-slate-900 border-gray-200 dark:border-slate-700' : 'bg-gray-50 dark:bg-slate-800/50 border-gray-200 dark:border-slate-600 hover:border-green-300 dark:hover:border-green-700')
                                                         }`}
                                                     >
                                                         <div className="flex items-start justify-between gap-4">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-2 mb-2">
-                                                                    <h5 className={`font-bold text-lg truncate ${isSelecionado ? 'text-green-800' : 'text-gray-900'}`}>
+                                                                    <h5 className={`font-bold text-lg truncate ${isSelecionado ? 'text-green-800 dark:text-green-300' : 'text-gray-900 dark:text-dark-text'}`}>
                                                                         {orcamento.titulo || 'Sem título'}
                                                                     </h5>
                                                                     {isSelecionado && (
@@ -2299,8 +2324,8 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                                 
                                                                 <div className="grid grid-cols-2 gap-3 text-sm">
                                                                     <div>
-                                                                        <span className="text-gray-600">Cliente:</span>
-                                                                        <p className="font-semibold text-gray-900">{orcamento.cliente?.nome || 'N/A'}</p>
+                                                                        <span className="text-gray-600 dark:text-gray-400">Cliente:</span>
+                                                                        <p className="font-semibold text-gray-900 dark:text-gray-100">{orcamento.cliente?.nome || 'N/A'}</p>
                                                                     </div>
                                                                     <div>
                                                                         <span className="text-gray-600">Nº Orçamento:</span>
@@ -2385,39 +2410,39 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                 {/* SEÇÃO 2: Informações do Projeto (Read-Only) */}
                 {orcamentoSelecionado && (
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                            <span className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600">🏢</span>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center text-purple-600 dark:text-purple-300">🏢</span>
                             Informações do Projeto (Herdadas)
                         </h3>
-                        <div className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200 rounded-xl p-6">
+                        <div className="bg-slate-50 dark:bg-slate-800/50 border-2 border-purple-200 dark:border-slate-600 rounded-xl p-6">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Cliente</h4>
-                                    <p className="text-gray-900 font-medium">{orcamentoSelecionado.cliente?.nome || 'N/A'}</p>
-                                    <p className="text-xs text-gray-600 mt-1">{orcamentoSelecionado.cliente?.email || ''}</p>
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Cliente</h4>
+                                    <p className="text-gray-900 dark:text-gray-100 font-medium">{orcamentoSelecionado.cliente?.nome || 'N/A'}</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{orcamentoSelecionado.cliente?.email || ''}</p>
                                 </div>
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Projeto</h4>
-                                    <p className="text-gray-900 font-medium">{orcamentoSelecionado.titulo || 'Projeto'}</p>
-                                    <p className="text-xs text-gray-600 mt-1">Nº Orçamento: {orcamentoSelecionado.numeroOrcamento || orcamentoSelecionado.id?.slice(0, 8)}</p>
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Projeto</h4>
+                                    <p className="text-gray-900 dark:text-gray-100 font-medium">{orcamentoSelecionado.titulo || 'Projeto'}</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Nº Orçamento: {orcamentoSelecionado.numeroOrcamento || orcamentoSelecionado.id?.slice(0, 8)}</p>
                                 </div>
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Status</h4>
-                                    <span className="inline-block px-3 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-lg">
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Status</h4>
+                                    <span className="inline-block px-3 py-1 bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300 text-xs font-bold rounded-lg">
                                         ✅ Aprovado
                                     </span>
                                 </div>
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Endereço da Obra</h4>
-                                    <p className="text-sm text-gray-900">{orcamentoSelecionado.enderecoObra || orcamentoSelecionado.cliente?.endereco || 'Não especificado'}</p>
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Endereço da Obra</h4>
+                                    <p className="text-sm text-gray-900 dark:text-gray-100">{orcamentoSelecionado.enderecoObra || orcamentoSelecionado.cliente?.endereco || 'Não especificado'}</p>
                                 </div>
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Tipo de Projeto</h4>
-                                    <p className="text-sm text-gray-900">{orcamentoSelecionado.tipoInstalacao || 'Instalação Elétrica'}</p>
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Tipo de Projeto</h4>
+                                    <p className="text-sm text-gray-900 dark:text-gray-100">{orcamentoSelecionado.tipoInstalacao || 'Instalação Elétrica'}</p>
                                 </div>
-                                <div className="bg-white bg-opacity-70 p-4 rounded-lg">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Itens/Serviços</h4>
-                                    <p className="text-sm text-gray-900 font-medium">{orcamentoSelecionado.items?.length || 0} item(s)</p>
+                                <div className="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-slate-600 p-4 rounded-lg">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Itens/Serviços</h4>
+                                    <p className="text-sm text-gray-900 dark:text-gray-100 font-medium">{orcamentoSelecionado.items?.length || 0} item(s)</p>
                                 </div>
                             </div>
                         </div>
@@ -2427,11 +2452,11 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                 {/* SEÇÃO 3: Condições Financeiras (Inputs Ativos) */}
                 {orcamentoSelecionado && (
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                            <span className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center text-green-600">💰</span>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-900/50 flex items-center justify-center text-green-600 dark:text-green-300">💰</span>
                             Condições Financeiras
                         </h3>
-                        <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-6">
+                        <div className="bg-white dark:bg-slate-800/40 border border-gray-200 dark:border-slate-600 rounded-xl p-6 space-y-6">
                             {/* Valor Total (Read-Only) e breakdown quando há desconto */}
                             <div className="space-y-3">
                                 {(orcamentoSelecionado?.descontoValor ?? 0) > 0 && (
@@ -2466,13 +2491,13 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                         )}
                                     </div>
                                 )}
-                                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 p-6 rounded-xl">
+                                <div className="bg-green-50 dark:bg-green-950/30 border-2 border-green-300 dark:border-green-800 p-6 rounded-xl">
                                     <div className="flex justify-between items-center">
                                         <div>
-                                            <h4 className="text-sm font-semibold text-green-700 uppercase mb-1">Valor Total do Projeto</h4>
-                                            <p className="text-xs text-gray-600">Valor herdado do orçamento aprovado{(orcamentoSelecionado?.descontoValor ?? 0) > 0 ? ' (já com desconto)' : ''}</p>
+                                            <h4 className="text-sm font-semibold text-green-700 dark:text-green-300 uppercase mb-1">Valor Total do Projeto</h4>
+                                            <p className="text-xs text-gray-600 dark:text-gray-400">Valor herdado do orçamento aprovado{(orcamentoSelecionado?.descontoValor ?? 0) > 0 ? ' (já com desconto)' : ''}</p>
                                         </div>
-                                        <p className="text-4xl font-bold text-green-700">
+                                        <p className="text-4xl font-bold text-green-700 dark:text-green-400">
                                             R$ {calculosFinanceiros.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
                                     </div>
@@ -2517,9 +2542,9 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                             )}
                                         </div>
                                     </div>
-                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                    <div className="border border-gray-200 dark:border-slate-600 rounded-xl overflow-hidden">
                                         {/* Header da Tabela */}
-                                        <div className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200 px-6 py-3 grid grid-cols-12 gap-4 text-xs font-semibold text-gray-700 uppercase">
+                                        <div className="bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-600 px-6 py-3 grid grid-cols-12 gap-4 text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                                             <div className="col-span-1"></div>
                                             <div className="col-span-3">Item/Serviço</div>
                                             <div className="col-span-1 text-center">NCM</div>
@@ -2529,7 +2554,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                         </div>
                                         
                                         {/* Linhas de Itens */}
-                                        <div className="divide-y divide-gray-200">
+                                        <div className="divide-y divide-gray-200 dark:divide-slate-600">
                                             {(itensOrcamentoModificados || orcamentoSelecionado.items).map((item: any, index: number) => {
                                                 const nomeItem = getItemNomeVenda(item);
                                                 const dataFrio = getItemDataBancoFrioVenda(item);
@@ -2537,7 +2562,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 // Obter NCM: prioridade para item (manual) > cotação > material
                                                 const ncm = item.ncm || item.cotacao?.ncm || item.material?.ncm || '-';
                                                 return (
-                                                <div key={index} className={`px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 transition-colors ${itensSelecionadosVenda.has(index) ? 'bg-indigo-50 border-l-4 border-indigo-500' : ''}`}>
+                                                <div key={index} className={`px-6 py-4 grid grid-cols-12 gap-4 items-center hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors ${itensSelecionadosVenda.has(index) ? 'bg-indigo-50 dark:bg-indigo-950/40 border-l-4 border-indigo-500' : ''}`}>
                                                     {/* Checkbox de seleção */}
                                                     <div className="col-span-1">
                                                         <input
@@ -2549,7 +2574,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                     </div>
                                                     <div className="col-span-3">
                                                         <div className="flex items-center gap-2 flex-wrap">
-                                                            <p className="font-semibold text-gray-900">{nomeItem}</p>
+                                                            <p className="font-semibold text-gray-900 dark:text-gray-100">{nomeItem}</p>
                                                             {(item.tipo === 'KIT' || item.tipo === 'Kit') && item.itensDoKit && Array.isArray(item.itensDoKit) && item.itensDoKit.length > 0 && (
                                                                 <button
                                                                     type="button"
@@ -2634,7 +2659,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                         </div>
 
                                         {/* Footer com Total (e breakdown de desconto quando houver) */}
-                                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-t-2 border-green-300 px-6 py-4 space-y-2">
+                                        <div className="bg-green-50 dark:bg-green-950/25 border-t-2 border-green-300 dark:border-green-800 px-6 py-4 space-y-2">
                                             {(orcamentoSelecionado?.descontoValor ?? 0) > 0 && (() => {
                                                 const itensAtuais = itensOrcamentoModificados || orcamentoSelecionado?.items || [];
                                                 const subtotalItens = itensAtuais.reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
@@ -2652,11 +2677,11 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                     </>
                                                 );
                                             })()}
-                                            <div className="flex justify-between items-center pt-1 border-t border-green-200">
-                                                <span className="text-sm font-semibold text-gray-700">
+                                            <div className="flex justify-between items-center pt-1 border-t border-green-200 dark:border-green-800">
+                                                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">
                                                     {(orcamentoSelecionado?.descontoValor ?? 0) > 0 ? 'Valor total do pedido (com desconto)' : `TOTAL DOS ITENS${itensOrcamentoModificados ? ' (Modificado)' : ''}`}
                                                 </span>
-                                                <span className="text-2xl font-bold text-green-700">
+                                                <span className="text-2xl font-bold text-green-700 dark:text-green-400">
                                                     R$ {calculosFinanceiros.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </span>
                                             </div>
@@ -2668,14 +2693,14 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                             {/* Inputs de Pagamento */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                         Forma de Pagamento *
                                     </label>
                                     <select
                                         value={vendaForm.formaPagamento}
                                         onChange={(e) => setVendaForm({...vendaForm, formaPagamento: e.target.value})}
                                         required
-                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                        className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                     >
                                         {formasPagamento.map(forma => (
                                             <option key={forma} value={forma}>{forma}</option>
@@ -2686,7 +2711,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                 {/* Boleto integral: apenas data para cobrança (padrão: hoje) */}
                                 {vendaForm.formaPagamento === 'Boleto integral' && (
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                             Data para cobrança *
                                         </label>
                                         <input
@@ -2694,7 +2719,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                             value={vendaForm.dataCobrancaBoleto || hojeISO()}
                                             onChange={(e) => setVendaForm({...vendaForm, dataCobrancaBoleto: e.target.value})}
                                             required
-                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                            className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                         />
                                         <p className="text-xs text-gray-500 mt-1">Data em que o boleto será cobrado (padrão: hoje)</p>
                                     </div>
@@ -2704,7 +2729,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                 {vendaForm.formaPagamento === 'Boleto parcelado' && (
                                     <>
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Número de Parcelas *
                                             </label>
                                             <input
@@ -2714,13 +2739,13 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 min="1"
                                                 max="36"
                                                 required
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                             />
                                         </div>
                                         {vendaForm.parcelas > 1 && (
                                             <>
                                                 <div className="md:col-span-2">
-                                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Distribuição dos valores</label>
+                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Distribuição dos valores</label>
                                                     <div className="flex flex-wrap gap-4 items-center">
                                                         <label className="inline-flex items-center gap-2 cursor-pointer">
                                                             <input
@@ -2746,7 +2771,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 </div>
                                                 {!vendaForm.parcelasIguais && (
                                                     <div className="md:col-span-2">
-                                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Valor de cada parcela (R$) — última = restante</label>
+                                                        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Valor de cada parcela (R$) — última = restante</label>
                                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                                             {Array.from({ length: Math.max(0, vendaForm.parcelas - 1) }).map((_, idx) => (
                                                                 <div key={idx}>
@@ -2780,7 +2805,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                             </>
                                         )}
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Valor de Entrada (R$)
                                             </label>
                                             <input
@@ -2790,12 +2815,12 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 min="0"
                                                 max={calculosFinanceiros.valorTotal}
                                                 step="0.01"
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                                 placeholder="0,00"
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Data da Primeira Parcela *
                                             </label>
                                             <input
@@ -2810,13 +2835,13 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                     }));
                                                 }}
                                                 required
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                             />
                                         </div>
                                         {/* Datas de vencimento das parcelas (já existe uma data dedicada para a 1ª parcela) */}
                                         {(vendaForm.parcelas || 1) > 1 && (
                                             <div className="md:col-span-2">
-                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                     Datas de vencimento das parcelas (2 a {vendaForm.parcelas})
                                                 </label>
                                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -2851,7 +2876,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                         {vendaForm.formaPagamento === 'Cartão de crédito' && (
                                             <>
                                                 <div>
-                                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                         Número de Parcelas *
                                                     </label>
                                                     <input
@@ -2861,13 +2886,13 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                         min="1"
                                                         max="36"
                                                         required
-                                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                        className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                                     />
                                                 </div>
                                                 {vendaForm.parcelas > 1 && (
                                                     <>
                                                         <div className="md:col-span-2">
-                                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Distribuição dos valores</label>
+                                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Distribuição dos valores</label>
                                                             <div className="flex flex-wrap gap-4 items-center">
                                                                 <label className="inline-flex items-center gap-2 cursor-pointer">
                                                                     <input
@@ -2893,7 +2918,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                         </div>
                                                         {!vendaForm.parcelasIguais && (
                                                             <div className="md:col-span-2">
-                                                                <label className="block text-sm font-semibold text-gray-700 mb-2">Valor de cada parcela (R$) — última = restante</label>
+                                                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Valor de cada parcela (R$) — última = restante</label>
                                                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                                                     {Array.from({ length: Math.max(0, vendaForm.parcelas - 1) }).map((_, idx) => (
                                                                         <div key={idx}>
@@ -2929,7 +2954,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                             </>
                                         )}
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Valor de Entrada (R$)
                                             </label>
                                             <input
@@ -2939,12 +2964,12 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 min="0"
                                                 max={calculosFinanceiros.valorTotal}
                                                 step="0.01"
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                                 placeholder="0,00"
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Data da Primeira Parcela *
                                             </label>
                                             <input
@@ -2952,7 +2977,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                                 value={vendaForm.dataPrimeiraParcela}
                                                 onChange={(e) => setVendaForm({...vendaForm, dataPrimeiraParcela: e.target.value})}
                                                 required
-                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                                                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-white dark:bg-slate-900 text-gray-900 dark:text-dark-text"
                                             />
                                         </div>
                                     </>
@@ -2962,21 +2987,21 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                             {/* Cálculos Automáticos (ocultar para Boleto integral; mostrar para parcelado e demais) */}
                             {vendaForm.formaPagamento !== 'Boleto integral' && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                                    <h4 className="text-xs font-semibold text-blue-700 uppercase mb-1">Valor de Venda</h4>
-                                    <p className="text-2xl font-bold text-blue-900">
+                                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4 rounded-xl">
+                                    <h4 className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase mb-1">Valor de Venda</h4>
+                                    <p className="text-2xl font-bold text-blue-900 dark:text-blue-200">
                                         R$ {calculosFinanceiros.valorFinanciado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </p>
-                                    <p className="text-xs text-gray-600 mt-1">
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                         Total - Entrada = Valor a parcelar
                                     </p>
                                 </div>
 
-                                <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
-                                    <h4 className="text-xs font-semibold text-purple-700 uppercase mb-1">Valor da Parcela</h4>
+                                <div className="bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 p-4 rounded-xl">
+                                    <h4 className="text-xs font-semibold text-purple-700 dark:text-purple-300 uppercase mb-1">Valor da Parcela</h4>
                                     {vendaForm.parcelasIguais || !calculosFinanceiros.valoresPorParcela?.length ? (
                                         <>
-                                            <p className="text-2xl font-bold text-purple-900">
+                                            <p className="text-2xl font-bold text-purple-900 dark:text-purple-200">
                                                 R$ {calculosFinanceiros.valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
                                             <p className="text-xs text-gray-600 mt-1">
@@ -3003,14 +3028,14 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                 {/* SEÇÃO 4: Gerar Contrato (documentos futuros: apenas botão de contrato) */}
                 {orcamentoSelecionado && (
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                            <span className="w-8 h-8 rounded-lg bg-yellow-100 flex items-center justify-center text-yellow-600" aria-hidden>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-dark-text mb-4 flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-lg bg-yellow-100 dark:bg-amber-900/40 flex items-center justify-center text-yellow-600 dark:text-amber-300" aria-hidden>
                                 🧾
                             </span>
                             Contrato
                         </h3>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 space-y-3">
-                            <p className="text-sm text-gray-600">
+                        <div className="bg-amber-50 dark:bg-amber-950/25 border border-yellow-200 dark:border-amber-800 rounded-xl p-6 space-y-3">
+                            <p className="text-sm text-gray-600 dark:text-gray-300">
                                 Gere o contrato de prestação de serviços com os dados do orçamento e da forma de pagamento. Escolha abaixo qual modelo deseja usar como base, edite o texto no editor e salve ou imprima conforme necessário.
                             </p>
                             <div className="flex flex-wrap gap-3">
@@ -3027,7 +3052,7 @@ const Vendas: React.FC<VendasProps> = ({ toggleSidebar, onNavigate }) => {
                                 <button
                                     type="button"
                                     onClick={() => handleAbrirGerarContrato('subestacao')}
-                                    className="inline-flex items-center gap-2 px-5 py-3 bg-white text-amber-700 border border-amber-400 rounded-xl hover:bg-amber-50 transition-all font-semibold"
+                                    className="inline-flex items-center gap-2 px-5 py-3 bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 border border-amber-400 dark:border-amber-600 rounded-xl hover:bg-amber-50 dark:hover:bg-slate-700 transition-all font-semibold"
                                 >
                                     <span className="text-lg leading-none" aria-hidden>
                                         ⚡
@@ -3619,14 +3644,14 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                                     <p className="text-sm text-gray-600">Faturamento (mês corrente na empresa)</p>
                                     <p className="text-2xl font-bold text-green-600">
                                         R${' '}
-                                        {estatisticasVendas.totalVendas.toLocaleString('pt-BR', {
+                                        {estatisticasVendas.faturamentoMes.toLocaleString('pt-BR', {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits: 2,
                                         })}
                                     </p>
                                     {mesMetaConfig === yyyymmMesCorrente() && valorMetaForm > 0 ? (
                                         <p className="text-sm font-semibold text-gray-700 mt-1">
-                                            {((estatisticasVendas.totalVendas / valorMetaForm) * 100).toFixed(1)}% da meta
+                                            {((estatisticasVendas.faturamentoMes / valorMetaForm) * 100).toFixed(1)}% da meta
                                         </p>
                                     ) : (
                                         <p className="text-sm text-gray-500 mt-1">
@@ -3640,13 +3665,13 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                                     <div className="w-full bg-gray-200 rounded-full h-3">
                                         <div
                                             className={`h-3 rounded-full transition-all ${
-                                                estatisticasVendas.totalVendas >= valorMetaForm
+                                                estatisticasVendas.faturamentoMes >= valorMetaForm
                                                     ? 'bg-green-500'
                                                     : 'bg-blue-500'
                                             }`}
                                             style={{
                                                 width: `${Math.min(
-                                                    (estatisticasVendas.totalVendas / valorMetaForm) * 100,
+                                                    (estatisticasVendas.faturamentoMes / valorMetaForm) * 100,
                                                     100
                                                 )}%`,
                                             }}
@@ -4565,95 +4590,12 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                                             </div>
                                         </div>
 
-                                        {/* Tabela de Entrada e Parcelas (Contas a Receber) */}
                                         {detalhesVenda.contasReceber && detalhesVenda.contasReceber.length > 0 && (
-                                            <div className="mt-4">
-                                                <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                                                    📋 Detalhamento da Entrada e Parcelas
-                                                </h5>
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full border-collapse bg-white dark:bg-gray-800 rounded-lg">
-                                                        <thead>
-                                                            <tr className="bg-purple-100 dark:bg-purple-900/50">
-                                                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Parcela
-                                                                </th>
-                                                                <th className="px-4 py-2 text-right text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Valor
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Vencimento
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Status
-                                                                </th>
-                                                                <th className="px-4 py-2 text-center text-xs font-bold text-gray-700 dark:text-gray-300 border border-purple-200 dark:border-purple-700">
-                                                                    Data Pagamento
-                                                                </th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {detalhesVenda.contasReceber
-                                                                .sort((a: any, b: any) => {
-                                                                    // Ordenar: entrada (numeroParcela = 0) primeiro, depois parcelas normais
-                                                                    const parcelaA = a.numeroParcela || 0;
-                                                                    const parcelaB = b.numeroParcela || 0;
-                                                                    return parcelaA - parcelaB;
-                                                                })
-                                                                .map((conta: any, index: number) => {
-                                                                    const isEntrada = conta.numeroParcela === 0 || conta.descricao?.includes('Entrada');
-                                                                    const isPago = conta.status === 'Pago' || conta.status === 'Recebido';
-                                                                    const isRecebidoParcial = conta.status === 'Recebido Parcial';
-                                                                    const isAtrasado = !isPago && !isRecebidoParcial && new Date(conta.dataVencimento) < new Date();
-                                                                    const statusClass = isPago
-                                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                                                        : isRecebidoParcial
-                                                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                                                                            : isAtrasado
-                                                                                ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-                                                                                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-                                                                    const statusText = isPago ? 'Pago' : isRecebidoParcial ? 'Recebido Parcial' : isAtrasado ? 'Atrasado' : 'Pendente';
-                                                                    const totalParcelas = detalhesVenda.numeroParcelas || detalhesVenda.parcelas || 
-                                                                        detalhesVenda.contasReceber.filter((c: any) => (c.numeroParcela || 0) > 0).length;
-                                                                    
-                                                                    return (
-                                                                        <tr key={conta.id || index} className={`hover:bg-purple-50 dark:hover:bg-purple-900/20 ${isEntrada ? 'bg-blue-50 dark:bg-blue-900/10' : ''}`}>
-                                                                            <td className="px-4 py-2 text-sm font-semibold text-gray-900 dark:text-white border border-purple-200 dark:border-purple-700">
-                                                                                {isEntrada ? (
-                                                                                    <span className="flex items-center gap-1">
-                                                                                        <span className="text-blue-600 dark:text-blue-400">💰</span>
-                                                                                        <span>Entrada</span>
-                                                                                    </span>
-                                                                                ) : (
-                                                                                    `${conta.numeroParcela || index + 1}/${totalParcelas}`
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm font-bold text-gray-900 dark:text-white text-right border border-purple-200 dark:border-purple-700">
-                                                                                R$ {(conta.valorParcela || conta.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
-                                                                                {new Date(conta.dataVencimento).toLocaleDateString('pt-BR')}
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-center border border-purple-200 dark:border-purple-700">
-                                                                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${statusClass}`}>
-                                                                                    {isPago && '✅ '}
-                                                                                    {isAtrasado && '⚠️ '}
-                                                                                    {!isPago && !isAtrasado && '⏳ '}
-                                                                                    {statusText}
-                                                                                </span>
-                                                                            </td>
-                                                                            <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 text-center border border-purple-200 dark:border-purple-700">
-                                                                                {conta.dataPagamento 
-                                                                                    ? new Date(conta.dataPagamento).toLocaleDateString('pt-BR')
-                                                                                    : '-'}
-                                                                            </td>
-                                                                        </tr>
-                                                                    );
-                                                                })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
+                                            <ParcelasVendaAuditoriaTable
+                                                contas={detalhesVenda.contasReceber}
+                                                numeroParcelas={detalhesVenda.numeroParcelas}
+                                                parcelas={detalhesVenda.parcelas}
+                                            />
                                         )}
 
                                         {/* Condições Especiais (se houver) */}

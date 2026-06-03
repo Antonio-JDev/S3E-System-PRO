@@ -28,3 +28,10 @@ export function calcValorBaseFromEfetivo(
 ): number {
   return Math.round((valorEfetivo + valorDesconto - valorJuros) * 100) / 100;
 }
+
+/** Entrada em caixa quando há diferença (retenção): saldo do título − diferença */
+export function calcEntradaCaixaComDiferenca(saldoTitulo: number, valorDiferenca: number): number {
+  const saldo = parseMoney(saldoTitulo);
+  const dif = parseMoney(valorDiferenca);
+  return Math.round(Math.max(0, saldo - dif) * 100) / 100;
+}

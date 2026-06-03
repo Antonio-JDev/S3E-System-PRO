@@ -533,8 +533,8 @@ const CriacaoKitModal: React.FC<CriacaoKitModalProps> = ({ isOpen, onClose, onSa
                     quantidade: item.quantidade
                 })),
                 // Combinar banco frio e serviços em um único array
-                itensBancoFrio: itensExtras.length > 0 ? itensExtras : undefined,
-                temItensCotacao: itensBancoFrio.length > 0 || itensServicos.length > 0
+                itensBancoFrio: itensExtras.length > 0 ? itensExtras : [],
+                temItensCotacao: itensBancoFrio.length > 0,
             };
 
             console.log('📤 Enviando kit para o backend:', kitData);

@@ -7,7 +7,41 @@ import {
 } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { dataReferenciaDiaCivilUtc } from '../utils/datetime-sp.util';
+import {
+  aplicarClassificacaoNosMinutos,
+  intervaloJustificativaMinutos,
+  parseClassificacaoJustificativa,
+  type ClassificacaoJustificativaPonto,
+} from '../utils/justificativaPonto.util';
 import { WORK_SHIFT_TEMPLATES_44H } from '../utils/workshift.util';
+
+async function ajustarBancoHorasPorJustificativa(
+  funcionarioId: string,
+  minutosDebito: number,
+  operacao: 'debitar' | 'estornar',
+) {
+  if (minutosDebito <= 0) return;
+  const horas = minutosDebito / 60;
+  const delta = operacao === 'debitar' ? -horas : horas;
+  const f = await prisma.funcionario.findUnique({
+    where: { id: funcionarioId },
+    select: {
+      saldoBancoHoras: true,
+      saldoBancoHorasNormaisExcedente: true,
+      saldoBancoHorasExtras100: true,
+    },
+  });
+  if (!f) return;
+  const novoN = Number(f.saldoBancoHorasNormaisExcedente ?? 0) + delta;
+  const novo100 = Number(f.saldoBancoHorasExtras100 ?? 0);
+  await prisma.funcionario.update({
+    where: { id: funcionarioId },
+    data: {
+      saldoBancoHorasNormaisExcedente: novoN,
+      saldoBancoHoras: novoN + novo100,
+    },
+  });
+}
 
 function caminhoArquivoFalta(url: string | null | undefined): string | null {
   if (!url || !url.includes('/uploads/rh-faltas/')) return null;
@@ -194,10 +228,13 @@ export async function criarJustificativaParcial(params: {
   justificativaTipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
   horaInicio: string;
   horaFim: string;
+  classificacaoJustificativa?: ClassificacaoJustificativaPonto | string | null;
   documentoAnexoUrl?: string | null;
   documentoAnexoNome?: string | null;
 }) {
   const dataReferencia = dataReferenciaDiaCivilUtc(params.referenciaAno, params.referenciaMes, params.dia);
+  const classificacao = parseClassificacaoJustificativa(params.classificacaoJustificativa);
+  const minutosJp = intervaloJustificativaMinutos(params.horaInicio, params.horaFim);
 
   const registro = await prisma.registroPonto.findUnique({
     where: {
@@ -209,7 +246,22 @@ export async function criarJustificativaParcial(params: {
     select: { id: true },
   });
 
-  return prisma.ocorrenciaPontoRh.upsert({
+  const existente = await prisma.ocorrenciaPontoRh.findUnique({
+    where: {
+      funcionarioId_dataReferencia_tipo: {
+        funcionarioId: params.funcionarioId,
+        dataReferencia,
+        tipo: 'JUSTIFICATIVA_PARCIAL' as any,
+      },
+    },
+  });
+  const classAntiga = existente
+    ? parseClassificacaoJustificativa((existente as any).classificacaoJustificativa)
+    : null;
+  const minutosAntigosBanco =
+    classAntiga === 'DESCONTAR_BANCO' ? Number(existente?.minutos ?? 0) : 0;
+
+  const ocorrencia = await prisma.ocorrenciaPontoRh.upsert({
     where: {
       funcionarioId_dataReferencia_tipo: {
         funcionarioId: params.funcionarioId,
@@ -226,6 +278,8 @@ export async function criarJustificativaParcial(params: {
       justificativaTipo: params.justificativaTipo,
       horaInicio: params.horaInicio,
       horaFim: params.horaFim,
+      classificacaoJustificativa: classificacao,
+      minutos: classificacao === 'DESCONTAR_BANCO' ? minutosJp : 0,
       documentoAnexoUrl: params.documentoAnexoUrl ?? null,
       documentoAnexoNome: params.documentoAnexoNome ?? null,
       registroPontoId: registro?.id ?? null,
@@ -236,11 +290,134 @@ export async function criarJustificativaParcial(params: {
       justificativaTipo: params.justificativaTipo,
       horaInicio: params.horaInicio,
       horaFim: params.horaFim,
+      classificacaoJustificativa: classificacao,
+      minutos: classificacao === 'DESCONTAR_BANCO' ? minutosJp : 0,
       ...(params.documentoAnexoUrl !== undefined && { documentoAnexoUrl: params.documentoAnexoUrl }),
       ...(params.documentoAnexoNome !== undefined && { documentoAnexoNome: params.documentoAnexoNome }),
       ...(registro?.id ? { registroPontoId: registro.id } : {}),
     } as any,
   });
+
+  if (minutosAntigosBanco > 0) {
+    await ajustarBancoHorasPorJustificativa(params.funcionarioId, minutosAntigosBanco, 'estornar');
+  }
+  if (classificacao === 'DESCONTAR_BANCO' && minutosJp > 0) {
+    await ajustarBancoHorasPorJustificativa(params.funcionarioId, minutosJp, 'debitar');
+  }
+
+  return ocorrencia;
+}
+
+/** Atualiza justificativa parcial existente (inclui classificação e ajuste de banco). */
+export async function atualizarJustificativaParcial(
+  ocorrenciaId: string,
+  params: {
+    descricao: string;
+    justificativaTipo: 'ENTRADA_ATRASADA' | 'SAIDA_ANTECIPADA';
+    horaInicio: string;
+    horaFim: string;
+    classificacaoJustificativa?: ClassificacaoJustificativaPonto | string | null;
+    documentoAnexoUrl?: string | null;
+    documentoAnexoNome?: string | null;
+    removerAnexo?: boolean;
+  },
+) {
+  const atual = await prisma.ocorrenciaPontoRh.findUnique({ where: { id: ocorrenciaId } });
+  if (!atual || (atual as any).tipo !== 'JUSTIFICATIVA_PARCIAL') {
+    throw new Error('Justificativa parcial não encontrada');
+  }
+  if (atual.status === 'REPROVADO') {
+    throw new Error('Não é possível editar uma justificativa reprovada');
+  }
+
+  const classificacaoNova = parseClassificacaoJustificativa(params.classificacaoJustificativa);
+  const classificacaoAntiga = parseClassificacaoJustificativa(
+    (atual as any).classificacaoJustificativa,
+  );
+  const minutosAntigos =
+    classificacaoAntiga === 'DESCONTAR_BANCO' ? Number(atual.minutos ?? 0) : 0;
+  const minutosNovos =
+    classificacaoNova === 'DESCONTAR_BANCO'
+      ? intervaloJustificativaMinutos(params.horaInicio, params.horaFim)
+      : 0;
+
+  if (minutosAntigos > 0) {
+    await ajustarBancoHorasPorJustificativa(atual.funcionarioId, minutosAntigos, 'estornar');
+  }
+
+  if (params.removerAnexo && atual.documentoAnexoUrl) {
+    removerArquivoFaltaSeExistir(atual.documentoAnexoUrl);
+  }
+
+  const registro = await prisma.registroPonto.findFirst({
+    where: {
+      funcionarioId: atual.funcionarioId,
+      dataReferencia: atual.dataReferencia,
+    },
+    select: { id: true },
+  });
+
+  const ocorrencia = await prisma.ocorrenciaPontoRh.update({
+    where: { id: ocorrenciaId },
+    data: {
+      status: 'APROVADO_RH',
+      descricao: params.descricao,
+      justificativaTipo: params.justificativaTipo,
+      horaInicio: params.horaInicio,
+      horaFim: params.horaFim,
+      classificacaoJustificativa: classificacaoNova,
+      minutos: minutosNovos,
+      ...(params.removerAnexo
+        ? { documentoAnexoUrl: null, documentoAnexoNome: null }
+        : params.documentoAnexoUrl !== undefined
+          ? {
+              documentoAnexoUrl: params.documentoAnexoUrl,
+              documentoAnexoNome: params.documentoAnexoNome ?? null,
+            }
+          : {}),
+      ...(registro?.id ? { registroPontoId: registro.id } : {}),
+    } as any,
+  });
+
+  if (minutosNovos > 0) {
+    await ajustarBancoHorasPorJustificativa(atual.funcionarioId, minutosNovos, 'debitar');
+  }
+
+  return ocorrencia;
+}
+
+/** Remove justificativa parcial (falta do dia ou meio período) e estorna banco se aplicável. */
+export async function excluirJustificativaParcial(ocorrenciaId: string) {
+  const atual = await prisma.ocorrenciaPontoRh.findUnique({ where: { id: ocorrenciaId } });
+  if (!atual || (atual as { tipo?: string }).tipo !== 'JUSTIFICATIVA_PARCIAL') {
+    throw new Error('Justificativa parcial não encontrada');
+  }
+  const classificacao = parseClassificacaoJustificativa(
+    (atual as { classificacaoJustificativa?: string | null }).classificacaoJustificativa,
+  );
+  const minutosBanco =
+    classificacao === 'DESCONTAR_BANCO' ? Number(atual.minutos ?? 0) : 0;
+  if (minutosBanco > 0) {
+    await ajustarBancoHorasPorJustificativa(atual.funcionarioId, minutosBanco, 'estornar');
+  }
+  if (atual.documentoAnexoUrl) {
+    removerArquivoFaltaSeExistir(atual.documentoAnexoUrl);
+  }
+  await prisma.ocorrenciaPontoRh.delete({ where: { id: ocorrenciaId } });
+  return { id: ocorrenciaId };
+}
+
+/** Remove falta justificada (modelo legado). */
+export async function excluirFaltaJustificada(ocorrenciaId: string) {
+  const atual = await prisma.ocorrenciaPontoRh.findUnique({ where: { id: ocorrenciaId } });
+  if (!atual || atual.tipo !== 'FALTA_JUSTIFICADA') {
+    throw new Error('Justificativa de falta não encontrada');
+  }
+  if (atual.documentoAnexoUrl) {
+    removerArquivoFaltaSeExistir(atual.documentoAnexoUrl);
+  }
+  await prisma.ocorrenciaPontoRh.delete({ where: { id: ocorrenciaId } });
+  return { id: ocorrenciaId };
 }
 
 export async function vincularJustificativaParcialAoRegistro(

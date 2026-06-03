@@ -355,11 +355,11 @@ export function fetchWhatsappMessages(chatId: string) {
   return axiosApiService.get<WhatsappMessageDto[]>(`${BASE}/messages`, { chatId });
 }
 
-export function sendWhatsappMessage(chatId: string, text: string) {
-  return axiosApiService.post<WhatsappMessageDto>(`${BASE}/send`, { chatId, text });
+export function sendWhatsappMessage(chatId: string, text: string, quotedMessageId?: string) {
+  return axiosApiService.post<WhatsappMessageDto>(`${BASE}/send`, { chatId, text, quotedMessageId });
 }
 
-export type WhatsappProviderMediaType = 'image' | 'voice' | 'video' | 'file';
+export type WhatsappProviderMediaType = 'image' | 'voice' | 'video' | 'file' | 'sticker';
 
 export interface SendMediaPayload {
   chatId: string;
@@ -368,6 +368,7 @@ export interface SendMediaPayload {
   mimetype: string;
   filename?: string;
   caption?: string;
+  quotedMessageId?: string;
 }
 
 export function sendWhatsappMedia(payload: SendMediaPayload) {
@@ -379,6 +380,8 @@ export async function postWhatsappSendFile(params: {
   chatId: string;
   file: File;
   caption?: string;
+  quotedMessageId?: string;
+  asSticker?: boolean;
 }): Promise<{ success: boolean; data?: WhatsappMessageDto; error?: string }> {
   const backend = getBackendUrl();
   const token = (typeof localStorage !== 'undefined' && localStorage.getItem('token')) || '';
@@ -386,6 +389,8 @@ export async function postWhatsappSendFile(params: {
   fd.append('chatId', params.chatId);
   fd.append('file', params.file);
   if (params.caption?.trim()) fd.append('caption', params.caption.trim());
+  if (params.quotedMessageId?.trim()) fd.append('quotedMessageId', params.quotedMessageId.trim());
+  if (params.asSticker) fd.append('asSticker', '1');
   const headers: Record<string, string> = {};
   if (token && token !== 'null' && token !== 'undefined') {
     headers.Authorization = `Bearer ${token}`;

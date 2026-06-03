@@ -56,7 +56,7 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
   const printRef = useRef<HTMLDivElement>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
 
-  const ROWS_PER_PDF_PAGE = 22;
+  const ROWS_PER_PDF_PAGE = 18;
   const chunkRows = <T,>(arr: T[], size: number): T[][] => {
     if (arr.length === 0) return [[]];
     const pages: T[][] = [];
@@ -221,6 +221,21 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
       const totalPages = pages.length;
       const periodo = `${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}`;
       const fmt = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+      const fmtCell = (n: number | undefined) =>
+        n != null && n > 0 ? `R$ ${fmt(n)}` : '—';
+      const totalJurosEntradas = movimentacoes
+        .filter((m) => m.tipo === 'ENTRADA')
+        .reduce((s, m) => s + (m.valorJuros ?? 0), 0);
+      const pdfHeaders = [
+        'Data',
+        'Descrição',
+        'Cat.',
+        'Principal',
+        'Juros atraso',
+        'Desconto',
+        'Valor caixa',
+        'Meio',
+      ];
 
       const { blob, filename } = await renderSystemPdfDocument({
         filename: `extrato-caixa-${dataInicio}-${dataFim}.pdf`,
@@ -244,17 +259,18 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                     <p style={{ fontSize: 11, color: '#666', margin: '4px 0 0' }}>Período: {periodo}</p>
                   </div>
                 )}
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
                   <thead>
                     <tr>
-                      {['Data', 'Descrição', 'Categoria', 'Valor', 'Meio'].map((h) => (
+                      {pdfHeaders.map((h) => (
                         <th
                           key={h}
                           style={{
                             border: '1px solid #ddd',
-                            padding: '5px 6px',
+                            padding: '4px 5px',
                             background: '#f5f5f5',
-                            textAlign: 'left',
+                            textAlign: h === 'Principal' || h === 'Juros atraso' || h === 'Desconto' || h === 'Valor caixa' ? 'right' : 'left',
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           {h}
@@ -263,28 +279,41 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                     </tr>
                   </thead>
                   <tbody>
-                    {pageRows.map((m) => (
-                      <tr key={m.id}>
-                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>
+                    {pageRows.map((m) => {
+                      const principal = m.valorBase ?? m.valor;
+                      return (
+                      <tr key={`${m.origem}-${m.id}`}>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px', whiteSpace: 'nowrap' }}>
                           {new Date(m.dataPagamento).toLocaleDateString('pt-BR')}
                         </td>
-                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>{m.descricao}</td>
-                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>{m.categoria}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px', maxWidth: 140 }}>{m.descricao}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px' }}>{m.categoria}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px', textAlign: 'right' }}>
+                          {fmtCell(principal)}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px', textAlign: 'right', color: '#b45309' }}>
+                          {fmtCell(m.valorJuros)}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px', textAlign: 'right' }}>
+                          {fmtCell(m.valorDesconto)}
+                        </td>
                         <td
                           style={{
                             border: '1px solid #ddd',
-                            padding: '5px 6px',
+                            padding: '4px 5px',
+                            textAlign: 'right',
                             color: m.tipo === 'ENTRADA' ? '#059669' : '#dc2626',
                             fontWeight: 600,
+                            whiteSpace: 'nowrap',
                           }}
                         >
                           {m.tipo === 'ENTRADA' ? '+' : '-'} R$ {fmt(m.valor)}
                         </td>
-                        <td style={{ border: '1px solid #ddd', padding: '5px 6px' }}>
-                          {m.meioPagamento || '-'}
+                        <td style={{ border: '1px solid #ddd', padding: '4px 5px' }}>
+                          {m.meioPagamento || '—'}
                         </td>
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
                 {pageIndex === totalPages - 1 && (
@@ -298,13 +327,20 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                       fontWeight: 700,
                     }}
                   >
-                    <span>Entradas: R$ {fmt(resumo?.entradasTotal ?? 0)}</span>
+                    <span>Entradas (caixa): R$ {fmt(resumo?.entradasTotal ?? 0)}</span>
                     <span>Saídas: R$ {fmt(resumo?.saidasTotal ?? 0)}</span>
                     <span>Saldo: R$ {fmt(resumo?.saldoConta ?? 0)}</span>
+                    {totalJurosEntradas > 0 && (
+                      <span style={{ color: '#b45309' }}>
+                        Juros por atraso (entradas): R$ {fmt(totalJurosEntradas)}
+                      </span>
+                    )}
                   </div>
                 )}
                 {pageIndex === totalPages - 1 && (
-                  <p style={{ marginTop: 12, fontSize: 9, color: '#888' }}>
+                  <p style={{ marginTop: 8, fontSize: 8, color: '#888', lineHeight: 1.4 }}>
+                    Valor caixa = principal + juros por atraso − desconto. Juros por atraso não alteram o saldo da parcela no contas a receber.
+                    <br />
                     Gerado em {new Date().toLocaleString('pt-BR')}
                   </p>
                 )}
@@ -476,7 +512,15 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                         m.tipo === 'ENTRADA' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                       }`}
                     >
-                      {m.tipo === 'ENTRADA' ? '+' : '-'} R$ {m.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      <div>
+                        {m.tipo === 'ENTRADA' ? '+' : '-'} R$ {m.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </div>
+                      {m.tipo === 'ENTRADA' && (m.valorJuros ?? 0) > 0 && (
+                        <div className="text-[10px] font-normal text-amber-700 dark:text-amber-300">
+                          principal R$ {(m.valorBase ?? m.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          {' '}+ juros R$ {(m.valorJuros ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-text-secondary">{m.meioPagamento || '—'}</td>
                     <td className="px-4 py-3 text-sm text-right">
@@ -590,7 +634,7 @@ const MovimentacoesCaixa: React.FC<MovimentacoesCaixaProps> = ({ toggleSidebar, 
                   {(movimentacaoToView.valorJuros !== undefined && movimentacaoToView.valorJuros > 0) || (movimentacaoToView.valorDesconto !== undefined && movimentacaoToView.valorDesconto > 0) ? (
                     <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
                       Base R$ {movimentacaoToView.valorBase?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) ?? '—'}
-                      {movimentacaoToView.valorJuros ? ` + juros R$ ${movimentacaoToView.valorJuros.toFixed(2)}` : ''}
+                      {movimentacaoToView.valorJuros ? ` + juros por atraso R$ ${movimentacaoToView.valorJuros.toFixed(2)}` : ''}
                       {movimentacaoToView.valorDesconto ? ` - desconto R$ ${movimentacaoToView.valorDesconto.toFixed(2)}` : ''}
                     </p>
                   ) : null}

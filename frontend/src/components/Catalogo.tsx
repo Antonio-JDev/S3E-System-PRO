@@ -9,6 +9,7 @@ import CriacaoKitModal from './CriacaoKitModal';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { roundMoney } from '../utils/currency';
+import { kitTemCotacaoBancoFrio } from '../utils/kitCatalogFlags';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 
@@ -133,7 +134,7 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                             createdAt: kit.createdAt || new Date().toISOString(),
                             updatedAt: kit.updatedAt || new Date().toISOString(),
                             // Campos adicionais para controle de estoque
-                            temItensCotacao: kit.temItensCotacao || false,
+                            temItensCotacao: kitTemCotacaoBancoFrio(kit),
                             itensFaltantes: kit.itensFaltantes || [],
                             statusEstoque: kit.statusEstoque || 'COMPLETO',
                             isActive: kit.ativo !== false

@@ -60,6 +60,11 @@ export const canRegredirOrcamentoStatus = (user: User | null | undefined): boole
   return isAdmin(user) || isDeveloper(user);
 };
 
+/** Admin ou desenvolvedor — rollback de status da ordem de serviço. */
+export const canReverterStatusOs = (user: User | null | undefined): boolean => {
+  return isAdmin(user) || isDeveloper(user);
+};
+
 /**
  * Verifica se o usuário tem uma permissão específica
  * @param user - Usuário a verificar

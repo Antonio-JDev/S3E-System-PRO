@@ -1,35 +1,22 @@
 import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
-// Verificar rapidamente se a tabela/colunas audit_logs estão disponíveis para evitar queries falhando repetidamente.
-let auditAvailable = false;
+import {
+  countAuditLogsResilient,
+  isAuditLogsReadable,
+  listAuditLogsResilient,
+} from '../utils/auditLogsSchema.util';
+
+const disableAuditLogs = String(process.env.DISABLE_AUDIT_LOGS || '').toLowerCase() === 'true';
+
 (async function checkAuditAvailability() {
   try {
-    // Verificar se existem todas as colunas essenciais esperadas pelo Prisma model.
-    // Evita casos onde a tabela existe mas falta mapeamento (ex: user_id ou user_name).
-    const rows: any = await prisma.$queryRawUnsafe(`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'audit_logs'
-    `);
-    const found = Array.isArray(rows) ? rows.map((r: any) => String((r && typeof r === 'object' ? Object.values(r)[0] : r) ?? '').toLowerCase()) : [];
-    const hasAction = found.includes('action');
-    const hasCreated = found.some((c: string) => c === 'created_at' || c === 'createdat');
-    const hasUser = found.some((c: string) => c === 'user_id' || c === 'userid') || found.some((c: string) => c === 'user_name' || c === 'username');
-    if (hasAction && hasCreated && hasUser) {
-      auditAvailable = true;
-      console.log('🔎 audit_logs disponível - leitura de logs ativada.');
-    } else {
-      auditAvailable = false;
-      console.log('🔎 audit_logs ausente ou incompatível - leitura desativada.');
-    }
+    const ok = await isAuditLogsReadable();
+    console.log(ok ? '🔎 audit_logs disponível - leitura de logs ativada.' : '🔎 audit_logs ausente ou incompleta.');
   } catch (err) {
-    auditAvailable = false;
-    console.warn('🔎 Falha ao verificar audit_logs (continuando com auditoria desativada):', err instanceof Error ? err.message : err);
+    console.warn('🔎 Falha ao verificar audit_logs:', err instanceof Error ? err.message : err);
   }
 })();
-// Opcional: desativar leitura de audit_logs via env (ex.: DISABLE_AUDIT_LOGS=true).
-// Por padrão a leitura está ATIVADA quando a tabela audit_logs existe e tem as colunas esperadas.
-const disableAuditLogs = String(process.env.DISABLE_AUDIT_LOGS || '').toLowerCase() === 'true';
 
 export class LogsController {
   /**
@@ -51,68 +38,38 @@ export class LogsController {
         return;
       }
 
-      const { limit = 100, offset = 0, action, entity, userId } = req.query;
+      const limitNum = Math.min(Number(req.query.limit) || 500, 2000);
+      const offsetNum = Number(req.query.offset) || 0;
+      const action = req.query.action ? String(req.query.action) : undefined;
+      const entity = req.query.entity ? String(req.query.entity) : undefined;
+      const userId = req.query.userId ? String(req.query.userId) : undefined;
 
-      // Construir filtros
-      const where: any = {};
-      if (action) where.action = String(action);
-      if (entity) where.entity = String(entity);
-      if (userId) where.userId = String(userId);
+      const filters = { action, entity, userId };
+      const auditReadable = !disableAuditLogs && (await isAuditLogsReadable());
 
-      // Consultar audit_logs quando a tabela estiver disponível e a leitura não estiver desativada por env.
       let logs: any[] = [];
-      if (!auditAvailable || disableAuditLogs) {
-        if (disableAuditLogs) {
-          console.log('🔒 Leitura de audit_logs desabilitada por DISABLE_AUDIT_LOGS=true.');
-        } else {
-          console.warn('⚠️ audit_logs ausente ou incompatível: retornando lista vazia (auditAvailable=false)');
-        }
-        logs = [];
-      } else {
-        try {
-          logs = await prisma.auditLog.findMany({
-            where,
-            orderBy: { createdAt: 'desc' },
-            take: Number(limit),
-            skip: Number(offset),
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true,
-                  role: true
-                }
-              }
-            }
-          });
-        } catch (err: any) {
-          // Se ocorrer erro de schema, marcar auditAvailable=false para não tentar novamente
-          if (err?.code === 'P2022' || /does not exist/i.test(String(err?.message || ''))) {
-            console.warn('⚠️ audit_logs schema incompatível detectado: desativando auditoria para evitar falhas repetidas.', err.message || err);
-            auditAvailable = false;
-            logs = [];
-          } else {
-            throw err;
-          }
-        }
+      if (auditReadable) {
+        logs = await listAuditLogsResilient({
+          limit: limitNum,
+          offset: offsetNum,
+          ...filters,
+        });
+      } else if (disableAuditLogs) {
+        console.log('🔒 Leitura de audit_logs desabilitada por DISABLE_AUDIT_LOGS=true.');
       }
 
-      // Estatísticas (users sempre; audit só quando disponível)
       const totalUsers = await prisma.user.count();
       const activeUsers = await prisma.user.count({ where: { active: true } });
+
       let totalActions = 0;
       let errorActions = 0;
       let totalFiltered = logs.length;
-      if (auditAvailable && !disableAuditLogs) {
-        try {
-          totalActions = await prisma.auditLog.count();
-          errorActions = await prisma.auditLog.count({ where: { action: 'ERROR' } });
-          totalFiltered = await prisma.auditLog.count({ where });
-        } catch {
-          totalFiltered = logs.length;
-        }
+      if (auditReadable) {
+        totalActions = await countAuditLogsResilient();
+        errorActions = await countAuditLogsResilient({ action: 'ERROR' });
+        totalFiltered = await countAuditLogsResilient(filters);
       }
+
       const errorRate = totalActions > 0 ? (errorActions / totalActions) * 100 : 0;
 
       res.json({
@@ -123,44 +80,36 @@ export class LogsController {
             totalUsers,
             activeUsers,
             totalActions,
-            errorRate
+            errorRate,
           },
           pagination: {
-            limit: Number(limit),
-            offset: Number(offset),
-            total: totalFiltered
+            limit: limitNum,
+            offset: offsetNum,
+            total: totalFiltered,
           },
-          auditAvailable: auditAvailable && !disableAuditLogs
-        }
+          auditAvailable: auditReadable,
+        },
       });
     } catch (error: any) {
       console.error('Erro ao buscar logs:', error);
-      // Resposta resiliente: 200 com dados vazios para não quebrar o frontend
-      // Se erro de schema (ex: P2022), retornar resposta com auditAvailable=false
-      if ((error as any)?.code === 'P2022' || /audit_logs/.test(String(error?.message || ''))) {
-        res.status(200).json({
-          success: true,
-          data: {
-            logs: [],
-            stats: { totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 },
-            pagination: {
-               limit: Number(req.query?.limit) || 100,
-               offset: Number(req.query?.offset) || 0},
-            total: 0,
-            auditAvailable: false
-          }
-        });
-        return;
+      let totalUsers = 0;
+      let activeUsers = 0;
+      try {
+        totalUsers = await prisma.user.count();
+        activeUsers = await prisma.user.count({ where: { active: true } });
+      } catch {
+        /* ignore */
       }
-
+      const limitNum = Math.min(Number(req.query?.limit) || 500, 2000);
+      const offsetNum = Number(req.query.offset) || 0;
       res.status(200).json({
         success: true,
         data: {
           logs: [],
-          stats: { totalUsers: 0, activeUsers: 0, totalActions: 0, errorRate: 0 },
-          pagination: { limit: Number(req.query?.limit) || 100, offset: Number(req.query?.offset) || 0, total: 0 },
-          auditAvailable: false
-        }
+          stats: { totalUsers, activeUsers, totalActions: 0, errorRate: 0 },
+          pagination: { limit: limitNum, offset: offsetNum, total: 0 },
+          auditAvailable: false,
+        },
       });
     }
   }
@@ -176,10 +125,9 @@ export class LogsController {
       const userId = (req as any).user?.userId;
       const userName = (req as any).user?.name;
       const userRole = (req as any).user?.role;
-      const ipAddress = req.ip || req.socket.remoteAddress;
-      const userAgent = req.headers['user-agent'];
+      const { buildNetworkContext } = await import('../utils/requestAuditContext.util');
+      const network = buildNetworkContext(req);
 
-      // Registrar via serviço de auditoria (stub em ambientes onde persistência está desativada)
       try {
         const evt = await AuditoriaService.registrarEvento({
           userId,
@@ -189,7 +137,9 @@ export class LogsController {
           entity,
           entityId,
           description,
-          metadata: metadata || undefined
+          ipAddress: network.clientIp,
+          userAgent: network.userAgent,
+          metadata: { ...(metadata || {}), network },
         });
         res.json({
           success: true,
@@ -258,42 +208,52 @@ export class LogsController {
         return;
       }
 
-      // Ações por tipo
-      const actionsByType = await prisma.auditLog.groupBy({
-        by: ['action'],
-        _count: true,
-        orderBy: { _count: { action: 'desc' } }
-      });
+      const allLogs = disableAuditLogs || !(await isAuditLogsReadable())
+        ? []
+        : await listAuditLogsResilient({ limit: 5000, offset: 0 });
 
-      // Ações por usuário
-      const actionsByUser = await prisma.auditLog.groupBy({
-        by: ['userId', 'userName'],
-        _count: true,
-        orderBy: { _count: { userId: 'desc' } },
-        take: 10
-      });
-
-      // Ações por entidade
-      const actionsByEntity = await prisma.auditLog.groupBy({
-        by: ['entity'],
-        _count: true,
-        where: { entity: { not: null } },
-        orderBy: { _count: { entity: 'desc' } }
-      });
-
-      // Atividade nos últimos 7 dias
+      const actionCounts = new Map<string, number>();
+      const userCounts = new Map<string, { userId: string | null; userName: string | null; count: number }>();
+      const entityCounts = new Map<string, number>();
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      const recentActivity = await prisma.auditLog.findMany({
-        where: {
-          createdAt: { gte: sevenDaysAgo }
-        },
-        select: {
-          createdAt: true,
-          action: true
+      const recentActivity: { createdAt: Date; action: string }[] = [];
+
+      for (const log of allLogs) {
+        actionCounts.set(log.action, (actionCounts.get(log.action) ?? 0) + 1);
+        const uKey = log.userId || log.userName || 'anon';
+        const prev = userCounts.get(uKey) ?? {
+          userId: log.userId,
+          userName: log.userName,
+          count: 0,
+        };
+        prev.count += 1;
+        userCounts.set(uKey, prev);
+        if (log.entity) {
+          entityCounts.set(log.entity, (entityCounts.get(log.entity) ?? 0) + 1);
         }
-      });
+        const created = log.createdAt instanceof Date ? log.createdAt : new Date(log.createdAt);
+        if (created >= sevenDaysAgo) {
+          recentActivity.push({ createdAt: created, action: log.action });
+        }
+      }
+
+      const actionsByType = [...actionCounts.entries()]
+        .map(([action, count]) => ({ action, _count: count }))
+        .sort((a, b) => b._count - a._count);
+
+      const actionsByUser = [...userCounts.values()]
+        .map((u) => ({
+          userId: u.userId,
+          userName: u.userName,
+          _count: u.count,
+        }))
+        .sort((a, b) => b._count - a._count)
+        .slice(0, 10);
+
+      const actionsByEntity = [...entityCounts.entries()]
+        .map(([entity, count]) => ({ entity, _count: count }))
+        .sort((a, b) => b._count - a._count);
 
       res.json({
         success: true,
@@ -301,14 +261,19 @@ export class LogsController {
           actionsByType,
           actionsByUser,
           actionsByEntity,
-          recentActivity
-        }
+          recentActivity,
+        },
       });
     } catch (error) {
       console.error('Erro ao buscar analytics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erro ao buscar analytics'
+      res.status(200).json({
+        success: true,
+        data: {
+          actionsByType: [],
+          actionsByUser: [],
+          actionsByEntity: [],
+          recentActivity: [],
+        },
       });
     }
   }

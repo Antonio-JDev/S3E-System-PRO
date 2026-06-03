@@ -192,6 +192,8 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
         : Prisma.JsonNull;
     }
 
+    const statusAnterior = String(taskExistente.status || '').toLowerCase();
+
     const task = await prisma.task.update({
       where: { id: taskId },
       data: updateData,
@@ -210,6 +212,50 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
             console.error('Erro ao criar notificação de tarefa:', err);
           }
         }
+      }
+    }
+
+    // Notificar o responsável da OS quando uma task for concluída
+    const statusNovo = String(task.status || '').toLowerCase();
+    const virouConcluida =
+      statusAnterior !== 'done' &&
+      (statusNovo === 'done' || statusNovo === 'concluído' || statusNovo === 'concluido');
+
+    if (virouConcluida) {
+      try {
+        const projeto = await prisma.projeto.findUnique({
+          where: { id: projetoId },
+          select: {
+            id: true,
+            titulo: true,
+            responsavelId: true,
+            orcamento: { select: { numeroSequencial: true } },
+          },
+        });
+
+        if (projeto?.responsavelId) {
+          const { criarNotificacao } = await import('../services/notificacoes.service');
+          const numeroOs = projeto.orcamento?.numeroSequencial
+            ? `OS-${projeto.orcamento.numeroSequencial}`
+            : undefined;
+
+          await criarNotificacao({
+            userId: projeto.responsavelId,
+            tipo: 'kanban_ordem_servico',
+            titulo: 'Task concluída no Kanban da OS',
+            mensagem: `A task "${task.titulo}" foi concluída na ${numeroOs || 'ordem de serviço'}${projeto.titulo ? ` (${projeto.titulo})` : ''}.`,
+            metadata: {
+              entityId: task.id,
+              entityType: 'Task',
+              projetoId,
+              ...(numeroOs ? { numeroOrdemServico: numeroOs } : {}),
+              link: `/projetos?projeto=${projetoId}`,
+            },
+            enviarEmail: false,
+          });
+        }
+      } catch (err) {
+        console.error('Erro ao notificar responsável da OS por task concluída:', err);
       }
     }
 

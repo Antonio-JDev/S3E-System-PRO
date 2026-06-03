@@ -21,6 +21,7 @@ import {
   SquareCheck,
   Star,
   Trash2,
+  X,
   User,
   UserPlus,
   UserRound,
@@ -134,6 +135,7 @@ import { useWhatsAppSocket } from '../../hooks/useWhatsAppSocket';
 import { useWhatsAppRealtimeStatus } from '../../hooks/useWhatsAppSocket';
 import { ComposerEmojiGifStickerModal, type ComposerPickerTab } from './ComposerEmojiGifStickerModal';
 import { WhatsappComposerEditor, type WhatsappComposerEditorHandle } from './WhatsappComposerEditor';
+import './WhatsappComposerEditor.css';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -175,7 +177,6 @@ import {
   WA_SIDEBAR_FILTER_STORAGE_KEY,
   readStoredSidebarFilter,
   isCrmAdminUser,
-  buildWhatsappReplyPrefix,
 } from '../../utils/whatsappCrmHelpers';
 
 const FALLBACK_WHATSAPP_PROVIDER_DASHBOARD =
@@ -1062,6 +1063,7 @@ interface PendingMedia {
   file: File;
   mediaType: WhatsappProviderMediaType;
   previewUrl: string | null;
+  asSticker?: boolean;
 }
 
 function newPendingMediaId(): string {
@@ -1168,12 +1170,16 @@ function VoiceWaveformPreview({ progress, playing, bars }: { progress: number; p
   );
 }
 
+/** Tamanho de exibição de figurinha no chat (WhatsApp Web ~180px; arquivo 512×512). */
+const WA_STICKER_DISPLAY_PX = 180;
+
 function mediaMimeCategory(
   mime: string | null | undefined,
   mediaTypeField?: string | null,
   filename?: string | null
-): 'image' | 'audio' | 'video' | 'document' {
+): 'image' | 'audio' | 'video' | 'document' | 'sticker' {
   const t = (mediaTypeField || '').toLowerCase();
+  if (t === 'sticker') return 'sticker';
   if (t === 'image') return 'image';
   if (t === 'video') return 'video';
   if (t === 'audio' || t === 'ptt' || t === 'voice') return 'audio';
@@ -1187,6 +1193,41 @@ function mediaMimeCategory(
   if (/\.(ogg|opus|mp3|wav|m4a|aac|webm)$/i.test(low)) return 'audio';
   if (/\.(mp4|mov|mkv|avi|webm)$/i.test(low)) return 'video';
   return 'document';
+}
+
+/** Trecho exibido na barra de resposta do composer (rótulos iguais ao WhatsApp Web). */
+function composerReplySnippet(m: WhatsappMessageDto): string {
+  const raw = (m.content || '').trim();
+  if (raw && !raw.includes('BEGIN:VCARD')) {
+    return repairUtf8Mojibake(raw);
+  }
+  const mt = (m.mediaType || '').toLowerCase();
+  if (mt === 'sticker') return 'Figurinha';
+  if (mt === 'location') return 'Localização';
+  if (mt === 'contact') return 'Contato';
+  const hasMedia = Boolean(
+    m.hasMedia ||
+      m.mediaUrl ||
+      m.mediaType ||
+      m.mediaMimetype ||
+      m.mimeType ||
+      m.fileName ||
+      m.mediaFilename
+  );
+  if (!hasMedia) return 'Mensagem';
+  const cat = mediaMimeCategory(
+    m.mediaMimetype ?? m.mimeType ?? undefined,
+    m.mediaType,
+    m.mediaFilename || m.fileName
+  );
+  if (cat === 'image') return 'Foto';
+  if (cat === 'video') return 'Vídeo';
+  if (cat === 'audio') return 'Áudio';
+  if (cat === 'document') {
+    const name = repairUtf8Mojibake(m.mediaFilename || m.fileName || '').trim();
+    return name || 'Documento';
+  }
+  return 'Mensagem';
 }
 
 function tokenQueryString(): string {
@@ -1321,6 +1362,28 @@ function MediaRenderer({
     const url = mediaSrcDownload ?? mediaSrc;
     downloadInNewTab({ url, filename: fname });
   };
+
+  if (cat === 'sticker') {
+    return (
+      <button
+        type="button"
+        onClick={() => onImageClick?.(mediaSrc)}
+        className="mb-0.5 block cursor-pointer leading-none"
+        aria-label="Abrir figurinha"
+        title="Abrir figurinha"
+      >
+        <img
+          src={mediaSrc}
+          alt="Figurinha"
+          width={WA_STICKER_DISPLAY_PX}
+          height={WA_STICKER_DISPLAY_PX}
+          className="wa-chat-sticker-img"
+          loading="lazy"
+          draggable={false}
+        />
+      </button>
+    );
+  }
 
   if (cat === 'image') {
     return (
@@ -1515,12 +1578,12 @@ const MessageBubble = memo(function MessageBubble({
   const isFormattedLocationText = (m.content || '').trim().toLowerCase().startsWith('📍 localização compartilhada');
   const showContent =
     m.content &&
-    (!hasMedia || !['📷 Imagem', '🎤 Áudio', '🎥 Vídeo'].includes(m.content)) &&
+    (!hasMedia || !['📷 Imagem', '🎤 Áudio', '🎥 Vídeo', '🟩 Figurinha'].includes(m.content)) &&
     !(locationPayload && isFormattedLocationText) &&
     !showContactCard;
   const showAck = Boolean(m.fromMe);
-  const primaryMediaIsAudio = useMemo(() => {
-    if (!hasMedia) return false;
+  const primaryMediaKind = useMemo(() => {
+    if (!hasMedia) return null as 'audio' | 'sticker' | null;
     const fname = repairUtf8Mojibake(m.mediaFilename || m.fileName || 'arquivo');
     let cat = mediaMimeCategory(m.mediaMimetype ?? m.mimeType ?? undefined, m.mediaType, fname);
     if (cat === 'document') {
@@ -1528,10 +1591,15 @@ const MessageBubble = memo(function MessageBubble({
       if (c.includes('áudio') || c.includes('audio') || c.includes('🎤')) cat = 'audio';
       else if (c.includes('imagem') || c.includes('foto') || c.includes('📷')) cat = 'image';
     }
-    return cat === 'audio';
+    if (cat === 'audio') return 'audio';
+    if (cat === 'sticker') return 'sticker';
+    return null;
   }, [hasMedia, m.mediaFilename, m.fileName, m.mediaMimetype, m.mimeType, m.mediaType, m.content]);
 
-  const bubblePadX = primaryMediaIsAudio ? 'px-2.5' : 'px-2';
+  const primaryMediaIsAudio = primaryMediaKind === 'audio';
+  const primaryMediaIsSticker = primaryMediaKind === 'sticker';
+
+  const bubblePadX = primaryMediaIsAudio ? 'px-2.5' : primaryMediaIsSticker ? 'px-1 py-0.5' : 'px-2';
   const embedAudioMetaFooter = primaryMediaIsAudio && !showContent;
   const embedVCardMetaFooter = Boolean(showContactCard && vcard);
 
@@ -1652,6 +1720,11 @@ const MessageBubble = memo(function MessageBubble({
                   className={WA_MSG_MENU_ITEM}
                   onSelect={(e) => {
                     e.preventDefault();
+                    if (!m.providerMessageId) {
+                      toast.message('Aguarde a mensagem ser entregue antes de responder.');
+                      return;
+                    }
+                    setBubbleMenuOpen(false);
                     onReplyToMessage(m);
                   }}
                 >
@@ -3174,6 +3247,19 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     title,
   ]);
 
+  const composerReplyMeta = useMemo(() => {
+    if (!replyToMessage) return null;
+    const m = replyToMessage;
+    const author = m.fromMe
+      ? 'Você'
+      : activeIsGroup
+        ? resolveGroupParticipantLabel(m.participant) || headerPrimary || 'Participante'
+        : headerPrimary || title || 'Contato';
+    const toneClass =
+      !m.fromMe && activeIsGroup ? 'whatsapp-composer-reply--group' : 'whatsapp-composer-reply--peer';
+    return { author, toneClass, snippet: composerReplySnippet(m) };
+  }, [replyToMessage, activeIsGroup, resolveGroupParticipantLabel, headerPrimary, title]);
+
   useEffect(() => {
     if (!chatId) return;
     setForceHeaderReset(true);
@@ -4042,11 +4128,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       if (!items.length) throw new Error('Nenhum arquivo');
       if (!outboundChatId?.trim()) throw new Error('Selecione uma conversa.');
 
-      const replyPrefix = replyToMessage
-        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
-        : '';
-      const captionFirst = (replyPrefix + mediaCaption.trim()).trim() || undefined;
-      const captionRest = replyPrefix.trim() || undefined;
+      const captionFirst = mediaCaption.trim() || undefined;
+      const captionRest = undefined;
+      const quotedMessageId = replyToMessage?.providerMessageId || undefined;
 
       const conc = WA_UPLOAD_SEND_CONCURRENCY;
       let done = 0;
@@ -4059,6 +4143,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           chatId: outboundChatId,
           file,
           caption: caption?.trim() ? caption : undefined,
+          quotedMessageId,
+          asSticker: pm.asSticker === true,
         });
         if (!r.success || !r.data) {
           throw new Error(r.error || `Falha ao enviar ${file.name}`);
@@ -4101,16 +4187,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const sendAudioMut = useMutation({
     mutationFn: async (payload: { base64Data: string; mimetype: string; filename: string }) => {
-      const replyPrefix = replyToMessage
-        ? `↩ Respondendo: ${(replyToMessage.content || '').trim().slice(0, 120)}\n\n`
-        : '';
       const r = await sendWhatsappMedia({
         chatId: outboundChatId,
         mediaType: 'voice',
         base64Data: payload.base64Data,
         mimetype: payload.mimetype,
         filename: payload.filename,
-        caption: replyPrefix.trim() || undefined,
+        quotedMessageId: replyToMessage?.providerMessageId || undefined,
       });
       if (!r.success || !r.data) throw new Error(r.error || 'Falha ao enviar áudio');
       return r.data;
@@ -4184,13 +4267,14 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   });
 
   const stageFilesFromPicker = useCallback(
-    (rawFiles: File[]) => {
+    (rawFiles: File[], opts?: { asSticker?: boolean }) => {
       if (sendMediaMut.isPending) {
         toast.message('Aguarde o envio em andamento.');
         return;
       }
       const maxBytes = MAX_FILE_SIZE_MB * 1024 * 1024;
       const next: PendingMedia[] = [];
+      const asSticker = opts?.asSticker === true;
       for (const file of rawFiles) {
         if (file.size > maxBytes) {
           toast.error(`${repairUtf8Mojibake(file.name)} excede ${MAX_FILE_SIZE_MB} MB e foi ignorado.`);
@@ -4205,7 +4289,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
         try {
           const mediaType = detectMediaType(file.type);
           const previewUrl = mediaType === 'image' ? URL.createObjectURL(file) : null;
-          next.push({ id: newPendingMediaId(), file, mediaType, previewUrl });
+          next.push({ id: newPendingMediaId(), file, mediaType, previewUrl, asSticker });
         } catch {
           toast.error('Não foi possível ler um dos arquivos');
         }
@@ -4226,7 +4310,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0] || null;
       if (!file) return;
-      stageFilesFromPicker([file]);
+      stageFilesFromPicker([file], { asSticker: true });
       if (stickerInputRef.current) stickerInputRef.current.value = '';
     },
     [stageFilesFromPicker]
@@ -5278,7 +5362,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const sendMut = useMutation({
     mutationFn: async ({ text, replySnapshot }: SendTextMutationVars) => {
-      const r = await sendWhatsappMessage(outboundChatId, `${buildWhatsappReplyPrefix(replySnapshot)}${text}`);
+      const r = await sendWhatsappMessage(
+        outboundChatId,
+        text,
+        replySnapshot?.providerMessageId || undefined
+      );
       if (!r.success) throw new Error(r.error || 'Falha ao enviar');
       return r.data;
     },
@@ -5318,12 +5406,11 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     if (!t) return;
 
     const replySnapshot = replyToMessage;
-    const fullText = `${buildWhatsappReplyPrefix(replySnapshot)}${t}`;
     const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const optimistic: WhatsappMessageDto = {
       id: optimisticId,
       chatId: outboundChatId,
-      content: fullText,
+      content: t,
       fromMe: true,
       timestamp: new Date().toISOString(),
       ack: 0,
@@ -7786,28 +7873,6 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                     )}
                   </div>
                 ) : null}
-                {replyToMessage ? (
-                  <div className="flex items-stretch justify-between gap-2 rounded-lg border border-[#d1d7db] bg-white px-3 py-2 dark:border-[#2a3942] dark:bg-[#161717]">
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold text-[#00a884]">
-                        Respondendo a {replyToMessage.fromMe ? 'você' : headerPrimary || title || 'contato'}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 text-[12px] text-[#54656f] dark:text-[#a9b4ba]">
-                        {(replyToMessage.content || '').trim() ||
-                          repairUtf8Mojibake(replyToMessage.mediaFilename || replyToMessage.fileName || 'Mensagem')}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setReplyToMessage(null)}
-                      className="shrink-0 rounded-md px-2 text-[#54656f] hover:bg-black/5 dark:text-[#8696a0] dark:hover:bg-white/10"
-                      aria-label="Cancelar resposta"
-                      title="Cancelar resposta"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : null}
                 <div className="flex min-h-[52px] flex-col gap-2">
                   <input
                     ref={fileInputRef}
@@ -7874,7 +7939,38 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                       </button>
                     </div>
                   ) : (
-                    <div className="relative flex w-full items-center gap-0.5 rounded-full border border-[#d1d7db] bg-white px-1.5 py-1 shadow-sm dark:border-transparent dark:bg-[#2a3942] dark:shadow-none">
+                    <div
+                      className={`relative flex w-full border border-[#d1d7db] bg-white shadow-sm dark:border-transparent dark:bg-[#2a3942] dark:shadow-none ${
+                        composerReplyMeta
+                          ? 'flex-col rounded-[21px]'
+                          : 'items-center gap-0.5 rounded-full px-1.5 py-1'
+                      }`}
+                    >
+                      {composerReplyMeta ? (
+                        <>
+                          <div className={`whatsapp-composer-reply ${composerReplyMeta.toneClass}`}>
+                            <div className="whatsapp-composer-reply__body">
+                              <p className="whatsapp-composer-reply__author">{composerReplyMeta.author}</p>
+                              <p className="whatsapp-composer-reply__snippet">{composerReplyMeta.snippet}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setReplyToMessage(null)}
+                              className="whatsapp-composer-reply__dismiss"
+                              aria-label="Cancelar resposta"
+                              title="Cancelar resposta"
+                            >
+                              <X className="h-5 w-5" strokeWidth={2} aria-hidden />
+                            </button>
+                          </div>
+                          <div className="whatsapp-composer-reply-divider" aria-hidden />
+                        </>
+                      ) : null}
+                      <div
+                        className={`flex w-full items-end gap-0.5 ${
+                          composerReplyMeta ? 'px-1.5 pb-1 pt-0.5' : ''
+                        }`}
+                      >
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
@@ -8051,6 +8147,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                           )}
                         </button>
                       )}
+                      </div>
                     </div>
                   )}
                 </div>
