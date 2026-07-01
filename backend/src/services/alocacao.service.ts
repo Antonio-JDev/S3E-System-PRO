@@ -303,10 +303,11 @@ export class AlocacaoService {
     // Calcular data fim prevista
     const dataFimPrevisto = this.calcularDataFimPrevista(dataInicio, data.duracaoDias);
 
-    // Verificar conflitos com outras alocações da mesma equipe
+    // Conflito apenas na mesma OS — equipe pode estar em várias ordens de serviço
     const alocacoesExistentes = await prisma.alocacaoObra.findMany({
       where: {
         equipeId: data.equipeId,
+        projetoId: data.projetoId,
         status: { in: ['Planejada', 'EmAndamento'] }
       }
     });
@@ -559,31 +560,35 @@ export class AlocacaoService {
    * Busca alocações para exibição em calendário
    * Otimizado para frontend de calendário
    */
-  async getAlocacoesCalendario(mes: number, ano: number) {
+  async getAlocacoesCalendario(mes: number, ano: number, projetoId?: string) {
     // Calcular primeiro e último dia do mês
     const dataInicio = new Date(ano, mes - 1, 1);
     const dataFim = new Date(ano, mes, 0, 23, 59, 59);
 
+    const filtroPeriodo = {
+      OR: [
+        {
+          dataInicio: { gte: dataInicio, lte: dataFim }
+        },
+        {
+          dataFimPrevisto: { gte: dataInicio, lte: dataFim }
+        },
+        {
+          AND: [
+            { dataInicio: { lte: dataInicio } },
+            { dataFimPrevisto: { gte: dataFim } }
+          ]
+        }
+      ]
+    };
+
+    const where: Record<string, unknown> = { ...filtroPeriodo };
+    if (projetoId) {
+      where.projetoId = projetoId;
+    }
+
     const alocacoes = await prisma.alocacaoObra.findMany({
-      where: {
-        OR: [
-          {
-            // Alocação começa no mês
-            dataInicio: { gte: dataInicio, lte: dataFim }
-          },
-          {
-            // Alocação termina no mês
-            dataFimPrevisto: { gte: dataInicio, lte: dataFim }
-          },
-          {
-            // Alocação engloba o mês todo
-            AND: [
-              { dataInicio: { lte: dataInicio } },
-              { dataFimPrevisto: { gte: dataFim } }
-            ]
-          }
-        ]
-      },
+      where,
       include: {
         equipe: {
           select: {

@@ -78,6 +78,25 @@ async function buscarItensApropriacao(projetoId: string) {
   return rows;
 }
 
+function calcularDiasCorridos(dataInicio: Date | null | undefined, ref: Date = new Date()): number {
+  if (!dataInicio) return 0;
+  const start = new Date(dataInicio);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(ref);
+  end.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000));
+}
+
+export interface CockpitResumoItem {
+  diariasEquipeOrcadas: number;
+  diariasEquipeRealizadas: number;
+  custoTempoOrcado: number;
+  dataPrevisao: string | null;
+  diasCorridos: number;
+  estouroDiarias: boolean;
+  estouroDiasCorridos: boolean;
+}
+
 async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
   const projeto = await prisma.projeto.findUnique({
     where: { id: projetoId },
@@ -166,5 +185,81 @@ export const apropriacaoOsService = {
 
   async obterResumo(projetoId: string): Promise<ResultadoOsCalculado> {
     return montarResumo(projetoId);
+  },
+
+  async montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
+    return montarResumo(projetoId);
+  },
+
+  async obterCockpitResumoBatch(projetoIds: string[]): Promise<Record<string, CockpitResumoItem>> {
+    const ids = [...new Set(projetoIds.filter(Boolean))];
+    const map: Record<string, CockpitResumoItem> = {};
+    if (ids.length === 0) return map;
+
+    const projetos = await prisma.projeto.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        status: true,
+        dataInicio: true,
+        dataPrevisao: true,
+        horasEngenhariaOrcadas: true,
+        diariasEquipeOrcadas: true,
+        valorHoraEngenharia: true,
+        valorDiariaEquipe: true,
+        valorTotal: true,
+        orcamento: { select: { precoVenda: true } },
+      },
+    });
+
+    const itensRows = await prisma.apontamentoOsItem.findMany({
+      where: { apontamento: { projetoId: { in: ids } } },
+      select: {
+        tipoRecurso: true,
+        quantidade: true,
+        apontamento: { select: { projetoId: true } },
+      },
+    });
+
+    const itensPorProjeto = new Map<string, typeof itensRows>();
+    for (const row of itensRows) {
+      const pid = row.apontamento.projetoId;
+      const list = itensPorProjeto.get(pid) ?? [];
+      list.push(row);
+      itensPorProjeto.set(pid, list);
+    }
+
+    for (const projeto of projetos) {
+      const itens = (itensPorProjeto.get(projeto.id) ?? []).map((r) => ({
+        tipoRecurso: r.tipoRecurso,
+        quantidade: r.quantidade,
+      }));
+      const totais = calcularTotaisApropriacao(itens);
+      const resumo = calcularResultadoOs(
+        {
+          horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas,
+          diariasEquipeOrcadas: projeto.diariasEquipeOrcadas,
+          valorHoraEngenharia: projeto.valorHoraEngenharia,
+          valorDiariaEquipe: projeto.valorDiariaEquipe,
+          valorTotal: projeto.valorTotal,
+          precoVendaOrcamento: projeto.orcamento?.precoVenda,
+        },
+        totais
+      );
+      const diasCorridos = calcularDiasCorridos(projeto.dataInicio);
+      const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
+      map[projeto.id] = {
+        diariasEquipeOrcadas: diariasOrcadas,
+        diariasEquipeRealizadas: resumo.diariasEquipeRealizadas,
+        custoTempoOrcado: resumo.custoOrcado,
+        dataPrevisao: projeto.dataPrevisao ? projeto.dataPrevisao.toISOString() : null,
+        diasCorridos,
+        estouroDiarias: resumo.estouroDiariasEquipe,
+        estouroDiasCorridos:
+          projeto.status === 'EXECUCAO' && diariasOrcadas > 0 && diasCorridos > diariasOrcadas,
+      };
+    }
+
+    return map;
   },
 };

@@ -4,6 +4,8 @@ import type { Obra } from '../services/obrasService';
 interface ObrasGanttChartProps {
   obras: Obra[];
   onSelectObra?: (obraId: string) => void;
+  /** Modo embutido no modal da OS — altura reduzida e cabeçalho simplificado */
+  compact?: boolean;
 }
 
 const PHASE_ORDER = ['BACKLOG', 'A_FAZER', 'ANDAMENTO', 'CONCLUIDO'] as const;
@@ -229,7 +231,7 @@ const SequenceOverlay: React.FC<SequenceOverlayProps> = ({ obrasOrdenadas, getBa
   );
 };
 
-const ObrasGanttChart: React.FC<ObrasGanttChartProps> = ({ obras, onSelectObra }) => {
+const ObrasGanttChart: React.FC<ObrasGanttChartProps> = ({ obras, onSelectObra, compact = false }) => {
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [selectedObraId, setSelectedObraId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<1 | 2 | 3 | 6>(3);
@@ -300,13 +302,13 @@ const ObrasGanttChart: React.FC<ObrasGanttChartProps> = ({ obras, onSelectObra }
   return (
     <div
       className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
-      style={{ minHeight: 'calc(100vh - 400px)' }}
+      style={{ minHeight: compact ? '280px' : 'calc(100vh - 400px)' }}
     >
-      <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 border-b border-blue-700">
+      <div className={`px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 border-b border-blue-700 ${compact ? 'py-3' : ''}`}>
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h3 className="text-xl font-bold text-white flex items-center gap-3">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <h3 className={`font-bold text-white flex items-center gap-3 ${compact ? 'text-base' : 'text-xl'}`}>
+              <svg className={compact ? 'w-5 h-5' : 'w-6 h-6'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -314,9 +316,11 @@ const ObrasGanttChart: React.FC<ObrasGanttChartProps> = ({ obras, onSelectObra }
                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                 />
               </svg>
-              Timeline das Obras
+              {compact ? 'Timeline' : 'Timeline das Obras'}
             </h3>
-            <p className="text-sm text-blue-100 mt-1">Visualização de Gantt por fase e equipe</p>
+            {!compact && (
+              <p className="text-sm text-blue-100 mt-1">Visualização de Gantt por fase e equipe</p>
+            )}
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">

@@ -1,5 +1,6 @@
 import { axiosApiService } from './axiosApi';
 import { ENDPOINTS } from '../config/api';
+import type { CockpitResumoItem } from '../utils/osCockpit.util';
 
 export interface Projeto {
   id: string;
@@ -18,6 +19,7 @@ export interface Projeto {
   diariasEquipeOrcadas?: number;
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
+  semObra?: boolean;
   iniciadoSemEstoque?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -113,6 +115,36 @@ class OrdemServicosService {
 
   async excluirPermanentemente(id: string) {
     return axiosApiService.delete<Projeto>(`${ENDPOINTS.PROJETOS}/${id}?permanent=true`);
+  }
+
+  async getCockpitResumo(ids: string[]) {
+    if (!ids.length) return { success: true, data: {} as Record<string, CockpitResumoItem> };
+    return axiosApiService.get<Record<string, CockpitResumoItem>>(
+      `${ENDPOINTS.PROJETOS}/cockpit-resumo`,
+      { ids: ids.join(',') }
+    );
+  }
+
+  async getRelatorioCumprimentoEstimativa(status?: string) {
+    return axiosApiService.get<
+      Array<{
+        projetoId: string;
+        numeroOS: string;
+        titulo: string;
+        clienteNome: string;
+        engenheiroResponsavel: string | null;
+        status: string;
+        diasEstimados: number;
+        diasReais: number;
+        horasEstimadas: number;
+        horasReais: number;
+        custoOrcado: number;
+        custoRealizado: number;
+        lucroPerdaPrazo: number;
+        resultadoOs: number;
+        cumpriuEstimativa: boolean;
+      }>
+    >(`${ENDPOINTS.PROJETOS}/relatorios/cumprimento-estimativa`, status ? { status } : undefined);
   }
 }
 

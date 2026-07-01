@@ -103,8 +103,12 @@ function normalizeAnexosUrls(lead: {
 
 export type ContatoLeadStatus = 'AGUARDANDO_DOCUMENTO' | 'EM_ANALISE_TECNICA' | 'PRONTO_PARA_ORCAR' | 'NAO_ATENDE' | 'CONVERTIDO';
 
+/** Leads convertidos com proposta comercial são removidos após este período (dias). */
+export const DIAS_RETENCAO_LEAD_CONVERTIDO = 7;
+
 const leadListInclude = {
   cliente: { select: { id: true, nome: true, cpfCnpj: true } },
+  responsavel: { select: { id: true, name: true, setor: true, role: true } },
   _count: { select: { orcamentos: true } },
   orcamentos: {
     select: { numeroSequencial: true },
@@ -113,8 +117,63 @@ const leadListInclude = {
   },
 };
 
+function formatLead<T extends { responsavel?: { id: string; name: string; setor?: string | null; role?: string } | null }>(
+  lead: T
+) {
+  const { responsavel, ...rest } = lead as T & { responsavel?: { id: string; name: string; setor?: string | null; role?: string } | null };
+  return {
+    ...rest,
+    responsavel: responsavel
+      ? { id: responsavel.id, nome: responsavel.name, setor: responsavel.setor ?? null, role: responsavel.role }
+      : null,
+  };
+}
+
+async function deleteLeadFiles(lead: { anexosUrls?: unknown; contaEnergiaUrl?: string | null }) {
+  const urls = normalizeAnexosUrls(lead);
+  const uploadDirResolved = path.resolve(uploadDir);
+  for (const rel of urls) {
+    if (typeof rel !== 'string' || !rel.startsWith('/uploads/contato-lead/')) continue;
+    const baseName = path.basename(rel);
+    if (!baseName || baseName === '.' || baseName === '..') continue;
+    const abs = path.resolve(path.join(uploadDir, baseName));
+    if (!abs.startsWith(uploadDirResolved + path.sep) && abs !== uploadDirResolved) continue;
+    try {
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Remove leads convertidos com proposta comercial há mais de N dias. */
+export async function purgeLeadsConvertidosAntigos(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - DIAS_RETENCAO_LEAD_CONVERTIDO);
+
+  const leads = await prisma.contatoLead.findMany({
+    where: {
+      updatedAt: { lt: cutoff },
+      orcamentos: { some: {} },
+    },
+    select: { id: true, anexosUrls: true, contaEnergiaUrl: true },
+  });
+
+  for (const lead of leads) {
+    await deleteLeadFiles(lead);
+    await prisma.contatoLead.delete({ where: { id: lead.id } });
+  }
+
+  if (leads.length > 0) {
+    console.log(`[CRM] ${leads.length} lead(s) convertido(s) removido(s) após ${DIAS_RETENCAO_LEAD_CONVERTIDO} dias`);
+  }
+  return leads.length;
+}
+
 export async function list(req: Request, res: Response): Promise<void> {
   try {
+    await purgeLeadsConvertidosAntigos();
+
     const { status, etapa } = req.query;
     const where: any = {};
     if (status && typeof status === 'string') where.status = status;
@@ -125,7 +184,7 @@ export async function list(req: Request, res: Response): Promise<void> {
       include: leadListInclude,
       orderBy: { updatedAt: 'desc' },
     });
-    res.json({ success: true, data: leads });
+    res.json({ success: true, data: leads.map(formatLead) });
   } catch (e: any) {
     console.error('atendimentoCrm list:', e);
     res.status(500).json({ success: false, error: e?.message || 'Erro ao listar leads' });
@@ -143,7 +202,7 @@ export async function getById(req: Request, res: Response): Promise<void> {
       res.status(404).json({ success: false, error: 'Lead não encontrado' });
       return;
     }
-    res.json({ success: true, data: lead });
+    res.json({ success: true, data: formatLead(lead) });
   } catch (e: any) {
     console.error('atendimentoCrm getById:', e);
     res.status(500).json({ success: false, error: e?.message || 'Erro ao buscar lead' });
@@ -167,6 +226,7 @@ export async function create(req: Request, res: Response): Promise<void> {
       cep?: string;
       cidade?: string;
       estado?: string;
+      responsavelId?: string | null;
     };
     if (!body.nome || !body.nome.trim()) {
       res.status(400).json({ success: false, error: 'Nome é obrigatório' });
@@ -187,10 +247,14 @@ export async function create(req: Request, res: Response): Promise<void> {
         bairro: body.bairro?.trim() || null,
         cep: body.cep?.trim() || null,
         cidade: body.cidade?.trim() || null,
-        estado: body.estado?.trim() || null
-      }
+        estado: body.estado?.trim() || null,
+        responsavelId: body.responsavelId === '' || body.responsavelId === undefined
+          ? undefined
+          : body.responsavelId || null,
+      },
+      include: leadListInclude,
     });
-    res.status(201).json({ success: true, data: lead });
+    res.status(201).json({ success: true, data: formatLead(lead) });
   } catch (e: any) {
     console.error('atendimentoCrm create:', e);
     res.status(500).json({ success: false, error: e?.message || 'Erro ao criar lead' });
@@ -220,6 +284,7 @@ export async function update(req: Request, res: Response): Promise<void> {
       cep?: string;
       cidade?: string;
       estado?: string;
+      responsavelId?: string | null;
     };
     const existing = await prisma.contatoLead.findUnique({
       where: { id },
@@ -267,11 +332,14 @@ export async function update(req: Request, res: Response): Promise<void> {
         ...(body.bairro !== undefined && { bairro: body.bairro?.trim() || null }),
         ...(body.cep !== undefined && { cep: body.cep?.trim() || null }),
         ...(body.cidade !== undefined && { cidade: body.cidade?.trim() || null }),
-        ...(body.estado !== undefined && { estado: body.estado?.trim() || null })
+        ...(body.estado !== undefined && { estado: body.estado?.trim() || null }),
+        ...(body.responsavelId !== undefined && {
+          responsavelId: body.responsavelId === '' || body.responsavelId === null ? null : String(body.responsavelId),
+        }),
       },
       include: leadListInclude,
     });
-    res.json({ success: true, data: lead });
+    res.json({ success: true, data: formatLead(lead) });
   } catch (e: any) {
     if (e?.code === 'P2025') {
       res.status(404).json({ success: false, error: 'Lead não encontrado' });
@@ -338,8 +406,9 @@ export async function uploadContaEnergiaHandler(req: Request, res: Response): Pr
         anexosUrls: merged,
         contaEnergiaUrl: merged[0] ?? null,
       },
+      include: leadListInclude,
     });
-    res.json({ success: true, data: lead });
+    res.json({ success: true, data: formatLead(lead) });
   } catch (e: any) {
     unlinkUploaded();
     if (e?.code === 'P2025') {
@@ -360,20 +429,7 @@ export async function remove(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const urls = normalizeAnexosUrls(existing);
-    const uploadDirResolved = path.resolve(uploadDir);
-    for (const rel of urls) {
-      if (typeof rel !== 'string' || !rel.startsWith('/uploads/contato-lead/')) continue;
-      const baseName = path.basename(rel);
-      if (!baseName || baseName === '.' || baseName === '..') continue;
-      const abs = path.resolve(path.join(uploadDir, baseName));
-      if (!abs.startsWith(uploadDirResolved + path.sep) && abs !== uploadDirResolved) continue;
-      try {
-        if (fs.existsSync(abs)) fs.unlinkSync(abs);
-      } catch {
-        /* ignore */
-      }
-    }
+    await deleteLeadFiles(existing);
 
     await prisma.contatoLead.delete({ where: { id } });
     res.json({ success: true, message: 'Lead excluído' });

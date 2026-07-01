@@ -1,39 +1,149 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { alocacaoService, type AlocacaoEquipeDTO } from '../services/alocacaoService';
+import {
+  alocacaoObraService,
+  type AlocacaoCalendarioDTO,
+} from '../services/AlocacaoObraService';
 import { toast } from 'sonner';
 
 interface CalendarioAlocacoesProps {
   obraId?: string;
+  projetoId?: string;
   equipeId?: string;
   dataInicio?: Date;
   dataFim?: Date;
-  /** Quando true, exibe texto de visão consolidada (todas as obras) */
+  /** Quando true, exibe texto de visão consolidada (todas as OS) */
   visaoExecucao?: boolean;
+  /** `os` = alocações de ordem de serviço; `tarefa` = alocações de tarefas de obra */
+  modo?: 'tarefa' | 'os';
+}
+
+interface CalendarioItem {
+  id: string;
+  contextoNome: string;
+  recursoNome: string;
+  detalhe?: string;
+  dataInicio: string;
+  dataFim: string;
+  status: string;
 }
 
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+function mapAlocacaoOs(a: AlocacaoCalendarioDTO): CalendarioItem {
+  const recurso = a.equipe?.nome
+    ? `Equipe ${a.equipe.nome}`
+    : a.eletricista?.nome
+      ? `Eletricista ${a.eletricista.nome}`
+      : 'Recurso';
+  return {
+    id: a.id,
+    contextoNome: a.projeto?.titulo || 'OS',
+    recursoNome: recurso,
+    detalhe: a.projeto?.cliente,
+    dataInicio: String(a.dataInicio),
+    dataFim: String(a.dataFimPrevisto),
+    status: a.status,
+  };
+}
+
+function mapAlocacaoTarefa(a: AlocacaoEquipeDTO): CalendarioItem {
+  const membrosTxt =
+    a.membros?.length && a.membros.length > 0
+      ? a.membros.map((m) => m.nome).join(', ')
+      : '';
+  return {
+    id: a.id,
+    contextoNome: a.obraNome || 'Obra',
+    recursoNome: a.equipeNome,
+    detalhe: membrosTxt ? `Eletricistas: ${membrosTxt}` : undefined,
+    dataInicio: a.dataInicio,
+    dataFim: a.dataFim,
+    status: a.status,
+  };
+}
+
+function statusEmAndamento(status: string): boolean {
+  const s = status.toUpperCase();
+  return s === 'EM_ANDAMENTO' || s === 'EMANDAMENTO';
+}
+
+function statusConcluida(status: string): boolean {
+  const s = status.toUpperCase();
+  return s === 'CONCLUIDA' || s === 'CONCLUÍDA';
+}
+
+function statusPlanejada(status: string): boolean {
+  return status.toUpperCase() === 'PLANEJADA';
+}
+
 const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
-  obraId,
+  obraId: obraIdProp,
+  projetoId,
   equipeId,
   dataInicio: dataInicioProp,
   dataFim: dataFimProp,
-  visaoExecucao = false
+  visaoExecucao = false,
+  modo: modoProp,
 }) => {
-  const [alocacoes, setAlocacoes] = useState<AlocacaoEquipeDTO[]>([]);
+  const modo = modoProp ?? (projetoId || visaoExecucao ? 'os' : 'tarefa');
+
+  const [alocacoes, setAlocacoes] = useState<CalendarioItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [mesAtual, setMesAtual] = useState(new Date());
+  const [obraIdResolvido, setObraIdResolvido] = useState<string | undefined>(obraIdProp);
 
   useEffect(() => {
-    carregarAlocacoes();
-  }, [obraId, equipeId, mesAtual]);
+    setObraIdResolvido(obraIdProp);
+  }, [obraIdProp]);
 
-  const carregarAlocacoes = async () => {
+  useEffect(() => {
+    if (modo === 'os' || obraIdProp || !projetoId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { axiosApiService } = await import('../services/axiosApi');
+        const res = await axiosApiService.get<{ id: string }>(`/api/obras/projeto/${projetoId}`);
+        if (!cancelled && res.success && res.data?.id) {
+          setObraIdResolvido(res.data.id);
+        }
+      } catch {
+        if (!cancelled) setObraIdResolvido(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projetoId, obraIdProp, modo]);
+
+  const obraId = obraIdResolvido;
+
+  const carregarAlocacoes = useCallback(async () => {
     try {
       setLoading(true);
-      
+
+      if (modo === 'os') {
+        const mes = mesAtual.getMonth() + 1;
+        const ano = mesAtual.getFullYear();
+        const response = await alocacaoObraService.getAlocacoesCalendario(
+          mes,
+          ano,
+          visaoExecucao ? undefined : projetoId
+        );
+        if (response.success && Array.isArray(response.data)) {
+          let lista = response.data;
+          if (equipeId) {
+            lista = lista.filter((a) => a.equipeId === equipeId);
+          }
+          setAlocacoes(lista.map(mapAlocacaoOs));
+        } else {
+          setAlocacoes([]);
+        }
+        return;
+      }
+
       const dataInicio = dataInicioProp || new Date(mesAtual.getFullYear(), mesAtual.getMonth(), 1);
       const dataFim = dataFimProp || new Date(mesAtual.getFullYear(), mesAtual.getMonth() + 1, 0);
 
@@ -41,31 +151,47 @@ const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
         dataInicio: dataInicio.toISOString(),
         dataFim: dataFim.toISOString(),
         obraId,
-        equipeId
+        equipeId,
       });
 
       if (response.success && response.data) {
-        setAlocacoes(response.data);
+        setAlocacoes(response.data.map(mapAlocacaoTarefa));
+      } else {
+        setAlocacoes([]);
       }
     } catch (error) {
       console.error('Erro ao carregar alocações:', error);
       toast.error('Erro ao carregar alocações do calendário');
+      setAlocacoes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    modo,
+    mesAtual,
+    visaoExecucao,
+    projetoId,
+    equipeId,
+    obraId,
+    dataInicioProp,
+    dataFimProp,
+  ]);
+
+  useEffect(() => {
+    void carregarAlocacoes();
+  }, [carregarAlocacoes]);
 
   const diasDoMes = useMemo(() => {
     const ano = mesAtual.getFullYear();
     const mes = mesAtual.getMonth();
     const primeiroDia = new Date(ano, mes, 1);
     const ultimoDia = new Date(ano, mes + 1, 0);
-    
+
     const dias: Date[] = [];
     for (let dia = new Date(primeiroDia); dia <= ultimoDia; dia.setDate(dia.getDate() + 1)) {
       dias.push(new Date(dia));
     }
-    
+
     return dias;
   }, [mesAtual]);
 
@@ -88,20 +214,29 @@ const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
 
   const mesNomeCompleto = mesAtual.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-  const mostrarVisaoGlobal = visaoExecucao || (!obraId && !equipeId);
+  const mostrarVisaoGlobal = visaoExecucao || (modo === 'os' && !projetoId && !equipeId);
 
   return (
     <div className="space-y-6">
       {mostrarVisaoGlobal && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/80 dark:bg-blue-950/30 dark:border-blue-800 px-4 py-3 text-sm text-blue-900 dark:text-blue-100">
-          <p className="font-semibold">Calendário de execução (todas as obras)</p>
+          <p className="font-semibold">Calendário de alocações (ordens de serviço)</p>
           <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
-            Cada data mostra <strong>obras</strong> com alocação de <strong>equipe</strong> e os <strong>eletricistas</strong> (membros) vinculados ao período. Use em conjunto com o Kanban e a Timeline (aba própria) em Execução Obra.
+            Cada data mostra em quais <strong>períodos</strong> equipes ou eletricistas estão
+            previstos para cada <strong>ordem de serviço</strong>.
           </p>
         </div>
       )}
 
-      {/* Header de Controles */}
+      {modo === 'os' && projetoId && !visaoExecucao && (
+        <div className="rounded-xl border border-purple-200 bg-purple-50/80 dark:bg-purple-950/30 dark:border-purple-800 px-4 py-3 text-sm text-purple-900 dark:text-purple-100">
+          <p className="font-semibold">Agenda desta OS</p>
+          <p className="mt-1 text-purple-800/90 dark:text-purple-200/90">
+            Previsão de dias em que equipes ou eletricistas estarão alocados nesta ordem de serviço.
+          </p>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <button
@@ -151,82 +286,74 @@ const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
             )}
 
             <div className="grid grid-cols-7 gap-2">
-                {/* Cabeçalho dos dias da semana */}
-                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia) => (
-                  <div key={dia} className="text-center font-bold text-gray-700 dark:text-gray-300 py-2">
-                    {dia}
-                  </div>
-                ))}
+              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((dia) => (
+                <div key={dia} className="text-center font-bold text-gray-700 dark:text-gray-300 py-2">
+                  {dia}
+                </div>
+              ))}
 
-                {/* Espaços vazios antes do primeiro dia */}
-                {Array.from({ length: diasDoMes[0].getDay() }).map((_, i) => (
-                  <div key={`empty-${i}`} className="aspect-square"></div>
-                ))}
+              {Array.from({ length: diasDoMes[0].getDay() }).map((_, i) => (
+                <div key={`empty-${i}`} className="aspect-square"></div>
+              ))}
 
-                {/* Dias do mês */}
-                {diasDoMes.map((dia) => {
-                  const alocacoesDia = obterAlocacoesDoDia(dia);
-                  const isHoje = dia.toDateString() === new Date().toDateString();
+              {diasDoMes.map((dia) => {
+                const alocacoesDia = obterAlocacoesDoDia(dia);
+                const isHoje = dia.toDateString() === new Date().toDateString();
 
-                  return (
-                    <div
-                      key={dia.toISOString()}
-                      className={`aspect-square border-2 rounded-lg p-2 transition-all ${
-                        isHoje
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : alocacoesDia.length > 0
+                return (
+                  <div
+                    key={dia.toISOString()}
+                    className={`aspect-square border-2 rounded-lg p-2 transition-all ${
+                      isHoje
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                        : alocacoesDia.length > 0
                           ? 'border-purple-300 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/10 hover:bg-purple-100'
                           : 'border-gray-200 dark:border-dark-border hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="text-xs font-semibold text-gray-900 dark:text-white mb-1">
-                        {dia.getDate()}
-                      </div>
-                      {alocacoesDia.length > 0 && (
-                        <div className="space-y-0.5">
-                          {alocacoesDia.slice(0, 3).map((alocacao) => {
-                            const membrosTxt =
-                              alocacao.membros?.length && alocacao.membros.length > 0
-                                ? alocacao.membros.map((m) => m.nome).join(', ')
-                                : '';
-                            const titulo = [
-                              alocacao.obraNome,
-                              `Equipe: ${alocacao.equipeNome}`,
-                              membrosTxt ? `Eletricistas: ${membrosTxt}` : ''
-                            ]
-                              .filter(Boolean)
-                              .join(' · ');
-                            return (
-                              <div key={alocacao.id} className="space-y-0">
-                                <div
-                                  className="text-[9px] leading-tight px-1 py-0.5 bg-slate-700 text-white rounded truncate font-medium"
-                                  title={titulo}
-                                >
-                                  {(alocacao.obraNome || 'Obra').substring(0, 14)}
-                                </div>
-                                <div
-                                  className="text-[9px] px-1 py-0.5 bg-purple-600 text-white rounded truncate"
-                                  title={titulo}
-                                >
-                                  {alocacao.equipeNome.substring(0, 12)}
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {alocacoesDia.length > 3 && (
-                            <div className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">
-                              +{alocacoesDia.length - 3}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                    }`}
+                  >
+                    <div className="text-xs font-semibold text-gray-900 dark:text-white mb-1">
+                      {dia.getDate()}
                     </div>
-                  );
-                })}
+                    {alocacoesDia.length > 0 && (
+                      <div className="space-y-0.5">
+                        {alocacoesDia.slice(0, 3).map((alocacao) => {
+                          const titulo = [
+                            alocacao.contextoNome,
+                            alocacao.recursoNome,
+                            alocacao.detalhe,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ');
+                          return (
+                            <div key={alocacao.id} className="space-y-0">
+                              <div
+                                className="text-[9px] leading-tight px-1 py-0.5 bg-slate-700 text-white rounded truncate font-medium"
+                                title={titulo}
+                              >
+                                {alocacao.contextoNome.substring(0, 14)}
+                              </div>
+                              <div
+                                className="text-[9px] px-1 py-0.5 bg-purple-600 text-white rounded truncate"
+                                title={titulo}
+                              >
+                                {alocacao.recursoNome.substring(0, 14)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {alocacoesDia.length > 3 && (
+                          <div className="text-[10px] text-purple-600 dark:text-purple-400 font-bold">
+                            +{alocacoesDia.length - 3}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* Resumo de Alocações */}
           <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-2xl p-6">
             <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4">📊 Resumo do Período</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -236,19 +363,19 @@ const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
               </div>
               <div className="text-center p-3 bg-white dark:bg-dark-card rounded-xl border border-blue-200 dark:border-blue-700">
                 <div className="text-2xl font-bold text-blue-600">
-                  {alocacoes.filter(a => a.status === 'EM_ANDAMENTO').length}
+                  {alocacoes.filter((a) => statusEmAndamento(a.status)).length}
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">Em Andamento</div>
               </div>
               <div className="text-center p-3 bg-white dark:bg-dark-card rounded-xl border border-green-200 dark:border-green-700">
                 <div className="text-2xl font-bold text-green-600">
-                  {alocacoes.filter(a => a.status === 'CONCLUIDA').length}
+                  {alocacoes.filter((a) => statusConcluida(a.status)).length}
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">Concluídas</div>
               </div>
               <div className="text-center p-3 bg-white dark:bg-dark-card rounded-xl border border-yellow-200 dark:border-yellow-700">
                 <div className="text-2xl font-bold text-yellow-600">
-                  {alocacoes.filter(a => a.status === 'PLANEJADA').length}
+                  {alocacoes.filter((a) => statusPlanejada(a.status)).length}
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">Planejadas</div>
               </div>
@@ -261,4 +388,3 @@ const CalendarioAlocacoes: React.FC<CalendarioAlocacoesProps> = ({
 };
 
 export default CalendarioAlocacoes;
-

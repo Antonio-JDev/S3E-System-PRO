@@ -44,6 +44,7 @@ model User {
   projetosInicioSemEstoque Projeto[]            @relation("OsInicioSemEstoque")
   apontamentosOsCriados    ApontamentoOs[]      @relation("ApontamentosOsCriados")
   apontamentosOsItens      ApontamentoOsItem[]
+  contatoLeadsResponsavel  ContatoLead[]        @relation("ContatoLeadResponsavel")
 
   @@map("users")
 }
@@ -324,6 +325,7 @@ model ContatoLead {
   status              String   @default("AGUARDANDO_DOCUMENTO") // AGUARDANDO_DOCUMENTO | EM_ANALISE_TECNICA | PRONTO_PARA_ORCAR | NAO_ATENDE | CONVERTIDO
   etapa               Int      @default(1) // 1=Qualificação, 2=Diagnóstico, 3=Conversão
   clienteId           String? // Quando converter: vincular ao cliente cadastrado
+  responsavelId       String? // Usuário do sistema responsável pelo lead
   // Endereço (para preencher orçamento quando cliente ainda não cadastrado)
   logradouro          String?
   numero              String?
@@ -335,11 +337,13 @@ model ContatoLead {
   updatedAt           DateTime @updatedAt
 
   cliente      Cliente?      @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  responsavel  User?         @relation("ContatoLeadResponsavel", fields: [responsavelId], references: [id], onDelete: SetNull)
   orcamentos   Orcamento[]
   chatMessages ChatMessage[]
 
   @@index([status])
   @@index([etapa])
+  @@index([responsavelId])
   @@index([createdAt])
   @@map("contato_leads")
 }

@@ -2,11 +2,17 @@ import { axiosApiService, type ApiResponse } from './axiosApi';
 
 export interface AlocacaoDTO {
   id: string;
-  equipe: {
+  equipe?: {
     id: string;
     nome: string;
     tipo: string;
-  };
+  } | null;
+  eletricista?: {
+    id: string;
+    name: string;
+    email?: string | null;
+  } | null;
+  eletricistaId?: string | null;
   projeto: {
     id: string;
     titulo: string;
@@ -19,12 +25,86 @@ export interface AlocacaoDTO {
   observacoes?: string | null;
 }
 
+export interface AlocacaoCalendarioDTO {
+  id: string;
+  equipeId?: string | null;
+  eletricistaId?: string | null;
+  projetoId: string;
+  equipe?: {
+    id: string;
+    nome: string;
+    tipo: string;
+  } | null;
+  eletricista?: {
+    id: string;
+    nome: string;
+    email?: string | null;
+    role?: string;
+  } | null;
+  projeto: {
+    id: string;
+    titulo: string;
+    cliente: string;
+  };
+  dataInicio: string | Date;
+  dataFimPrevisto: string | Date;
+  dataFimReal?: string | Date | null;
+  status: string;
+  observacoes?: string | null;
+}
+
 export interface AlocarEquipeInput {
   equipeId: string;
   projetoId: string;
   dataInicio: string | Date;
   duracaoDias: number;
   observacoes?: string;
+}
+
+export interface AlocarEletricistaInput {
+  eletricistaId: string;
+  projetoId: string;
+  dataInicio: string | Date;
+  duracaoDias: number;
+  observacoes?: string;
+}
+
+export interface AlocacaoRecursoLinhaDTO {
+  id: string;
+  projetoId: string;
+  osTitulo: string;
+  osNumero: string | null;
+  clienteNome: string;
+  dataInicio: string;
+  dataFimPrevisto: string;
+  status: string;
+  projetoStatus: string;
+  obraStatus: string | null;
+}
+
+export interface RecursoOcupacaoLinhaDTO {
+  tipo: 'equipe' | 'eletricista';
+  id: string;
+  nome: string;
+  ocupadoHoje: boolean;
+  osVinculadas: number;
+  previsaoLiberacao: string | null;
+  alocacoes: AlocacaoRecursoLinhaDTO[];
+}
+
+export interface RelatorioOcupacaoResumoDTO {
+  totalRecursos: number;
+  recursosOcupadosHoje: number;
+  recursosLivresHoje: number;
+  osComAlocacaoAtiva: number;
+  osEmExecucao: number;
+  horizonteOcupacaoGlobal: string | null;
+  proximaLiberacaoRecurso: string | null;
+}
+
+export interface RelatorioOcupacaoDTO {
+  resumo: RelatorioOcupacaoResumoDTO;
+  porRecurso: RecursoOcupacaoLinhaDTO[];
 }
 
 class AlocacaoObraService {
@@ -40,9 +120,30 @@ class AlocacaoObraService {
     return this.unwrap<AlocacaoDTO>(res);
   }
 
+  async alocarEletricista(data: AlocarEletricistaInput): Promise<ApiResponse<AlocacaoDTO>> {
+    const res = await axiosApiService.post<any>('/api/obras/alocar-eletricista', data);
+    return this.unwrap<AlocacaoDTO>(res);
+  }
+
   async getAlocacoesPorProjeto(projetoId: string): Promise<ApiResponse<AlocacaoDTO[]>> {
     const res = await axiosApiService.get<any>('/api/obras/alocacoes', { projetoId });
     return this.unwrap<AlocacaoDTO[]>(res);
+  }
+
+  async getAlocacoesCalendario(
+    mes: number,
+    ano: number,
+    projetoId?: string
+  ): Promise<ApiResponse<AlocacaoCalendarioDTO[]>> {
+    const params: Record<string, string | number> = { mes, ano };
+    if (projetoId) params.projetoId = projetoId;
+    const res = await axiosApiService.get<any>('/api/obras/alocacoes/calendario', params);
+    return this.unwrap<AlocacaoCalendarioDTO[]>(res);
+  }
+
+  async getRelatorioOcupacao(): Promise<ApiResponse<RelatorioOcupacaoDTO>> {
+    const res = await axiosApiService.get<any>('/api/obras/alocacoes/relatorio-ocupacao');
+    return this.unwrap<RelatorioOcupacaoDTO>(res);
   }
 
   async getAllAlocacoes(): Promise<ApiResponse<AlocacaoDTO[]>> {
@@ -67,5 +168,3 @@ class AlocacaoObraService {
 }
 
 export const alocacaoObraService = new AlocacaoObraService();
-
-

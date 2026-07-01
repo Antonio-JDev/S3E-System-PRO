@@ -7,14 +7,19 @@
 -- AlterTable
 ALTER TABLE "contas_pagar" ADD COLUMN     "dataAgendamento" TIMESTAMP(3);
 
--- AlterTable
-ALTER TABLE "ferramentas" ALTER COLUMN "updatedAt" DROP DEFAULT;
-
--- AlterTable
-ALTER TABLE "kit_ferramenta_itens" ALTER COLUMN "updatedAt" DROP DEFAULT;
-
--- AlterTable
-ALTER TABLE "kits_ferramenta" ALTER COLUMN "updatedAt" DROP DEFAULT;
+-- AlterTable (tabelas de ferramentas podem ainda não existir em instalações novas)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ferramentas') THEN
+        ALTER TABLE "ferramentas" ALTER COLUMN "updatedAt" DROP DEFAULT;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'kit_ferramenta_itens') THEN
+        ALTER TABLE "kit_ferramenta_itens" ALTER COLUMN "updatedAt" DROP DEFAULT;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'kits_ferramenta') THEN
+        ALTER TABLE "kits_ferramenta" ALTER COLUMN "updatedAt" DROP DEFAULT;
+    END IF;
+END $$;
 
 -- AlterTable
 ALTER TABLE "orcamento_items" ADD COLUMN     "ncm" TEXT;
@@ -59,5 +64,18 @@ BEGIN
     END IF;
 END $$;
 
--- AddForeignKey
-ALTER TABLE "kits_ferramenta" ADD CONSTRAINT "kits_ferramenta_eletricistaId_fkey" FOREIGN KEY ("eletricistaId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- AddForeignKey (somente se kits_ferramenta já existir)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'kits_ferramenta'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_name = 'kits_ferramenta' AND constraint_name = 'kits_ferramenta_eletricistaId_fkey'
+    ) THEN
+        ALTER TABLE "kits_ferramenta"
+        ADD CONSTRAINT "kits_ferramenta_eletricistaId_fkey"
+        FOREIGN KEY ("eletricistaId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+    END IF;
+END $$;

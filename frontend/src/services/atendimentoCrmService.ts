@@ -32,6 +32,8 @@ export interface ContatoLead {
   cep?: string | null;
   cidade?: string | null;
   estado?: string | null;
+  responsavelId?: string | null;
+  responsavel?: { id: string; nome: string; setor?: string | null; role?: string } | null;
   createdAt: string;
   updatedAt: string;
   /** Preenchido na listagem do CRM: quantidade de orçamentos vinculados ao lead */
@@ -55,6 +57,7 @@ export interface CreateContatoLeadInput {
   cep?: string;
   cidade?: string;
   estado?: string;
+  responsavelId?: string | null;
 }
 
 export interface UpdateContatoLeadInput {
@@ -77,6 +80,7 @@ export interface UpdateContatoLeadInput {
   cep?: string;
   cidade?: string;
   estado?: string;
+  responsavelId?: string | null;
 }
 
 const base = ENDPOINTS.ATENDIMENTO_CRM;

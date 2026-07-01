@@ -16,6 +16,7 @@ import {
   getRelatorioKanbanUsuarioAtrasadas,
   buscarProjetos,
   getKitDisponibilidadeBomItem,
+  getProjetosCockpitResumo,
 } from '../controllers/projetosController';
 import {
   getTasksByProjeto,
@@ -50,6 +51,7 @@ import {
   listarApontamentosOs,
   obterResumoApropriacaoOs,
 } from '../controllers/apropriacaoOsController';
+import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
 import { authenticate } from '../middlewares/auth';
 import PDFDocument from 'pdfkit';
 import path from 'path';
@@ -71,6 +73,8 @@ router.get('/', getProjetos);
 router.get('/_avancado', listarProjetosAvancado);
 // endpoint para retornar progresso de múltiplos projetos em uma chamada
 router.get('/progresso', getProjetosProgresso);
+// resumo cockpit (prazo, custo tempo, estouro) em lote
+router.get('/cockpit-resumo', getProjetosCockpitResumo);
 // IDs dos projetos (OS) em que o usuário tem tarefas pendentes/em andamento no Kanban
 router.get('/ids-com-minhas-tarefas', getProjetosIdsComMinhasTarefas);
 // IDs dos projetos (OS) em que o usuário tem tarefas pendentes/em andamento atrasadas no Kanban
@@ -79,6 +83,8 @@ router.get('/ids-com-minhas-tarefas-atrasadas', getProjetosIdsComMinhasTarefasAt
 router.get('/relatorios/kanban-usuarios', getRelatorioKanbanUsuarios);
 // Drilldown: tasks atrasadas por usuário no período (Admin/Dev)
 router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUsuarioAtrasadas);
+// Relatório global de cumprimento de estimativa de prazo (Admin/Dev)
+router.get('/relatorios/cumprimento-estimativa', getRelatorioCumprimentoEstimativa);
 router.get('/busca', buscarProjetos);
 
 /**

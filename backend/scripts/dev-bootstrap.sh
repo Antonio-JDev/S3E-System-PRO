@@ -13,6 +13,11 @@ else
 fi
 
 resolve_known_failed() {
+  status_out=$(npx prisma migrate status 2>&1 || true)
+  if ! echo "$status_out" | grep -qi "failed"; then
+    echo "Sem migrations failed — pulando resolve preemptivo (volume novo ou base saudável)."
+    return 0
+  fi
   echo "Resolvendo migrations conhecidas que travam DEV..."
   npx prisma migrate resolve --applied 20241202_add_unit_conversion_fields >/dev/null 2>&1 || true
   npx prisma migrate resolve --applied 20241204_add_ferramentas_kits >/dev/null 2>&1 || true
@@ -22,9 +27,10 @@ resolve_known_failed() {
   npx prisma migrate resolve --applied 20260213_add_audit_logs >/dev/null 2>&1 || true
 }
 
-# Extrai o nome da migration do erro P3009/P3018: The `nome_da_migration` migration ...
+# Extrai o nome da migration do erro P3009/P3018
 extract_failed_migration() {
-  grep -oE 'The `[^`]+` migration' "$1" 2>/dev/null | head -1 | sed 's/The `//;s/` migration//'
+  grep -oE 'The `[^`]+` migration' "$1" 2>/dev/null | head -1 | sed 's/The `//;s/` migration//' \
+    || grep -oE 'Migration name: [^[:space:]]+' "$1" 2>/dev/null | head -1 | sed 's/Migration name: //'
 }
 
 resolve_known_failed

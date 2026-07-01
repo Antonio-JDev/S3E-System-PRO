@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, FileText, ImageIcon, X } from 'lucide-react';
+import { ExternalLink, FileText, ImageIcon, Trash2, X } from 'lucide-react';
 import {
   atendimentoCrmService,
   type ContatoLead,
@@ -30,6 +30,7 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { maskCpfCnpj, maskWhatsApp, maskCep, onlyDigits } from '../utils/masks';
 import { toWhatsappChatId } from '../utils/whatsappChat';
 import { fetchWhatsappResolveOpenChat } from '../services/whatsappChatService';
+import { axiosApiService } from '../services/axiosApi';
 
 const HORAS_ALERTA_ATRASO = 48;
 const MAX_ANEXOS_LEAD = 8;
@@ -323,6 +324,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
     viabilidadeTecnica: '' as boolean | '',
     condicoesNaoAtender: '',
     contaEnergiaFiles: [] as File[],
+    responsavelId: '' as string,
     logradouro: '',
     numero: '',
     bairro: '',
@@ -338,6 +340,8 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
   const openOrcamentoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [leadSearch, setLeadSearch] = useState('');
   const [showStats, setShowStats] = useState(false);
+  const [usuariosSistema, setUsuariosSistema] = useState<Array<{ id: string; nome: string; role: string }>>([]);
+  const [leadToDelete, setLeadToDelete] = useState<ContatoLead | null>(null);
   const cepAbortRef = useRef<AbortController | null>(null);
   const cepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openChatForLead = async (lead: ContatoLead) => {
@@ -384,6 +388,24 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
 
   useEffect(() => {
     loadLeads();
+    void (async () => {
+      try {
+        const res = await axiosApiService.get<any[]>('/api/configuracoes/usuarios');
+        if (res.success && Array.isArray(res.data)) {
+          setUsuariosSistema(
+            res.data
+              .filter((u) => (u.role || u.funcao || '') !== 'eletricista')
+              .map((u) => ({
+                id: u.id,
+                nome: u.name || u.nome || u.email || 'Usuário',
+                role: u.role || u.funcao || '',
+              }))
+          );
+        }
+      } catch {
+        setUsuariosSistema([]);
+      }
+    })();
   }, []);
 
   useEscapeKey(showClienteOficialModal, () => setShowClienteOficialModal(false));
@@ -404,7 +426,8 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       viabilidadeTecnica: '',
       condicoesNaoAtender: '',
       contaEnergiaFiles: [],
-      logradouro: '',
+      responsavelId: '' as string,
+    logradouro: '',
       numero: '',
       bairro: '',
       cep: '',
@@ -412,26 +435,33 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       estado: '',
     });
 
-  const excluirLeadPermanente = async () => {
-    if (!editingLead) return;
+  const excluirLeadById = async (leadId: string) => {
     setExcluindo(true);
     try {
-      const res = await atendimentoCrmService.excluir(editingLead.id);
+      const res = await atendimentoCrmService.excluir(leadId);
       if (!res.success) {
         toast.error(res.error || 'Não foi possível excluir o lead');
         return;
       }
-      toast.success('Lead excluído', { description: 'Registro e anexos removidos do sistema.' });
+      toast.success('Lead excluído', { description: 'Registro removido do funil.' });
+      setLeadToDelete(null);
       setConfirmExcluirOpen(false);
-      setModalOpen(false);
-      setEditingLead(null);
-      resetFormPadrao();
+      if (editingLead?.id === leadId) {
+        setModalOpen(false);
+        setEditingLead(null);
+        resetFormPadrao();
+      }
       await loadLeads(false);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao excluir');
     } finally {
       setExcluindo(false);
     }
+  };
+
+  const excluirLeadPermanente = async () => {
+    if (!editingLead) return;
+    await excluirLeadById(editingLead.id);
   };
 
   const descartarLead = async () => {
@@ -465,7 +495,8 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       viabilidadeTecnica: '',
       condicoesNaoAtender: '',
       contaEnergiaFiles: [],
-      logradouro: '',
+      responsavelId: '' as string,
+    logradouro: '',
       numero: '',
       bairro: '',
       cep: '',
@@ -489,6 +520,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
       viabilidadeTecnica: lead.viabilidadeTecnica === true ? true : lead.viabilidadeTecnica === false ? false : '',
       condicoesNaoAtender: lead.condicoesNaoAtender || '',
       contaEnergiaFiles: [],
+      responsavelId: lead.responsavelId || lead.responsavel?.id || '',
       logradouro: lead.logradouro || '',
       numero: lead.numero || '',
       bairro: lead.bairro || '',
@@ -531,6 +563,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           cep: form.cep.trim() || undefined,
           cidade: form.cidade.trim() || undefined,
           estado: form.estado.trim() || undefined,
+          responsavelId: form.responsavelId ? form.responsavelId : null,
         });
         if (form.contaEnergiaFiles.length > 0) {
           const up = await atendimentoCrmService.uploadContaEnergia(editingLead.id, form.contaEnergiaFiles);
@@ -563,6 +596,7 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
           cep: form.cep.trim() || undefined,
           cidade: form.cidade.trim() || undefined,
           estado: form.estado.trim() || undefined,
+          responsavelId: form.responsavelId ? form.responsavelId : null,
         };
         const res = await atendimentoCrmService.criar(createData);
         if (!res.success || !res.data?.id) {
@@ -817,6 +851,11 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                             {[lead.cidade, lead.bairro].filter(Boolean).join(' · ')}
                           </p>
                         )}
+                        {lead.responsavel?.nome && (
+                          <p className="text-xs text-indigo-700 dark:text-indigo-300 truncate mt-0.5">
+                            Responsável: {lead.responsavel.nome}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-400 dark:text-dark-text-secondary mt-1">{formatarData(lead.updatedAt)}</p>
                         {numeroOrc != null && (
                           <span className="inline-block mt-1 text-xs font-bold text-emerald-700 dark:text-emerald-400">
@@ -835,17 +874,32 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                           Clique para abrir na página WhatsApp
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEdit(lead);
-                        }}
-                        className="shrink-0 p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-dark-text-secondary"
-                        title="Editar lead"
-                      >
-                        <PencilIcon className="w-4 h-4" />
-                      </button>
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(lead);
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-dark-text-secondary"
+                          title="Editar lead"
+                        >
+                          <PencilIcon className="w-4 h-4" />
+                        </button>
+                        {status === 'NAO_ATENDE' && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLeadToDelete(lead);
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400"
+                            title="Excluir lead"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   );
@@ -928,6 +982,21 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">CPF/CNPJ</label>
                     <input type="text" value={form.cpfCnpj} onChange={(e) => setForm((f) => ({ ...f, cpfCnpj: maskCpfCnpj(e.target.value) }))} className="input-field" placeholder="CPF ou CNPJ (com máscara)" maxLength={18} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">Responsável pelo lead</label>
+                    <select
+                      value={form.responsavelId}
+                      onChange={(e) => setForm((f) => ({ ...f, responsavelId: e.target.value }))}
+                      className="input-field"
+                    >
+                      <option value="">Sem responsável</option>
+                      {usuariosSistema.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.nome}{u.role ? ` — ${u.role}` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -1173,6 +1242,26 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
               onClick={() => {
                 void excluirLeadPermanente();
               }}
+            >
+              {excluindo ? 'Excluindo…' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!leadToDelete} onOpenChange={(open) => !open && setLeadToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir lead &quot;{leadToDelete?.nome}&quot;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O lead será removido permanentemente do histórico (coluna Não Atende).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setLeadToDelete(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={excluindo}
+              onClick={() => leadToDelete && void excluirLeadById(leadToDelete.id)}
             >
               {excluindo ? 'Excluindo…' : 'Excluir'}
             </AlertDialogAction>

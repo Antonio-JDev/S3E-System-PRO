@@ -371,7 +371,7 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
                             Equipes e eletricistas alocados por obra em cada data (planejamento de execução)
                         </p>
                     </div>
-                    <CalendarioAlocacoes key={refreshKey} visaoExecucao />
+                    <CalendarioAlocacoes key={refreshKey} visaoExecucao modo="os" />
                 </div>
             )}
 

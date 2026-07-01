@@ -94,6 +94,13 @@ router.get('/alocacoes', authenticate, AlocacaoController.listarAlocacoes);
 router.get('/alocacoes/calendario', authenticate, AlocacaoController.getAlocacoesCalendario);
 
 /**
+ * @route   GET /api/obras/alocacoes/relatorio-ocupacao
+ * @desc    Relatório de ocupação de equipes e eletricistas (horizonte de capacidade)
+ * @access  Authenticated
+ */
+router.get('/alocacoes/relatorio-ocupacao', authenticate, AlocacaoController.getRelatorioOcupacao);
+
+/**
  * @route   GET /api/obras/alocacoes/:id
  * @desc    Busca uma alocação específica
  * @access  Authenticated

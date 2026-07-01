@@ -44,7 +44,8 @@ async function main() {
     data: {
       email: 'financeiro@s3eengenharia.com.br',
       password: adminPassword,
-      name: 'Administrador Financeiro S3E',
+      name: 'Luciana Muhlen',
+      setor: 'Financeiro | Fiscal',
       role: 'admin',
       active: true
     }
@@ -61,7 +62,8 @@ async function main() {
     data: {
       email: 'antoniojrtech@gmail.com',
       password: devPassword,
-      name: 'Antonio Jr - Desenvolvedor',
+      name: 'Antonio Junior',
+      setor: 'Dept. TI',
       role: 'desenvolvedor',
       contaProtegida: true,
       active: true
@@ -121,11 +123,15 @@ async function main() {
   console.log('📝 Credenciais de acesso:');
   console.log('');
   console.log('👤 ADMIN (PRODUÇÃO):');
+  console.log('   Nome: Luciana Muhlen');
+  console.log('   Setor: Financeiro | Fiscal');
   console.log('   Email: financeiro@s3eengenharia.com.br');
   console.log('   Senha: Eng.elet30838361');
   console.log('   Role: admin');
   console.log('');
   console.log('👨‍💻 DESENVOLVEDOR:');
+  console.log('   Nome: Antonio Junior');
+  console.log('   Setor: Dept. TI');
   console.log('   Email: antoniojrtech@gmail.com');
   console.log('   Senha: 134679@Aj');
   console.log('   Role: desenvolvedor');

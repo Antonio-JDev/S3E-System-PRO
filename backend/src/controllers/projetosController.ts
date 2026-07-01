@@ -146,15 +146,25 @@ export const getProjetos = async (req: Request, res: Response): Promise<void> =>
           select: { id: true, valorTotal: true, status: true },
           orderBy: { createdAt: 'desc' },
           take: 5
+        },
+        responsavel: {
+          select: { id: true, name: true, setor: true, role: true }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
 
+    const data = projetos.map((p) => ({
+      ...p,
+      responsavel: p.responsavel
+        ? { id: p.responsavel.id, nome: p.responsavel.name, setor: p.responsavel.setor, role: p.responsavel.role }
+        : null,
+    }));
+
     res.json({
       success: true,
-      data: projetos,
-      total: projetos.length
+      data,
+      total: data.length
     });
   } catch (error) {
     console.error('Erro ao buscar projetos:', error);
@@ -1369,5 +1379,29 @@ export const getProjetosProgresso = async (req: Request, res: Response): Promise
   } catch (error) {
     console.error('Erro ao calcular progresso em lote:', error);
     res.status(500).json({ success: false, error: 'Erro ao calcular progresso' });
+  }
+};
+
+// GET /api/projetos/cockpit-resumo?ids=id1,id2,id3
+export const getProjetosCockpitResumo = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const idsParam = String(req.query.ids || '');
+    if (!idsParam) {
+      res.status(400).json({ success: false, error: 'Parâmetro ids é obrigatório (ex: ?ids=id1,id2)' });
+      return;
+    }
+
+    const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) {
+      res.status(400).json({ success: false, error: 'ids inválido' });
+      return;
+    }
+
+    const { apropriacaoOsService } = await import('../services/apropriacaoOs.service');
+    const data = await apropriacaoOsService.obterCockpitResumoBatch(ids);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro ao buscar cockpit-resumo em lote:', error);
+    res.status(500).json({ success: false, error: 'Erro ao buscar resumo do cockpit' });
   }
 };

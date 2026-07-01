@@ -14,7 +14,12 @@ import { AuthContext } from '../contexts/AuthContext';
 import ViewToggle from './ui/ViewToggle';
 import ActionsDropdown from './ui/ActionsDropdown';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
-import { calcularHomemHoraTotal } from '../utils/apropriacaoOs';
+import { calcularHomemHoraTotal, formatMoeda } from '../utils/apropriacaoOs';
+import {
+  calcularCustoTempoOrcado,
+  calcularDiasEstimadosTexto,
+  type CockpitResumoItem,
+} from '../utils/osCockpit.util';
 import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -177,6 +182,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         obrasTotal: number;
         obrasConcluidas: number;
     }>>({});
+    const [cockpitResumoMap, setCockpitResumoMap] = useState<Record<string, CockpitResumoItem>>({});
 
     // Filtros
     const [searchTerm, setSearchTerm] = useState('');
@@ -239,6 +245,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     // Gestão de equipe
     const [teamManagementMode, setTeamManagementMode] = useState<'view' | 'add' | 'edit'>('view');
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+    const [responsavelAtribuindoId, setResponsavelAtribuindoId] = useState<string | null>(null);
     const [usuarioToEdit, setUsuarioToEdit] = useState<Usuario | null>(null);
     const [memberToDelete, setMemberToDelete] = useState<Usuario | null>(null);
     const [usuarioFormState, setUsuarioFormState] = useState({
@@ -246,6 +253,18 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         email: '',
         funcao: ''
     });
+
+    const usuariosOs = useMemo(
+        () => usuarios.filter((u) => (u.role || u.funcao || '').toLowerCase() !== 'eletricista'),
+        [usuarios]
+    );
+
+    const responsaveisOsFiltro = useMemo(() => {
+        const idsAtribuidos = new Set(
+            projetos.map((p) => p.responsavelId).filter((id): id is string => Boolean(id))
+        );
+        return usuariosOs.filter((u) => idsAtribuidos.has(u.id));
+    }, [projetos, usuariosOs]);
 
     // Ref para upload de arquivos
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -365,14 +384,27 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             ]);
 
             if (projetosRes.success && projetosRes.data) {
-                // Garantir que sempre seja um array
                 const projetosArray = Array.isArray(projetosRes.data) ? projetosRes.data : [];
-                setProjetos(projetosArray);
-                void loadEngInfo(projetosArray.map((p) => p.id));
+                const usuariosArray = usuariosRes.success && Array.isArray(usuariosRes.data)
+                    ? usuariosRes.data.map((u: any) => ({
+                        id: u.id,
+                        nome: u.name || u.nome || '',
+                        email: u.email || '',
+                        funcao: u.role || u.funcao || '',
+                        role: u.role || '',
+                    }))
+                    : [];
+                const enriched = projetosArray.map((p) => {
+                    if (p.responsavel?.nome) return p;
+                    const u = usuariosArray.find((x) => x.id === p.responsavelId);
+                    return u ? { ...p, responsavel: { id: u.id, nome: u.nome } } : p;
+                });
+                setProjetos(enriched);
+                void loadEngInfo(enriched.map((p) => p.id));
                 if (opts?.silent) {
                     setProjetoToView((prev) => {
                         if (!prev) return prev;
-                        return projetosArray.find((p) => p.id === prev.id) ?? prev;
+                        return enriched.find((p) => p.id === prev.id) ?? prev;
                     });
                 }
             } else {
@@ -458,17 +490,22 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         try {
             const ids = (projetosArray || []).map(p => p.id).filter(Boolean);
             if (ids.length === 0) return;
-            const resp = await axiosApiService.get<{ [key: string]: any }>(`/api/projetos/progresso?ids=${ids.join(',')}`);
+            const [resp, cockpitResp] = await Promise.all([
+                axiosApiService.get<{ [key: string]: any }>(`/api/projetos/progresso?ids=${ids.join(',')}`),
+                projetosService.getCockpitResumo(ids),
+            ]);
             if (resp.success && resp.data) {
                 setProjectProgressMap(resp.data);
             } else {
                 console.warn('Resposta inesperada ao buscar progresso em lote, fallback para cálculo local');
-                // fallback: manter comportamento anterior simples
                 const map: Record<string, any> = {};
                 projetosArray.forEach(p => {
                     map[p.id] = { percentual: calcularProgressoProjeto(p), tasksTotal: 0, tasksConcluidas: 0, obrasTotal: 0, obrasConcluidas: 0 };
                 });
                 setProjectProgressMap(map);
+            }
+            if (cockpitResp.success && cockpitResp.data) {
+                setCockpitResumoMap(cockpitResp.data);
             }
         } catch (err) {
             console.error('Erro ao buscar progresso de projetos:', err);
@@ -704,7 +741,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 if (response.success && response.data) {
                     const updated = response.data;
                     const responsavelUsuario = updated.responsavelId
-                        ? usuarios.find((u) => u.id === updated.responsavelId)
+                        ? usuariosOs.find((u) => u.id === updated.responsavelId)
                         : undefined;
                     const merged = {
                         ...updated,
@@ -720,7 +757,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             } else {
                 const response = await projetosService.criar(formState);
                 if (response.success && response.data) {
-                    setProjetos(prev => [response.data!, ...prev]);
+                    const created = response.data;
+                    const responsavelUsuario = created.responsavelId
+                        ? usuariosOs.find((u) => u.id === created.responsavelId)
+                        : undefined;
+                    const merged = {
+                        ...created,
+                        responsavel: created.responsavel ?? (responsavelUsuario
+                            ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
+                            : undefined),
+                    };
+                    setProjetos(prev => [merged, ...prev]);
                     setIsCreateModalOpen(false);
                 }
             }
@@ -765,6 +812,31 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             }
         } catch {
             toast.error('Erro ao atribuir à engenharia');
+        }
+    };
+
+    const handleResponsavelOsChange = async (projetoId: string, responsavelId: string) => {
+        try {
+            setResponsavelAtribuindoId(projetoId);
+            const response = await projetosService.atualizar(projetoId, { responsavelId });
+            if (response.success && response.data) {
+                const updated = response.data;
+                const responsavelUsuario = responsavelId
+                    ? usuariosOs.find((u) => u.id === responsavelId)
+                    : undefined;
+                const merged = {
+                    ...updated,
+                    responsavel: updated.responsavel ?? (responsavelUsuario
+                        ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
+                        : undefined),
+                };
+                setProjetos((prev) => prev.map((p) => (p.id === projetoId ? merged : p)));
+                toast.success('Responsável da OS atualizado');
+            }
+        } catch {
+            toast.error('Erro ao atualizar responsável da OS');
+        } finally {
+            setResponsavelAtribuindoId(null);
         }
     };
 
@@ -1227,7 +1299,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all dark:bg-dark-card dark:border-dark-border dark:text-dark-text"
                         >
                             <option value="Todos">Todos Responsáveis</option>
-                            {/* opções de responsáveis poderão ser carregadas via API futura */}
+                            {responsaveisOsFiltro.map((usuario) => (
+                                <option key={usuario.id} value={usuario.id}>
+                                    {usuario.nome}
+                                </option>
+                            ))}
                         </select>
                     </div>
                     {abaAtiva === 'concluidos' && (
@@ -1322,12 +1398,32 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                         const numeroOS = gerarNumeroOS(projeto);
                         const temMinhasTarefas = projetoIdsComMinhasTarefas.has(projeto.id);
                         const temMinhasTarefasAtrasadas = projetoIdsComMinhasTarefasAtrasadas.has(projeto.id);
+                        const cockpitResumo = cockpitResumoMap[projeto.id];
+                        const custoTempoOrcado =
+                            cockpitResumo?.custoTempoOrcado ??
+                            calcularCustoTempoOrcado({
+                                horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
+                                diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
+                                valorHoraEngenharia: projeto.valorHoraEngenharia,
+                                valorDiariaEquipe: projeto.valorDiariaEquipe,
+                            });
+                        const diasEstimadosTexto = calcularDiasEstimadosTexto(
+                            cockpitResumo?.diariasEquipeOrcadas ?? projeto.diariasEquipeOrcadas ?? 0,
+                            projeto.dataInicio,
+                            projeto.dataPrevisao
+                        );
+                        const estouroPrazo =
+                            projeto.status === 'EXECUCAO' &&
+                            cockpitResumo != null &&
+                            (cockpitResumo.estouroDiarias || cockpitResumo.estouroDiasCorridos);
                         
                         return (
                             <div
                                 key={projeto.id}
                                 className={`bg-white rounded-2xl p-6 shadow-soft hover:shadow-medium transition-all duration-200 relative group ${
-                                    temMinhasTarefasAtrasadas && temMinhasTarefas
+                                    estouroPrazo && !temMinhasTarefasAtrasadas
+                                        ? 'border-2 border-red-500 hover:border-red-600'
+                                        : temMinhasTarefasAtrasadas && temMinhasTarefas
                                         ? 'border-2 border-red-600 hover:border-red-700 ring-2 ring-inset ring-amber-400 dark:ring-amber-500'
                                         : temMinhasTarefasAtrasadas
                                             ? 'border-2 border-red-600 hover:border-red-700'
@@ -1352,9 +1448,14 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                                 Atrasada
                                             </span>
                                         )}
-                                            {temMinhasTarefas && (
+                                        {temMinhasTarefas && (
                                             <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-200 px-2 py-1 rounded-md border border-amber-400 shadow-sm dark:bg-amber-900/50 dark:text-amber-200 dark:border-amber-600" title="Você tem tarefas a fazer ou em andamento nesta OS">
                                                 Minhas tarefas
+                                            </span>
+                                        )}
+                                        {estouroPrazo && (
+                                            <span className="inline-flex items-center gap-1 text-xs font-bold text-white bg-red-600 px-2 py-1 rounded-md border border-red-700 shadow-sm" title="Dias corridos ou diárias realizadas ultrapassaram a estimativa">
+                                                Estouro de prazo
                                             </span>
                                         )}
                                     </div>
@@ -1367,11 +1468,25 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         <span className="text-xs text-gray-500">Cliente:</span>
                                         <span className="text-sm font-semibold text-gray-900">{projeto.cliente?.nome || 'N/A'}</span>
                                     </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-xs text-gray-500">Responsável:</span>
-                                        <span className="text-sm font-medium text-gray-700">
-                                            {projeto.responsavel?.nome || 'N/A'}
-                                        </span>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs text-gray-500 shrink-0">Responsável:</span>
+                                        <select
+                                            value={projeto.responsavelId || ''}
+                                            disabled={responsavelAtribuindoId === projeto.id}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => {
+                                                e.stopPropagation();
+                                                void handleResponsavelOsChange(projeto.id, e.target.value);
+                                            }}
+                                            className="text-sm font-medium text-gray-700 border border-gray-200 rounded-lg px-2 py-1 max-w-[55%] truncate bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        >
+                                            <option value="">Selecionar...</option>
+                                            {usuariosOs.map((usuario) => (
+                                                <option key={usuario.id} value={usuario.id}>
+                                                    {usuario.nome}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs text-gray-500">Status:</span>
@@ -1395,10 +1510,30 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </div>
                                 </div>
 
+                                {/* Prazo e custo de tempo */}
+                                <div className="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-100 space-y-2">
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <span className="text-xs font-medium text-gray-600">Estimativa</span>
+                                        <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
+                                            {diasEstimadosTexto}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-medium text-gray-600">Custo tempo orçado</span>
+                                        <span className="text-sm font-bold text-gray-900">{formatMoeda(custoTempoOrcado)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="text-xs font-medium text-gray-600">Data limite</span>
+                                        <span className="text-sm font-bold text-blue-700">
+                                            {formatDateDisplay((cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao) as any) || '—'}
+                                        </span>
+                                    </div>
+                                </div>
+
                                 {/* Datas */}
                                 <div className="flex items-center justify-between text-xs text-gray-500 pt-4 border-t border-gray-100">
                                     <span>Início: {formatDateDisplay(projeto.dataInicio as any)}</span>
-                                    <span>Previsão: {formatDateDisplay(projeto.dataPrevisao as any)}</span>
+                                    <span className="text-gray-400">Execução física</span>
                                 </div>
                             </div>
                         );
@@ -1592,7 +1727,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     >
                                         <option value="">Selecione o responsável</option>
-                                        {usuarios.map(usuario => (
+                                        {usuariosOs.map(usuario => (
                                             <option key={usuario.id} value={usuario.id}>
                                                 {usuario.nome} - {usuario.role}
                                             </option>

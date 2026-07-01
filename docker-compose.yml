@@ -105,15 +105,20 @@ services:
       retries: 5
       start_period: 90s
 
-  # Backend API — imagem publicada (mesma tag da produção, ex.: 2.1.7)
+  # Backend API — build local (stage development) + tsx watch para hot reload
   backend:
-    image: odev10antonio/s3e-backend:${S3E_APP_VERSION:-2.1.7}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    image: s3e-backend-dev:local
     container_name: s3e-backend-dev
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
       TZ: America/Sao_Paulo # Horário Brasília (evita rejeição 703 na NF-e)
       PORT: 3001
       DATABASE_URL: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/${DB_NAME:-s3e_dev}?schema=public&connection_limit=10
@@ -164,13 +169,14 @@ services:
       - "3001:3001"
       - "5555:5555"
     volumes:
+      - ./backend:/app
+      - backend_node_modules:/app/node_modules
       - backend_uploads:/app/uploads
       - backend_logs:/app/logs
       - backend_certificados:/app/data/certificados
       - ./nfse-xsd:/app/nfse-xsd:ro
       - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro
       - ./backend/certs:/app/certs:ro
-      - ./backend/scripts:/app/scripts:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       postgres:
@@ -179,7 +185,7 @@ services:
         condition: service_started
     networks:
       - s3e-network
-    command: sh -c "sed 's/\\r$//' scripts/dev-bootstrap.sh | sh && node dist/app.js"
+    command: sh -c "sed 's/\\r$//' scripts/dev-bootstrap.sh | sh && npm run dev"
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
       interval: 30s
@@ -187,22 +193,35 @@ services:
       retries: 3
       start_period: 60s
 
-  # Frontend — imagem nginx publicada (mesma tag da produção, ex.: 2.1.7)
+  # Frontend — Vite dev server (HMR) na porta 5173
   frontend:
-    image: odev10antonio/s3e-frontend:${S3E_APP_VERSION:-2.1.7}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    image: s3e-frontend-dev:local
     container_name: s3e-frontend-dev
     restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+      VITE_WHATSAPP_PROVIDER_DASHBOARD_URL: ${VITE_WHATSAPP_PROVIDER_DASHBOARD_URL:-http://localhost:3333/manager}
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
     networks:
       - s3e-network
     depends_on:
       - backend
     healthcheck:
-      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/" ]
+      test: [ "CMD-SHELL", "node -e \"fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # PgAdmin (opcional — credenciais em PGADMIN_* no .env)
   pgadmin:
@@ -226,6 +245,10 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  backend_node_modules:
+    driver: local
+  frontend_node_modules:
     driver: local
   backend_uploads:
     driver: local

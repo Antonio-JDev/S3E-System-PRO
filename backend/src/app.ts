@@ -641,6 +641,14 @@ httpServer.listen(PORT, () => {
   };
   setTimeout(runGroupMetadataBackfill, 15_000);
   setInterval(runGroupMetadataBackfill, 6 * 60 * 60 * 1000);
+
+  const runPurgeLeadsConvertidos = () => {
+    import('./controllers/atendimentoCrmController')
+      .then((m) => m.purgeLeadsConvertidosAntigos())
+      .catch((err) => console.warn('⚠ Purge leads convertidos falhou:', err));
+  };
+  setTimeout(runPurgeLeadsConvertidos, 20_000);
+  setInterval(runPurgeLeadsConvertidos, 24 * 60 * 60 * 1000);
 });
 
 export default app;

@@ -43,8 +43,9 @@ class EquipeService {
     return { success: true, data } as ApiResponse<T>;
   }
 
-  async getAllEquipes(): Promise<ApiResponse<EquipeDTO[]>> {
-    const res = await axiosApiService.get<any>('/api/equipes');
+  async getAllEquipes(opts?: { todas?: boolean }): Promise<ApiResponse<EquipeDTO[]>> {
+    const params = opts?.todas ? { todas: 'true' } : undefined;
+    const res = await axiosApiService.get<any>('/api/equipes', params);
     return this.unwrap<EquipeDTO[]>(res);
   }
 

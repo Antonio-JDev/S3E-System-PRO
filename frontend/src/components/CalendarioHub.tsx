@@ -16,6 +16,13 @@ import {
 } from '../services/eventosCalendarioService';
 import { orcamentosService } from '../services/orcamentosService';
 import { axiosApiService } from '../services/axiosApi';
+import {
+  alocacaoObraService,
+  type AlocacaoCalendarioDTO,
+  type RelatorioOcupacaoDTO,
+} from '../services/AlocacaoObraService';
+import CalendarioOcupacaoCards from './calendario/CalendarioOcupacaoCards';
+import RelatorioOcupacaoRecursos from './calendario/RelatorioOcupacaoRecursos';
 
 interface CalendarioHubProps {
   toggleSidebar: () => void;
@@ -74,6 +81,14 @@ function formatPeriodo(date: Date): string {
 }
 
 function renderEventContent(arg: EventContentArg) {
+  if (arg.event.extendedProps.tipo === 'ALOCACAO_OS') {
+    return (
+      <div className="px-1 py-0.5 overflow-hidden h-full">
+        <div className="text-[9px] uppercase tracking-wide text-emerald-800 font-bold">Alocação OS</div>
+        <div className="text-xs font-medium leading-tight truncate">{arg.event.title}</div>
+      </div>
+    );
+  }
   const evento = arg.event.extendedProps.evento as EventoCalendario | undefined;
   const timeText = arg.timeText;
   return (
@@ -87,9 +102,27 @@ function renderEventContent(arg: EventContentArg) {
   );
 }
 
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function mesesNoIntervalo(inicio: Date, fim: Date): Array<{ mes: number; ano: number }> {
+  const set = new Map<string, { mes: number; ano: number }>();
+  const d = new Date(inicio.getFullYear(), inicio.getMonth(), 1);
+  const limite = new Date(fim.getFullYear(), fim.getMonth(), 1);
+  while (d <= limite) {
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    set.set(key, { mes: d.getMonth() + 1, ano: d.getFullYear() });
+    d.setMonth(d.getMonth() + 1);
+  }
+  return Array.from(set.values());
+}
+
 const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   const calendarRef = useRef<FullCalendar>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('semana');
+  const [viewMode, setViewMode] = useState<ViewMode>('mes');
   const [periodoLabel, setPeriodoLabel] = useState('');
   const [eventos, setEventos] = useState<EventoCalendario[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,6 +146,11 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   );
   const [capacidadeDias, setCapacidadeDias] = useState<CapacidadeDia[]>([]);
   const [capacidadeDiaria, setCapacidadeDiaria] = useState(0);
+  const [relatorioOcupacao, setRelatorioOcupacao] = useState<RelatorioOcupacaoDTO | null>(null);
+  const [loadingRelatorio, setLoadingRelatorio] = useState(false);
+  const [alocacoesOs, setAlocacoesOs] = useState<AlocacaoCalendarioDTO[]>([]);
+  const [mostrarAlocacoesOs, setMostrarAlocacoesOs] = useState(true);
+  const [alocacaoDetalhe, setAlocacaoDetalhe] = useState<AlocacaoCalendarioDTO | null>(null);
 
   useEffect(() => {
     orcamentosService.listar().then((res) => {
@@ -128,6 +166,42 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
       }
     });
   }, []);
+
+  const carregarRelatorioOcupacao = useCallback(async () => {
+    setLoadingRelatorio(true);
+    try {
+      const res = await alocacaoObraService.getRelatorioOcupacao();
+      if (res.success && res.data) {
+        setRelatorioOcupacao(res.data);
+      }
+    } catch {
+      toast.error('Erro ao carregar relatório de ocupação');
+    } finally {
+      setLoadingRelatorio(false);
+    }
+  }, []);
+
+  const carregarAlocacoesOs = useCallback(async (inicio: Date, fim: Date) => {
+    try {
+      const meses = mesesNoIntervalo(inicio, fim);
+      const resultados = await Promise.all(
+        meses.map(({ mes, ano }) => alocacaoObraService.getAlocacoesCalendario(mes, ano))
+      );
+      const map = new Map<string, AlocacaoCalendarioDTO>();
+      for (const res of resultados) {
+        if (res.success && Array.isArray(res.data)) {
+          res.data.forEach((a) => map.set(a.id, a));
+        }
+      }
+      setAlocacoesOs(Array.from(map.values()));
+    } catch {
+      setAlocacoesOs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregarRelatorioOcupacao();
+  }, [carregarRelatorioOcupacao]);
 
   const carregarCapacidade = useCallback(async (inicio: Date, fim: Date) => {
     try {
@@ -159,12 +233,13 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         setEventos(res.data);
       }
       await carregarCapacidade(inicio, fim);
+      await carregarAlocacoesOs(inicio, fim);
     } catch {
       toast.error('Erro ao carregar eventos');
     } finally {
       setLoading(false);
     }
-  }, [buscaEvento, carregarCapacidade]);
+  }, [buscaEvento, carregarCapacidade, carregarAlocacoesOs]);
 
   const gargaloPorData = useMemo(() => {
     const map = new Map<string, CapacidadeDia>();
@@ -197,9 +272,33 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     });
   }, [eventos, tiposAtivos, statusAtivos]);
 
+  const eventosAlocacaoOs = useMemo(() => {
+    if (!mostrarAlocacoesOs) return [];
+    return alocacoesOs.map((a) => {
+      const recurso = a.equipe?.nome
+        ? `Equipe ${a.equipe.nome}`
+        : a.eletricista?.nome
+          ? `El. ${a.eletricista.nome}`
+          : 'Recurso';
+      const fimExclusive = addDaysIso(String(a.dataFimPrevisto), 1);
+      return {
+        id: `aloc-os-${a.id}`,
+        title: `${a.projeto.titulo} · ${recurso}`,
+        start: String(a.dataInicio).slice(0, 10),
+        end: fimExclusive,
+        allDay: true,
+        extendedProps: { tipo: 'ALOCACAO_OS', alocacao: a },
+        backgroundColor: '#d1fae5',
+        borderColor: '#059669',
+        textColor: '#064e3b',
+        classNames: ['fc-event-alocacao-os'],
+      };
+    });
+  }, [alocacoesOs, mostrarAlocacoesOs]);
+
   const calendarEvents = useMemo(
-    () =>
-      eventosFiltrados.map((e) => ({
+    () => [
+      ...eventosFiltrados.map((e) => ({
         id: e.id,
         title: e.titulo,
         start: e.dataInicio,
@@ -207,7 +306,9 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         extendedProps: { evento: e },
         ...getEventStyle(e.tipo, e.status),
       })),
-    [eventosFiltrados]
+      ...eventosAlocacaoOs,
+    ],
+    [eventosFiltrados, eventosAlocacaoOs]
   );
 
   const orcamentosSugeridos = useMemo(() => {
@@ -262,7 +363,12 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   };
 
   const handleEventClick = async (info: EventClickArg) => {
+    if (info.event.extendedProps.tipo === 'ALOCACAO_OS') {
+      setAlocacaoDetalhe(info.event.extendedProps.alocacao as AlocacaoCalendarioDTO);
+      return;
+    }
     const resumo = info.event.extendedProps.evento as EventoCalendario;
+    if (!resumo?.id) return;
     setOrcamentoPreenchido(null);
     setModalAberto(true);
 
@@ -309,6 +415,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         .calendario-hub .fc { --fc-border-color: #e5e7eb; }
         .dark .calendario-hub .fc { --fc-border-color: #374151; }
         .fc-day-gargalo { background-color: rgba(239, 68, 68, 0.12) !important; }
+        .fc-event-alocacao-os { border-left-width: 4px !important; border-style: solid !important; }
       `}</style>
 
       <div className="flex flex-1 min-h-0">
@@ -407,6 +514,21 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
                 </li>
               ))}
             </ul>
+          </div>
+
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">Alocações de OS</h2>
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-gray-700 dark:text-dark-text">
+              <input
+                type="checkbox"
+                checked={mostrarAlocacoesOs}
+                onChange={(e) => setMostrarAlocacoesOs(e.target.checked)}
+                className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              Mostrar alocações de OS
+            </label>
+            <p className="text-[10px] text-gray-500 mt-1 ml-6">Equipes e eletricistas (somente leitura)</p>
           </div>
 
           {capacidadeDiaria > 0 && (
@@ -541,6 +663,14 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
             </button>
           </div>
 
+          <CalendarioOcupacaoCards
+            resumo={relatorioOcupacao?.resumo ?? null}
+            loading={loadingRelatorio}
+            onAtualizar={() => void carregarRelatorioOcupacao()}
+          />
+
+          <RelatorioOcupacaoRecursos relatorio={relatorioOcupacao} loading={loadingRelatorio} />
+
           {/* Calendar grid */}
           <div className="flex-1 p-4 calendario-hub relative min-h-[500px]">
             {loading && (
@@ -551,7 +681,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
             <FullCalendar
               ref={calendarRef}
               plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              initialView="dayGridMonth"
               headerToolbar={false}
               locale={ptBrLocale}
               firstDay={1}
@@ -592,6 +722,46 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         orcamentoPreenchido={orcamentoPreenchido}
         datasIniciais={datasIniciais}
       />
+
+      {alocacaoDetalhe && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-dark-card rounded-2xl shadow-xl max-w-md w-full p-6 space-y-3">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">Alocação de OS</h3>
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              <strong>OS:</strong> {alocacaoDetalhe.projeto.titulo}
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              <strong>Cliente:</strong> {alocacaoDetalhe.projeto.cliente}
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              <strong>Recurso:</strong>{' '}
+              {alocacaoDetalhe.equipe?.nome
+                ? `Equipe ${alocacaoDetalhe.equipe.nome}`
+                : alocacaoDetalhe.eletricista?.nome
+                  ? `Eletricista ${alocacaoDetalhe.eletricista.nome}`
+                  : '—'}
+            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              <strong>Período:</strong>{' '}
+              {new Date(alocacaoDetalhe.dataInicio).toLocaleDateString('pt-BR')} →{' '}
+              {new Date(alocacaoDetalhe.dataFimPrevisto).toLocaleDateString('pt-BR')}
+            </p>
+            <p className="text-sm">
+              <span className="font-semibold">Status:</span> {alocacaoDetalhe.status}
+            </p>
+            <p className="text-xs text-gray-500 italic">
+              Edite alocações no cockpit da ordem de serviço.
+            </p>
+            <button
+              type="button"
+              onClick={() => setAlocacaoDetalhe(null)}
+              className="w-full mt-2 py-2 rounded-xl border border-gray-200 dark:border-dark-border font-semibold text-sm hover:bg-gray-50 dark:hover:bg-dark-bg"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

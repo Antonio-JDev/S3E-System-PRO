@@ -26,6 +26,10 @@ import {
   type ResultadoOsCalculado,
 } from '../utils/apropriacaoOs';
 import { projetosService } from '../services/projetosService';
+import type { Obra } from '../services/obrasService';
+import OsPrazoEstimadoCard from './os/OsPrazoEstimadoCard';
+import OsEquipeAlocacaoPanel from './os/OsEquipeAlocacaoPanel';
+import OsCronogramaAlocacaoTab from './os/OsCronogramaAlocacaoTab';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,9 +103,18 @@ export interface ProjetoDetalhe {
   status: ProjetoStatus;
   valorTotal?: number;
   createdAt?: string;
+  semObra?: boolean;
+  responsavelId?: string;
+  responsavel?: { id: string; nome: string };
+  dataInicio?: string;
+  dataPrevisao?: string;
+  horasEngenhariaOrcadas?: number;
+  diariasEquipeOrcadas?: number;
+  valorHoraEngenharia?: number | null;
+  valorDiariaEquipe?: number | null;
 }
 
-type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Qualidade' | 'Resultado';
+type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Cronograma & Alocação' | 'Qualidade' | 'Resultado';
 
 const MSG_BLOQUEIO_CONCLUSAO_ENG =
   'Essa ordem de serviço não pode ser concluída pois o projeto ainda não está concluído. Pressione a equipe de projetos!';
@@ -143,7 +156,7 @@ interface ModalVizualizacaoProjetoProps {
   onAtribuirEngenharia?: () => void;
 }
 
-const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Qualidade', 'Resultado'];
+const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Cronograma & Alocação', 'Qualidade', 'Resultado'];
 
 // Retorna os nomes dos responsáveis (suporta múltiplos)
 function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisIds?: string[] }, usuariosDisponiveis: any[]): string {
@@ -212,6 +225,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   
   // Estado para obra vinculada
   const [obraVinculada, setObraVinculada] = useState<{ id: string; nome?: string } | null>(null);
+  const [obraDetalhe, setObraDetalhe] = useState<Obra | null>(null);
   const [loadingObra, setLoadingObra] = useState(false);
 
   // Modal de visualização de cliente
@@ -307,6 +321,10 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     if (isOpen && activeTab === 'Visão Geral') {
       carregarObraVinculada();
       carregarDocumentos();
+      void carregarResumoApropriacao();
+    }
+    if (isOpen && activeTab === 'Cronograma & Alocação') {
+      carregarObraVinculada();
     }
     if (isOpen && activeTab === 'Qualidade' && projeto?.id) {
       carregarQualidade();
@@ -520,21 +538,38 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       setLoadingObra(true);
       const response = await axiosApiService.get<any>(`/api/obras/projeto/${projeto.id}`);
       if (response.success && response.data) {
+        const data = response.data;
         const obra = {
-          id: response.data.id, 
-          nome: response.data.nome || response.data.nomeObra || 'Obra vinculada'
+          id: data.id,
+          nome: data.nome || data.nomeObra || 'Obra vinculada',
         };
         setObraVinculada(obra);
-        
-        // Carregar materiais já alocados para esta obra
+        setObraDetalhe({
+          id: data.id,
+          projetoId: data.projetoId ?? projeto.id,
+          nomeObra: data.nomeObra || data.nome || 'Obra vinculada',
+          status: data.status || 'BACKLOG',
+          clienteNome: data.clienteNome || projeto.cliente?.nome || '',
+          dataPrevistaInicio: data.dataPrevistaInicio,
+          dataPrevistaFim: data.dataPrevistaFim,
+          dataInicioReal: data.dataInicioReal,
+          dataFimReal: data.dataFimReal,
+          progresso: data.progresso ?? 0,
+          totalTarefas: data.totalTarefas ?? 0,
+          tarefasConcluidas: data.tarefasConcluidas ?? 0,
+          equipe: data.equipe,
+        });
+
         await carregarMateriaisAlocados(obra.id);
       } else {
         setObraVinculada(null);
+        setObraDetalhe(null);
         setMateriaisAlocados(new Set());
       }
     } catch (error) {
       console.error('Erro ao carregar obra vinculada:', error);
       setObraVinculada(null);
+      setObraDetalhe(null);
       setMateriaisAlocados(new Set());
     } finally {
       setLoadingObra(false);
@@ -2104,6 +2139,46 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
                 </div>
 
+                <OsPrazoEstimadoCard
+                  projetoId={projeto.id}
+                  projeto={{
+                    status: projeto.status,
+                    dataInicio: (projeto as ProjetoDetalhe).dataInicio ?? '',
+                    dataPrevisao: (projeto as ProjetoDetalhe).dataPrevisao ?? '',
+                    horasEngenhariaOrcadas: (projeto as ProjetoDetalhe).horasEngenhariaOrcadas ?? 0,
+                    diariasEquipeOrcadas: (projeto as ProjetoDetalhe).diariasEquipeOrcadas ?? 0,
+                    valorHoraEngenharia: (projeto as ProjetoDetalhe).valorHoraEngenharia,
+                    valorDiariaEquipe: (projeto as ProjetoDetalhe).valorDiariaEquipe,
+                  }}
+                  resumo={resumoApropriacao}
+                  canEdit={isAdmin(user) || isDeveloper(user)}
+                  onSaved={() => {
+                    void carregarResumoApropriacao();
+                    onRefresh?.();
+                  }}
+                />
+
+                <OsEquipeAlocacaoPanel
+                  projetoId={projeto.id}
+                  projetoTitulo={projeto.titulo}
+                  responsavelOs={
+                    (projeto as ProjetoDetalhe).responsavel
+                      ? {
+                          id: (projeto as ProjetoDetalhe).responsavel!.id,
+                          nome: (projeto as ProjetoDetalhe).responsavel!.nome,
+                        }
+                      : null
+                  }
+                  engenhariaAtribuicao={engenhariaAtribuicao}
+                  obraStatus={obraDetalhe?.status ?? null}
+                  semObra={Boolean((projeto as ProjetoDetalhe).semObra)}
+                  canAlocar={isAdmin(user) || isDeveloper(user)}
+                  onRefresh={() => {
+                    void carregarObraVinculada();
+                    onRefresh?.();
+                  }}
+                />
+
                 {engenhariaAtribuicao && (
                   <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
                     <div
@@ -3400,6 +3475,16 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
                 </div>
               </div>
+          )}
+
+          {activeTab === 'Cronograma & Alocação' && (
+            <OsCronogramaAlocacaoTab
+              projetoId={projeto.id}
+              semObra={Boolean((projeto as ProjetoDetalhe).semObra)}
+              obra={obraDetalhe}
+              loadingObra={loadingObra}
+              onIniciarObra={podeGerarObra ? handleIniciarObra : undefined}
+            />
           )}
 
           {activeTab === 'Qualidade' && (

@@ -6,6 +6,7 @@ import {
   AlocarEletricistaDTO,
   AtualizarAlocacaoDTO 
 } from '../services/alocacao.service';
+import { gerarRelatorioOcupacao } from '../services/relatorioOcupacao.service';
 
 /**
  * Controller para gestão de equipes e alocações de obras
@@ -293,7 +294,7 @@ export class AlocacaoController {
    */
   static async getAlocacoesCalendario(req: Request, res: Response) {
     try {
-      const { mes, ano } = req.query;
+      const { mes, ano, projetoId } = req.query;
 
       if (!mes || !ano) {
         return res.status(400).json({
@@ -310,7 +311,11 @@ export class AlocacaoController {
         });
       }
 
-      const alocacoes = await alocacaoService.getAlocacoesCalendario(mesNum, anoNum);
+      const alocacoes = await alocacaoService.getAlocacoesCalendario(
+        mesNum,
+        anoNum,
+        typeof projetoId === 'string' && projetoId.trim() ? projetoId.trim() : undefined
+      );
 
       res.json({
         success: true,
@@ -484,6 +489,26 @@ export class AlocacaoController {
       res.status(500).json({
         error: 'Erro ao concluir alocação',
         message: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  }
+
+  /**
+   * Relatório de ocupação de equipes e eletricistas
+   * GET /api/obras/alocacoes/relatorio-ocupacao
+   */
+  static async getRelatorioOcupacao(req: Request, res: Response) {
+    try {
+      const relatorio = await gerarRelatorioOcupacao();
+      res.json({
+        success: true,
+        data: relatorio,
+      });
+    } catch (error) {
+      console.error('Erro ao gerar relatório de ocupação:', error);
+      res.status(500).json({
+        error: 'Erro interno do servidor',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
       });
     }
   }
