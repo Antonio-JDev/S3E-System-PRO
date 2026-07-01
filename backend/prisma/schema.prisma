@@ -41,6 +41,9 @@ model User {
   tasksKanbanCriadas Task[]                  @relation("TaskKanbanCriador")
   tarefasInternas     TarefaInterna[]         @relation("TarefaInternaResponsavel")
   whatsappReadStates  WhatsappChatReadState[]
+  projetosInicioSemEstoque Projeto[]            @relation("OsInicioSemEstoque")
+  apontamentosOsCriados    ApontamentoOs[]      @relation("ApontamentosOsCriados")
+  apontamentosOsItens      ApontamentoOsItem[]
 
   @@map("users")
 }
@@ -625,11 +628,44 @@ model Orcamento {
   contatoLead   ContatoLead?    @relation(fields: [contatoLeadId], references: [id], onDelete: SetNull)
   items         OrcamentoItem[]
   fotos         OrcamentoFoto[]
-  projeto       Projeto?
-  venda         Venda? // Relação 1:1 com venda (quando orçamento é vendido)
+  projeto           Projeto?
+  venda             Venda? // Relação 1:1 com venda (quando orçamento é vendido)
+  eventosCalendario EventoCalendario[]
 
   @@index([contatoLeadId])
   @@map("orcamentos")
+}
+
+// ============================================
+// CALENDÁRIO E PREVISÃO DE ALOCAÇÃO
+// ============================================
+
+enum EventoStatus {
+  PREVISAO
+  VALIDO
+}
+
+model EventoCalendario {
+  id           String       @id @default(uuid())
+  titulo       String
+  descricao    String?
+  dataInicio   DateTime
+  dataFim      DateTime
+  status       EventoStatus @default(PREVISAO)
+  tipo         String       @default("REUNIAO") // OBRA | REUNIAO | VISITA
+  orcamentoId  String?
+  custoVeiculo Decimal?     @default(0) @db.Decimal(12, 2)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  orcamento Orcamento?    @relation(fields: [orcamentoId], references: [id], onDelete: SetNull)
+  equipe    Funcionario[]
+
+  @@index([dataInicio, dataFim])
+  @@index([status])
+  @@index([tipo])
+  @@index([orcamentoId])
+  @@map("eventos_calendario")
 }
 
 model OrcamentoItem {
@@ -707,6 +743,11 @@ enum TipoServico {
   ADMINISTRATIVO
 }
 
+enum TipoRecursoApontamento {
+  HORA_ENGENHARIA
+  DIARIA_EQUIPE
+}
+
 model Projeto {
   id                   String        @id @default(uuid())
   orcamentoId          String        @unique
@@ -729,6 +770,15 @@ model Projeto {
   // Indica que esta ordem de serviço não terá obra de campo (ex: desenho técnico, consultoria)
   semObra              Boolean       @default(false)
   justificativaSemObra String?
+  // Planejamento orçado de recursos
+  horasEngenhariaOrcadas Float       @default(0)
+  diariasEquipeOrcadas   Float       @default(0)
+  valorHoraEngenharia    Float?
+  valorDiariaEquipe      Float?
+  // Auditoria do início sem estoque
+  iniciadoSemEstoque       Boolean   @default(false)
+  iniciadoSemEstoqueEm     DateTime?
+  iniciadoSemEstoquePorId  String?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
@@ -747,8 +797,42 @@ model Projeto {
   engenharia   ProjetoEngenharia? // Aba Projetos de Engenharia (Notion)
   compras          Compra[] // Compras avulsas classificadas para esta OS
   reservasMaterial ReservaMaterialProjeto[]
+  iniciadoSemEstoquePor User? @relation("OsInicioSemEstoque", fields: [iniciadoSemEstoquePorId], references: [id], onDelete: SetNull)
+  apontamentos         ApontamentoOs[]
 
   @@map("projetos")
+}
+
+model ApontamentoOs {
+  id              String   @id @default(uuid())
+  projetoId       String
+  dataApontamento DateTime @db.Date
+  observacoes     String?
+  criadoPorId     String
+  createdAt       DateTime @default(now())
+
+  projeto   Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  criadoPor User    @relation("ApontamentosOsCriados", fields: [criadoPorId], references: [id])
+  itens     ApontamentoOsItem[]
+
+  @@index([projetoId, dataApontamento])
+  @@map("apontamentos_os")
+}
+
+model ApontamentoOsItem {
+  id            String                 @id @default(uuid())
+  apontamentoId String
+  tipoRecurso   TipoRecursoApontamento
+  quantidade    Float
+  userId        String?
+  funcionarioId String?
+
+  apontamento ApontamentoOs @relation(fields: [apontamentoId], references: [id], onDelete: Cascade)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  funcionario Funcionario?  @relation(fields: [funcionarioId], references: [id], onDelete: SetNull)
+
+  @@index([apontamentoId])
+  @@map("apontamentos_os_itens")
 }
 
 // Controle de Qualidade da OS (aba Qualidade no modal de detalhes)
@@ -1784,6 +1868,8 @@ model Funcionario {
   ocorrenciasPontoRh            OcorrenciaPontoRh[]
   comentariosConferenciaPonto   ComentarioConferenciaPontoRh[]
   workShiftCompensacoes         CompensacaoHorasRh[]
+  eventosCalendario             EventoCalendario[]
+  apontamentosOsItens           ApontamentoOsItem[]
 
   @@map("funcionarios")
 }

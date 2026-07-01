@@ -1027,10 +1027,33 @@ async function evolutionRecoverRecipientNumberForSend(firstNumber: string): Prom
  * função na fila global (whatsappSendQueue) para evitar burst de envios
  * paralelos contra a Evolution Go e race condition na resolução de @lid.
  */
+export type WhatsappProviderQuotedOptions = {
+  quotedMessageId?: string;
+  /** JID do chat onde a mensagem citada existe (default: chatId do envio). */
+  quotedRemoteJid?: string;
+  /** Se a mensagem citada foi enviada por nós (default: false). */
+  quotedFromMe?: boolean;
+};
+
+function buildProviderQuotedPayload(
+  chatId: string,
+  options?: WhatsappProviderQuotedOptions
+): Record<string, unknown> | undefined {
+  const quotedMessageId = (options?.quotedMessageId || '').trim();
+  if (!quotedMessageId) return undefined;
+  return {
+    key: {
+      id: quotedMessageId,
+      remoteJid: canonicalWhatsappChatId(options?.quotedRemoteJid || chatId),
+      fromMe: options?.quotedFromMe === true
+    }
+  };
+}
+
 async function sendWhatsappProviderTextRaw(
   chatId: string,
   text: string,
-  options?: { quotedMessageId?: string }
+  options?: WhatsappProviderQuotedOptions
 ): Promise<string | null> {
   if (isEvolutionProviderKind()) {
     await ensureEvolutionInstanceReady();
@@ -1039,7 +1062,7 @@ async function sendWhatsappProviderTextRaw(
     await refreshContatoS3eFromWhatsappNumbers(chatId);
     const resolved = await resolvePreferredChatIdForOutbound(chatId);
     let number = chatIdToEvolutionNumber(canonicalWhatsappChatId(resolved));
-    const quotedMessageId = (options?.quotedMessageId || '').trim();
+    const quoted = buildProviderQuotedPayload(canonicalWhatsappChatId(resolved), options);
     const buildBody = (n: string): Record<string, unknown> => {
       const body: Record<string, unknown> = {
         number: n,
@@ -1047,9 +1070,7 @@ async function sendWhatsappProviderTextRaw(
         presence: evolutionSendPresence(),
         delay: evolutionSendDelayMs()
       };
-      if (quotedMessageId) {
-        body.quoted = { key: { id: quotedMessageId } };
-      }
+      if (quoted) body.quoted = quoted;
       return body;
     };
     let res = await evolutionApiPost(path, buildBody(number));
@@ -1101,6 +1122,8 @@ export interface WhatsappProviderSendMediaPayload {
   filename?: string;
   caption?: string;
   quotedMessageId?: string;
+  quotedRemoteJid?: string;
+  quotedFromMe?: boolean;
 }
 
 function providerEndpointForMediaType(type: WhatsappProviderMediaType): string {
@@ -1158,7 +1181,11 @@ async function sendWhatsappProviderMediaRaw(
       mediatype = 'document';
     }
     const caption = (payload.caption && payload.caption.trim()) || '';
-    const quotedMessageId = (payload.quotedMessageId || '').trim();
+    const quoted = buildProviderQuotedPayload(canonicalWhatsappChatId(resolved), {
+      quotedMessageId: payload.quotedMessageId,
+      quotedRemoteJid: payload.quotedRemoteJid,
+      quotedFromMe: payload.quotedFromMe
+    });
     const buildBody = (n: string): Record<string, unknown> => {
       // Voice = nota de voz (PTT). Marcamos explicitamente para que o WhatsApp do
       // destinatário exiba a barra de progresso + foto do perfil (estilo "áudio
@@ -1178,9 +1205,7 @@ async function sendWhatsappProviderMediaRaw(
       if (isVoice) {
         body.ptt = true;
       }
-      if (quotedMessageId) {
-        body.quoted = { key: { id: quotedMessageId } };
-      }
+      if (quoted) body.quoted = quoted;
       return body;
     };
 
@@ -1328,7 +1353,7 @@ async function sendWhatsappProviderMediaRaw(
 export async function sendWhatsappProviderText(
   chatId: string,
   text: string,
-  options?: { quotedMessageId?: string }
+  options?: WhatsappProviderQuotedOptions
 ): Promise<string | null> {
   return withWhatsappSendLock({ label: 'sendText' }, () =>
     sendWhatsappProviderTextRaw(chatId, text, options)
@@ -1353,6 +1378,8 @@ export interface WhatsappProviderSendReactionPayload {
   providerMessageId: string;
   /** `true` se a mensagem original foi enviada por nós (afeta o `key.fromMe` da API v2). */
   fromMe: boolean;
+  /** Em grupos: JID do participante que enviou a mensagem alvo (obrigatório para reagir a mensagens de terceiros). */
+  participant?: string | null;
   /**
    * Emoji da reação. Use string vazia `''` para REMOVER a reação anteriormente
    * enviada (semântica oficial do WhatsApp).
@@ -1383,8 +1410,11 @@ export async function sendWhatsappProviderReaction(
     throw new Error('sendWhatsappProviderReaction: chatId e providerMessageId são obrigatórios');
   }
   return withWhatsappSendLock({ label: 'sendReaction', skipJitter: true }, async () => {
+    const key: Record<string, unknown> = { remoteJid, fromMe: !!payload.fromMe, id: messageId };
+    const participant = payload.participant?.trim();
+    if (participant) key.participant = participant;
     return EvoChat.evolutionSendReaction({
-      key: { remoteJid, fromMe: !!payload.fromMe, id: messageId },
+      key,
       reaction: payload.emoji
     });
   });
@@ -1417,32 +1447,46 @@ export async function fetchWhatsappProviderMediaWithRange(
 export async function fetchWhatsappProviderMessageDownloadMedia(
   chatId: string,
   messageId: string,
-  rangeHeader?: string
+  rangeHeader?: string,
+  fromMe?: boolean
 ): Promise<Response> {
   if (isEvolutionProviderKind()) {
     const remoteJid = canonicalWhatsappChatId(chatId);
-    const payload: Record<string, unknown> = {
-      message: {
-        key: {
-          id: messageId.trim(),
-          remoteJid,
-          fromMe: false
+    const id = messageId.trim();
+    const attempts =
+      typeof fromMe === 'boolean' ? [fromMe] : [false, true];
+
+    let lastError: Error | null = null;
+    for (const attemptFromMe of attempts) {
+      try {
+        const payload: Record<string, unknown> = {
+          message: {
+            key: {
+              id,
+              remoteJid,
+              fromMe: attemptFromMe
+            }
+          },
+          convertToMp4: false
+        };
+        const raw = await EvoChat.evolutionGetBase64FromMediaMessage(payload);
+        const parsed = extractEvolutionMediaBinary(raw);
+        if (!parsed) {
+          lastError = new Error('Evolution não retornou base64 de mídia para a mensagem informada');
+          continue;
         }
-      },
-      convertToMp4: false
-    };
-    const raw = await EvoChat.evolutionGetBase64FromMediaMessage(payload);
-    const parsed = extractEvolutionMediaBinary(raw);
-    if (!parsed) {
-      throw new Error('Evolution não retornou base64 de mídia para a mensagem informada');
-    }
-    return new Response(parsed.buffer, {
-      status: 200,
-      headers: {
-        'content-type': parsed.contentType || 'application/octet-stream',
-        'content-length': String(parsed.buffer.length)
+        return new Response(parsed.buffer, {
+          status: 200,
+          headers: {
+            'content-type': parsed.contentType || 'application/octet-stream',
+            'content-length': String(parsed.buffer.length)
+          }
+        });
+      } catch (e) {
+        lastError = e instanceof Error ? e : new Error(String(e));
       }
-    });
+    }
+    throw lastError ?? new Error('Evolution não retornou base64 de mídia para a mensagem informada');
   }
 
   const s = session();

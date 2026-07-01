@@ -17,6 +17,15 @@ import { isAdmin, isDeveloper } from '../utils/permissions';
 import { getStatusEngenhariaStyle } from '../constants/engenhariaProjeto';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useF1Key } from '../hooks/useF1Key';
+import ModalApontamentoOs from './ModalApontamentoOs';
+import { apropriacaoOsService } from '../services/apropriacaoOsService';
+import {
+  formatMoeda,
+  formatQuantidade,
+  type ResultadoOsCalculado,
+} from '../utils/apropriacaoOs';
+import { projetosService } from '../services/projetosService';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,7 +101,7 @@ export interface ProjetoDetalhe {
   createdAt?: string;
 }
 
-type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Qualidade';
+type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Qualidade' | 'Resultado';
 
 const MSG_BLOQUEIO_CONCLUSAO_ENG =
   'Essa ordem de serviço não pode ser concluída pois o projeto ainda não está concluído. Pressione a equipe de projetos!';
@@ -134,7 +143,7 @@ interface ModalVizualizacaoProjetoProps {
   onAtribuirEngenharia?: () => void;
 }
 
-const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Qualidade'];
+const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Qualidade', 'Resultado'];
 
 // Retorna os nomes dos responsáveis (suporta múltiplos)
 function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisIds?: string[] }, usuariosDisponiveis: any[]): string {
@@ -148,9 +157,12 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const { user } = useContext(AuthContext) || {};
   const [activeTab, setActiveTab] = useState<Aba>(initialTab);
   const [loadingAcao, setLoadingAcao] = useState(false);
-
-
-  // Tasks Kanban
+  const [apontamentoOpen, setApontamentoOpen] = useState(false);
+  const [resumoApropriacao, setResumoApropriacao] = useState<ResultadoOsCalculado | null>(null);
+  const [estoqueEscapeOpen, setEstoqueEscapeOpen] = useState(false);
+  const [materiaisFaltantesEstoque, setMateriaisFaltantesEstoque] = useState<
+    Array<{ nome: string; necessario: number; disponivel: number; falta: number; bancoFrio?: boolean }>
+  >([]);
   interface Task {
     id: string;
     titulo: string;
@@ -299,8 +311,26 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     if (isOpen && activeTab === 'Qualidade' && projeto?.id) {
       carregarQualidade();
     }
+    if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status === 'EXECUCAO' || projeto.status === 'CONCLUIDO')) {
+      void carregarResumoApropriacao();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, activeTab, projeto?.id]);
+
+  async function carregarResumoApropriacao() {
+    if (!projeto?.id) return;
+    try {
+      const res = await apropriacaoOsService.obterResumo(projeto.id);
+      if (res.success && res.data) setResumoApropriacao(res.data);
+    } catch {
+      /* silencioso */
+    }
+  }
+
+  useF1Key(
+    isOpen && projeto.status === 'EXECUCAO' && !apontamentoOpen,
+    () => setApontamentoOpen(true)
+  );
 
   async function carregarQualidade() {
     if (!projeto?.id) return;
@@ -1371,9 +1401,43 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   async function handleGerarObra() {
     try {
       setLoadingAcao(true);
-      await axiosApiService.put(`${ENDPOINTS.PROJETOS}/${projeto.id}/status`, { status: 'EXECUCAO' });
-      if (onRefresh) onRefresh();
+      const response = (await projetosService.atualizarStatus(projeto.id, 'EXECUCAO')) as {
+        success: boolean;
+        error?: string;
+        status?: number;
+        code?: string;
+        materiaisFaltantes?: Array<{ nome: string; necessario: number; disponivel: number; falta: number }>;
+      };
+      if (response.success) {
+        toast.success('Obra iniciada — OS em execução');
+        if (onRefresh) await onRefresh();
+        setActiveTab('Kanban');
+      } else if (
+        (response.code === 'ESTOQUE_INSUFICIENTE' || response.status === 409) &&
+        (response.materiaisFaltantes?.length || (response.error || '').includes('estoque'))
+      ) {
+        setMateriaisFaltantesEstoque(response.materiaisFaltantes || []);
+        setEstoqueEscapeOpen(true);
+      } else {
+        toast.error(response.error || 'Erro ao iniciar obra');
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Erro ao iniciar obra');
+    } finally {
+      setLoadingAcao(false);
+    }
+  }
+
+  async function handleIniciarSemEstoque() {
+    try {
+      setLoadingAcao(true);
+      await projetosService.atualizarStatus(projeto.id, 'EXECUCAO', true);
+      toast.warning('Obra iniciada sem materiais em estoque');
+      setEstoqueEscapeOpen(false);
+      if (onRefresh) await onRefresh();
       setActiveTab('Kanban');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Erro ao iniciar sem estoque');
     } finally {
       setLoadingAcao(false);
     }
@@ -2040,7 +2104,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
                 </div>
 
-                {engenhariaAtribuicao?.precisaEquipeEngenharia && (
+                {engenhariaAtribuicao && (
                   <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
                     <div
                       className={
@@ -3551,6 +3615,93 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                 )}
               </div>
             )}
+
+          {activeTab === 'Resultado' && (
+            <div className="space-y-6 animate-fade-in">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Resultado — Orçado vs Realizado</h3>
+              {!resumoApropriacao ? (
+                <p className="text-sm text-gray-500">Carregando resumo...</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className={`rounded-2xl border-2 p-5 ${resumoApropriacao.estouroHorasEngenharia ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-blue-200 bg-blue-50 dark:bg-blue-900/20'}`}>
+                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Horas de Engenharia</h4>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span>Orçado</span>
+                        <span className="font-semibold">{formatQuantidade(resumoApropriacao.horasEngenhariaOrcadas, 'h')}</span>
+                      </div>
+                      <div className="flex justify-between text-sm mb-3">
+                        <span>Realizado</span>
+                        <span className={`font-semibold ${resumoApropriacao.estouroHorasEngenharia ? 'text-red-700' : ''}`}>
+                          {formatQuantidade(resumoApropriacao.horasEngenhariaRealizadas, 'h')}
+                        </span>
+                      </div>
+                      <div className="h-3 bg-white/70 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${resumoApropriacao.estouroHorasEngenharia ? 'bg-red-500' : 'bg-blue-500'}`}
+                          style={{
+                            width: `${Math.min(100, resumoApropriacao.horasEngenhariaOrcadas > 0 ? (resumoApropriacao.horasEngenhariaRealizadas / resumoApropriacao.horasEngenhariaOrcadas) * 100 : 0)}%`,
+                          }}
+                        />
+                      </div>
+                      {resumoApropriacao.estouroHorasEngenharia && (
+                        <p className="text-xs text-red-700 mt-2 font-semibold">Orçamento de horas estourado</p>
+                      )}
+                    </div>
+
+                    <div className={`rounded-2xl border-2 p-5 ${resumoApropriacao.estouroDiariasEquipe ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20'}`}>
+                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Diárias de Equipe</h4>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span>Orçado</span>
+                        <span className="font-semibold">{formatQuantidade(resumoApropriacao.diariasEquipeOrcadas, 'd')}</span>
+                      </div>
+                      <div className="flex justify-between text-sm mb-3">
+                        <span>Realizado</span>
+                        <span className={`font-semibold ${resumoApropriacao.estouroDiariasEquipe ? 'text-red-700' : ''}`}>
+                          {formatQuantidade(resumoApropriacao.diariasEquipeRealizadas, 'd')}
+                        </span>
+                      </div>
+                      <div className="h-3 bg-white/70 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${resumoApropriacao.estouroDiariasEquipe ? 'bg-red-500' : 'bg-emerald-500'}`}
+                          style={{
+                            width: `${Math.min(100, resumoApropriacao.diariasEquipeOrcadas > 0 ? (resumoApropriacao.diariasEquipeRealizadas / resumoApropriacao.diariasEquipeOrcadas) * 100 : 0)}%`,
+                          }}
+                        />
+                      </div>
+                      {resumoApropriacao.estouroDiariasEquipe && (
+                        <p className="text-xs text-red-700 mt-2 font-semibold">Orçamento de diárias estourado</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="card-primary p-4">
+                      <div className="text-xs text-gray-500">Homem-hora orçado</div>
+                      <div className="text-xl font-bold">{formatQuantidade(resumoApropriacao.homemHoraOrcado, 'h')}</div>
+                    </div>
+                    <div className="card-primary p-4">
+                      <div className="text-xs text-gray-500">Homem-hora realizado</div>
+                      <div className="text-xl font-bold">{formatQuantidade(resumoApropriacao.homemHoraRealizado, 'h')}</div>
+                    </div>
+                    <div className="card-primary p-4">
+                      <div className="text-xs text-gray-500">Valor fechado</div>
+                      <div className="text-xl font-bold">{formatMoeda(resumoApropriacao.valorFechado)}</div>
+                    </div>
+                    <div className={`card-primary p-4 ${resumoApropriacao.resultado >= 0 ? '' : 'ring-2 ring-red-300'}`}>
+                      <div className="text-xs text-gray-500">Resultado</div>
+                      <div className={`text-xl font-bold ${resumoApropriacao.resultado >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                        {formatMoeda(resumoApropriacao.resultado)}
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-1">
+                        Custo orç: {formatMoeda(resumoApropriacao.custoOrcado)} · real: {formatMoeda(resumoApropriacao.custoRealizado)}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           </div>
         </div>
 
@@ -4414,6 +4565,58 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         loading={kitComposicaoModal.loading}
         data={kitComposicaoModal.data}
       />
+
+      {projeto.status === 'EXECUCAO' && isOpen && (
+        <button
+          type="button"
+          onClick={() => setApontamentoOpen(true)}
+          className="fixed bottom-6 right-6 z-[70] px-4 py-3 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-lg text-sm"
+          title="Apontamento rápido (F1)"
+        >
+          Apontar (F1)
+        </button>
+      )}
+
+      <ModalApontamentoOs
+        projetoId={projeto.id}
+        projetoTitulo={projeto.titulo}
+        isOpen={apontamentoOpen}
+        onClose={() => setApontamentoOpen(false)}
+        onSaved={(resumo) => setResumoApropriacao(resumo)}
+      />
+
+      {estoqueEscapeOpen && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 p-4">
+          <div className="max-w-lg w-full bg-white dark:bg-dark-card rounded-2xl shadow-2xl border border-red-200 p-6">
+            <h3 className="text-lg font-bold text-red-700 mb-2">Porra, está faltando material</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
+              A validação de estoque encontrou itens insuficientes para iniciar a obra normalmente.
+            </p>
+            {materiaisFaltantesEstoque.length > 0 && (
+              <ul className="text-xs space-y-2 max-h-40 overflow-y-auto mb-4 text-gray-700 dark:text-gray-300">
+                {materiaisFaltantesEstoque.map((m, i) => (
+                  <li key={i}>
+                    • {m.nome} — falta {m.falta} (disp. {m.disponivel})
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-col sm:flex-row gap-3 justify-end">
+              <button type="button" className="btn-secondary" onClick={() => setEstoqueEscapeOpen(false)}>
+                Voltar
+              </button>
+              <button
+                type="button"
+                className="btn-primary bg-red-600 hover:bg-red-700"
+                onClick={handleIniciarSemEstoque}
+                disabled={loadingAcao}
+              >
+                Dar início sem materiais em estoque
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

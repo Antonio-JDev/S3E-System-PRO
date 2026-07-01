@@ -1,4 +1,10 @@
 import { prisma } from '../lib/prisma';
+import {
+  calcularCpvLinhaItem,
+  classificarOrcamentoBI,
+  isOrcamentoAprovadoBI,
+  whereVendasBI,
+} from '../utils/biOrcamentoStatus.util';
 
 // Configuração de mão de obra para quadros (15% do custo de materiais)
 const MAO_OBRA_PERCENTUAL = 0.15;
@@ -267,16 +273,9 @@ export class BIService {
     dataInicio: Date,
     dataFim: Date
   ): Promise<CustosQuadros> {
-    // Buscar orçamentos vendidos (com venda associada) no período
     const orcamentos = await prisma.orcamento.findMany({
       where: {
-        createdAt: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        venda: {
-          isNot: null, // Apenas orçamentos que foram vendidos
-        },
+        venda: whereVendasBI(dataInicio, dataFim),
       },
       include: {
         items: {
@@ -292,6 +291,7 @@ export class BIService {
 
     for (const orcamento of orcamentos) {
       for (const item of orcamento.items) {
+        if ((item as { vendaDiretaFornecedor?: boolean }).vendaDiretaFornecedor) continue;
         if (item.tipo === 'QUADRO_PRONTO') {
           const custoMateriais = (item.custoUnit || 0) * (item.quantidade || 0);
           const custoMaoObra = custoMateriais * MAO_OBRA_PERCENTUAL;
@@ -319,13 +319,7 @@ export class BIService {
   ): Promise<LucrosQuadros> {
     const orcamentos = await prisma.orcamento.findMany({
       where: {
-        createdAt: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        venda: {
-          isNot: null,
-        },
+        venda: whereVendasBI(dataInicio, dataFim),
       },
       include: {
         items: {
@@ -343,6 +337,7 @@ export class BIService {
 
     for (const orcamento of orcamentos) {
       for (const item of orcamento.items) {
+        if ((item as { vendaDiretaFornecedor?: boolean }).vendaDiretaFornecedor) continue;
         if (item.tipo === 'QUADRO_PRONTO') {
           const custoMateriais = (item.custoUnit || 0) * (item.quantidade || 0);
           const custoMaoObra = custoMateriais * MAO_OBRA_PERCENTUAL;
@@ -376,12 +371,7 @@ export class BIService {
     dataFim: Date
   ): Promise<VendasStats> {
     const vendas = await prisma.venda.findMany({
-      where: {
-        createdAt: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       select: {
         valorTotal: true,
       },
@@ -407,13 +397,7 @@ export class BIService {
   ): Promise<{ porTipo: MarkupItem[] }> {
     const orcamentos = await prisma.orcamento.findMany({
       where: {
-        createdAt: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        venda: {
-          isNot: null,
-        },
+        venda: whereVendasBI(dataInicio, dataFim),
       },
       include: {
         items: {
@@ -452,6 +436,7 @@ export class BIService {
 
     for (const orcamento of orcamentos) {
       for (const item of orcamento.items) {
+        if ((item as { vendaDiretaFornecedor?: boolean }).vendaDiretaFornecedor) continue;
         const tipo = item.tipo as string;
         const custoUnit = item.custoUnit || 0;
         const precoUnit = item.precoUnit || 0;
@@ -751,15 +736,7 @@ export class BIService {
   ): Promise<DashboardMetrics> {
     // 1. Vendas Total (Receita Bruta)
     const vendas = await prisma.venda.findMany({
-      where: {
-        dataVenda: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        status: {
-          not: 'Cancelada',
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       select: {
         valorTotal: true,
         orcamentoId: true,
@@ -768,9 +745,7 @@ export class BIService {
 
     const vendasTotal = vendas.reduce((sum, v) => sum + (v.valorTotal || 0), 0);
 
-    // 2. CPV (Custo dos Produtos Vendidos)
-    // Buscar itens de orçamento das vendas realizadas
-    const orcamentoIds = vendas.map((v) => v.orcamentoId).filter(Boolean);
+    const orcamentoIds = vendas.map((v) => v.orcamentoId).filter(Boolean) as string[];
     
     let cpv = 0;
     if (orcamentoIds.length > 0) {
@@ -779,26 +754,16 @@ export class BIService {
           orcamentoId: {
             in: orcamentoIds,
           },
-          // Excluir serviços e custos extras do CPV
-          tipo: {
-            notIn: ['SERVICO', 'CUSTO_EXTRA'],
-          },
         },
-        include: {
-          material: {
-            select: {
-              id: true,
-              sku: true,
-              nome: true,
-            },
-          },
+        select: {
+          tipo: true,
+          quantidade: true,
+          custoUnit: true,
+          vendaDiretaFornecedor: true,
         },
       });
 
-      cpv = itensVendidos.reduce(
-        (sum, item) => sum + (item.quantidade || 0) * (item.custoUnit || 0),
-        0
-      );
+      cpv = itensVendidos.reduce((sum, item) => sum + calcularCpvLinhaItem(item, MAO_OBRA_PERCENTUAL), 0);
     }
 
     // 3. Margem Bruta (Lucro Bruto)
@@ -824,31 +789,15 @@ export class BIService {
     // Calcular custos fixos baseado nos pagamentos realizados no período
     let custosFixosTotal = 0;
     despesasFixas.forEach((despesa) => {
-      if (despesa.pagamentos.length > 0) {
-        // Se houver pagamentos no período, somar os valores pagos
-        despesa.pagamentos.forEach((pagamento) => {
-          custosFixosTotal += Number(pagamento.valorPago);
-        });
-      } else {
-        // Se não houver pagamentos no período, usar o valor mensal da despesa
-        // Calcular proporcionalmente aos meses no período
-        const mesesNoPeriodo = this.calcularMesesNoPeriodo(dataInicio, dataFim);
-        custosFixosTotal += Number(despesa.valor) * mesesNoPeriodo;
-      }
+      despesa.pagamentos.forEach((pagamento) => {
+        custosFixosTotal += Number(pagamento.valorPago);
+      });
     });
 
     // 5. Investimentos em Produtos por Mês (CPV por mês)
     // Buscar vendas novamente com dataVenda para agrupar por mês
     const vendasComData = await prisma.venda.findMany({
-      where: {
-        dataVenda: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        status: {
-          not: 'Cancelada',
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       select: {
         dataVenda: true,
         orcamentoId: true,
@@ -883,23 +832,17 @@ export class BIService {
           orcamentoId: {
             in: orcamentoIdsMes,
           },
-          tipo: {
-            notIn: ['SERVICO', 'CUSTO_EXTRA'],
-          },
         },
-        include: {
-          material: {
-            select: {
-              id: true,
-              sku: true,
-              nome: true,
-            },
-          },
+        select: {
+          tipo: true,
+          quantidade: true,
+          custoUnit: true,
+          vendaDiretaFornecedor: true,
         },
       });
 
       const cpvMes = itens.reduce(
-        (sum, item) => sum + (item.quantidade || 0) * (item.custoUnit || 0),
+        (sum, item) => sum + calcularCpvLinhaItem(item, MAO_OBRA_PERCENTUAL),
         0
       );
 
@@ -1047,15 +990,7 @@ export class BIService {
     limit: number = 10
   ): Promise<MaterialMaisVendido[]> {
     const vendas = await prisma.venda.findMany({
-      where: {
-        dataVenda: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        status: {
-          not: 'Cancelada',
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       include: {
         orcamento: {
           include: {
@@ -1094,6 +1029,7 @@ export class BIService {
     vendas.forEach((venda) => {
       if (venda.orcamento?.items) {
         venda.orcamento.items.forEach((item) => {
+          if ((item as { vendaDiretaFornecedor?: boolean }).vendaDiretaFornecedor) return;
           if (item.materialId && item.material) {
             const materialId = item.material.id;
             const materialInfo = materiaisMap.get(materialId) || {
@@ -1269,15 +1205,7 @@ export class BIService {
   }>> {
     // Buscar vendas realizadas no período
     const vendas = await prisma.venda.findMany({
-      where: {
-        dataVenda: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        status: {
-          not: 'Cancelada',
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       include: {
         orcamento: {
           include: {
@@ -1329,6 +1257,7 @@ export class BIService {
       if (!venda.orcamento?.items) return;
 
       venda.orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'SERVICO' && item.servicoNome) {
           const servicoNome = item.servicoNome;
           const servicoInfo = servicoMap.get(servicoNome) || {
@@ -1337,8 +1266,10 @@ export class BIService {
           };
           const classificacao = classificacaoLabels[servicoInfo.tipoServico] || 'Mão de Obra';
 
-          const receita = item.precoUnit || 0;
-          const custo = servicoInfo.custo || item.custoUnit || 0;
+          const qtd = item.quantidade || 1;
+          const receita = item.subtotal ?? (item.precoUnit || 0) * qtd;
+          const custoUnit = servicoInfo.custo ?? item.custoUnit ?? 0;
+          const custo = custoUnit * qtd;
 
           if (!servicosMap.has(servicoNome)) {
             servicosMap.set(servicoNome, {
@@ -1352,7 +1283,7 @@ export class BIService {
           const stats = servicosMap.get(servicoNome)!;
           stats.receita += receita;
           stats.custo += custo;
-          stats.quantidade += 1;
+          stats.quantidade += qtd;
         }
       });
     });
@@ -1396,7 +1327,6 @@ export class BIService {
     const hoje = new Date();
     hoje.setHours(23, 59, 59, 999);
 
-    // Buscar todos os orçamentos no período
     const orcamentos = await prisma.orcamento.findMany({
       where: {
         createdAt: {
@@ -1419,23 +1349,18 @@ export class BIService {
 
     orcamentos.forEach((orcamento) => {
       const valor = orcamento.precoVenda || 0;
-      const status = orcamento.status || 'Pendente';
-      const validade = orcamento.validade;
+      const bucket = classificarOrcamentoBI(orcamento.status, orcamento.validade, hoje);
 
-      // Verificar se está expirado (validade passou e não está aprovado)
-      const estaExpirado = validade && validade < hoje && status !== 'Aprovado';
-
-      if (status === 'Aprovado') {
+      if (bucket === 'aprovados') {
         aprovados.quantidade++;
         aprovados.valorTotal += valor;
-      } else if (estaExpirado) {
+      } else if (bucket === 'expirados') {
         expirados.quantidade++;
         expirados.valorTotal += valor;
-      } else if (status === 'Declinado' || status === 'Recusado') {
+      } else if (bucket === 'declinados') {
         declinados.quantidade++;
         declinados.valorTotal += valor;
       } else {
-        // Pendente, Rascunho, Enviado ao Cliente
         pendentes.quantidade++;
         pendentes.valorTotal += valor;
       }
@@ -1569,7 +1494,7 @@ export class BIService {
 
     // Processar orçamentos
     orcamentos.forEach((orcamento) => {
-      const isAprovado = orcamento.status === 'Aprovado';
+      const isAprovado = isOrcamentoAprovadoBI(orcamento.status);
 
       orcamento.items.forEach((item) => {
         if ((item as any).vendaDiretaFornecedor) return;
@@ -1647,6 +1572,7 @@ export class BIService {
       }
 
       orcamento.items.forEach((item) => {
+        if ((item as any).vendaDiretaFornecedor) return;
         if (item.tipo === 'SERVICO' && item.servicoNome) {
           const servicoNome = item.servicoNome;
           const classificacao = servicoMap.get(servicoNome) || 'MAO_DE_OBRA';
@@ -1709,15 +1635,7 @@ export class BIService {
   }> {
     // Buscar vendas realizadas no período
     const vendas = await prisma.venda.findMany({
-      where: {
-        dataVenda: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-        status: {
-          not: 'Cancelada',
-        },
-      },
+      where: whereVendasBI(dataInicio, dataFim),
       include: {
         orcamento: {
           include: {
@@ -1806,14 +1724,15 @@ export class BIService {
             quantidade: 0,
           };
 
-          const receita = item.subtotal || 0;
-          const custoUnit = servicoInfo.custo || item.custoUnit || 0;
-          const custo = custoUnit * (item.quantidade || 0);
+          const qtd = item.quantidade || 1;
+          const receita = item.subtotal ?? (item.precoUnit || 0) * qtd;
+          const custoUnit = servicoInfo.custo ?? item.custoUnit ?? 0;
+          const custo = custoUnit * qtd;
 
           periodoMap.set(chaveServico, {
             receita: servicoDados.receita + receita,
             custo: servicoDados.custo + custo,
-            quantidade: servicoDados.quantidade + (item.quantidade || 0),
+            quantidade: servicoDados.quantidade + qtd,
           });
         }
       });
@@ -1911,7 +1830,7 @@ export class BIService {
   };
 
   /**
-   * Receita de orçamentos aprovados (período) vs compras agregadas por classificação da NF-e
+   * Receita de vendas (dataVenda) vs compras agregadas por classificação da NF-e
    */
   static async getVendasEComprasPorClassificacao(
     dataInicio: Date,
@@ -1925,22 +1844,17 @@ export class BIService {
       quantidadeCompras: number;
     }>;
   }> {
-    const aprovados = await prisma.orcamento.findMany({
-      where: {
-        status: 'Aprovado',
-        createdAt: {
-          gte: dataInicio,
-          lte: dataFim,
-        },
-      },
+    const vendas = await prisma.venda.findMany({
+      where: whereVendasBI(dataInicio, dataFim),
       select: {
-        precoVenda: true,
+        valorTotal: true,
+        id: true,
       },
     });
 
     const vendasOrcamentosAprovados = {
-      valorTotal: aprovados.reduce((s, o) => s + (o.precoVenda || 0), 0),
-      quantidadeOrcamentos: aprovados.length,
+      valorTotal: vendas.reduce((s, v) => s + (v.valorTotal || 0), 0),
+      quantidadeOrcamentos: vendas.length,
     };
 
     const compras = await prisma.compra.findMany({

@@ -59,7 +59,6 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
             if (orcamento.descricaoTecnica) {
                 partes.push(`
                     <div class="section">
-                        <h2>Descrição Técnica do Projeto</h2>
                         ${normalizeForPdf(orcamento.descricaoTecnica)}
                     </div>
                 `);

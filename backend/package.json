@@ -7,8 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/app.ts",
     "dev:bootstrap": "sh -lc \"sed -i 's/\\r$//' ./scripts/dev-bootstrap.sh || true; sh ./scripts/dev-bootstrap.sh\"",
-    "build": "tsc --project tsconfig.build.json || echo 'Build completed with warnings'",
-    "postbuild": "node dist/swagger/writeOpenApiArtifact.js",
+    "build": "tsc --project tsconfig.build.json && node dist/swagger/writeOpenApiArtifact.js",
     "start": "node dist/app.js",
     "lint": "eslint . --ext .ts",
     "test": "npm run prisma:generate && jest",

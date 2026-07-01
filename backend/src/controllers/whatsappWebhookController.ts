@@ -14,7 +14,8 @@ import {
   evolutionMessageUpdateToAckPayload,
   evolutionPresenceToProviderPayload,
   evolutionUpsertMessageToProviderRaw,
-  evolutionWebhookSession
+  evolutionWebhookSession,
+  unwrapEvolutionWebhookMessageNode
 } from '../utils/whatsappEvolutionWebhook.util';
 import { adaptEvolutionGoWebhookBody } from '../utils/whatsappEvolutionGoWebhook.util';
 import { normalizeStoredMediaFilename } from '../utils/filename.util';
@@ -140,7 +141,7 @@ function extractEngineMediaHints(raw: Record<string, unknown>): {
   if (!message || typeof message !== 'object') {
     return out;
   }
-  const m = message as Record<string, unknown>;
+  const m = unwrapEvolutionWebhookMessageNode(message);
 
   const pick = (
     node: Record<string, unknown> | undefined,

@@ -134,7 +134,7 @@ services:
       start_period: 90s
 
   backend:
-    image: odev10antonio/s3e-backend:2.1.0
+    image: odev10antonio/s3e-backend:2.1.7
     container_name: s3e-backend-prod
     restart: unless-stopped
     dns:
@@ -240,7 +240,7 @@ services:
       - "traefik.http.services.s3e-api.loadbalancer.server.port=3001"
 
   frontend:
-    image: odev10antonio/s3e-frontend:2.1.2
+    image: odev10antonio/s3e-frontend:2.1.7
     container_name: s3e-frontend-prod
     restart: unless-stopped
     dns:

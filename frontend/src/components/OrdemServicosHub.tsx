@@ -12,7 +12,10 @@ import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
 import { AuthContext } from '../contexts/AuthContext';
 import ViewToggle from './ui/ViewToggle';
+import ActionsDropdown from './ui/ActionsDropdown';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
+import { calcularHomemHoraTotal } from '../utils/apropriacaoOs';
+import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { serverDateToInput, formatDateDisplay } from '../utils/date';
@@ -31,11 +34,6 @@ const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const MagnifyingGlassIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-    </svg>
-);
-const EllipsisVerticalIcon = (props: React.SVGProps<SVGSVGElement>) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
     </svg>
 );
 const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -196,8 +194,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [projetoAtribuirEng, setProjetoAtribuirEng] = useState<Projeto | null>(null);
     const [responsavelEngSelecionado, setResponsavelEngSelecionado] = useState('');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>(loadViewMode('Ordem De Serviços'));
-    
-    // Salvar viewMode no localStorage quando mudar
     const handleViewModeChange = (mode: 'grid' | 'list') => {
         setViewMode(mode);
         saveViewMode('Ordem De Serviços', mode);
@@ -258,22 +254,29 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [formState, setFormState] = useState<CreateProjetoData>({
         titulo: '',
         descricao: '',
-        tipo: 'Instalacao',
+        tipo: 'PROJETOS_ELETRICOS',
         clienteId: '',
         responsavelId: '',
         dataInicio: '',
         dataPrevisao: '',
-        orcamentoId: ''
+        orcamentoId: '',
+        horasEngenhariaOrcadas: 0,
+        diariasEquipeOrcadas: 0,
+        valorHoraEngenharia: null,
+        valorDiariaEquipe: null,
     });
-
-    // Dropdown menu state
-    const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
     // Search input state para Cliente e Orçamento (filtrar ao digitar)
     const [buscaCliente, setBuscaCliente] = useState('');
     const [buscaOrcamento, setBuscaOrcamento] = useState('');
     const [openDropdownCliente, setOpenDropdownCliente] = useState(false);
     const [openDropdownOrcamento, setOpenDropdownOrcamento] = useState(false);
+
+    const homemHoraReservado = useMemo(() => {
+        const h = Number(formState.horasEngenhariaOrcadas) || 0;
+        const d = Number(formState.diariasEquipeOrcadas) || 0;
+        return calcularHomemHoraTotal(h, d);
+    }, [formState.horasEngenhariaOrcadas, formState.diariasEquipeOrcadas]);
 
     // ==================== CARREGAMENTO DE DADOS ====================
     useEffect(() => {
@@ -334,7 +337,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 });
             }
         } catch {
-            setEngInfoMap({});
+            /* mantém cache anterior em falha parcial */
         }
     };
 
@@ -531,16 +534,16 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         });
     }, [projetos, projectProgressMap]);
 
-    const engInfoModal = projetoToView ? engInfoMap[projetoToView.id] : undefined;
     const engenhariaAtribuicaoModal = useMemo(() => {
-        if (!engInfoModal?.precisaEquipeEngenharia) return undefined;
+        if (!projetoToView) return undefined;
+        const info = engInfoMap[projetoToView.id];
         return {
             precisaEquipeEngenharia: true,
-            atribuido: Boolean(engInfoModal.atribuido),
-            responsavelNome: engInfoModal.responsavelNome ?? null,
-            statusEngenharia: engInfoModal.statusEngenharia ?? null,
+            atribuido: Boolean(info?.atribuido),
+            responsavelNome: info?.responsavelNome ?? null,
+            statusEngenharia: info?.statusEngenharia ?? null,
         };
-    }, [engInfoModal]);
+    }, [projetoToView, engInfoMap]);
 
     // ==================== FILTROS ====================
     const filteredProjetos = useMemo(() => {
@@ -610,22 +613,30 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 descricao: projeto.descricao,
                 tipo: projeto.tipo,
                 clienteId: projeto.clienteId,
-                responsavelId: projeto.responsavelId,
+                responsavelId: projeto.responsavelId || '',
                 dataInicio: serverDateToInput(projeto.dataInicio as any),
                 dataPrevisao: serverDateToInput(projeto.dataPrevisao as any),
-                orcamentoId: projeto.orcamentoId || ''
+                orcamentoId: projeto.orcamentoId || '',
+                horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas ?? 0,
+                diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
+                valorHoraEngenharia: projeto.valorHoraEngenharia ?? null,
+                valorDiariaEquipe: projeto.valorDiariaEquipe ?? null,
             });
         } else {
             setProjetoToEdit(null);
             setFormState({
                 titulo: '',
                 descricao: '',
-                tipo: 'Instalacao',
+                tipo: 'PROJETOS_ELETRICOS',
                 clienteId: '',
                 responsavelId: '',
                 dataInicio: '',
                 dataPrevisao: '',
-                orcamentoId: ''
+                orcamentoId: '',
+                horasEngenhariaOrcadas: 0,
+                diariasEquipeOrcadas: 0,
+                valorHoraEngenharia: null,
+                valorDiariaEquipe: null,
             });
             setBuscaCliente('');
             setBuscaOrcamento('');
@@ -672,13 +683,39 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             toast.error('Selecione um orçamento aprovado');
             return;
         }
+        if (!formState.responsavelId) {
+            toast.error('Selecione o gerente do projeto');
+            return;
+        }
+        if (!formState.dataInicio || !formState.dataPrevisao) {
+            toast.error('Informe as datas de início e fim');
+            return;
+        }
+        const horas = Number(formState.horasEngenhariaOrcadas) || 0;
+        const diarias = Number(formState.diariasEquipeOrcadas) || 0;
+        if (horas <= 0 && diarias <= 0) {
+            toast.error('Informe horas de engenharia ou diárias de equipe orçadas');
+            return;
+        }
         try {
             if (projetoToEdit) {
-                const response = await projetosService.atualizar(projetoToEdit.id, formState);
+                const { orcamentoId: _orcamentoId, ...updatePayload } = formState;
+                const response = await projetosService.atualizar(projetoToEdit.id, updatePayload);
                 if (response.success && response.data) {
-                    setProjetos(prev => prev.map(p => p.id === projetoToEdit.id ? response.data! : p));
+                    const updated = response.data;
+                    const responsavelUsuario = updated.responsavelId
+                        ? usuarios.find((u) => u.id === updated.responsavelId)
+                        : undefined;
+                    const merged = {
+                        ...updated,
+                        responsavel: updated.responsavel ?? (responsavelUsuario
+                            ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
+                            : undefined),
+                    };
+                    setProjetos((prev) => prev.map((p) => (p.id === projetoToEdit.id ? merged : p)));
                     setIsCreateModalOpen(false);
                     setProjetoToEdit(null);
+                    toast.success('Ordem de serviço atualizada');
                 }
             } else {
                 const response = await projetosService.criar(formState);
@@ -687,8 +724,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     setIsCreateModalOpen(false);
                 }
             }
-        } catch (err) {
-            toast.error('Erro ao salvar ordem de serviço');
+        } catch (err: unknown) {
+            const message =
+                (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+                || 'Erro ao salvar ordem de serviço';
+            toast.error(message);
         }
     };
 
@@ -697,7 +737,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         setProjetoAtribuirEng(projeto);
         setResponsavelEngSelecionado(info?.responsavelEngenhariaId ?? '');
         setAtribuirEngModalOpen(true);
-        setActiveDropdown(null);
     };
 
     const confirmarAtribuirEngenharia = async () => {
@@ -744,6 +783,34 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             });
         }
     };
+
+    const buildProjetoActions = useCallback((projeto: Projeto) => {
+        const atribuido = Boolean(engInfoMap[projeto.id]?.atribuido);
+        return [
+            {
+                label: 'Visualizar',
+                icon: <EyeIcon className="w-4 h-4" />,
+                onClick: () => handleOpenViewModal(projeto),
+            },
+            {
+                label: 'Editar',
+                icon: <PencilIcon className="w-4 h-4" />,
+                onClick: () => handleOpenCreateModal(projeto),
+            },
+            {
+                label: getProjetoEngenhariaActionLabel(atribuido),
+                icon: <CubeIcon className="w-4 h-4" />,
+                onClick: () => abrirAtribuirEngenharia(projeto),
+                variant: 'primary' as const,
+            },
+            {
+                label: 'Excluir',
+                icon: <TrashIcon className="w-4 h-4" />,
+                onClick: () => setProjetoToDelete(projeto),
+                variant: 'danger' as const,
+            },
+        ];
+    }, [engInfoMap]);
 
     // Fechar modais com ESC
     useEscapeKey(isCreateModalOpen, () => setIsCreateModalOpen(false));
@@ -1271,59 +1338,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                             >
                                 {/* Menu de Ações */}
                                 <div className="absolute top-4 right-4">
-                                    <button
-                                        onClick={() => setActiveDropdown(activeDropdown === projeto.id ? null : projeto.id)}
-                                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                                    >
-                                        <EllipsisVerticalIcon className="w-5 h-5" />
-                                    </button>
-                                    
-                                    {activeDropdown === projeto.id && (
-                                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-strong border border-gray-200 py-1 z-10">
-                                            <button
-                                                onClick={() => {
-                                                    handleOpenViewModal(projeto);
-                                                    setActiveDropdown(null);
-                                                }}
-                                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                            >
-                                                <EyeIcon className="w-4 h-4" />
-                                                Visualizar
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    handleOpenCreateModal(projeto);
-                                                    setActiveDropdown(null);
-                                                }}
-                                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                            >
-                                                <PencilIcon className="w-4 h-4" />
-                                                Editar
-                                            </button>
-                                            {engInfoMap[projeto.id]?.precisaEquipeEngenharia && (
-                                            <button
-                                                type="button"
-                                                onClick={() => abrirAtribuirEngenharia(projeto)}
-                                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 transition-colors"
-                                            >
-                                                <CubeIcon className="w-4 h-4" />
-                                                {engInfoMap[projeto.id]?.atribuido
-                                                    ? 'Alterar projetista'
-                                                    : 'Atribuir à Engenharia'}
-                                            </button>
-                                            )}
-                                            <button
-                                                onClick={() => {
-                                                    setProjetoToDelete(projeto);
-                                                    setActiveDropdown(null);
-                                                }}
-                                                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                                Excluir
-                                            </button>
-                                        </div>
-                                    )}
+                                    <ActionsDropdown label="Ações" actions={buildProjetoActions(projeto)} />
                                 </div>
 
                                 {/* Conteúdo do Card */}
@@ -1390,13 +1405,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     })}
                 </div>
             ): (
-                <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-soft">
+                <div className="bg-white border border-gray-200 rounded-2xl shadow-soft" style={{ overflow: 'visible', position: 'relative' }}>
+                    <div className="overflow-x-auto" style={{ overflowY: 'visible' }}>
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Ordem De Serviço</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Início</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
@@ -1454,20 +1473,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                             {projeto.status}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 text-center">
-                                        <button
-                                            onClick={() => handleOpenViewModal(projeto)}
-                                            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                                        >
-                                            <EyeIcon className="w-4 h-4 inline mr-2" />
-                                            Visualizar
-                                        </button>
+                                    <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
+                                        <div className="flex items-center justify-center" style={{ position: 'relative' }}>
+                                            <ActionsDropdown label="Ações" actions={buildProjetoActions(projeto)} />
+                                        </div>
                                     </td>
                                 </tr>
                             );
                             })}
                         </tbody>
                     </table>
+                    </div>
                 </div>
             )}
 
@@ -1519,6 +1535,16 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     />
                                 </div>
 
+                                <div className="md:col-span-2 p-4 rounded-xl bg-indigo-50 border border-indigo-200">
+                                    <div className="text-sm font-semibold text-indigo-900">Recursos reservados (homem-hora)</div>
+                                    <div className="text-2xl font-bold text-indigo-700 mt-1">
+                                        {homemHoraReservado.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h
+                                    </div>
+                                    <p className="text-xs text-indigo-600 mt-1">
+                                        {Number(formState.horasEngenhariaOrcadas) || 0}h engenharia + {Number(formState.diariasEquipeOrcadas) || 0} diárias × 8h
+                                    </p>
+                                </div>
+
                                 <div className="relative">
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                                         Cliente
@@ -1557,11 +1583,12 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Responsável Técnico
+                                        Gerente do Projeto *
                                     </label>
                                     <select
                                         value={formState.responsavelId}
                                         onChange={(e) => setFormState({...formState, responsavelId: e.target.value})}
+                                        required
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     >
                                         <option value="">Selecione o responsável</option>
@@ -1587,10 +1614,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         onChange={(e) => setFormState({...formState, tipo: e.target.value})}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     >
-                                        <option value="Instalacao">Instalação</option>
-                                        <option value="Manutencao">Manutenção</option>
-                                        <option value="Retrofit">Retrofit</option>
-                                        <option value="Automacao">Automação</option>
+                                        <option value="PROJETOS_ELETRICOS">Projetos Elétricos</option>
+                                        <option value="LAUDO_TECNICO">Laudo Técnico</option>
+                                        <option value="MANUTENCAO_EMERGENCIA">Manutenção / Emergência</option>
+                                        <option value="QUADROS_PAINEIS">Quadros e Painéis</option>
+                                        <option value="DESLIGAMENTO">Desligamento</option>
                                     </select>
                                 </div>
 
@@ -1661,12 +1689,68 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Data de Previsão
+                                        Data Fim *
                                     </label>
                                     <input
                                         type="date"
                                         value={formState.dataPrevisao}
                                         onChange={(e) => setFormState({...formState, dataPrevisao: e.target.value})}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Horas Engenharia Orçadas *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={formState.horasEngenhariaOrcadas ?? 0}
+                                        onChange={(e) => setFormState({...formState, horasEngenhariaOrcadas: Number(e.target.value)})}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Diárias Equipe Orçadas *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.5"
+                                        value={formState.diariasEquipeOrcadas ?? 0}
+                                        onChange={(e) => setFormState({...formState, diariasEquipeOrcadas: Number(e.target.value)})}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Valor Hora Engenharia (R$)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={formState.valorHoraEngenharia ?? ''}
+                                        onChange={(e) => setFormState({...formState, valorHoraEngenharia: e.target.value === '' ? null : Number(e.target.value)})}
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Valor Diária Equipe (R$)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={formState.valorDiariaEquipe ?? ''}
+                                        onChange={(e) => setFormState({...formState, valorDiariaEquipe: e.target.value === '' ? null : Number(e.target.value)})}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     />
                                 </div>

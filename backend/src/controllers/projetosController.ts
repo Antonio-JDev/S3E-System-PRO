@@ -3,7 +3,12 @@ import { ProjetoStatus } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
 import { AuditoriaService } from '../services/auditoria.service';
-import { projetosService } from '../services/projetos.service';
+import {
+  projetosService,
+  EstoqueInsuficienteError,
+  validarCamposPlanejamentoOs,
+  type CamposPlanejamentoOsInput,
+} from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
 
 /** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
@@ -236,7 +241,7 @@ export const getProjetoById = async (req: Request, res: Response): Promise<void>
 // Criar projeto
 export const createProjeto = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { orcamentoId, clienteId, titulo, descricao, tipo, responsavelId, dataInicio, dataPrevisao } = req.body;
+    const { orcamentoId, clienteId, titulo, descricao, tipo, responsavelId, dataInicio, dataPrevisao, horasEngenhariaOrcadas, diariasEquipeOrcadas, valorHoraEngenharia, valorDiariaEquipe } = req.body;
 
     console.log('🏗️ Criando projeto/obra com dados:', {
       orcamentoId,
@@ -322,40 +327,64 @@ export const createProjeto = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Criar projeto
-    const projeto = await prisma.projeto.create({
-      data: {
-        orcamentoId,
-        clienteId: clienteIdFinal,
+    // Criar projeto (com scaffolding de tasks por tipo de workflow)
+    const authUser = (req as AuthRequest).user;
+
+    try {
+      validarCamposPlanejamentoOs({
         responsavelId: responsavelId || null,
-        titulo,
-        descricao: descricao || '',
-        tipo: tipo || 'Instalacao',
-        status: 'PROPOSTA',
-        dataInicio: dataInicio ? new Date(dataInicio) : new Date(),
-        dataPrevisao: dataPrevisao ? new Date(dataPrevisao) : new Date()
-      },
+        dataInicio: dataInicio || new Date(),
+        dataPrevisao: dataPrevisao || null,
+        horasEngenhariaOrcadas: horasEngenhariaOrcadas ?? 0,
+        diariasEquipeOrcadas: diariasEquipeOrcadas ?? 0,
+      });
+    } catch (validationError) {
+      res.status(400).json({
+        success: false,
+        error: validationError instanceof Error ? validationError.message : 'Dados de planejamento inválidos',
+      });
+      return;
+    }
+
+    const projetoBase = await projetosService.criarProjeto({
+      orcamentoId,
+      clienteId: clienteIdFinal,
+      responsavelId: responsavelId || null,
+      titulo,
+      descricao: descricao || '',
+      tipo: tipo || 'Instalacao',
+      dataInicio: dataInicio ? new Date(dataInicio) : new Date(),
+      dataPrevisao: dataPrevisao ? new Date(dataPrevisao) : undefined,
+      criadoPorId: authUser?.userId ?? null,
+      horasEngenhariaOrcadas: horasEngenhariaOrcadas != null ? Number(horasEngenhariaOrcadas) : 0,
+      diariasEquipeOrcadas: diariasEquipeOrcadas != null ? Number(diariasEquipeOrcadas) : 0,
+      valorHoraEngenharia: valorHoraEngenharia != null ? Number(valorHoraEngenharia) : null,
+      valorDiariaEquipe: valorDiariaEquipe != null ? Number(valorDiariaEquipe) : null,
+    });
+
+    const projeto = await prisma.projeto.findUnique({
+      where: { id: projetoBase.id },
       include: {
         cliente: {
           select: {
             id: true,
-            nome: true
-          }
+            nome: true,
+          },
         },
         responsavel: {
           select: {
             id: true,
-            name: true
-          }
+            name: true,
+          },
         },
         orcamento: {
           select: {
             id: true,
             titulo: true,
-            precoVenda: true
-          }
-        }
-      }
+            precoVenda: true,
+          },
+        },
+      },
     });
 
     res.status(201).json({
@@ -365,9 +394,10 @@ export const createProjeto = async (req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     console.error('Erro ao criar projeto:', error);
-    res.status(500).json({ 
+    const message = error instanceof Error ? error.message : 'Erro ao criar projeto';
+    res.status(400).json({
       success: false,
-      error: 'Erro ao criar projeto' 
+      error: message,
     });
   }
 };
@@ -376,9 +406,29 @@ export const createProjeto = async (req: Request, res: Response): Promise<void> 
 export const updateProjeto = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { titulo, descricao, valorTotal, dataInicio, dataPrevisao, dataFim, semObra, justificativaSemObra } = req.body;
+    const {
+      titulo,
+      descricao,
+      valorTotal,
+      tipo,
+      responsavelId,
+      dataInicio,
+      dataPrevisao,
+      dataFim,
+      dataPrevistaInicio,
+      dataPrevistaFim,
+      semObra,
+      justificativaSemObra,
+      enderecoObra,
+      cidade,
+      estado,
+      responsavelObra,
+      horasEngenhariaOrcadas,
+      diariasEquipeOrcadas,
+      valorHoraEngenharia,
+      valorDiariaEquipe,
+    } = req.body;
 
-    // Verificar se projeto existe
     const projetoExistente = await prisma.projeto.findUnique({
       where: { id }
     });
@@ -391,37 +441,125 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Se projeto está concluído, não permitir alterações
-    if (projetoExistente.status === 'CONCLUIDO') {
+    const isConcluido = projetoExistente.status === 'CONCLUIDO';
+    const dataInicioPayload = dataInicio ?? dataPrevistaInicio;
+    const dataPrevisaoPayload = dataPrevisao ?? dataPrevistaFim;
+
+    if (typeof responsavelId !== 'undefined') {
+      const responsavelIdFinal =
+        responsavelId === '' || responsavelId === null ? null : String(responsavelId);
+
+      if (responsavelIdFinal) {
+        const responsavel = await prisma.user.findUnique({
+          where: { id: responsavelIdFinal }
+        });
+
+        if (!responsavel) {
+          res.status(404).json({
+            success: false,
+            error: 'Responsável não encontrado'
+          });
+          return;
+        }
+      }
+    }
+
+    const data: Record<string, unknown> = {};
+
+    if (!isConcluido) {
+      if (titulo !== undefined) data.titulo = titulo;
+      if (descricao !== undefined) data.descricao = descricao;
+      if (valorTotal !== undefined) data.valorTotal = valorTotal;
+      if (tipo !== undefined) data.tipo = tipo;
+      if (dataInicioPayload) data.dataInicio = new Date(dataInicioPayload);
+      if (dataPrevisaoPayload) data.dataPrevisao = new Date(dataPrevisaoPayload);
+      if (dataFim) data.dataFim = new Date(dataFim);
+    }
+
+    if (typeof responsavelId !== 'undefined') {
+      data.responsavelId =
+        responsavelId === '' || responsavelId === null ? null : String(responsavelId);
+    }
+
+    if (typeof enderecoObra !== 'undefined') data.enderecoObra = enderecoObra || null;
+    if (typeof cidade !== 'undefined') data.cidade = cidade || null;
+    if (typeof estado !== 'undefined') data.estado = estado || null;
+    if (typeof responsavelObra !== 'undefined') data.responsavelObra = responsavelObra || null;
+
+    if (typeof semObra !== 'undefined') data.semObra = Boolean(semObra);
+    if (typeof justificativaSemObra !== 'undefined') {
+      data.justificativaSemObra = justificativaSemObra || null;
+    }
+
+    if (!isConcluido) {
+      if (horasEngenhariaOrcadas !== undefined) {
+        data.horasEngenhariaOrcadas = Number(horasEngenhariaOrcadas) || 0;
+      }
+      if (diariasEquipeOrcadas !== undefined) {
+        data.diariasEquipeOrcadas = Number(diariasEquipeOrcadas) || 0;
+      }
+      if (valorHoraEngenharia !== undefined) {
+        data.valorHoraEngenharia =
+          valorHoraEngenharia === '' || valorHoraEngenharia == null
+            ? null
+            : Number(valorHoraEngenharia);
+      }
+      if (valorDiariaEquipe !== undefined) {
+        data.valorDiariaEquipe =
+          valorDiariaEquipe === '' || valorDiariaEquipe == null
+            ? null
+            : Number(valorDiariaEquipe);
+      }
+    }
+
+    if (!isConcluido && Object.keys(data).some((k) =>
+      ['responsavelId', 'dataInicio', 'dataPrevisao', 'horasEngenhariaOrcadas', 'diariasEquipeOrcadas'].includes(k)
+    )) {
+      const merged: CamposPlanejamentoOsInput = {
+        responsavelId:
+          data.responsavelId !== undefined
+            ? (data.responsavelId as string | null)
+            : projetoExistente.responsavelId,
+        dataInicio: (data.dataInicio as Date | undefined) ?? projetoExistente.dataInicio,
+        dataPrevisao: (data.dataPrevisao as Date | undefined) ?? projetoExistente.dataPrevisao,
+        horasEngenhariaOrcadas:
+          (data.horasEngenhariaOrcadas as number | undefined) ??
+          projetoExistente.horasEngenhariaOrcadas,
+        diariasEquipeOrcadas:
+          (data.diariasEquipeOrcadas as number | undefined) ??
+          projetoExistente.diariasEquipeOrcadas,
+      };
+      validarCamposPlanejamentoOs(merged);
+    }
+
+    if (Object.keys(data).length === 0) {
       res.status(400).json({
         success: false,
-        error: 'Não é possível alterar projeto concluído'
+        error: isConcluido
+          ? 'Nenhum campo permitido para atualização em projeto concluído'
+          : 'Nenhum campo para atualizar'
       });
       return;
     }
 
     const projeto = await prisma.projeto.update({
       where: { id },
-      data: {
-        titulo,
-        descricao,
-        valorTotal,
-        dataInicio: dataInicio ? new Date(dataInicio) : undefined,
-        dataPrevisao: dataPrevisao ? new Date(dataPrevisao) : undefined,
-        dataFim: dataFim ? new Date(dataFim) : undefined,
-        // Permitir atualizar flag de "sem obra" e justificativa
-        ...(typeof semObra !== 'undefined' ? { semObra: Boolean(semObra) } : {}),
-        ...(typeof justificativaSemObra !== 'undefined' ? { justificativaSemObra: justificativaSemObra || null } : {})
-      },
+      data,
       include: {
-        cliente: { select: { nome: true } },
-        orcamento: { select: { precoVenda: true } }
+        cliente: { select: { id: true, nome: true } },
+        orcamento: { select: { id: true, precoVenda: true, numeroSequencial: true } },
+        responsavel: { select: { id: true, name: true } }
       }
     });
 
     res.json({
       success: true,
-      data: projeto,
+      data: {
+        ...projeto,
+        responsavel: projeto.responsavel
+          ? { id: projeto.responsavel.id, nome: projeto.responsavel.name }
+          : null
+      },
       message: 'Projeto atualizado com sucesso'
     });
   } catch (error) {
@@ -437,27 +575,45 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
 export const updateProjetoStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { status } = req.body as { status: ProjetoStatus };
+    const { status, ignorarEstoque } = req.body as {
+      status: ProjetoStatus;
+      ignorarEstoque?: boolean;
+    };
+    const authUser = (req as AuthRequest).user;
 
     if (!['PROPOSTA','VALIDADO','APROVADO','EXECUCAO','CONCLUIDO','CANCELADO'].includes(String(status))) {
       res.status(400).json({ success: false, error: 'Status inválido. Use: PROPOSTA, VALIDADO, APROVADO, EXECUCAO, CONCLUIDO, CANCELADO' });
       return;
     }
 
-    const atualizado = await projetosService.atualizarStatus(id, status as ProjetoStatus);
+    const atualizado = await projetosService.atualizarStatus(id, status as ProjetoStatus, {
+      ignorarEstoque: Boolean(ignorarEstoque),
+      userId: authUser?.userId,
+    });
 
     res.json({ success: true, data: atualizado, message: `Status atualizado para ${status}` });
   } catch (error) {
     console.error('Erro ao atualizar status do projeto:', error);
+    if (error instanceof EstoqueInsuficienteError) {
+      res.status(409).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        materiaisFaltantes: error.materiaisFaltantes,
+      });
+      return;
+    }
     const message =
       error instanceof Error && error.message
         ? error.message
         : 'Erro ao atualizar status do projeto';
-    const bloqueioEngenharia =
+    const bloqueioNegocio =
       message.includes('não pode ser concluída') ||
       message.includes('Não é possível concluir') ||
-      message.includes('projeto de engenharia');
-    res.status(bloqueioEngenharia ? 400 : 500).json({
+      message.includes('projeto de engenharia') ||
+      message.includes('Organização Final') ||
+      message.includes('BLOQUEADA');
+    res.status(bloqueioNegocio ? 400 : 500).json({
       success: false,
       error: message,
     });
@@ -746,12 +902,16 @@ export const deleteProjeto = async (req: Request, res: Response): Promise<void> 
 // Criar projeto a partir de orçamento
 export const criarProjetoDeOrcamento = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { orcamentoId } = req.body as { orcamentoId: string };
+    const { orcamentoId, tipo } = req.body as { orcamentoId: string; tipo?: string };
     if (!orcamentoId) {
       res.status(400).json({ success: false, error: 'orcamentoId é obrigatório' });
       return;
     }
-    const projeto = await projetosService.criarProjetoAPartirDoOrcamento(orcamentoId);
+    const authUser = (req as AuthRequest).user;
+    const projeto = await projetosService.criarProjetoAPartirDoOrcamento(orcamentoId, {
+      tipo,
+      criadoPorId: authUser?.userId ?? null,
+    });
     res.status(201).json({ success: true, data: projeto, message: 'Projeto criado a partir do orçamento' });
   } catch (error) {
     res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Erro ao criar projeto do orçamento' });

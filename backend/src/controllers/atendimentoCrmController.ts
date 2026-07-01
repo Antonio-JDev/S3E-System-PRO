@@ -1,8 +1,24 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../lib/prisma';
+
+const IMAGE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'jfif', 'bmp', 'tif', 'tiff',
+]);
+
+/** Aceita PDF ou imagem por extensão e/ou mimetype (navegadores às vezes enviam application/octet-stream). */
+export function isAllowedLeadAnexoFile(file: Pick<Express.Multer.File, 'originalname' | 'mimetype'>): boolean {
+  const ext = path.extname(file.originalname || '').toLowerCase().replace(/^\./, '');
+  const mime = (file.mimetype || '').toLowerCase();
+  const pdfByExt = ext === 'pdf';
+  const imageByExt = IMAGE_EXTENSIONS.has(ext);
+  const pdfByMime = mime === 'application/pdf';
+  const imageByMime = mime.startsWith('image/');
+  const octetWithKnownExt = mime === 'application/octet-stream' && (pdfByExt || imageByExt);
+  return pdfByExt || imageByExt || pdfByMime || imageByMime || octetWithKnownExt;
+}
 
 const cwd = process.cwd();
 const uploadDir = path.join(cwd, 'uploads', 'contato-lead');
@@ -25,13 +41,10 @@ const uploadContaEnergia = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
-    const allowed = /pdf|jpeg|jpg|png|webp/i;
-    const ext = path.extname(file.originalname).toLowerCase().slice(1);
-    const mimetypeOk = file.mimetype === 'application/pdf' || file.mimetype.startsWith('image/');
-    if (allowed.test(ext) && mimetypeOk) {
+    if (isAllowedLeadAnexoFile(file)) {
       cb(null, true);
     } else {
-      cb(new Error('Apenas PDF ou imagens (JPEG, PNG, WEBP) são permitidos'));
+      cb(new Error('Apenas PDF ou imagens (JPEG, PNG, WEBP, GIF, etc.) são permitidos'));
     }
   }
 });
@@ -40,6 +53,27 @@ const uploadContaEnergia = multer({
 export const MAX_ANEXOS_LEAD = 8;
 
 export const uploadContaEnergiaMiddleware = uploadContaEnergia.array('contaEnergia', MAX_ANEXOS_LEAD);
+
+export function uploadContaEnergiaWithErrorHandling(req: Request, res: Response, next: NextFunction): void {
+  uploadContaEnergiaMiddleware(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    if (err instanceof multer.MulterError) {
+      const message =
+        err.code === 'LIMIT_FILE_SIZE'
+          ? 'Arquivo muito grande (máximo 10 MB por arquivo)'
+          : err.code === 'LIMIT_FILE_COUNT'
+            ? `Máximo de ${MAX_ANEXOS_LEAD} arquivos por envio`
+            : err.message;
+      res.status(400).json({ success: false, error: message });
+      return;
+    }
+    const message = err instanceof Error ? err.message : 'Erro ao enviar arquivo';
+    res.status(400).json({ success: false, error: message });
+  });
+}
 
 function normalizeAnexosUrls(lead: {
   anexosUrls?: unknown;

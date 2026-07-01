@@ -187,7 +187,7 @@ export async function listarProjetosEngenharia(userId: string, verTodos = false)
   const servicos = await prisma.servico.findMany({
     select: { id: true, codigo: true, nome: true, tipoServico: true },
   });
-  const { byId, byNome } = buildServicoLookupMaps(servicos);
+  const { byId, byNome, byCodigo } = buildServicoLookupMaps(servicos);
 
   const projetos = await prisma.projeto.findMany({
     where: { status: { not: 'CANCELADO' } },
@@ -222,6 +222,7 @@ export async function listarProjetosEngenharia(userId: string, verTodos = false)
       projeto.orcamento.items,
       byId,
       byNome,
+      byCodigo,
     );
     if (!(atribuido || matchAuto)) continue;
     if (!usuarioPodeVerProjetoEngenharia(projeto.engenharia, userId, verTodos)) continue;
@@ -259,7 +260,7 @@ export async function listarProjetosEngenharia(userId: string, verTodos = false)
     : [];
 
   return refreshed.map((p) => {
-    const matchAuto = projetoTemServicoEngenhariaAtribuivelSetor(p.orcamento.items as any, byId, byNome);
+    const matchAuto = projetoTemServicoEngenhariaAtribuivelSetor(p.orcamento.items as any, byId, byNome, byCodigo);
     return serializeEngenhariaRow(p as any, progressoMap[p.id] ?? 0, matchAuto);
   });
 }
@@ -405,8 +406,8 @@ export async function getEngenhariaByProjetoId(projetoId: string) {
   const servicos = await prisma.servico.findMany({
     select: { id: true, codigo: true, nome: true, tipoServico: true },
   });
-  const { byId, byNome } = buildServicoLookupMaps(servicos);
-  const matchAuto = projetoTemServicoEngenhariaAtribuivelSetor(projeto.orcamento.items, byId, byNome);
+  const { byId, byNome, byCodigo } = buildServicoLookupMaps(servicos);
+  const matchAuto = projetoTemServicoEngenhariaAtribuivelSetor(projeto.orcamento.items, byId, byNome, byCodigo);
   const progressoMap = await calcularProgressoMap([projetoId]);
 
   return serializeEngenhariaRow(projeto as any, progressoMap[projetoId] ?? 0, matchAuto);
@@ -439,11 +440,12 @@ export async function validarConclusaoOsEngenharia(projetoId: string): Promise<s
   const servicos = await prisma.servico.findMany({
     select: { id: true, codigo: true, nome: true, tipoServico: true },
   });
-  const { byId, byNome } = buildServicoLookupMaps(servicos);
+  const { byId, byNome, byCodigo } = buildServicoLookupMaps(servicos);
   const precisaEquipe = projetoTemServicoEngenhariaAtribuivelSetor(
     projeto.orcamento.items,
     byId,
     byNome,
+    byCodigo,
   );
   if (!precisaEquipe) return null;
 
@@ -469,24 +471,9 @@ export type InfoAtribuicaoOs = {
 export async function getInfoAtribuicaoOsBatch(projetoIds: string[]): Promise<InfoAtribuicaoOs[]> {
   if (projetoIds.length === 0) return [];
 
-  const servicos = await prisma.servico.findMany({
-    select: { id: true, codigo: true, nome: true, tipoServico: true },
-  });
-  const { byId, byNome } = buildServicoLookupMaps(servicos);
-
   const projetos = await prisma.projeto.findMany({
     where: { id: { in: projetoIds } },
     include: {
-      orcamento: {
-        select: {
-          items: {
-            include: {
-              servico: { select: { id: true, codigo: true, nome: true, tipoServico: true } },
-              kit: { select: { id: true, itensFaltantes: true } },
-            },
-          },
-        },
-      },
       engenharia: {
         include: {
           responsavelEngenharia: { select: { id: true, name: true } },
@@ -497,12 +484,8 @@ export async function getInfoAtribuicaoOsBatch(projetoIds: string[]): Promise<In
 
   return projetos.map((p) => ({
     projetoId: p.id,
-    precisaEquipeEngenharia: projetoTemServicoEngenhariaAtribuivelSetor(
-      p.orcamento.items as any,
-      byId,
-      byNome,
-    ),
-    atribuido: Boolean(p.engenharia?.responsavelEngenhariaId),
+    precisaEquipeEngenharia: true,
+    atribuido: Boolean(p.engenharia?.atribuidoSetorEngenharia),
     responsavelEngenhariaId: p.engenharia?.responsavelEngenhariaId ?? null,
     responsavelNome: p.engenharia?.responsavelEngenharia?.name ?? null,
     statusEngenharia: p.engenharia?.statusEngenharia ?? null,

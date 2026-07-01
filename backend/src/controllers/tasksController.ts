@@ -223,6 +223,13 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
 
     if (virouConcluida) {
       try {
+        const { dispararGatilhosTaskConcluida } = await import('../services/projetos.service');
+        await dispararGatilhosTaskConcluida(projetoId, task.titulo, taskId);
+      } catch (err) {
+        console.error('Erro ao disparar gatilhos de workflow da task:', err);
+      }
+
+      try {
         const projeto = await prisma.projeto.findUnique({
           where: { id: projetoId },
           select: {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { ExternalLink, FileText, ImageIcon, X } from 'lucide-react';
 import {
   atendimentoCrmService,
   type ContatoLead,
@@ -40,6 +41,117 @@ function anexosDoLead(lead: ContatoLead | null): string[] {
     return raw.filter((u): u is string => typeof u === 'string' && u.length > 0);
   }
   return lead.contaEnergiaUrl ? [lead.contaEnergiaUrl] : [];
+}
+
+function isAnexoImagem(pathOrName: string): boolean {
+  return /\.(jpe?g|png|webp|gif|heic|heif|bmp)(\?|$)/i.test(pathOrName);
+}
+
+function isAnexoPdf(pathOrName: string): boolean {
+  return /\.pdf(\?|$)/i.test(pathOrName);
+}
+
+function nomeArquivoAnexo(url: string, idx: number): string {
+  const parts = url.split('/').filter(Boolean);
+  const last = parts[parts.length - 1] || `Anexo ${idx + 1}`;
+  try {
+    return decodeURIComponent(last);
+  } catch {
+    return last;
+  }
+}
+
+/** Preview quadrado de arquivo ainda não enviado (blob local). */
+function AnexoPendenteTile({
+  file,
+  onRemove,
+}: {
+  file: File;
+  onRemove: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const isImg = file.type.startsWith('image/') || isAnexoImagem(file.name);
+  const isPdf = file.type === 'application/pdf' || isAnexoPdf(file.name);
+
+  useEffect(() => {
+    if (!isImg) return;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file, isImg]);
+
+  return (
+    <div
+      className="group relative aspect-square overflow-hidden rounded-xl border-2 border-dashed border-amber-400/80 bg-amber-50/50 dark:border-amber-500/60 dark:bg-amber-950/20 shadow-sm"
+      title={file.name}
+    >
+      {isImg && previewUrl ? (
+        <img src={previewUrl} alt={file.name} className="h-full w-full object-cover" />
+      ) : isPdf ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2 text-red-600 dark:text-red-400">
+          <FileText className="h-9 w-9" strokeWidth={1.5} aria-hidden />
+          <span className="text-[10px] font-semibold uppercase tracking-wide">PDF</span>
+        </div>
+      ) : (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2 text-gray-500 dark:text-dark-text-secondary">
+          <FileText className="h-9 w-9" strokeWidth={1.5} aria-hidden />
+          <span className="line-clamp-2 w-full px-1 text-center text-[10px]">{file.name}</span>
+        </div>
+      )}
+      <span className="absolute left-1.5 top-1.5 rounded-md bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow">
+        Novo
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100 focus:opacity-100"
+        aria-label={`Remover ${file.name}`}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent px-1.5 pb-1.5 pt-4">
+        <p className="line-clamp-2 text-[10px] leading-tight text-white">{file.name}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Preview quadrado de anexo já salvo no servidor. */
+function AnexoSalvoTile({ url, idx }: { url: string; idx: number }) {
+  const fullUrl = getUploadUrl(url);
+  const label = nomeArquivoAnexo(url, idx);
+  const isImg = isAnexoImagem(url);
+  const isPdf = isAnexoPdf(url);
+
+  return (
+    <a
+      href={fullUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group relative aspect-square overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm transition-all hover:ring-2 hover:ring-blue-500 dark:border-dark-border dark:bg-dark-bg"
+      title={`Abrir ${label}`}
+    >
+      {isImg ? (
+        <img src={fullUrl} alt={label} className="h-full w-full object-cover" loading="lazy" />
+      ) : isPdf ? (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2 text-red-600 dark:text-red-400">
+          <FileText className="h-9 w-9" strokeWidth={1.5} aria-hidden />
+          <span className="text-[10px] font-semibold uppercase tracking-wide">PDF</span>
+        </div>
+      ) : (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2 text-gray-500 dark:text-dark-text-secondary">
+          <ImageIcon className="h-9 w-9" strokeWidth={1.5} aria-hidden />
+          <span className="line-clamp-2 w-full px-1 text-center text-[10px]">{label}</span>
+        </div>
+      )}
+      <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100">
+        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+      </span>
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent px-1.5 pb-1.5 pt-4">
+        <p className="line-clamp-2 text-[10px] leading-tight text-white">{label}</p>
+      </div>
+    </a>
+  );
 }
 
 function leadTemPropostaComercial(lead: ContatoLead): boolean {
@@ -881,13 +993,13 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
-                      Anexos (conta de energia, PDF ou fotos) — até {MAX_ANEXOS_LEAD} arquivos no total
+                      Anexos (conta de energia, PDF ou fotos) — até {MAX_ANEXOS_LEAD} arquivos · PDF ou imagens até 10 MB cada
                     </label>
                     <input
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept=".pdf,image/*"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,image/*,application/pdf"
                       onChange={(e) => {
                         const picked = e.target.files ? Array.from(e.target.files) : [];
                         const jaSalvos = anexosDoLead(editingLead);
@@ -908,47 +1020,24 @@ const FunilAtendimentoPage: React.FC<FunilAtendimentoPageProps> = ({ toggleSideb
                         ? ` · ${form.contaEnergiaFiles.length} selecionado(s) para enviar ao salvar`
                         : ''}
                     </p>
-                    {form.contaEnergiaFiles.length > 0 && (
-                      <ul className="mt-2 space-y-1">
-                        {form.contaEnergiaFiles.map((file, idx) => (
-                          <li
-                            key={`${file.name}-${file.size}-${idx}`}
-                            className="flex items-center justify-between gap-2 text-xs text-gray-700 dark:text-dark-text-secondary bg-gray-50 dark:bg-dark-bg rounded-lg px-2 py-1.5"
-                          >
-                            <span className="truncate" title={file.name}>
-                              {file.name}
-                            </span>
-                            <button
-                              type="button"
-                              className="shrink-0 text-red-600 hover:text-red-700 font-medium"
-                              onClick={() =>
-                                setForm((f) => ({
-                                  ...f,
-                                  contaEnergiaFiles: f.contaEnergiaFiles.filter((_, i) => i !== idx),
-                                }))
-                              }
-                            >
-                              Remover
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {anexosDoLead(editingLead).length > 0 && (
-                      <ul className="mt-2 space-y-1">
+                    {(anexosDoLead(editingLead).length > 0 || form.contaEnergiaFiles.length > 0) && (
+                      <div className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-4">
                         {anexosDoLead(editingLead).map((url, idx) => (
-                          <li key={`${url}-${idx}`}>
-                            <a
-                              href={getUploadUrl(url)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-blue-600 dark:text-blue-400 underline"
-                            >
-                              Anexo {idx + 1}
-                            </a>
-                          </li>
+                          <AnexoSalvoTile key={`${url}-${idx}`} url={url} idx={idx} />
                         ))}
-                      </ul>
+                        {form.contaEnergiaFiles.map((file, idx) => (
+                          <AnexoPendenteTile
+                            key={`${file.name}-${file.size}-${idx}`}
+                            file={file}
+                            onRemove={() =>
+                              setForm((f) => ({
+                                ...f,
+                                contaEnergiaFiles: f.contaEnergiaFiles.filter((_, i) => i !== idx),
+                              }))
+                            }
+                          />
+                        ))}
+                      </div>
                     )}
                   </div>
                   <div className="md:col-span-2">

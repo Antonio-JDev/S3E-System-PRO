@@ -355,8 +355,18 @@ export function fetchWhatsappMessages(chatId: string) {
   return axiosApiService.get<WhatsappMessageDto[]>(`${BASE}/messages`, { chatId });
 }
 
-export function sendWhatsappMessage(chatId: string, text: string, quotedMessageId?: string) {
-  return axiosApiService.post<WhatsappMessageDto>(`${BASE}/send`, { chatId, text, quotedMessageId });
+export function sendWhatsappMessage(
+  chatId: string,
+  text: string,
+  quotedMessageId?: string,
+  quotedFromMe?: boolean
+) {
+  return axiosApiService.post<WhatsappMessageDto>(`${BASE}/send`, {
+    chatId,
+    text,
+    quotedMessageId,
+    quotedFromMe
+  });
 }
 
 export type WhatsappProviderMediaType = 'image' | 'voice' | 'video' | 'file' | 'sticker';
@@ -564,7 +574,7 @@ export function postWhatsappMarkRead(chatId: string) {
  *    `sendMedia` mas sem o jitter de 2-5s (reaction é interação leve).
  */
 export function reactToWhatsappMessage(messageId: string, emoji: string) {
-  return axiosApiService.post<void>(
+  return axiosApiService.post<{ id: string; chatId: string; reaction: string | null }>(
     `${BASE}/messages/${encodeURIComponent(messageId)}/react`,
     { emoji }
   );

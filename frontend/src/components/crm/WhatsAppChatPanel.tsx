@@ -1039,6 +1039,44 @@ function detectMediaType(mime: string): WhatsappProviderMediaType {
   return 'file';
 }
 
+/** Extrai arquivos do clipboard (ex.: print com Ctrl+V). */
+function filesFromClipboardData(clipboardData: DataTransfer | null): File[] {
+  if (!clipboardData) return [];
+  const out: File[] = [];
+  const seen = new Set<string>();
+
+  const push = (file: File | null) => {
+    if (!file || file.size <= 0) return;
+    const key = `${file.name}|${file.size}|${file.type}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(file);
+  };
+
+  if (clipboardData.items?.length) {
+    for (const item of Array.from(clipboardData.items)) {
+      if (item.kind !== 'file') continue;
+      push(item.getAsFile());
+    }
+  }
+  if (!out.length && clipboardData.files?.length) {
+    for (const file of Array.from(clipboardData.files)) {
+      push(file);
+    }
+  }
+
+  return out.map((file, idx) => {
+    const mime = file.type || 'image/png';
+    const hasName = Boolean(file.name?.trim() && file.name !== 'blob');
+    if (hasName) return file;
+    const ext =
+      mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'png';
+    const suffix = out.length > 1 ? `-${idx + 1}` : '';
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    return new File([file], `print-${stamp}${suffix}.${ext}`, { type: mime });
+  });
+}
+
 const MEDIA_ACCEPT = 'image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar';
 const MAX_FILE_SIZE_MB = 50;
 
@@ -2354,31 +2392,46 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   /**
    * Reage a uma mensagem (ou remove a reação ao passar `''`).
-   *
-   * Atualização da UI: ainda NÃO persistimos reactions localmente — uma vez
-   * que a EvoGo aceite, o webhook `messages.upsert` traz o evento de reaction
-   * e a próxima sync do chat reflete (fase 2 do roadmap). Por isso só
-   * dispara o request e mostra toast — não há optimistic update no painel.
+   * Atualiza o cache local imediatamente; o backend persiste e emite socket.
    */
-  const reactToMessage = useCallback(async (m: WhatsappMessageDto, emoji: string) => {
-    if (!m.id) return;
-    if (!m.providerMessageId) {
-      toast.message('Aguarde a mensagem ser entregue antes de reagir.');
-      return;
-    }
-    const trimmed = (emoji || '').trim();
-    try {
-      const res = await reactToWhatsappMessage(m.id, trimmed);
-      if (!res.success) {
-        toast.error(res.error || 'Não foi possível reagir');
+  const reactToMessage = useCallback(
+    async (m: WhatsappMessageDto, emoji: string) => {
+      if (!m.id) return;
+      if (!m.providerMessageId) {
+        toast.message('Aguarde a mensagem ser entregue antes de reagir.');
         return;
       }
-      toast.success(trimmed ? `Reação ${trimmed} enviada` : 'Reação removida');
-    } catch (err) {
-      console.warn('[WA] reactToWhatsappMessage falhou', err);
-      toast.error('Não foi possível reagir');
-    }
-  }, []);
+      const trimmed = (emoji || '').trim();
+      const cid = canonicalWhatsappChatId(m.chatId);
+      const previous = queryClient.getQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid));
+      queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+        (old ?? []).map((x) =>
+          x.id === m.id ? { ...x, reaction: trimmed ? trimmed : null } : x
+        )
+      );
+      try {
+        const res = await reactToWhatsappMessage(m.id, trimmed);
+        if (!res.success) {
+          if (previous) queryClient.setQueryData(messagesQueryKey(cid), previous);
+          toast.error(res.error || 'Não foi possível reagir');
+          return;
+        }
+        if (res.data) {
+          queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(cid), (old) =>
+            (old ?? []).map((x) =>
+              x.id === res.data!.id ? { ...x, reaction: res.data!.reaction } : x
+            )
+          );
+        }
+        toast.success(trimmed ? `Reação ${trimmed} enviada` : 'Reação removida');
+      } catch (err) {
+        if (previous) queryClient.setQueryData(messagesQueryKey(cid), previous);
+        console.warn('[WA] reactToWhatsappMessage falhou', err);
+        toast.error('Não foi possível reagir');
+      }
+    },
+    [queryClient]
+  );
   const [groupEphemeralExpiration, setGroupEphemeralExpiration] = useState('86400');
   const [groupInviteUrl, setGroupInviteUrl] = useState('');
   const [groupInfo, setGroupInfo] = useState<GroupInfoView | null>(null);
@@ -4409,6 +4462,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     [chatId, isInForwardSelectionMode, sendMediaMut.isPending, stageFilesFromPicker]
   );
 
+  const handleChatFilePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLDivElement>) => {
+      if (!chatId || isInForwardSelectionMode) return;
+      const list = filesFromClipboardData(e.clipboardData);
+      if (!list.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (sendMediaMut.isPending) {
+        toast.message('Aguarde o envio em andamento.');
+        return;
+      }
+      stageFilesFromPicker(list);
+    },
+    [chatId, isInForwardSelectionMode, sendMediaMut.isPending, stageFilesFromPicker]
+  );
+
   const cancelMedia = useCallback(() => {
     setPendingMediaList((prev) => {
       for (const pm of prev) {
@@ -5365,7 +5434,8 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const r = await sendWhatsappMessage(
         outboundChatId,
         text,
-        replySnapshot?.providerMessageId || undefined
+        replySnapshot?.providerMessageId || undefined,
+        replySnapshot?.fromMe
       );
       if (!r.success) throw new Error(r.error || 'Falha ao enviar');
       return r.data;
@@ -7487,6 +7557,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
               onDragEnter={handleChatFileDragEnter}
               onDragLeave={handleChatFileDragLeave}
               onDrop={handleChatFileDrop}
+              onPasteCapture={handleChatFilePaste}
             >
             <WhatsAppActionsDrawer
               open={actionsPanelOpen}
@@ -8159,7 +8230,9 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 className="pointer-events-none absolute inset-0 z-[100] m-3 flex items-center justify-center rounded-2xl border-[3px] border-dashed border-[#16a34a]/70 bg-[rgba(74,222,128,0.22)] dark:border-[#22c55e]/80 dark:bg-[rgba(34,197,94,0.18)]"
                 aria-hidden
               >
-                <p className="text-[15px] font-medium text-[#166534] dark:text-[#bbf7d0]">Arraste arquivo aqui</p>
+                <p className="text-[15px] font-medium text-[#166534] dark:text-[#bbf7d0]">
+                  Arraste ou cole (Ctrl+V) arquivo aqui
+                </p>
               </div>
             ) : null}
             </div>

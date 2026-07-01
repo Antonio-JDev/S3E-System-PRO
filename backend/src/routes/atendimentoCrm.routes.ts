@@ -4,7 +4,7 @@ import {
   getById,
   create,
   update,
-  uploadContaEnergiaMiddleware,
+  uploadContaEnergiaWithErrorHandling,
   uploadContaEnergiaHandler,
   remove
 } from '../controllers/atendimentoCrmController';
@@ -17,7 +17,7 @@ router.get('/', list);
 router.get('/:id', getById);
 router.post('/', create);
 router.put('/:id', update);
-router.post('/:id/upload-conta', uploadContaEnergiaMiddleware, uploadContaEnergiaHandler);
+router.post('/:id/upload-conta', uploadContaEnergiaWithErrorHandling, uploadContaEnergiaHandler);
 router.delete('/:id', remove);
 
 export default router;

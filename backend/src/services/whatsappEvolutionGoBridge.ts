@@ -312,10 +312,15 @@ export async function evolutionGoProxyRequest(
   if (method === 'DELETE' && /\/chat\/deleteMessageForEveryone\//.test(path)) {
     const remoteJid = typeof b.remoteJid === 'string' ? b.remoteJid : '';
     const id = typeof b.id === 'string' ? b.id : '';
+    const chat = normalizeJidForEvoGo(remoteJid);
+    const goBody: Record<string, unknown> = { chat, messageId: id };
+    if (typeof b.fromMe === 'boolean') goBody.fromMe = b.fromMe;
+    const participant = typeof b.participant === 'string' ? b.participant.trim() : '';
+    if (participant) goBody.participant = normalizeJidForEvoGo(participant);
     const res = await fetch(`${baseUrl()}/message/delete`, {
       method: 'POST',
       headers: instanceHeaders(),
-      body: JSON.stringify({ chat: remoteJid, messageId: id })
+      body: JSON.stringify(goBody)
     });
     const t = await res.text();
     return new Response(t, { status: res.status, headers: { 'Content-Type': 'application/json' } });
@@ -643,8 +648,8 @@ export async function evolutionGoProxyRequest(
   }
 
   // --- /message/sendReaction/{instance} → /message/react ---
-  // Evolution v2 body: { key: { remoteJid, fromMe, id }, reaction }
-  // Evolution Go body: { number, id, reaction }
+  // Evolution v2 body: { key: { remoteJid, fromMe, id, participant? }, reaction }
+  // Evolution Go body: { number, id, reaction, fromMe?, participant? }
   if (method === 'POST' && /\/message\/sendReaction\//.test(path)) {
     const key = b.key && typeof b.key === 'object' ? (b.key as Record<string, unknown>) : null;
     const remoteJid = key && typeof key.remoteJid === 'string' ? key.remoteJid.trim() : '';
@@ -653,10 +658,18 @@ export async function evolutionGoProxyRequest(
     if (!remoteJid || !id) {
       return jsonResponse({ error: 'sendReaction: key.remoteJid e key.id obrigatórios' }, 400);
     }
+    const goBody: Record<string, unknown> = {
+      number: normalizeJidForEvoGo(remoteJid),
+      id,
+      reaction
+    };
+    if (typeof key?.fromMe === 'boolean') goBody.fromMe = key.fromMe;
+    const participant = key && typeof key.participant === 'string' ? key.participant.trim() : '';
+    if (participant) goBody.participant = normalizeJidForEvoGo(participant);
     const res = await fetch(`${baseUrl()}/message/react`, {
       method: 'POST',
       headers: instanceHeaders(),
-      body: JSON.stringify({ number: remoteJid, id, reaction })
+      body: JSON.stringify(goBody)
     });
     const t = await res.text();
     return new Response(t, { status: res.status, headers: { 'Content-Type': 'application/json' } });

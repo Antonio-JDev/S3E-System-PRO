@@ -272,10 +272,15 @@ class AxiosApiService {
       };
     } catch (error: unknown) {
       const { message, status } = axiosErrorPayload(error);
+      const extra =
+        axios.isAxiosError(error) && error.response?.data && typeof error.response.data === 'object'
+          ? (error.response.data as Record<string, unknown>)
+          : {};
       return {
         success: false,
         error: message,
         status,
+        ...extra,
       };
     }
   }

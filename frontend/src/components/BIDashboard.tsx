@@ -62,9 +62,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
   const [gastosFornecedor, setGastosFornecedor] = useState<any>(null);
   const [servicosRentaveis, setServicosRentaveis] = useState<any>(null);
   const [vendasCompras, setVendasCompras] = useState<VendasComprasClassificacao | null>(null);
-  const [diasMateriais, setDiasMateriais] = useState<30 | 60>(30);
   const [materiaisPeriodo, setMateriaisPeriodo] = useState<MateriaisMaisCompradosPeriodo | null>(null);
-  const [loadingMateriais, setLoadingMateriais] = useState(false);
 
   const themeContext = useContext(ThemeContext);
   const isDark =
@@ -112,6 +110,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         gastosFornecedorResultado,
         servicosRentaveisResultado,
         vendasComprasResultado,
+        materiaisResultado,
       ] = await Promise.all([
         biService.getOrcamentosPorStatus(dataInicio, dataFim),
         biService.getOrcamentosPorTipoServicoClassificado(dataInicio, dataFim),
@@ -119,6 +118,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         biService.getGastosFornecedor(dataInicio, dataFim),
         biService.getServicosRentaveis(dataInicio, dataFim),
         biService.getVendasComprasClassificacao(dataInicio, dataFim),
+        biService.getMateriaisMaisCompradosPeriodo(dataInicio, dataFim),
       ]);
 
       console.log('📊 Resultados recebidos:', {
@@ -198,6 +198,12 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       } else {
         setVendasCompras(null);
       }
+
+      if (materiaisResultado?.success && materiaisResultado.data) {
+        setMateriaisPeriodo(materiaisResultado.data);
+      } else {
+        setMateriaisPeriodo(null);
+      }
     } catch (error: any) {
       console.error('Erro ao carregar dados de BI:', error);
       toast.error('Erro ao carregar dados do Business Intelligence');
@@ -210,21 +216,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     carregarDados();
   }, [dataInicio, dataFim, periodoMarkup]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoadingMateriais(true);
-      const r = await biService.getMateriaisMaisCompradosPeriodo(diasMateriais);
-      if (!cancelled && r.success && r.data) {
-        setMateriaisPeriodo(r.data);
-      }
-      if (!cancelled) setLoadingMateriais(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [diasMateriais]);
-
   const vendasComprasChartData = useMemo(() => {
     if (!vendasCompras) return [];
     const rows: Array<{
@@ -235,7 +226,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       fill?: string;
     }> = [
       {
-        nome: 'Receita (orçamentos aprovados)',
+        nome: 'Receita (vendas)',
         valor: vendasCompras.vendasOrcamentosAprovados.valorTotal,
         qtd: vendasCompras.vendasOrcamentosAprovados.quantidadeOrcamentos,
         tipo: 'venda',
@@ -326,7 +317,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
             Business Intelligence - S3E Engenharia
           </h2>
           <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-            Visão administrativa: vendas (orçamentos aprovados), compras por classificação, fornecedores, serviços e materiais
+            Visão administrativa: vendas realizadas, compras por classificação, fornecedores, serviços e materiais
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
@@ -450,7 +441,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         </div>
       )}
 
-      {/* Receita (orç. aprovados) vs compras por classificação — mesmo período do filtro */}
+      {/* Receita (vendas) vs compras por classificação — mesmo período do filtro */}
       {vendasCompras && vendasComprasChartData.length > 0 && (
         <div className="card-primary">
           <div className="p-6 border-b border-gray-200 dark:border-dark-border">
@@ -458,7 +449,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
               Receita de vendas vs compras por classificação
             </h3>
             <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-              Compara a receita somada dos <strong>orçamentos aprovados</strong> no período com o gasto em compras (NF-e),
+              Compara a receita de <strong>vendas realizadas</strong> no período (data da venda) com o gasto em compras (NF-e),
               agrupado por classificação: material/estoque, RH, despesas variadas, escritório, limpeza, ferramentas, etc.
               Use junto com os gráficos de serviços e fornecedores para enxergar volume de negócio, tipo de compra e onde mais se gasta.
             </p>
@@ -518,7 +509,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 </thead>
                 <tbody>
                   <tr className="border-b border-gray-200 dark:border-dark-border bg-emerald-50/50 dark:bg-emerald-900/10">
-                    <td className="p-3 font-medium text-gray-900 dark:text-dark-text">Receita — orçamentos aprovados</td>
+                    <td className="p-3 font-medium text-gray-900 dark:text-dark-text">Receita — vendas realizadas</td>
                     <td className="p-3 text-right tabular-nums">{vendasCompras.vendasOrcamentosAprovados.quantidadeOrcamentos}</td>
                     <td className="p-3 text-right font-semibold tabular-nums">
                       {formatarMoeda(vendasCompras.vendasOrcamentosAprovados.valorTotal)}
@@ -1327,7 +1318,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         </div>
       )}
 
-      {/* Materiais mais comprados — últimos 30 ou 60 dias (independente do filtro de datas do BI) */}
+      {/* Materiais mais comprados — mesmo período do filtro do BI */}
       <div className="card-primary">
         <div className="p-6 border-b border-gray-200 dark:border-dark-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -1336,32 +1327,8 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
               Materiais mais comprados
             </h3>
             <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-              Ranking por valor gasto em itens vinculados a materiais no estoque (compras recebidas). Escolha a janela de tempo:
+              Ranking por valor gasto em itens vinculados a materiais no estoque (compras recebidas), no período selecionado acima.
             </p>
-          </div>
-          <div className="flex rounded-lg border border-gray-200 dark:border-dark-border p-1 bg-gray-50 dark:bg-slate-800/80">
-            <button
-              type="button"
-              onClick={() => setDiasMateriais(30)}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                diasMateriais === 30
-                  ? 'bg-white dark:bg-slate-700 shadow text-indigo-700 dark:text-indigo-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-              }`}
-            >
-              30 dias
-            </button>
-            <button
-              type="button"
-              onClick={() => setDiasMateriais(60)}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                diasMateriais === 60
-                  ? 'bg-white dark:bg-slate-700 shadow text-indigo-700 dark:text-indigo-300'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-              }`}
-            >
-              60 dias
-            </button>
           </div>
         </div>
         <div className="p-6 space-y-6">
@@ -1372,7 +1339,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
               {new Date(materiaisPeriodo.dataFim).toLocaleDateString('pt-BR')}
             </p>
           )}
-          {loadingMateriais ? (
+          {loading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600" />
             </div>

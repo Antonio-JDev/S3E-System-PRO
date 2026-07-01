@@ -539,25 +539,34 @@ export class BIController {
   }
 
   /**
-   * GET /api/bi/materiais-mais-comprados-periodo?dias=30|60
+   * GET /api/bi/materiais-mais-comprados-periodo?dataInicio=&dataFim= (ou ?dias=30|60)
    */
   static async getMateriaisMaisCompradosPeriodo(req: Request, res: Response): Promise<void> {
     try {
-      const diasRaw = req.query.dias;
-      const dias = diasRaw === '60' ? 60 : 30;
+      const { dataInicio, dataFim, dias: diasRaw } = req.query;
 
-      const fim = new Date();
-      fim.setHours(23, 59, 59, 999);
-      const inicio = new Date(fim);
-      inicio.setDate(inicio.getDate() - dias);
-      inicio.setHours(0, 0, 0, 0);
+      let inicio: Date;
+      let fim: Date;
+
+      if (dataInicio && dataFim) {
+        inicio = new Date(dataInicio as string);
+        inicio.setHours(0, 0, 0, 0);
+        fim = new Date(dataFim as string);
+        fim.setHours(23, 59, 59, 999);
+      } else {
+        const dias = diasRaw === '60' ? 60 : 30;
+        fim = new Date();
+        fim.setHours(23, 59, 59, 999);
+        inicio = new Date(fim);
+        inicio.setDate(inicio.getDate() - dias);
+        inicio.setHours(0, 0, 0, 0);
+      }
 
       const materiais = await BIService.getMateriaisMaisComprados(inicio, fim, 25);
 
       res.json({
         success: true,
         data: {
-          dias,
           dataInicio: inicio.toISOString(),
           dataFim: fim.toISOString(),
           materiais,

@@ -247,7 +247,7 @@ describe('OrcamentoPrintable', () => {
                 <OrcamentoPrintable orcamento={mockOrcamentoData} />
             );
 
-            expect(container.textContent).toContain('Descrição Técnica do Projeto');
+            expect(container.textContent).toContain('Descrição técnica do projeto');
         });
     });
 

@@ -14,6 +14,11 @@ export interface Projeto {
   dataConclusao?: string;
   orcamentoId?: string;
   valorTotal?: number;
+  horasEngenhariaOrcadas?: number;
+  diariasEquipeOrcadas?: number;
+  valorHoraEngenharia?: number | null;
+  valorDiariaEquipe?: number | null;
+  iniciadoSemEstoque?: boolean;
   createdAt: string;
   updatedAt: string;
   cliente?: {
@@ -41,6 +46,10 @@ export interface CreateProjetoData {
   dataInicio: string;
   dataPrevisao: string;
   orcamentoId?: string;
+  horasEngenhariaOrcadas?: number;
+  diariasEquipeOrcadas?: number;
+  valorHoraEngenharia?: number | null;
+  valorDiariaEquipe?: number | null;
 }
 
 export interface UpdateProjetoData extends Partial<CreateProjetoData> {
@@ -87,8 +96,11 @@ class OrdemServicosService {
     return axiosApiService.put<Projeto>(`${ENDPOINTS.PROJETOS}/${id}`, data);
   }
 
-  async atualizarStatus(id: string, status: string) {
-    return axiosApiService.put<Projeto>(`${ENDPOINTS.PROJETOS}/${id}/status`, { status });
+  async atualizarStatus(id: string, status: string, ignorarEstoque?: boolean) {
+    return axiosApiService.put<Projeto>(`${ENDPOINTS.PROJETOS}/${id}/status`, {
+      status,
+      ...(ignorarEstoque ? { ignorarEstoque: true } : {}),
+    });
   }
 
   async reverterStatus(id: string, status: 'PROPOSTA' | 'VALIDADO' | 'APROVADO') {

@@ -48,8 +48,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
+# Limita pico de RAM do tsc (evita OOM/restart do Docker Desktop no Windows).
+ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN (npx prisma generate || (sleep 5 && npx prisma generate) || (sleep 10 && npx prisma generate)) && echo "Prisma Client generated successfully"
-RUN npm run build || (echo "Build completed with warnings" && exit 0)
+RUN npx tsc --project tsconfig.build.json && node dist/swagger/writeOpenApiArtifact.js
 
 FROM base AS production
 WORKDIR /app
@@ -77,8 +79,9 @@ COPY certs ./certs
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nodejs
-RUN chmod -R o+rX /app && \
-    chown -R nodejs:nodejs /app/uploads /app/data /app/certs
+# Não rodar chmod -R em /app/node_modules — centenas de milhares de arquivos
+# causam I/O error / EOF no Docker Desktop (pior em pastas OneDrive).
+RUN chown -R nodejs:nodejs /app/uploads /app/data /app/certs /app/dist /app/prisma
 
 USER nodejs
 

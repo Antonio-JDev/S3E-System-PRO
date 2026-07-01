@@ -1205,16 +1205,33 @@ async function ingestWhatsappProviderMessage(
     normalizeMetaString(pl.name) ||
     null;
 
-  const providerMessageIdFromPayload = normalizeProviderMessageId(pl.id);
+  let providerMessageIdForInsert = normalizeProviderMessageId(pl.id);
 
-  if (providerMessageIdFromPayload) {
+  if (providerMessageIdForInsert) {
     const existingByProvider = await prisma.chatMessage.findUnique({
-      where: { providerMessageId: providerMessageIdFromPayload },
-      select: { id: true }
+      where: { providerMessageId: providerMessageIdForInsert },
+      select: { id: true, fromMe: true }
     });
     if (existingByProvider) {
-      await applyAckFromMessagePayloadIfNeeded(pl, existingByProvider.id);
-      return;
+      // Alguns webhooks de resposta (reply) chegam com o mesmo provider id da
+      // mensagem citada (stanzaId) em vez do id da mensagem nova. Nesse caso
+      // o evento inbound seria descartado como "duplicata" da nossa mensagem.
+      if (existingByProvider.fromMe !== !!pl.fromMe) {
+        console.warn(
+          '[WA-MSG] colisão provider id (fromMe diferente) — persistindo resposta sem provider id',
+          {
+            providerMessageId: providerMessageIdForInsert,
+            existingId: existingByProvider.id,
+            existingFromMe: existingByProvider.fromMe,
+            inboundFromMe: !!pl.fromMe,
+            chatId
+          }
+        );
+        providerMessageIdForInsert = null;
+      } else {
+        await applyAckFromMessagePayloadIfNeeded(pl, existingByProvider.id);
+        return;
+      }
     }
   }
 
@@ -1232,13 +1249,13 @@ async function ingestWhatsappProviderMessage(
     });
     if (echo) {
       if (
-        providerMessageIdFromPayload &&
-        (!echo.providerMessageId || echo.providerMessageId !== providerMessageIdFromPayload)
+        providerMessageIdForInsert &&
+        (!echo.providerMessageId || echo.providerMessageId !== providerMessageIdForInsert)
       ) {
         try {
           const updated = await prisma.chatMessage.update({
             where: { id: echo.id },
-            data: { providerMessageId: providerMessageIdFromPayload }
+            data: { providerMessageId: providerMessageIdForInsert }
           });
           emitWhatsAppMessageEdited(updated);
         } catch {
@@ -1267,7 +1284,7 @@ async function ingestWhatsappProviderMessage(
         fromMe: !!pl.fromMe,
         timestamp,
         chatId,
-        providerMessageId: providerMessageIdFromPayload || undefined,
+        providerMessageId: providerMessageIdForInsert || undefined,
         session: session || undefined,
         participant: isGroupChat && !pl.fromMe ? participant : undefined,
         hasMedia: persistHasMedia,
@@ -2258,12 +2275,15 @@ export async function sendChatMessageFromUser(params: {
   userId: string;
   userName?: string | null;
   quotedMessageId?: string;
+  quotedFromMe?: boolean;
 }): Promise<ChatMessage> {
   const chatId = canonicalWhatsappChatId(await resolvePreferredChatIdForOutbound(params.chatId));
   const displayName = await resolveOutboundDisplayName(params.userId, params.userName);
   const fullText = formatOutboundPrefix(displayName || 'Usuário', params.text.trim());
   const providerMsgId = await sendWhatsappProviderText(chatId, fullText, {
-    quotedMessageId: params.quotedMessageId
+    quotedMessageId: params.quotedMessageId,
+    quotedRemoteJid: chatId,
+    quotedFromMe: params.quotedFromMe
   });
 
   const clienteId = await resolveClienteIdForChat(chatId);
@@ -2305,6 +2325,7 @@ export async function sendMediaMessageFromUser(params: {
   caption?: string;
   fileSize?: number;
   quotedMessageId?: string;
+  quotedFromMe?: boolean;
 }): Promise<ChatMessage> {
   const chatId = canonicalWhatsappChatId(await resolvePreferredChatIdForOutbound(params.chatId));
   const displayName = await resolveOutboundDisplayName(params.userId, params.userName);
@@ -2323,7 +2344,9 @@ export async function sendMediaMessageFromUser(params: {
     mimetype: params.mimetype,
     filename: safeFilename,
     caption: captionText,
-    quotedMessageId: params.quotedMessageId
+    quotedMessageId: params.quotedMessageId,
+    quotedRemoteJid: chatId,
+    quotedFromMe: params.quotedFromMe
   });
 
   const label = MEDIA_LABELS[params.mediaType];
@@ -2451,6 +2474,7 @@ function providerMediaTypeFromRow(row: {
 
 async function readMediaBytesForRow(row: {
   chatId: string;
+  fromMe?: boolean;
   mediaUrl?: string | null;
   providerMessageId?: string | null;
 }): Promise<{ buffer: Buffer; contentType: string }> {
@@ -2469,7 +2493,12 @@ async function readMediaBytesForRow(row: {
   if (!res && (row.providerMessageId || '').trim()) {
     const variants = storageChatIdVariants(canonicalWhatsappChatId(row.chatId));
     for (const cid of variants) {
-      const r = await fetchWhatsappProviderMessageDownloadMedia(cid, String(row.providerMessageId).trim(), rangeHeader);
+      const r = await fetchWhatsappProviderMessageDownloadMedia(
+        cid,
+        String(row.providerMessageId).trim(),
+        rangeHeader,
+        row.fromMe
+      );
       if (r.ok || r.status === 206) {
         res = r;
         break;
@@ -2704,7 +2733,7 @@ export async function deleteChatMessageById(messageId: string): Promise<{ chatId
       'Mensagem sem ID do WhatsApp. Aguarde sincronização ou envie uma nova mensagem a partir deste painel.'
     );
   }
-  await deleteWhatsappProviderChatMessage(row.chatId, row.providerMessageId);
+  await deleteWhatsappProviderChatMessage(row.chatId, row.providerMessageId, row.fromMe);
   await prisma.chatMessage.delete({ where: { id: messageId } });
   const chatId = canonicalWhatsappChatId(row.chatId);
   emitWhatsAppMessageDeleted({ id: messageId, chatId });

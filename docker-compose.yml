@@ -10,7 +10,9 @@
 # Passo a passo:
 #   1. cp .env.example .env   (ou copie a secção "DEV em Docker" do .env.example)
 #   2. Ajuste WHATSAPP_PROVIDER_API_KEY e, se quiser, DB_USER / DB_PASSWORD
-#   3. docker compose up --build
+#   3. docker compose pull && docker compose up -d
+# Imagens da aplicação (paridade com produção): odev10antonio/s3e-*:${S3E_APP_VERSION:-2.1.7}
+# NÃO usar :latest — manter a mesma tag publicada em produção.
 #
 # URLs: Frontend http://localhost:5173  |  API http://localhost:3001  |  EvoGo Manager http://localhost:3333/manager
 # PgAdmin: http://localhost:5050
@@ -103,18 +105,15 @@ services:
       retries: 5
       start_period: 90s
 
-  # Backend API - Desenvolvimento com Hot Reload
+  # Backend API — imagem publicada (mesma tag da produção, ex.: 2.1.7)
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      target: development # ✅ Usa stage de desenvolvimento para hot reload
+    image: odev10antonio/s3e-backend:${S3E_APP_VERSION:-2.1.7}
     container_name: s3e-backend-dev
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      NODE_ENV: development # ✅ Modo desenvolvimento
+      NODE_ENV: production
       TZ: America/Sao_Paulo # Horário Brasília (evita rejeição 703 na NF-e)
       PORT: 3001
       DATABASE_URL: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/${DB_NAME:-s3e_dev}?schema=public&connection_limit=10
@@ -165,21 +164,14 @@ services:
       - "3001:3001"
       - "5555:5555"
     volumes:
-      # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
-      - ./backend/src:/app/src # Código fonte (rw para hot reload)
-      - ./backend/prisma:/app/prisma # Schema Prisma
-      - ./backend/scripts:/app/scripts # Scripts utilitários (dev bootstrap, etc.)
-      - ./backend/package.json:/app/package.json
-      - ./backend/package-lock.json:/app/package-lock.json
-      - ./backend/tsconfig.json:/app/tsconfig.json
-      - ./backend/tsconfig.build.json:/app/tsconfig.build.json
-      - backend_uploads:/app/uploads # Uploads persistentes
-      - backend_logs:/app/logs # Logs da aplicação
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+      - backend_certificados:/app/data/certificados
       - ./nfse-xsd:/app/nfse-xsd:ro
-      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro # XSDs de validação NF-e
-      - ./backend/certs:/app/certs:ro # CA bundle ICP-Brasil para mTLS SEFAZ
-      - ./backend:/app/backend      # node_modules usa os da imagem (já instalados durante o build)     # Não montamos volume para evitar sobrescrever dependências instaladas
-      - /etc/localtime:/etc/localtime:ro # Horário Brasília
+      - ./PL_010b_NT2025_002_v1.30:/app/PL_010b_NT2025_002_v1.30:ro
+      - ./backend/certs:/app/certs:ro
+      - ./backend/scripts:/app/scripts:ro
+      - /etc/localtime:/etc/localtime:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -187,9 +179,7 @@ services:
         condition: service_started
     networks:
       - s3e-network
-    # ✅ Comando de desenvolvimento: sincroniza node_modules com package.json (novas deps, ex.: xlsx), depois Prisma e watch
-    # Sem "npm install" na subida, dependências adicionadas no host podem faltar na imagem antiga (Cannot find module 'xlsx').
-    command: sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npm run dev"
+    command: sh -c "sed 's/\\r$//' scripts/dev-bootstrap.sh | sh && node dist/app.js"
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health" ]
       interval: 30s
@@ -197,42 +187,22 @@ services:
       retries: 3
       start_period: 60s
 
-  # Frontend React App - Desenvolvimento com Hot Reload
+  # Frontend — imagem nginx publicada (mesma tag da produção, ex.: 2.1.7)
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      target: development # ✅ Usa stage de desenvolvimento para hot reload
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+    image: odev10antonio/s3e-frontend:${S3E_APP_VERSION:-2.1.7}
     container_name: s3e-frontend-dev
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
     ports:
-      - "5173:5173" # ✅ Porta do Vite dev server (hot reload)
-    volumes:
-      # ✅ Hot Reload: Monta o código fonte para mudanças refletirem automaticamente
-      - ./frontend/src:/app/src # Código fonte (rw para hot reload)
-      - ./frontend/public:/app/public # Arquivos públicos
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/package.json:/app/package.json # Para npm install ver deps atualizadas
-      - ./frontend/vite.config.ts:/app/vite.config.ts
-      - ./frontend/tsconfig.json:/app/tsconfig.json
-      - ./frontend/tsconfig.node.json:/app/tsconfig.node.json
-      - ./frontend/tailwind.config.js:/app/tailwind.config.js
-      - ./frontend/postcss.config.js:/app/postcss.config.js
-      # Volume isolado: npm install no startup instala binários Linux (rollup, etc.)
-      - frontend_node_modules:/app/node_modules
+      - "${FRONTEND_PORT:-5173}:80"
     networks:
       - s3e-network
     depends_on:
       - backend
-    # Instala deps (binários Linux) no startup, depois inicia Vite
-    command: sh -c "npm install --legacy-peer-deps && npm run dev -- --host 0.0.0.0"
-    # Não precisa de healthcheck no modo dev, Vite já tem seu próprio sistema
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # PgAdmin (opcional — credenciais em PGADMIN_* no .env)
   pgadmin:
@@ -261,7 +231,7 @@ volumes:
     driver: local
   backend_logs:
     driver: local
-  frontend_node_modules:
+  backend_certificados:
     driver: local
   pgadmin_data:
     driver: local

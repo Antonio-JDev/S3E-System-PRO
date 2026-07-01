@@ -115,6 +115,7 @@ export const ENDPOINTS = {
     ALOCACOES: '/api/obras/alocacoes',
     CALENDARIO: '/api/obras/alocacoes/calendario',
   },
+  EVENTOS_CALENDARIO: '/api/eventos-calendario',
   ORCAMENTOS: '/api/orcamentos',
   RELATORIOS: {
     FINANCEIRO: '/api/relatorios/financeiro',

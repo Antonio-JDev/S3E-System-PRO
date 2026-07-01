@@ -93,7 +93,7 @@ export interface VendasComprasClassificacao {
 }
 
 export interface MateriaisMaisCompradosPeriodo {
-  dias: number;
+  dias?: number;
   dataInicio: string;
   dataFim: string;
   materiais: Array<{
@@ -603,14 +603,16 @@ class BIService {
   }
 
   /**
-   * Materiais mais comprados nos últimos 30 ou 60 dias
+   * Materiais mais comprados no período (usa o mesmo filtro de datas do dashboard)
    */
   async getMateriaisMaisCompradosPeriodo(
-    dias: 30 | 60
+    dataInicio: string,
+    dataFim: string
   ): Promise<BIServiceResponse<MateriaisMaisCompradosPeriodo>> {
     try {
       const response = await axiosApiService.get('/api/bi/materiais-mais-comprados-periodo', {
-        dias,
+        dataInicio,
+        dataFim,
       });
       const data = response.data?.data || response.data;
       if (!data) {

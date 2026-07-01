@@ -200,10 +200,84 @@ function formatLocationBody(raw: Record<string, unknown>): string {
   return lines.join('\n');
 }
 
+function extractInteractiveReplyText(inner: Record<string, unknown>): string {
+  const btn = inner.buttonsResponseMessage;
+  if (btn && typeof btn === 'object') {
+    const b = btn as Record<string, unknown>;
+    const selected =
+      asTrimmedString(b.selectedDisplayText) ||
+      asTrimmedString(b.selectedButtonId) ||
+      asTrimmedString(b.selectedId);
+    if (selected) return selected;
+  }
+  const list = inner.listResponseMessage;
+  if (list && typeof list === 'object') {
+    const l = list as Record<string, unknown>;
+    const title = asTrimmedString(l.title);
+    const single = l.singleSelectReply;
+    if (single && typeof single === 'object') {
+      const rowId = asTrimmedString((single as Record<string, unknown>).selectedRowId);
+      if (title && rowId) return `${title} (${rowId})`;
+      if (title) return title;
+      if (rowId) return rowId;
+    }
+    if (title) return title;
+  }
+  const tpl = inner.templateButtonReplyMessage;
+  if (tpl && typeof tpl === 'object') {
+    const t = tpl as Record<string, unknown>;
+    return (
+      asTrimmedString(t.selectedDisplayText) ||
+      asTrimmedString(t.selectedId) ||
+      ''
+    );
+  }
+  return '';
+}
+
+function applyMediaNode(
+  node: Record<string, unknown>,
+  kind: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'ptv',
+  state: {
+    bodyText: string;
+    type?: string;
+    hasMedia: boolean;
+    mediaMimetype?: string;
+    mediaFilename?: string;
+    mediaUrl?: string;
+    providerMediaId?: string;
+  }
+): void {
+  state.hasMedia = true;
+  state.type = kind === 'ptv' ? 'video' : kind;
+  if (typeof node.caption === 'string' && node.caption.trim()) {
+    state.bodyText = node.caption;
+  }
+  if (typeof node.mimetype === 'string') state.mediaMimetype = node.mimetype;
+  if (typeof node.fileName === 'string') state.mediaFilename = node.fileName;
+  if (typeof node.url === 'string') state.mediaUrl = node.url;
+  if (typeof node.directPath === 'string') state.providerMediaId = node.directPath;
+  if (kind === 'sticker') {
+    state.mediaMimetype = state.mediaMimetype || 'image/webp';
+  }
+}
+
+/** Exportado para reutilizar no normalizador de mídia do webhook. */
+export function unwrapEvolutionWebhookMessageNode(node: unknown): Record<string, unknown> {
+  return unwrapMessageNode(node);
+}
+
 function unwrapMessageNode(node: unknown): Record<string, unknown> {
   if (!node || typeof node !== 'object') return {};
   let current = node as Record<string, unknown>;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
+    if (current.documentWithCaptionMessage && typeof current.documentWithCaptionMessage === 'object') {
+      const next = (current.documentWithCaptionMessage as Record<string, unknown>).message;
+      if (next && typeof next === 'object') {
+        current = next as Record<string, unknown>;
+        continue;
+      }
+    }
     if (current.ephemeralMessage && typeof current.ephemeralMessage === 'object') {
       const next = (current.ephemeralMessage as Record<string, unknown>).message;
       if (next && typeof next === 'object') {
@@ -265,6 +339,10 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
   const remoteJid = pickPreferredJid(key.remoteJid, key.remoteJidAlt);
   if (!remoteJid || remoteJid === 'status@broadcast') return null;
 
+  // Nunca usar stanzaId/contextInfo como id da mensagem — só o id da chave do evento.
+  const messageId = asTrimmedString(key.id);
+  if (!messageId) return null;
+
   const fromMe = key.fromMe === true;
   const participant = pickPreferredJid(key.participant, key.participantAlt) || undefined;
   const from = !fromMe && participant ? participant : remoteJid;
@@ -279,6 +357,16 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
   let mediaUrl: string | undefined;
   let providerMediaId: string | undefined;
 
+  const mediaState = {
+    bodyText,
+    type,
+    hasMedia,
+    mediaMimetype,
+    mediaFilename,
+    mediaUrl,
+    providerMediaId
+  };
+
   if (inner && typeof inner === 'object') {
     if (typeof inner.conversation === 'string') {
       bodyText = inner.conversation;
@@ -290,40 +378,15 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
       hasMedia = false;
       bodyText = formatLocationBody(inner.locationMessage as Record<string, unknown>);
     } else if (inner.imageMessage && typeof inner.imageMessage === 'object') {
-      type = 'image';
-      hasMedia = true;
-      const im = inner.imageMessage as Record<string, unknown>;
-      if (typeof im.caption === 'string') bodyText = im.caption;
-      if (typeof im.mimetype === 'string') mediaMimetype = im.mimetype;
-      if (typeof im.fileName === 'string') mediaFilename = im.fileName;
-      if (typeof im.url === 'string') mediaUrl = im.url;
-      if (typeof im.directPath === 'string') providerMediaId = im.directPath;
+      applyMediaNode(inner.imageMessage as Record<string, unknown>, 'image', mediaState);
     } else if (inner.videoMessage && typeof inner.videoMessage === 'object') {
-      type = 'video';
-      hasMedia = true;
-      const vm = inner.videoMessage as Record<string, unknown>;
-      if (typeof vm.caption === 'string') bodyText = vm.caption;
-      if (typeof vm.mimetype === 'string') mediaMimetype = vm.mimetype;
-      if (typeof vm.fileName === 'string') mediaFilename = vm.fileName;
-      if (typeof vm.url === 'string') mediaUrl = vm.url;
-      if (typeof vm.directPath === 'string') providerMediaId = vm.directPath;
+      applyMediaNode(inner.videoMessage as Record<string, unknown>, 'video', mediaState);
+    } else if (inner.ptvMessage && typeof inner.ptvMessage === 'object') {
+      applyMediaNode(inner.ptvMessage as Record<string, unknown>, 'ptv', mediaState);
     } else if (inner.audioMessage && typeof inner.audioMessage === 'object') {
-      type = 'audio';
-      hasMedia = true;
-      const am = inner.audioMessage as Record<string, unknown>;
-      if (typeof am.mimetype === 'string') mediaMimetype = am.mimetype;
-      if (typeof am.fileName === 'string') mediaFilename = am.fileName;
-      if (typeof am.url === 'string') mediaUrl = am.url;
-      if (typeof am.directPath === 'string') providerMediaId = am.directPath;
+      applyMediaNode(inner.audioMessage as Record<string, unknown>, 'audio', mediaState);
     } else if (inner.documentMessage && typeof inner.documentMessage === 'object') {
-      type = 'document';
-      hasMedia = true;
-      const dm = inner.documentMessage as Record<string, unknown>;
-      if (typeof dm.caption === 'string') bodyText = dm.caption;
-      if (typeof dm.mimetype === 'string') mediaMimetype = dm.mimetype;
-      if (typeof dm.fileName === 'string') mediaFilename = dm.fileName;
-      if (typeof dm.url === 'string') mediaUrl = dm.url;
-      if (typeof dm.directPath === 'string') providerMediaId = dm.directPath;
+      applyMediaNode(inner.documentMessage as Record<string, unknown>, 'document', mediaState);
     } else if (inner.contactMessage && typeof inner.contactMessage === 'object') {
       type = 'contact';
       hasMedia = false;
@@ -357,17 +420,25 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
       } else {
         bodyText = buildMinimalVcard('Contato');
       }
-    } else if (inner.stickerMessage) {
-      type = 'sticker';
-      hasMedia = true;
+    } else if (inner.stickerMessage && typeof inner.stickerMessage === 'object') {
+      applyMediaNode(inner.stickerMessage as Record<string, unknown>, 'sticker', mediaState);
     } else {
-      const keys = Object.keys(inner).filter((k) => k.endsWith('Message'));
-      if (keys.length > 0) {
-        hasMedia = true;
-        type = keys[0].replace(/Message$/i, '').toLowerCase();
+      const interactive = extractInteractiveReplyText(inner);
+      if (interactive) {
+        bodyText = interactive;
+        type = 'text';
+        hasMedia = false;
       }
     }
   }
+
+  bodyText = mediaState.bodyText || bodyText;
+  type = mediaState.type ?? type;
+  hasMedia = mediaState.hasMedia;
+  mediaMimetype = mediaState.mediaMimetype ?? mediaMimetype;
+  mediaFilename = mediaState.mediaFilename ?? mediaFilename;
+  mediaUrl = mediaState.mediaUrl ?? mediaUrl;
+  providerMediaId = mediaState.providerMediaId ?? providerMediaId;
 
   const tsRaw = m.messageTimestamp ?? m.timestamp;
   let timestamp = 0;
@@ -385,7 +456,7 @@ export function evolutionUpsertMessageToProviderRaw(m: Record<string, unknown>):
   }
 
   return {
-    id: key.id,
+    id: messageId,
     from,
     to: remoteJid,
     fromMe,

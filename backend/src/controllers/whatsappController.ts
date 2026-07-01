@@ -6,6 +6,7 @@ import { AuthRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
 import {
   archiveWhatsappConversation,
+  applyReactionFromWebhook,
   clearAllWhatsappContactCache,
   rebuildWhatsappContactCacheFromCrm,
   deleteChatMessageById,
@@ -1081,7 +1082,7 @@ export async function postWhatsappReactToMessage(req: AuthRequest, res: Response
     }
     const message = await prisma.chatMessage.findUnique({
       where: { id: messageId },
-      select: { id: true, chatId: true, providerMessageId: true, fromMe: true }
+      select: { id: true, chatId: true, providerMessageId: true, fromMe: true, participant: true }
     });
     if (!message) {
       res.status(404).json({ success: false, error: 'Mensagem não encontrada' });
@@ -1098,9 +1099,21 @@ export async function postWhatsappReactToMessage(req: AuthRequest, res: Response
       chatId: message.chatId,
       providerMessageId: message.providerMessageId,
       fromMe: message.fromMe,
+      participant: message.participant,
       emoji
     });
-    res.json({ success: true });
+    await applyReactionFromWebhook({
+      targetProviderMessageId: message.providerMessageId,
+      reaction: emoji
+    });
+    res.json({
+      success: true,
+      data: {
+        id: message.id,
+        chatId: message.chatId,
+        reaction: emoji ? emoji : null
+      }
+    });
   } catch (e) {
     console.error('postWhatsappReactToMessage', e);
     const msg = e instanceof Error ? e.message : 'Erro ao reagir à mensagem';
@@ -1233,7 +1246,12 @@ export async function getWhatsappMediaById(req: AuthRequest, res: Response): Pro
     if (!providerFetchRes && row.providerMessageId?.trim()) {
       const variants = storageChatIdVariants(canonicalWhatsappChatId(row.chatId));
       for (const cid of variants) {
-        const r = await fetchWhatsappProviderMessageDownloadMedia(cid, row.providerMessageId, rangeHeader);
+        const r = await fetchWhatsappProviderMessageDownloadMedia(
+          cid,
+          row.providerMessageId,
+          rangeHeader,
+          row.fromMe
+        );
         if (r.ok || r.status === 206) {
           providerFetchRes = r;
           break;
@@ -1322,6 +1340,11 @@ export async function postWhatsappSendFile(req: AuthRequest, res: Response): Pro
     const base64Data = dataBuffer.toString('base64');
     const quotedMessageId =
       typeof req.body?.quotedMessageId === 'string' ? req.body.quotedMessageId.trim() : undefined;
+    const quotedFromMe =
+      req.body?.quotedFromMe === true ||
+      req.body?.quotedFromMe === 'true' ||
+      req.body?.quotedFromMe === 1 ||
+      req.body?.quotedFromMe === '1';
     const created = await sendMediaMessageFromUser({
       chatId,
       userId,
@@ -1332,7 +1355,8 @@ export async function postWhatsappSendFile(req: AuthRequest, res: Response): Pro
       filename,
       caption: caption || undefined,
       fileSize: dataBuffer.length,
-      quotedMessageId
+      quotedMessageId,
+      quotedFromMe: quotedMessageId ? quotedFromMe : undefined
     });
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {
@@ -1514,6 +1538,11 @@ export async function postWhatsappSend(req: AuthRequest, res: Response): Promise
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     const quotedMessageId =
       typeof req.body?.quotedMessageId === 'string' ? req.body.quotedMessageId.trim() : undefined;
+    const quotedFromMe =
+      req.body?.quotedFromMe === true ||
+      req.body?.quotedFromMe === 'true' ||
+      req.body?.quotedFromMe === 1 ||
+      req.body?.quotedFromMe === '1';
     if (!chatId || !text) {
       res.status(400).json({ success: false, error: 'chatId e text são obrigatórios' });
       return;
@@ -1523,7 +1552,8 @@ export async function postWhatsappSend(req: AuthRequest, res: Response): Promise
       text,
       userId,
       userName: req.user?.name,
-      quotedMessageId
+      quotedMessageId,
+      quotedFromMe: quotedMessageId ? quotedFromMe : undefined
     });
     res.json({ success: true, data: toSocketDto(created) });
   } catch (e) {

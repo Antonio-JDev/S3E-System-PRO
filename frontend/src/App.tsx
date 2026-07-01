@@ -43,13 +43,13 @@ const ClientesModerno = lazy(() => import('./components/ClientesModerno'));
 const Projetos = lazy(() => import('./components/Projetos'));
 const ProjetosAPI = lazy(() => import('./components/ProjetosAPI'));
 const OrdemServicosHub = lazy(() => import('./components/OrdemServicosHub'));
+const CalendarioHub = lazy(() => import('./components/CalendarioHub'));
 const Obras = lazy(() => import('./components/Obras'));
 const Servicos = lazy(() => import('./components/Servicos'));
 const Financeiro = lazy(() => import('./components/Financeiro'));
 const EmissaoNFe = lazy(() => import('./components/EmissaoNFe'));
 const Configuracoes = lazy(() => import('./components/Configuracoes'));
 const Vendas = lazy(() => import('./components/Vendas'));
-const Cotacoes = lazy(() => import('./components/Cotacoes'));
 const GerenciamentoFerramentas = lazy(() => import('./components/GerenciamentoFerramentas'));
 const TarefasInternasKanban = lazy(() => import('./pages/TarefasInternasKanban'));
 const DetalhesTarefaInterna = lazy(() => import('./pages/DetalhesTarefaInterna'));
@@ -176,6 +176,8 @@ const MainApp: React.FC = () => {
       setActiveView('Fornecedores');
     } else if (pathname === '/obras' || pathname.startsWith('/obras/')) {
       setActiveView('Execução Obra');
+    } else if (pathname === '/calendario') {
+      setActiveView('Calendário');
     } else if (pathname === '/tarefas-internas') {
       setActiveView('Tarefas Internas');
       setInitialTarefaInternaId(null);
@@ -361,6 +363,8 @@ const MainApp: React.FC = () => {
                  onClearInitialProject={() => { setInitialProjectId(null); setInitialProjectTab('geral'); }}
                  onViewObra={handleViewObra}
                />;
+      case 'Calendário':
+        return <CalendarioHub toggleSidebar={toggleSidebar} />;
       case 'Execução Obra':
         return <ObrasKanban toggleSidebar={toggleSidebar} onNavigate={(view: string, ...args: any[]) => {
           if (view === 'DetalhesObra' && args[0]) {
@@ -389,8 +393,6 @@ const MainApp: React.FC = () => {
         );
       case 'Vendas':
         return <Vendas toggleSidebar={toggleSidebar} onNavigate={handleNavigate} />;
-      case 'Cotações':
-        return <Cotacoes toggleSidebar={toggleSidebar} />;
       case 'Emissão NF-e':
         return <EmissaoNFe toggleSidebar={toggleSidebar} />;
       case 'Serviços':

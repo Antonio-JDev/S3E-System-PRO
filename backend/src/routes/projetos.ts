@@ -45,6 +45,11 @@ import {
   deletarDocumentoReferencia,
   uploadDocumentoReferencia,
 } from '../controllers/engenhariaDocumentosReferenciaController';
+import {
+  criarApontamentoOs,
+  listarApontamentosOs,
+  obterResumoApropriacaoOs,
+} from '../controllers/apropriacaoOsController';
 import { authenticate } from '../middlewares/auth';
 import PDFDocument from 'pdfkit';
 import path from 'path';
@@ -99,6 +104,19 @@ router.patch('/:id/engenharia', patchEngenharia);
  * @desc Atribui OS manualmente ao setor de engenharia
  */
 router.patch('/:id/engenharia/atribuir', atribuirEngenharia);
+
+/**
+ * @route GET /api/projetos/:projetoId/apropriacao/resumo
+ * @desc Resumo orçado vs realizado e resultado financeiro da OS
+ */
+router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
+
+/**
+ * @route GET/POST /api/projetos/:projetoId/apontamentos
+ * @desc Listar e criar apontamentos rápidos (F1)
+ */
+router.get('/:projetoId/apontamentos', listarApontamentosOs);
+router.post('/:projetoId/apontamentos', criarApontamentoOs);
 
 /**
  * @route GET /api/projetos/:id
