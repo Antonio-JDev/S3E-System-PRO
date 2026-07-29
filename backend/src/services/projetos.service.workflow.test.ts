@@ -17,6 +17,11 @@ jest.mock('./projetosEngenharia.service', () => ({
   validarConclusaoOsEngenharia: jest.fn().mockResolvedValue(null),
 }));
 
+jest.mock('./vistoriaCelesc.service', () => ({
+  entrarNaFilaSeAplicavel: jest.fn().mockResolvedValue(null),
+  validarConclusaoVistoriaCelesc: jest.fn().mockReturnValue(null),
+}));
+
 jest.mock('./contasReceber.service', () => ({
   ContasReceberService: {
     criarContaReceberManual: jest.fn().mockResolvedValue({ id: 'conta-1' }),

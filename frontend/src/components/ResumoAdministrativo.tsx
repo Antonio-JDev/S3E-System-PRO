@@ -32,6 +32,7 @@ import {
   type EvolucaoFinanceira,
 } from '../services/biService';
 import { ThemeContext } from '../contexts/ThemeContext';
+import { CHART_ACCENT, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -53,8 +54,8 @@ const ResumoAdministrativo: React.FC = () => {
   const [exportando, setExportando] = useState(false);
 
   const themeContext = useContext(ThemeContext);
-  const isDark = themeContext?.theme === 'dark' ||
-    (themeContext?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = themeContext?.effectiveTheme === 'dark';
+  const ct = getChartTheme(!!isDark);
 
   // Carregar dados
   const carregarDados = async () => {
@@ -441,15 +442,15 @@ const ResumoAdministrativo: React.FC = () => {
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dadosLucroMaterial}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis
                     dataKey="mes"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                   />
                   <YAxis
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickFormatter={(value) => {
                       if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
                       return 'R$ ' + value;
@@ -457,15 +458,10 @@ const ResumoAdministrativo: React.FC = () => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                    }}
-                    labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
+                    labelStyle={{ color: ct.tooltipLabel }}
                   />
-                  <Legend wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }} />
+                  <Legend wrapperStyle={{ color: ct.legend }} />
                   <Bar dataKey="lucro" fill="#10B981" name="Lucro" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -489,15 +485,15 @@ const ResumoAdministrativo: React.FC = () => {
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dadosLucroServico}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis
                     dataKey="mes"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                   />
                   <YAxis
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickFormatter={(value) => {
                       if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
                       return 'R$ ' + value;
@@ -505,15 +501,10 @@ const ResumoAdministrativo: React.FC = () => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                    }}
-                    labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
+                    labelStyle={{ color: ct.tooltipLabel }}
                   />
-                  <Legend wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }} />
+                  <Legend wrapperStyle={{ color: ct.legend }} />
                   <Bar dataKey="lucro" fill="#8B5CF6" name="Lucro" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -537,15 +528,15 @@ const ResumoAdministrativo: React.FC = () => {
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dadosLucroMaoDeObra}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis
                     dataKey="mes"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                   />
                   <YAxis
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickFormatter={(value) => {
                       if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
                       return 'R$ ' + value;
@@ -553,15 +544,10 @@ const ResumoAdministrativo: React.FC = () => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                    }}
-                    labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
+                    labelStyle={{ color: ct.tooltipLabel }}
                   />
-                  <Legend wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }} />
+                  <Legend wrapperStyle={{ color: ct.legend }} />
                   <Bar dataKey="lucro" fill="#F59E0B" name="Lucro" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -585,15 +571,15 @@ const ResumoAdministrativo: React.FC = () => {
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dadosResumoMensal}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis
                     dataKey="mes"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                   />
                   <YAxis
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickFormatter={(value) => {
                       if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
                       return 'R$ ' + value;
@@ -601,19 +587,14 @@ const ResumoAdministrativo: React.FC = () => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                    }}
-                    labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
+                    labelStyle={{ color: ct.tooltipLabel }}
                   />
-                  <Legend wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }} />
+                  <Legend wrapperStyle={{ color: ct.legend }} />
                   <Bar dataKey="lucroMateriais" fill="#10B981" name="Lucro Materiais" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="lucroServicos" fill="#8B5CF6" name="Lucro Serviços" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="lucroMaoDeObra" fill="#F59E0B" name="Lucro Mão de Obra" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="totalBDI" fill="#6366F1" name="Total BDI" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="totalBDI" fill={CHART_ACCENT} name="Total BDI" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -682,15 +663,15 @@ const ResumoAdministrativo: React.FC = () => {
 
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dadosEvolucaoFinanceira}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis
                     dataKey="mes"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                   />
                   <YAxis
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickFormatter={(value) => {
                       if (value >= 1000) return 'R$ ' + (value / 1000).toFixed(1) + 'k';
                       return 'R$ ' + value;
@@ -698,15 +679,10 @@ const ResumoAdministrativo: React.FC = () => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                    }}
-                    labelStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
+                    labelStyle={{ color: ct.tooltipLabel }}
                   />
-                  <Legend wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }} />
+                  <Legend wrapperStyle={{ color: ct.legend }} />
                   <Line
                     type="monotone"
                     dataKey="receita"
@@ -726,7 +702,7 @@ const ResumoAdministrativo: React.FC = () => {
                   <Line
                     type="monotone"
                     dataKey="lucro"
-                    stroke="#3B82F6"
+                    stroke={CHART_ACCENT}
                     strokeWidth={3}
                     name="Lucro"
                     dot={{ r: 5 }}

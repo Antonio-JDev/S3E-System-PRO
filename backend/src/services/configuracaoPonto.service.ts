@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { recalcularMetricasFuncionario } from './ponto.service';
 
 export async function buscarPorFuncionario(funcionarioId: string) {
   return prisma.configuracaoPonto.findUnique({
@@ -17,7 +18,12 @@ export async function upsertPorFuncionario(
     inicioNoturno?: string | null;
   },
 ) {
-  return prisma.configuracaoPonto.upsert({
+  const existente = await prisma.configuracaoPonto.findUnique({
+    where: { funcionarioId },
+    select: { workShiftId: true, toleranciaMinutos: true },
+  });
+
+  const row = await prisma.configuracaoPonto.upsert({
     where: { funcionarioId },
     create: {
       funcionarioId,
@@ -36,4 +42,24 @@ export async function upsertPorFuncionario(
     },
     include: { workShift: true },
   });
+
+  const workShiftMudou =
+    data.workShiftId !== undefined &&
+    (existente?.workShiftId ?? null) !== (data.workShiftId ?? null);
+  const toleranciaMudou =
+    data.toleranciaMinutos !== undefined &&
+    (existente?.toleranciaMinutos ?? 5) !== data.toleranciaMinutos;
+
+  // Recálculo isolado: só este funcionário; batidas e avaliações RH preservadas.
+  // Reavalia atraso, saída antecipada, HE e horas normais com a nova jornada.
+  let recalculo: {
+    registrosAtualizados: number;
+    registrosIgnoradosSemBatidas: number;
+  } | null = null;
+
+  if (workShiftMudou || toleranciaMudou) {
+    recalculo = await recalcularMetricasFuncionario(funcionarioId);
+  }
+
+  return { ...row, recalculo };
 }

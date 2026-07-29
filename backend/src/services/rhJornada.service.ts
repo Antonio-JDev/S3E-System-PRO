@@ -13,7 +13,11 @@ import {
   parseClassificacaoJustificativa,
   type ClassificacaoJustificativaPonto,
 } from '../utils/justificativaPonto.util';
-import { WORK_SHIFT_TEMPLATES_44H } from '../utils/workshift.util';
+import {
+  WORK_SHIFT_TEMPLATES_44H,
+  diffMinutosHora,
+  jornadaMinutosPorDia,
+} from '../utils/workshift.util';
 
 async function ajustarBancoHorasPorJustificativa(
   funcionarioId: string,
@@ -81,6 +85,79 @@ export async function listarWorkShifts() {
   return prisma.workShift.findMany({
     where: { ativo: true },
     orderBy: { nome: 'asc' },
+  });
+}
+
+function normalizarHHmm(raw: string): string {
+  const m = String(raw ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) throw new Error(`Horário inválido: ${raw}. Use HH:mm`);
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h > 23 || min > 59) throw new Error(`Horário fora do intervalo: ${raw}`);
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+/**
+ * Cria (ou reaproveita) uma jornada personalizada com 4 horários:
+ * entrada → saída almoço → volta almoço → saída.
+ */
+export async function criarWorkShiftPersonalizada(params: {
+  entrada1: string;
+  saida1: string;
+  entrada2: string;
+  saida2: string;
+  nome?: string | null;
+}) {
+  const entrada1 = normalizarHHmm(params.entrada1);
+  const saida1 = normalizarHHmm(params.saida1);
+  const entrada2 = normalizarHHmm(params.entrada2);
+  const saida2 = normalizarHHmm(params.saida2);
+
+  if (diffMinutosHora(entrada1, saida1) <= 0) {
+    throw new Error('Saída para almoço deve ser após a entrada');
+  }
+  if (diffMinutosHora(saida1, entrada2) < 0) {
+    throw new Error('Volta do almoço deve ser igual ou após a saída para almoço');
+  }
+  if (diffMinutosHora(entrada2, saida2) <= 0) {
+    throw new Error('Saída final deve ser após a volta do almoço');
+  }
+
+  const existente = await prisma.workShift.findFirst({
+    where: { entrada1, saida1, entrada2, saida2 },
+  });
+  if (existente) {
+    if (!existente.ativo) {
+      return prisma.workShift.update({
+        where: { id: existente.id },
+        data: { ativo: true },
+      });
+    }
+    return existente;
+  }
+
+  const minutosDia = jornadaMinutosPorDia({ entrada1, saida1, entrada2, saida2 });
+  const horasSemana = Math.round((minutosDia * 5) / 60);
+  const nomeBase =
+    String(params.nome ?? '').trim() ||
+    `Personalizada ${horasSemana}h - ${entrada1}/${saida1}/${entrada2}/${saida2}`;
+
+  let nome = nomeBase;
+  let tentativa = 1;
+  while (await prisma.workShift.findUnique({ where: { nome } })) {
+    tentativa += 1;
+    nome = `${nomeBase} (#${tentativa})`;
+  }
+
+  return prisma.workShift.create({
+    data: {
+      nome,
+      entrada1,
+      saida1,
+      entrada2,
+      saida2,
+      ativo: true,
+    },
   });
 }
 

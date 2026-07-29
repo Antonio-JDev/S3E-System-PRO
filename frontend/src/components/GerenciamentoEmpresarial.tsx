@@ -718,22 +718,22 @@ const RHView: React.FC = () => {
                 <>
                     {/* Métricas RH */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-blue-700">Folha de Pagamento</p>
-                            <p className="text-2xl font-bold text-blue-900">
+                        <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Folha de Pagamento</p>
+                            <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                                 R$ {(metricas.folhaPagamento || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
-                            <p className="text-xs text-blue-600 mt-1">Mensal</p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400/80 mt-1">Mensal</p>
                         </div>
-                        <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-green-700">Vales do Mês</p>
-                            <p className="text-2xl font-bold text-green-900">
+                        <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-green-700 dark:text-green-400">Vales do Mês</p>
+                            <p className="text-2xl font-bold text-green-900 dark:text-green-300">
                                 R$ {(metricas.valesMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
-                        <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-purple-700">Custo Total</p>
-                            <p className="text-2xl font-bold text-purple-900">
+                        <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Custo Total</p>
+                            <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">
                                 R$ {(metricas.custoTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
@@ -2402,27 +2402,27 @@ const CarrosView: React.FC = () => {
 
             {/* Métricas Frota */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-orange-700">Gastos do Mês</p>
-                    <p className="text-2xl font-bold text-orange-900">
+                <div className="bg-orange-50 dark:bg-dark-elevated border-2 border-orange-200 dark:border-orange-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-400">Gastos do Mês</p>
+                    <p className="text-2xl font-bold text-orange-900 dark:text-orange-300">
                         R$ {(metricas.gastosMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-blue-700">Combustível</p>
-                    <p className="text-2xl font-bold text-blue-900">
+                <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Combustível</p>
+                    <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                         R$ {(metricas.combustivel || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Manutenção</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Manutenção</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         R$ {(metricas.manutencao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-purple-700">Veículos Ativos</p>
-                    <p className="text-2xl font-bold text-purple-900">{metricas.totalVeiculos || 0}</p>
+                <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Veículos Ativos</p>
+                    <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">{metricas.totalVeiculos || 0}</p>
                 </div>
             </div>
 
@@ -3184,21 +3184,21 @@ const PlanosView: React.FC = () => {
 
             {/* Categorias de Prioridade */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Alta Prioridade</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Alta Prioridade</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         {planos.filter(p => p.prioridade === 'Alta' && p.status !== 'Concluído').length}
                     </p>
                 </div>
-                <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-yellow-700">Média Prioridade</p>
-                    <p className="text-2xl font-bold text-yellow-900">
+                <div className="bg-yellow-50 dark:bg-dark-elevated border-2 border-yellow-200 dark:border-yellow-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">Média Prioridade</p>
+                    <p className="text-2xl font-bold text-yellow-900 dark:text-yellow-300">
                         {planos.filter(p => p.prioridade === 'Média' && p.status !== 'Concluído').length}
                     </p>
                 </div>
-                <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-green-700">Concluídos</p>
-                    <p className="text-2xl font-bold text-green-900">
+                <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Concluídos</p>
+                    <p className="text-2xl font-bold text-green-900 dark:text-green-300">
                         {planos.filter(p => p.status === 'Concluído').length}
                     </p>
                 </div>
@@ -3775,25 +3775,25 @@ const DespesasFixasView: React.FC = () => {
 
             {/* Métricas */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Total Mensal</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Total Mensal</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         R$ {(metricas.totalMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-blue-700">Total Anual</p>
-                    <p className="text-2xl font-bold text-blue-900">
+                <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Total Anual</p>
+                    <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                         R$ {(metricas.totalAnual || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-purple-700">Despesas Ativas</p>
-                    <p className="text-2xl font-bold text-purple-900">{metricas.totalDespesas || 0}</p>
+                <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Despesas Ativas</p>
+                    <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">{metricas.totalDespesas || 0}</p>
                 </div>
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-orange-700">Média por Despesa</p>
-                    <p className="text-2xl font-bold text-orange-900">
+                <div className="bg-orange-50 dark:bg-dark-elevated border-2 border-orange-200 dark:border-orange-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-400">Média por Despesa</p>
+                    <p className="text-2xl font-bold text-orange-900 dark:text-orange-300">
                         R$ {metricas.totalDespesas > 0 
                             ? ((metricas.totalMensal || 0) / metricas.totalDespesas).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
                             : '0,00'

@@ -25,6 +25,8 @@ export interface ContaPagarPayload {
     totalParcelas?: number;
     observacoes?: string;
     classificacao?: string; // Impostos, TRT-ART, Serviço mão de obra eletricista, Brindes, Combustíveis e pedagios, Frete, Material de escritório, Saídas
+    meioPagamento?: string;
+    cartaoCreditoId?: string | null;
 }
 
 export interface AtualizarContaPagarPayload {
@@ -34,6 +36,8 @@ export interface AtualizarContaPagarPayload {
     dataVencimento?: Date;
     observacoes?: string | null;
     classificacao?: string | null;
+    meioPagamento?: string | null;
+    cartaoCreditoId?: string | null;
 }
 
 type TipoContaPagar = 'FORNECEDOR' | 'RH' | 'DESPESA_FIXA' | 'FROTA';
@@ -52,6 +56,27 @@ function avancarMes(ano: number, mes: number): { ano: number; mes: number } {
     return { ano, mes: mes + 1 };
 }
 
+async function validarMeioPagamentoCartao(
+    meioPagamento?: string | null,
+    cartaoCreditoId?: string | null
+): Promise<{ meioPagamento?: string; cartaoCreditoId?: string | null }> {
+    const meio = meioPagamento ? String(meioPagamento).trim().toUpperCase() : undefined;
+    if (meio === 'CARTAO_CREDITO') {
+        if (!cartaoCreditoId) {
+            throw new Error('Selecione o cartão de crédito para o método CARTAO_CREDITO');
+        }
+        const cartao = await prisma.cartaoCredito.findUnique({ where: { id: cartaoCreditoId } });
+        if (!cartao || !cartao.ativo) {
+            throw new Error('Cartão de crédito inválido ou inativo');
+        }
+        return { meioPagamento: 'CARTAO_CREDITO', cartaoCreditoId };
+    }
+    if (meio) {
+        return { meioPagamento: meio, cartaoCreditoId: null };
+    }
+    return { meioPagamento: undefined, cartaoCreditoId: cartaoCreditoId ?? undefined };
+}
+
 export interface ContaPagarParceladaPayload {
     fornecedorId?: string;
     compraId?: string;
@@ -60,6 +85,8 @@ export interface ContaPagarParceladaPayload {
     parcelas: number;
     dataPrimeiroVencimento: Date;
     observacoes?: string;
+    meioPagamento?: string;
+    cartaoCreditoId?: string | null;
 }
 
 export interface ContaPagarPorDuplicataPayload {
@@ -72,6 +99,8 @@ export interface ContaPagarPorDuplicataPayload {
         valor: number;
     }>;
     observacoes?: string;
+    meioPagamento?: string;
+    cartaoCreditoId?: string | null;
 }
 
 export class ContasPagarService {
@@ -99,7 +128,9 @@ export class ContasPagarService {
             numeroParcela,
             totalParcelas,
             observacoes,
-            classificacao
+            classificacao,
+            meioPagamento,
+            cartaoCreditoId
         } = data;
 
         const tipoFinal = ((tipo || 'FORNECEDOR') as TipoContaPagar);
@@ -109,6 +140,8 @@ export class ContasPagarService {
             valorJuros,
             valorDesconto
         );
+
+        const pagamentoValidado = await validarMeioPagamentoCartao(meioPagamento, cartaoCreditoId);
 
         if (tipoFinal === 'FORNECEDOR') {
             const origem = origemCadastro || (fornecedorId ? 'FORNECEDOR_CADASTRADO' : 'FORNECEDOR_NOVO');
@@ -157,6 +190,8 @@ export class ContasPagarService {
                 totalParcelas,
                 observacoes,
                 classificacao: classificacao || undefined,
+                meioPagamento: pagamentoValidado.meioPagamento,
+                cartaoCreditoId: pagamentoValidado.cartaoCreditoId ?? undefined,
                 status: ContaStatus.Pendente
             };
         const contaPagar = await prisma.contaPagar.create({
@@ -199,7 +234,17 @@ export class ContasPagarService {
      * Cria múltiplas contas a pagar parceladas
      */
     static async criarContasPagarParceladas(data: ContaPagarParceladaPayload) {
-        const { fornecedorId, compraId, descricao, valorTotal, parcelas, dataPrimeiroVencimento, observacoes } = data;
+        const {
+            fornecedorId,
+            compraId,
+            descricao,
+            valorTotal,
+            parcelas,
+            dataPrimeiroVencimento,
+            observacoes,
+            meioPagamento,
+            cartaoCreditoId,
+        } = data;
 
         // Validações
         if (valorTotal <= 0) {
@@ -209,6 +254,8 @@ export class ContasPagarService {
         if (parcelas < 1) {
             throw new Error('Número de parcelas deve ser pelo menos 1');
         }
+
+        const pagamentoValidado = await validarMeioPagamentoCartao(meioPagamento, cartaoCreditoId);
 
         // Calcular valor por parcela
         const valorParcela = valorTotal / parcelas;
@@ -232,6 +279,8 @@ export class ContasPagarService {
                         numeroParcela: i,
                         totalParcelas: parcelas,
                         observacoes,
+                        meioPagamento: pagamentoValidado.meioPagamento,
+                        cartaoCreditoId: pagamentoValidado.cartaoCreditoId ?? undefined,
                         status: ContaStatus.Pendente
                     }
                 });
@@ -269,11 +318,21 @@ export class ContasPagarService {
      * Cria contas a pagar baseadas nas duplicatas (valores e datas exatos do XML)
      */
     static async criarContasPagarPorDuplicatas(data: ContaPagarPorDuplicataPayload) {
-        const { fornecedorId, compraId, descricao, duplicatas, observacoes } = data;
+        const {
+            fornecedorId,
+            compraId,
+            descricao,
+            duplicatas,
+            observacoes,
+            meioPagamento,
+            cartaoCreditoId,
+        } = data;
 
         if (!duplicatas || duplicatas.length === 0) {
             throw new Error('Pelo menos uma duplicata é necessária para criar contas a pagar');
         }
+
+        const pagamentoValidado = await validarMeioPagamentoCartao(meioPagamento, cartaoCreditoId);
 
         // Transação para garantir consistência
         const contasCriadas = await prisma.$transaction(async (tx) => {
@@ -298,6 +357,8 @@ export class ContasPagarService {
                         numeroParcela: i + 1,
                         totalParcelas,
                         observacoes,
+                        meioPagamento: pagamentoValidado.meioPagamento,
+                        cartaoCreditoId: pagamentoValidado.cartaoCreditoId ?? undefined,
                         status: ContaStatus.Pendente
                     }
                 });
@@ -480,6 +541,16 @@ export class ContasPagarService {
 
         if (conta.status === ContaStatus.Pago) {
             throw new Error('Conta já está paga');
+        }
+
+        const meioEfetivo = (meioPagamento || conta.meioPagamento || '').toUpperCase();
+        if (
+            meioEfetivo === 'CARTAO_CREDITO' ||
+            conta.cartaoCreditoId
+        ) {
+            throw new Error(
+                'Lançamentos no cartão de crédito devem ser liquidados pela fatura consolidada em Financeiro → Cartão de Crédito'
+            );
         }
 
         // ✅ CORRIGIDO: Usar data fornecida pelo usuário ou data atual
@@ -701,6 +772,14 @@ export class ContasPagarService {
                 orderBy: { dataVencimento: 'asc' },
             include: {
                 fornecedor: true,
+                cartaoCredito: {
+                    select: {
+                        id: true,
+                        nomeOuBanco: true,
+                        ultimosQuatroDigitos: true,
+                        bandeira: true,
+                    },
+                },
                 funcionario: {
                     select: {
                         id: true,
@@ -838,7 +917,9 @@ export class ContasPagarService {
             descricao,
             dataVencimento,
             observacoes,
-            classificacao
+            classificacao,
+            meioPagamento,
+            cartaoCreditoId
         } = payload;
 
         if (fornecedorId && credorNome && credorNome.trim()) {
@@ -871,10 +952,37 @@ export class ContasPagarService {
             }
         }
 
+        if (meioPagamento !== undefined || cartaoCreditoId !== undefined) {
+            const meioFinal =
+                meioPagamento !== undefined
+                    ? meioPagamento
+                    : conta.meioPagamento;
+            const cartaoFinal =
+                cartaoCreditoId !== undefined
+                    ? cartaoCreditoId
+                    : conta.cartaoCreditoId;
+
+            const pagamentoValidado = await validarMeioPagamentoCartao(
+                meioFinal,
+                cartaoFinal
+            );
+
+            dataUpdate.meioPagamento = pagamentoValidado.meioPagamento ?? null;
+            dataUpdate.cartaoCreditoId = pagamentoValidado.cartaoCreditoId ?? null;
+
+            const mudouCartao =
+                (pagamentoValidado.cartaoCreditoId ?? null) !== (conta.cartaoCreditoId ?? null);
+            const mudouMeio =
+                (pagamentoValidado.meioPagamento ?? null) !== (conta.meioPagamento ?? null);
+            if (mudouCartao || mudouMeio) {
+                dataUpdate.faturaCartaoId = null;
+            }
+        }
+
         return await prisma.contaPagar.update({
             where: { id },
             data: dataUpdate,
-            include: { fornecedor: true }
+            include: { fornecedor: true, cartaoCredito: true }
         });
     }
 
@@ -988,7 +1096,7 @@ export class ContasPagarService {
                 funcionarioId,
                 dataReferencia: dataRefFolha,
             });
-            valorFolha = Number(folha.valores.totalAPagar ?? 0);
+            valorFolha = Number((folha as any).totalAPagar ?? folha.valores.totalAPagar ?? 0);
         } catch {
             return { ok: false, erro: 'folha_indisponivel' };
         }
@@ -1056,7 +1164,7 @@ export class ContasPagarService {
                     funcionarioId: func.id,
                     dataReferencia: dataRefFolha,
                 });
-                valorFolha = Number(folha.valores.totalAPagar ?? 0);
+                valorFolha = Number((folha as any).totalAPagar ?? folha.valores.totalAPagar ?? 0);
             } catch {
                 valorFolha = Number(func.salario ?? 0);
             }

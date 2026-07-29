@@ -17,6 +17,7 @@ import AlertDialog from './ui/AlertDialog';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { axiosApiService } from '../services/axiosApi';
 import { empresaFiscalService } from '../services/empresaFiscalService';
+import { financeiroService } from '../services/financeiroService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { formatCNPJ, formatTelefoneBR, onlyDigits } from '../utils/inputMasks';
 import {
@@ -313,6 +314,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     const [outrasDespesas, setOutrasDespesas] = useState<string>('0');
     const [descontos, setDescontos] = useState<string>('0');
     const [condicaoPagamento, setCondicaoPagamento] = useState<'AVISTA' | 'PARCELADO'>('AVISTA');
+    const [meioPagamento, setMeioPagamento] = useState<string>('PIX');
+    const [cartaoCreditoId, setCartaoCreditoId] = useState<string>('');
+    const [cartoesCredito, setCartoesCredito] = useState<Array<{ id: string; nomeOuBanco: string; ultimosQuatroDigitos: string; bandeira: string }>>([]);
     const [numParcelas, setNumParcelas] = useState<string>('1');
     const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState<string>('');
 
@@ -456,6 +460,14 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
     useEffect(() => {
         loadPurchaseOrders();
     }, [loadPurchaseOrders]);
+
+    useEffect(() => {
+        const carregarCartoes = async () => {
+            const res = await financeiroService.listarCartoes(true);
+            if (res.success && res.data) setCartoesCredito(res.data);
+        };
+        carregarCartoes();
+    }, []);
 
     // ✅ NOVO: Carregar obras em andamento para compra avulsa
     useEffect(() => {
@@ -1137,6 +1149,11 @@ const filteredPurchases = useMemo(() => {
             return;
         }
 
+        if (meioPagamento === 'CARTAO_CREDITO' && !cartaoCreditoId) {
+            toast.error('Selecione o cartão de crédito');
+            return;
+        }
+
         try {
             // Se está editando, atualizar a compra completa
             if (purchaseToEdit) {
@@ -1156,6 +1173,8 @@ const filteredPurchases = useMemo(() => {
                     outrasDespesas: parseFloat(outrasDespesas || '0') || 0,
                     valorDesconto: parseFloat(descontos || '0') || 0,
                     condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
+                    meioPagamento,
+                    cartaoCreditoId: meioPagamento === 'CARTAO_CREDITO' ? cartaoCreditoId : null,
                     destinatarioCNPJ: onlyDigits(destinatarioCNPJ) || destinatarioCNPJ || undefined,
                     valorIPI: parseFloat(valorIPI || '0') || 0,
                     valorTotalProdutos: totalProdutosCalculado,
@@ -1208,6 +1227,8 @@ const filteredPurchases = useMemo(() => {
                 })),
                 observacoes: observacoesCompra.trim() || undefined,
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
+                meioPagamento,
+                cartaoCreditoId: meioPagamento === 'CARTAO_CREDITO' ? cartaoCreditoId : null,
                 destinatarioCNPJ: onlyDigits(destinatarioCNPJ) || destinatarioCNPJ || undefined,
                 statusImportacao,
                 valorIPI: parseFloat(valorIPI || '0') || 0,
@@ -3000,6 +3021,41 @@ const filteredPurchases = useMemo(() => {
                                             <option value="PARCELADO">Parcelado</option>
                                         </select>
                                     </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Método de Pagamento</label>
+                                        <select
+                                            value={meioPagamento}
+                                            onChange={(e) => {
+                                                setMeioPagamento(e.target.value);
+                                                if (e.target.value !== 'CARTAO_CREDITO') setCartaoCreditoId('');
+                                            }}
+                                            className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                        >
+                                            <option value="PIX">PIX</option>
+                                            <option value="DINHEIRO">Cédulas</option>
+                                            <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                            <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                            <option value="BOLETO">Boleto</option>
+                                            <option value="TRANSFERENCIA">Transferência</option>
+                                        </select>
+                                    </div>
+                                    {meioPagamento === 'CARTAO_CREDITO' && (
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">Cartão de Crédito *</label>
+                                            <select
+                                                value={cartaoCreditoId}
+                                                onChange={(e) => setCartaoCreditoId(e.target.value)}
+                                                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                                            >
+                                                <option value="">Selecione o cartão...</option>
+                                                {cartoesCredito.map((c) => (
+                                                    <option key={c.id} value={c.id}>
+                                                        {c.nomeOuBanco} ({c.bandeira}) •••• {c.ultimosQuatroDigitos}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                                             Status da Compra *

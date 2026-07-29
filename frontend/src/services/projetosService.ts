@@ -5,4 +5,8 @@ export {
   type CreateProjetoData,
   type UpdateProjetoData,
   type ProjetoFilters,
+  type StatusVistoriaCelesc,
+  type HistoricoReprovacaoVistoria,
+  type VistoriaCelescItem,
+  type ReprovarVistoriaPayload,
 } from './ordemServicosService';

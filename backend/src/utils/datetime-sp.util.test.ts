@@ -74,8 +74,9 @@ describe('datetime-sp.util', () => {
       expect(ehFeriado(2026, 12, 25)).toBe(true);
     });
 
-    it('11/06 é feriado municipal (Aniversário de Itajaí)', () => {
-      expect(ehFeriado(2026, 6, 11)).toBe(true);
+    it('15/06 é feriado municipal (Aniversário de Itajaí)', () => {
+      expect(ehFeriado(2026, 6, 15)).toBe(true);
+      expect(ehFeriado(2026, 6, 11)).toBe(false);
     });
 
     it('dia comum não é feriado', () => {

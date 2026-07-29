@@ -99,11 +99,11 @@ export function classificarOsPorProgresso(
 }
 
 export const OS_STATUS_LABEL: Record<string, string> = {
-  PROPOSTA: 'Proposta',
-  VALIDADO: 'Validado',
-  APROVADO: 'Aprovado',
-  EXECUCAO: 'Em Execução',
-  CONCLUIDO: 'Concluído',
+  PROPOSTA: 'Pendente',
+  VALIDADO: 'Aprovada', // legado — tratado como aprovada
+  APROVADO: 'Aprovada',
+  EXECUCAO: 'Execução',
+  CONCLUIDO: 'Concluída',
   CANCELADO: 'Cancelado',
 };
 
@@ -185,8 +185,7 @@ export function agregarOsBucket(
     else aguardando++;
 
     if (p.status === 'PROPOSTA') proposta++;
-    else if (p.status === 'VALIDADO') validado++;
-    else if (p.status === 'APROVADO') aprovado++;
+    else if (p.status === 'VALIDADO' || p.status === 'APROVADO') aprovado++;
     else if (p.status === 'EXECUCAO') emExecucao++;
   }
 

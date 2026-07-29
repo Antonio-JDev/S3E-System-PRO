@@ -19,7 +19,25 @@ export type WhatsAppRealtimeEventName =
   | 'whatsapp:chat:flags'
   | 'whatsapp:chat:meta'
   | 'whatsapp:connection:status'
+  | 'whatsapp:chat_list_update'
   | 'update_unread_count';
+
+/**
+ * Payload leve emitido em broadcast para TODOS os operadores quando chega
+ * mensagem em qualquer conversa. Serve apenas para sidebar (preview +
+ * contador de não lidas); a mensagem completa (`whatsapp:message`) chega
+ * somente para quem está na room da conversa (chat aberto).
+ */
+export interface WhatsappChatListUpdateDto {
+  id: string;
+  chatId: string;
+  content: string;
+  fromMe: boolean;
+  timestamp: string;
+  ack: number | null;
+  hasMedia: boolean;
+  mediaType: string | null;
+}
 
 export interface WhatsAppRealtimeStatusSnapshot {
   connected: boolean;
@@ -106,10 +124,18 @@ export interface WhatsAppSocketHandlers {
   }) => void;
   /** Backend sinaliza para refazer o total de não-lidas. */
   onUnreadCountUpdate?: (payload: { at?: number } | undefined) => void;
+  /** Preview leve de mensagem (qualquer conversa) para sidebar/contador. */
+  onChatListUpdate?: (payload: WhatsappChatListUpdateDto) => void;
 }
 
 export interface UseWhatsAppSocketOptions {
   enabled?: boolean;
+  /**
+   * Conversa aberta na tela. O hook entra na Socket.io room correspondente
+   * (`whatsapp:chat:join`) e sai ao trocar/fechar — somente quem está na room
+   * recebe `whatsapp:message` completo daquela conversa.
+   */
+  activeChatId?: string | null;
 }
 
 /**
@@ -134,6 +160,9 @@ export function useWhatsAppSocket(
   const chatMetaRef = useRef(handlers?.onChatMeta);
   const connectionRef = useRef(handlers?.onConnectionStatus);
   const unreadRef = useRef(handlers?.onUnreadCountUpdate);
+  const chatListRef = useRef(handlers?.onChatListUpdate);
+  const socketRef = useRef<Socket | null>(null);
+  const activeChatIdRef = useRef<string | null>(opts?.activeChatId ?? null);
   deletedRef.current = handlers?.onDeleted;
   editedRef.current = handlers?.onEdited;
   ackRef.current = handlers?.onAck;
@@ -145,6 +174,7 @@ export function useWhatsAppSocket(
   chatMetaRef.current = handlers?.onChatMeta;
   connectionRef.current = handlers?.onConnectionStatus;
   unreadRef.current = handlers?.onUnreadCountUpdate;
+  chatListRef.current = handlers?.onChatListUpdate;
 
   useEffect(() => {
     const enabled = opts?.enabled ?? true;
@@ -166,6 +196,8 @@ export function useWhatsAppSocket(
       withCredentials: true
     });
 
+    socketRef.current = socket;
+
     socket.on('connect', () => {
       console.log('📡 [WhatsApp] Socket conectado');
       bumpEvent('socket:connect');
@@ -174,6 +206,11 @@ export function useWhatsAppSocket(
         lastConnectedAtMs: Date.now(),
         lastError: null,
       });
+      // Reconexão: reentra na room da conversa aberta (rooms não sobrevivem
+      // à queda do socket).
+      if (activeChatIdRef.current) {
+        socket.emit('whatsapp:chat:join', activeChatIdRef.current);
+      }
     });
     socket.on('disconnect', (reason) => {
       console.warn('[WhatsApp] Socket disconnect:', reason);
@@ -249,6 +286,10 @@ export function useWhatsAppSocket(
       bumpEvent('update_unread_count');
       unreadRef.current?.(payload);
     };
+    const onChatListUpdate = (payload: WhatsappChatListUpdateDto) => {
+      bumpEvent('whatsapp:chat_list_update');
+      chatListRef.current?.(payload);
+    };
 
     socket.on('whatsapp:message', handler);
     socket.on('whatsapp:message:deleted', onDeleted);
@@ -262,6 +303,7 @@ export function useWhatsAppSocket(
     socket.on('whatsapp:chat:meta', onChatMeta);
     socket.on('whatsapp:connection:status', onConnection);
     socket.on('update_unread_count', onUnreadUpdate);
+    socket.on('whatsapp:chat_list_update', onChatListUpdate);
 
     return () => {
       socket.off('whatsapp:message', handler);
@@ -276,7 +318,24 @@ export function useWhatsAppSocket(
       socket.off('whatsapp:chat:meta', onChatMeta);
       socket.off('whatsapp:connection:status', onConnection);
       socket.off('update_unread_count', onUnreadUpdate);
+      socket.off('whatsapp:chat_list_update', onChatListUpdate);
+      socketRef.current = null;
       socket.disconnect();
     };
   }, [auth?.token, opts?.enabled]);
+
+  // Room da conversa aberta: entra ao selecionar, sai ao trocar/fechar.
+  // O backend remove as rooms anteriores no próprio `join`, então basta um
+  // `join` na troca e um `leave` explícito quando nenhuma conversa está aberta.
+  useEffect(() => {
+    const cid = (opts?.activeChatId ?? '').trim() || null;
+    activeChatIdRef.current = cid;
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) return;
+    if (cid) {
+      socket.emit('whatsapp:chat:join', cid);
+    } else {
+      socket.emit('whatsapp:chat:leave');
+    }
+  }, [opts?.activeChatId]);
 }

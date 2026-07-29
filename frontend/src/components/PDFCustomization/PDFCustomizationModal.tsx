@@ -292,7 +292,7 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
                 {/* Content Area */}
                 <div className="flex-1 overflow-hidden flex">
                     {/* Painel de Controles: na aba Preview mesma largura do modal Gerar Contrato (barra estreita); na Design mais largo */}
-                    <div className={`overflow-y-auto border-r border-gray-200 dark:border-dark-border ${activeTab === 'preview' ? 'w-56 max-w-[220px] p-4 flex-shrink-0' : 'w-[calc(40%-10px)] p-6'}`}>
+                    <div className={`overflow-y-auto border-r border-gray-200 dark:border-dark-border bg-white dark:bg-dark-elevated ${activeTab === 'preview' ? 'w-56 max-w-[220px] p-4 flex-shrink-0' : 'w-[calc(40%-10px)] p-6'}`}>
                         {/* TAB: Design */}
                         {activeTab === 'design' && (
                             <div className="space-y-6">
@@ -499,7 +499,7 @@ const PDFCustomizationModal: React.FC<PDFCustomizationModalProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 bg-gray-50 dark:bg-slate-800 border-t border-gray-200 dark:border-dark-border flex justify-between items-center">
+                <div className="p-6 bg-gray-50 dark:bg-dark-elevated border-t border-gray-200 dark:border-dark-border flex justify-between items-center">
                     <div className="text-sm text-gray-600 dark:text-dark-text-secondary">
                         {hasUnsavedChanges && <span className="text-orange-600 dark:text-orange-400">⚠️ Alterações não salvas</span>}
                     </div>

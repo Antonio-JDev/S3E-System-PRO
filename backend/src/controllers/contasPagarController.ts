@@ -362,7 +362,7 @@ export class ContasPagarController {
     static async atualizarConta(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { fornecedorId, credorNome, descricao, dataVencimento, observacoes, classificacao } = req.body || {};
+            const { fornecedorId, credorNome, descricao, dataVencimento, observacoes, classificacao, meioPagamento, cartaoCreditoId } = req.body || {};
 
             if (!id) {
                 return res.status(400).json({ error: 'ID da conta a pagar é obrigatório' });
@@ -385,7 +385,9 @@ export class ContasPagarController {
                 descricao,
                 dataVencimento: dataVencimentoParsed,
                 observacoes,
-                classificacao
+                classificacao,
+                meioPagamento: meioPagamento === '' ? null : meioPagamento,
+                cartaoCreditoId: cartaoCreditoId === '' ? null : cartaoCreditoId,
             });
 
             res.json({

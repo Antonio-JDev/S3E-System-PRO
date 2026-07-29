@@ -2,7 +2,14 @@ import { Request, Response } from 'express';
 import * as ConfiguracaoPontoService from '../services/configuracaoPonto.service';
 import { prisma } from '../lib/prisma';
 
-function serialize(row: Awaited<ReturnType<typeof ConfiguracaoPontoService.buscarPorFuncionario>>) {
+function serialize(
+  row: Awaited<ReturnType<typeof ConfiguracaoPontoService.buscarPorFuncionario>> & {
+    recalculo?: {
+      registrosAtualizados: number;
+      registrosIgnoradosSemBatidas: number;
+    } | null;
+  },
+) {
   if (!row) return null;
   return {
     id: row.id,
@@ -23,6 +30,7 @@ function serialize(row: Awaited<ReturnType<typeof ConfiguracaoPontoService.busca
           saida2: row.workShift.saida2,
         }
       : null,
+    recalculo: row.recalculo ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

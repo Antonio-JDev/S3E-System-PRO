@@ -2,6 +2,23 @@ import { axiosApiService } from './axiosApi';
 import { ENDPOINTS } from '../config/api';
 import type { CockpitResumoItem } from '../utils/osCockpit.util';
 
+export type StatusVistoriaCelesc =
+  | 'PENDENTE_PROTOCOLO'
+  | 'AGUARDANDO_CELESC'
+  | 'REPROVADO'
+  | 'VISTORIA_APROVADA';
+
+export interface HistoricoReprovacaoVistoria {
+  id: string;
+  projetoId: string;
+  dataReprovacao: string;
+  motivos: string;
+  itensReprovados: string[] | unknown;
+  criadoEm: string;
+  criadoPorId?: string | null;
+  criadoPor?: { id: string; name: string } | null;
+}
+
 export interface Projeto {
   id: string;
   titulo: string;
@@ -21,6 +38,9 @@ export interface Projeto {
   valorDiariaEquipe?: number | null;
   semObra?: boolean;
   iniciadoSemEstoque?: boolean;
+  exigeVistoriaCelesc?: boolean;
+  statusVistoria?: StatusVistoriaCelesc | null;
+  dataProtocoloVistoria?: string | null;
   createdAt: string;
   updatedAt: string;
   cliente?: {
@@ -39,6 +59,20 @@ export interface Projeto {
   };
 }
 
+export interface VistoriaCelescItem extends Projeto {
+  diasDecorridos?: number | null;
+  diasRestantes?: number | null;
+  atrasado?: boolean;
+  qtdReprovacoes?: number;
+  historicoReprovacoesVistoria?: HistoricoReprovacaoVistoria[];
+  engenharia?: {
+    id: string;
+    statusCelesc?: string[] | null;
+    statusEngenharia?: string;
+    nomeProjeto?: string | null;
+  } | null;
+}
+
 export interface CreateProjetoData {
   titulo: string;
   descricao: string;
@@ -52,6 +86,7 @@ export interface CreateProjetoData {
   diariasEquipeOrcadas?: number;
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
+  exigeVistoriaCelesc?: boolean;
 }
 
 export interface UpdateProjetoData extends Partial<CreateProjetoData> {
@@ -65,6 +100,12 @@ export interface ProjetoFilters {
   clienteId?: string;
   responsavelId?: string;
   search?: string;
+}
+
+export interface ReprovarVistoriaPayload {
+  dataReprovacao: string;
+  motivos: string;
+  itensReprovados: string[] | string;
 }
 
 class OrdemServicosService {
@@ -105,7 +146,7 @@ class OrdemServicosService {
     });
   }
 
-  async reverterStatus(id: string, status: 'PROPOSTA' | 'VALIDADO' | 'APROVADO') {
+  async reverterStatus(id: string, status: 'PROPOSTA' | 'APROVADO') {
     return axiosApiService.put<Projeto>(`${ENDPOINTS.PROJETOS}/${id}/reverter-status`, { status });
   }
 
@@ -145,6 +186,31 @@ class OrdemServicosService {
         cumpriuEstimativa: boolean;
       }>
     >(`${ENDPOINTS.PROJETOS}/relatorios/cumprimento-estimativa`, status ? { status } : undefined);
+  }
+
+  async listarVistoriasCelesc() {
+    return axiosApiService.get<VistoriaCelescItem[]>(`${ENDPOINTS.PROJETOS}/vistorias-celesc`);
+  }
+
+  async protocolarVistoria(id: string) {
+    return axiosApiService.patch<VistoriaCelescItem>(
+      `${ENDPOINTS.PROJETOS}/${id}/protocolar-vistoria`,
+      {},
+    );
+  }
+
+  async reprovarVistoria(id: string, payload: ReprovarVistoriaPayload) {
+    return axiosApiService.post<VistoriaCelescItem>(
+      `${ENDPOINTS.PROJETOS}/${id}/reprovar-vistoria`,
+      payload,
+    );
+  }
+
+  async aprovarVistoria(id: string) {
+    return axiosApiService.patch<VistoriaCelescItem>(
+      `${ENDPOINTS.PROJETOS}/${id}/aprovar-vistoria`,
+      {},
+    );
   }
 }
 

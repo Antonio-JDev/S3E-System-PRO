@@ -1,6 +1,6 @@
-import React, { Component, Suspense, lazy, useState, useEffect, useCallback, type ReactNode } from 'react';
+import React, { Component, Suspense, lazy, useState, useEffect, useCallback, useContext, type ReactNode } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, AuthContext } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './components/Login';
@@ -24,6 +24,7 @@ import MobileMenuButton from './components/MobileMenuButton';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { useWhatsappUnreadSync } from './hooks/useWhatsappUnreadSync';
+import NotasAtualizacaoModal from './components/NotasAtualizacaoModal';
 
 // ====== Lazy-loaded modules principais (code splitting) ======
 const Dashboard = lazy(() => import('./components/DashboardModerno'));
@@ -460,6 +461,14 @@ const MainApp: React.FC = () => {
   );
 };
 
+/** Modal de notas — 1× por usuário após login, só em produção. */
+const ReleaseNotesGate: React.FC = () => {
+  const auth = useContext(AuthContext);
+  const userId = auth?.user?.id;
+  if (!auth?.isAuthenticated || auth.isLoading || !userId) return null;
+  return <NotasAtualizacaoModal userId={userId} />;
+};
+
 // Componente wrapper para páginas standalone com Sidebar (navegação SPA, sem refresh)
 const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: string }> = ({ children, activeView = 'Compras' }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -597,6 +606,7 @@ const App: React.FC = () => {
               />
             </Routes>
             <Toaster position="top-right" expand={false} richColors closeButton />
+            <ReleaseNotesGate />
           </QueryClientProvider>
         </AuthProvider>
       </ThemeProvider>

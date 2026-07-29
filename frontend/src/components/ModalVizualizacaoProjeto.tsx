@@ -1364,67 +1364,35 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   }
 
   const podeGerarObra = useMemo(() => projeto.status === 'APROVADO', [projeto.status]);
-  const podeValidar = useMemo(() => projeto.status === 'PROPOSTA', [projeto.status]);
-  const podeAprovar = useMemo(() => projeto.status === 'VALIDADO', [projeto.status]);
-
-  async function handleValidarProjeto() {
-    setAlertConfig({
-      title: '✅ Validar Proposta',
-      description: 'Deseja validar esta proposta tecnicamente? Após validada, poderá ser enviada para aprovação do cliente.',
-      onConfirm: async () => {
-        try {
-          setLoadingAcao(true);
-          await axiosApiService.put(`${ENDPOINTS.PROJETOS}/${projeto.id}/status`, { status: 'VALIDADO' });
-          toast.success('✅ Proposta validada com sucesso!');
-          if (onRefresh) onRefresh();
-        } catch (error) {
-          toast.error('❌ Erro ao validar proposta');
-        } finally {
-          setLoadingAcao(false);
-        }
-      }
-    });
-    setAlertOpen(true);
-  }
+  const podeAprovar = useMemo(
+    () => projeto.status === 'PROPOSTA' || projeto.status === 'VALIDADO',
+    [projeto.status]
+  );
 
   async function handleAprovarProjeto() {
     setAlertConfig({
-      title: '🎉 Aprovar Projeto',
-      description: 'Deseja aprovar este projeto? O estoque será apenas validado agora. A baixa e a alocação dos materiais ocorrerão somente ao clicar em "Iniciar obra".',
+      title: '🎉 Aprovar OS',
+      description: 'Deseja aprovar esta ordem de serviço? Em seguida você poderá iniciar a obra. A baixa de estoque (parcial se necessário) ocorre ao iniciar a obra.',
       onConfirm: async () => {
         try {
           setLoadingAcao(true);
           const response = await axiosApiService.put(`${ENDPOINTS.PROJETOS}/${projeto.id}/status`, { status: 'APROVADO' });
           
           if (response.success) {
-            toast.success('🎉 Projeto aprovado com sucesso!', {
-              description: 'Estoque validado. Clique em "Iniciar obra" para alocar os materiais e dar baixa no estoque.'
+            toast.success('🎉 OS aprovada com sucesso!', {
+              description: 'Clique em "Iniciar obra" quando quiser alocar materiais e criar a obra.'
             });
             if (onRefresh) onRefresh();
           } else {
-            // Erro pode conter informação de items frios
-            const mensagemErro = response.error || 'Erro ao aprovar projeto';
-            
-            // Verificar se é erro de items frios
-            if (mensagemErro.includes('BLOQUEADA') || mensagemErro.includes('sem estoque')) {
-              abrirModalAprovacaoNegada(mensagemErro);
-            } else {
-              toast.error('❌ Erro ao aprovar projeto', {
-                description: mensagemErro
-              });
-            }
+            toast.error('❌ Erro ao aprovar OS', {
+              description: response.error || 'Erro ao aprovar projeto'
+            });
           }
         } catch (error: any) {
           const mensagemErro = error?.response?.data?.message || error?.response?.data?.error || error?.message || 'Erro desconhecido';
-          
-          // Verificar se é erro de items frios
-          if (mensagemErro.includes('BLOQUEADA') || mensagemErro.includes('sem estoque')) {
-            abrirModalAprovacaoNegada(mensagemErro);
-          } else {
-            toast.error('❌ Erro ao aprovar projeto', {
-              description: mensagemErro
-            });
-          }
+          toast.error('❌ Erro ao aprovar OS', {
+            description: mensagemErro
+          });
         } finally {
           setLoadingAcao(false);
         }
@@ -1439,20 +1407,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       const response = (await projetosService.atualizarStatus(projeto.id, 'EXECUCAO')) as {
         success: boolean;
         error?: string;
-        status?: number;
-        code?: string;
-        materiaisFaltantes?: Array<{ nome: string; necessario: number; disponivel: number; falta: number }>;
       };
       if (response.success) {
         toast.success('Obra iniciada — OS em execução');
         if (onRefresh) await onRefresh();
         setActiveTab('Kanban');
-      } else if (
-        (response.code === 'ESTOQUE_INSUFICIENTE' || response.status === 409) &&
-        (response.materiaisFaltantes?.length || (response.error || '').includes('estoque'))
-      ) {
-        setMateriaisFaltantesEstoque(response.materiaisFaltantes || []);
-        setEstoqueEscapeOpen(true);
       } else {
         toast.error(response.error || 'Erro ao iniciar obra');
       }
@@ -1748,13 +1707,11 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   }
 
   async function handleIniciarObra() {
-
+    // Avisos informativos (não bloqueiam)
     try {
-      // ✅ Verificar se há itens do banco frio não vinculados
       const itens = orcamentoCompleto?.items || projeto.orcamento?.items || [];
       const itensBancoFrioNaoVinculados = itens.filter(item => {
         const isBancoFrio = (item.tipo || '').toUpperCase() === 'COTACAO' || !!item.cotacao || !!item.cotacaoId;
-        // Regra: banco frio marcado como venda direta não precisa (nem deve) ser vinculado ao estoque.
         if (!!(item as any).vendaDiretaFornecedor) return false;
         const materialVinculadoId = vinculacoesBancoFrio[item.id] || item.materialVinculadoId;
         return isBancoFrio && !materialVinculadoId;
@@ -1765,106 +1722,30 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
           .slice(0, 3)
           .map(item => item.cotacao?.nome || item.descricao || 'Item sem nome')
           .join(', ');
-        
-        const outrosMensagem = itensBancoFrioNaoVinculados.length > 3 
-          ? ` e mais ${itensBancoFrioNaoVinculados.length - 3} item(ns)` 
+        const outrosMensagem = itensBancoFrioNaoVinculados.length > 3
+          ? ` e mais ${itensBancoFrioNaoVinculados.length - 3} item(ns)`
           : '';
-
         toast.warning('Itens do banco frio não vinculados', {
-          description: `Os seguintes itens do banco frio precisam ser vinculados a materiais do estoque antes de iniciar a obra: ${nomesMateriais}${outrosMensagem}. Acesse a aba Materiais para vincular.`,
-          duration: 8000,
+          description: `${nomesMateriais}${outrosMensagem}. A obra pode ser iniciada mesmo assim; vincule na aba Materiais quando possível.`,
+          duration: 6000,
         });
-        
-        setActiveTab('Materiais');
-        setLoadingAcao(false);
-        return;
       }
 
-      // ✅ Verificar disponibilidade de estoque antes de criar obra
-      setLoadingAcao(true);
-      console.log('🔍 Verificando disponibilidade de estoque para o projeto:', projeto.id);
-      
       const verificacaoResponse = await axiosApiService.get(`/api/obras/verificar-estoque/${projeto.id}`);
-      
-      if (!verificacaoResponse.success || !verificacaoResponse.data) {
-        toast.error('Erro ao verificar estoque', {
-          description: 'Não foi possível verificar a disponibilidade de estoque. Tente novamente.',
+      if (verificacaoResponse.success && verificacaoResponse.data && !verificacaoResponse.data.disponivel) {
+        const qtd = verificacaoResponse.data.itensSemEstoque?.length || 0;
+        toast.warning('Estoque incompleto', {
+          description: `${qtd} item(ns) sem quantidade suficiente. A obra será iniciada com baixa parcial do disponível.`,
+          duration: 6000,
         });
-        setLoadingAcao(false);
-        return;
       }
-
-      const verificacao = verificacaoResponse.data;
-      
-      if (!verificacao.disponivel) {
-        const itensSemEstoque = verificacao.itensSemEstoque || [];
-        const itensBancoFrio = itensSemEstoque.filter((item: any) => item.origem === 'Banco Frio');
-        const itensEstoqueReal = itensSemEstoque.filter((item: any) => item.origem === 'Estoque Real');
-        const itensKit = itensSemEstoque.filter((item: any) => item.origem === 'Kit');
-        
-        // Construir mensagem detalhada
-        let mensagem = '❌ Não é possível criar a obra. Os seguintes materiais estão faltando em estoque:\n\n';
-        
-        if (itensBancoFrio.length > 0) {
-          mensagem += '⚠️ ITENS DO BANCO FRIO (precisam ser comprados):\n';
-          itensBancoFrio.slice(0, 5).forEach((item: any, idx: number) => {
-            mensagem += `  ${idx + 1}. ${item.nome} - Necessário: ${item.quantidadeNecessaria} unidades${item.falta > 0 ? ` (Faltam: ${item.falta})` : ''}\n`;
-          });
-          if (itensBancoFrio.length > 5) {
-            mensagem += `  ... e mais ${itensBancoFrio.length - 5} item(ns) do banco frio\n`;
-          }
-          mensagem += '\n';
-        }
-        
-        if (itensEstoqueReal.length > 0) {
-          mensagem += '📦 ITENS DO ESTOQUE REAL (faltam unidades):\n';
-          itensEstoqueReal.slice(0, 5).forEach((item: any, idx: number) => {
-            mensagem += `  ${idx + 1}. ${item.nome} - Necessário: ${item.quantidadeNecessaria}, Disponível: ${item.quantidadeDisponivel} (Faltam: ${item.falta})\n`;
-          });
-          if (itensEstoqueReal.length > 5) {
-            mensagem += `  ... e mais ${itensEstoqueReal.length - 5} item(ns) do estoque real\n`;
-          }
-          mensagem += '\n';
-        }
-        
-        if (itensKit.length > 0) {
-          mensagem += '🧩 COMPONENTES DE KIT (faltam unidades):\n';
-          itensKit.slice(0, 5).forEach((item: any, idx: number) => {
-            mensagem += `  ${idx + 1}. ${item.nome}${item.origemKit ? ` (${item.origemKit})` : ''} - Necessário: ${item.quantidadeNecessaria}, Disponível: ${item.quantidadeDisponivel} (Faltam: ${item.falta})\n`;
-          });
-          if (itensKit.length > 5) {
-            mensagem += `  ... e mais ${itensKit.length - 5} componente(s) de kit\n`;
-          }
-          mensagem += '\n';
-        }
-        
-        mensagem += '⚠️ Por favor, realize as compras necessárias antes de criar a obra.';
-        
-        toast.error('Materiais pendentes para iniciar a obra', {
-          description: mensagem,
-          duration: 8000,
-        });
-        
-        setActiveTab('Materiais');
-        setLoadingAcao(false);
-        return;
-      }
-      
-      // ✅ Estoque validado, prosseguir com criação da obra
-      console.log('✅ Validação de estoque passou. Todos os materiais estão disponíveis.');
     } catch (error: any) {
-      console.error('❌ Erro ao verificar estoque:', error);
-      toast.error('Erro ao verificar estoque', {
-        description: error?.response?.data?.message || error?.message || 'Não foi possível verificar a disponibilidade de estoque. Tente novamente.',
-      });
-      setLoadingAcao(false);
-      return;
+      console.warn('Aviso ao consultar estoque (não bloqueia):', error);
     }
 
-    // Se chegou aqui, a validação passou
     setAlertConfig({
       title: '🚀 Iniciar Obra',
-      description: 'Deseja iniciar a obra? Será dada baixa no estoque de todos os materiais, eles serão marcados como alocados nesta OS e listados na aba Materiais da página de tarefas da obra.',
+      description: 'Deseja iniciar a obra? Será dada baixa no estoque dos materiais disponíveis (baixa parcial se faltar quantidade). A OS passa para Execução.',
       onConfirm: async () => {
         try {
           setLoadingAcao(true);
@@ -1880,12 +1761,9 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
               return;
             }
           } catch (err) {
-            // Obra não existe, pode prosseguir
             console.log('✅ Nenhuma obra existente, criando nova...');
           }
-          
 
-          // Gerar obra automaticamente (backend já valida estoque novamente e atualiza status do projeto)
           const obraData = {
             projetoId: projeto.id,
             nomeObra: projeto.titulo,
@@ -1904,17 +1782,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
         } catch (error: any) {
           console.error('❌ Erro ao iniciar obra:', error);
           const mensagem = error?.response?.data?.message || error?.message || 'Erro ao iniciar obra';
-
-          
-          // Se o erro for relacionado a estoque, mostrar mensagem mais detalhada
-          if (mensagem.includes('materiais estão faltando') || mensagem.includes('estoque')) {
-            toast.error('❌ Não foi possível criar a obra', {
-              description: mensagem,
-              duration: 8000,
-            });
-          } else {
-            toast.error(`❌ ${mensagem}`);
-          }
+          toast.error(`❌ ${mensagem}`);
         } finally {
           setLoadingAcao(false);
         }
@@ -2232,35 +2100,14 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                   </div>
                 )}
 
-                {/* Botão Validar Proposta */}
-                {podeValidar && (
-                  <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">📋 Proposta Pendente</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          Este projeto está em fase de proposta. Valide tecnicamente antes de enviar para aprovação do cliente.
-                        </p>
-                      </div>
-                  <button
-                        onClick={handleValidarProjeto}
-                    disabled={loadingAcao}
-                        className="px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:from-blue-700 hover:to-cyan-700 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                  >
-                        {loadingAcao ? '⏳ Validando...' : '✅ Validar Proposta'}
-                  </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Botão Aprovar Projeto */}
+                {/* Botão Aprovar OS (Pendente → Aprovada) */}
                 {podeAprovar && (
                   <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-200 dark:border-green-800 rounded-2xl p-6">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">✅ Proposta Validada</h3>
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">📋 OS Pendente</h3>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                          A proposta foi validada tecnicamente. Pode ser aprovada pelo cliente; o pedido de venda (PV), se houver, será lançado depois no financeiro, sem alterar esta OS.
+                          Ordem gerada a partir de orçamento aprovado. Aprove a OS para liberar o início da obra.
                         </p>
               </div>
                       <button
@@ -2268,30 +2115,28 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         disabled={loadingAcao}
                         className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                       >
-                        {loadingAcao ? '⏳ Aprovando...' : '🎉 Aprovar Projeto'}
+                        {loadingAcao ? '⏳ Aprovando...' : '🎉 Aprovar OS'}
                       </button>
                     </div>
                   </div>
                 )}
 
                 {/* Botão Iniciar Obra */}
-                {((podeGerarObra || projeto.status === 'VALIDADO') && !projeto.semObra) && (
+                {podeGerarObra && !projeto.semObra && (
                   <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-2xl p-6">
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                          {podeGerarObra ? '🏗️ Iniciar Execução' : '🚧 Obra Pré-Aprovada'}
+                          🏗️ Iniciar Execução
                         </h3>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {podeGerarObra
-                            ? 'O projeto está aprovado nesta etapa. Clique para iniciar a obra e criar entrada no Kanban de Obras (não exige pedido de venda).'
-                            : 'O projeto foi validado. Avance para aprovado ou ajuste o fluxo na OS para iniciar a obra quando permitido.'}
+                          OS aprovada. Clique para iniciar a obra (permite iniciar mesmo com materiais faltantes; baixa parcial do disponível).
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
                           onClick={handleIniciarObra}
-                          disabled={loadingAcao || !podeGerarObra}
+                          disabled={loadingAcao}
                           className="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                         >
                           {loadingAcao ? '⏳ Iniciando...' : '🚀 INICIAR OBRA'}

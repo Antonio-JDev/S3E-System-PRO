@@ -2466,20 +2466,20 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             )}
 
             {/* Abas de Navegação: Listagem | Expirados | Declinados */}
-            <div className="bg-white rounded-2xl shadow-soft border border-gray-100 mb-6">
-                <div className="flex border-b border-gray-200">
+            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
+                <div className="flex border-b border-gray-200 dark:border-dark-border">
                     <button
                         onClick={() => setAbaAtiva('listagem')}
                         className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'listagem'
-                                ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
-                                : 'text-gray-600 hover:text-blue-600 hover:bg-gray-50'
+                                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 bg-blue-50 dark:bg-dark-elevated'
+                                : 'text-gray-600 dark:text-dark-text-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
                     >
                         <div className="flex items-center justify-center gap-2">
                             <span>📋</span>
                             <span>Listagem</span>
                             {abaAtiva === 'listagem' && (
-                                <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">
+                                <span className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full">
                                     {filteredOrcamentos.length}
                                 </span>
                             )}
@@ -2488,8 +2488,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     <button
                         onClick={() => setAbaAtiva('expirados')}
                         className={`flex-1 px-6 py-4 text-center font-semibold transition-all relative ${abaAtiva === 'expirados'
-                                ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50'
-                                : 'text-gray-600 hover:text-amber-600 hover:bg-gray-50'
+                                ? 'text-amber-600 dark:text-amber-400 border-b-2 border-amber-600 dark:border-amber-400 bg-amber-50 dark:bg-dark-elevated'
+                                : 'text-gray-600 dark:text-dark-text-secondary hover:text-amber-600 dark:hover:text-amber-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
                     >
                         <div className="flex items-center justify-center gap-2">
@@ -2497,14 +2497,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                             <span>Expirados</span>
                             {orcamentosExpirados.length > 0 && (
                                 <span
-                                    className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs font-bold text-white bg-red-500 rounded-full ring-2 ring-white"
+                                    className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs font-bold text-white bg-red-500 rounded-full ring-2 ring-white dark:ring-dark-card"
                                     title={`${orcamentosExpirados.length} orçamento(s) expirado(s)`}
                                 >
                                     {orcamentosExpirados.length > 99 ? '99+' : orcamentosExpirados.length}
                                 </span>
                             )}
                             {abaAtiva === 'expirados' && (
-                                <span className="px-2 py-0.5 text-xs bg-amber-100 text-amber-700 rounded-full">
+                                <span className="px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded-full">
                                     {orcamentosExpirados.length}
                                 </span>
                             )}
@@ -2513,15 +2513,15 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     <button
                         onClick={() => setAbaAtiva('declinados')}
                         className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'declinados'
-                                ? 'text-red-600 border-b-2 border-red-600 bg-red-50'
-                                : 'text-gray-600 hover:text-red-600 hover:bg-gray-50'
+                                ? 'text-red-600 dark:text-red-400 border-b-2 border-red-600 dark:border-red-400 bg-red-50 dark:bg-dark-elevated'
+                                : 'text-gray-600 dark:text-dark-text-secondary hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
                     >
                         <div className="flex items-center justify-center gap-2">
                             <span>❌</span>
                             <span>Declinados</span>
                             {abaAtiva === 'declinados' && (
-                                <span className="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
+                                <span className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-full">
                                     {orcamentosDeclinados.length}
                                 </span>
                             )}

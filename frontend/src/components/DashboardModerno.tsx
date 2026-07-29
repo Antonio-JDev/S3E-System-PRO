@@ -52,6 +52,7 @@ import {
 } from '../services/dashboardService';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { ThemeContext } from '../contexts/ThemeContext';
+import { CHART_ACCENT, CHART_SERIES_COLORS, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 import { useAuth } from '../hooks/useAuth';
 
 interface DashboardModernoProps {
@@ -106,6 +107,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
   // Detectar tema efetivo (igual ao que o ThemeContext aplica no <html>)
   const themeContext = useContext(ThemeContext);
   const isDark = themeContext?.effectiveTheme === 'dark';
+  const ct = getChartTheme(!!isDark);
   
   // Pegar usuário logado
   const { user } = useAuth();
@@ -852,7 +854,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
     loadGraficosExec(selectedPeriod);
   }, [selectedPeriod]);
 
-  const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#EF4444'];
+  const PIE_COLORS = [...CHART_SERIES_COLORS];
 
   /** Fatias para pizza interativa: pedidos por período (evolução) */
   const piePedidosPorPeriodo = useMemo(() => {
@@ -1159,23 +1161,18 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
               <AreaChart data={graficosExec?.evolucaoOrcamentos ?? []}>
                 <defs>
                   <linearGradient id="gOrc1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                    <stop offset="5%" stopColor={ct.areaFrom} stopOpacity={0.35} />
+                    <stop offset="95%" stopColor={ct.areaTo} stopOpacity={isDark ? 0.15 : 0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
-                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
-                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
+                <YAxis stroke={ct.axis} fontSize={11} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: 8,
-                    color: isDark ? '#F8FAFC' : '#334155'
-                  }}
+                  contentStyle={chartTooltipStyle(!!isDark)}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="criados" name="Criados" stroke="#3B82F6" fill="url(#gOrc1)" strokeWidth={2} />
+                <Area type="monotone" dataKey="criados" name="Criados" stroke={CHART_ACCENT} fill="url(#gOrc1)" strokeWidth={2} />
                 <Area type="monotone" dataKey="aprovados" name="Aprovados" stroke="#10B981" fillOpacity={0} strokeWidth={2} />
                 <Area type="monotone" dataKey="emAnalise" name="Em análise" stroke="#F59E0B" fillOpacity={0} strokeWidth={2} />
               </AreaChart>
@@ -1214,16 +1211,11 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                   if (label) void abrirDetalheKpis('ordens-servico', String(label));
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
-                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
-                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
+                <YAxis stroke={ct.axis} fontSize={11} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: 8,
-                    color: isDark ? '#F8FAFC' : '#334155'
-                  }}
+                  contentStyle={chartTooltipStyle(!!isDark)}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Line type="monotone" dataKey="concluido" name="Concluído" stroke="#8B5CF6" strokeWidth={2.5} dot={{ r: 4, fill: '#8B5CF6' }} activeDot={{ r: 6 }}>
@@ -1235,7 +1227,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                     formatter={(v: number) => (v > 0 ? v : '')}
                   />
                 </Line>
-                <Line type="monotone" dataKey="comProgresso" name="Com progresso (1–99%)" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3, fill: '#3B82F6' }}>
+                <Line type="monotone" dataKey="comProgresso" name="Com progresso (1–99%)" stroke={CHART_ACCENT} strokeWidth={2} dot={{ r: 3, fill: CHART_ACCENT }}>
                   <LabelList
                     dataKey="comProgresso"
                     position="top"
@@ -1276,23 +1268,19 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={graficosExec?.evolucaoObrasKanban ?? []}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
-                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
-                <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} allowDecimals={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
+                <YAxis stroke={ct.axis} fontSize={11} allowDecimals={false} />
                 <Tooltip
-                  cursor={{ stroke: isDark ? '#64748B' : '#94A3B8', strokeWidth: 1, strokeDasharray: '4 4' }}
+                  cursor={{ stroke: ct.axis, strokeWidth: 1, strokeDasharray: '4 4' }}
                   content={({ active, payload, label }) => {
                     if (!active || !payload?.length) return null;
                     return (
                       <div
                         className="rounded-xl px-3 py-2.5 shadow-lg min-w-[200px]"
-                        style={{
-                          backgroundColor: isDark ? '#1E293B' : '#fff',
-                          border: `1px solid ${isDark ? '#334155' : '#E5E7EB'}`,
-                          color: isDark ? '#F8FAFC' : '#1E293B'
-                        }}
+                        style={chartTooltipStyle(!!isDark)}
                       >
-                        <p className="font-bold text-sm mb-2 pb-1.5 border-b" style={{ borderColor: isDark ? '#334155' : '#E5E7EB' }}>
+                        <p className="font-bold text-sm mb-2 pb-1.5 border-b" style={{ borderColor: ct.grid }}>
                           {label}
                         </p>
                         <ul className="space-y-1.5 text-xs">
@@ -1313,7 +1301,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Area type="monotone" dataKey="backlog" name="Backlog" stroke="#94A3B8" fill="#94A3B833" strokeWidth={2} />
                 <Area type="monotone" dataKey="aFazer" name="A fazer" stroke="#F59E0B" fill="#F59E0B33" strokeWidth={2} />
-                <Area type="monotone" dataKey="andamento" name="Andamento" stroke="#3B82F6" fill="#3B82F633" strokeWidth={2} />
+                <Area type="monotone" dataKey="andamento" name="Andamento" stroke={CHART_ACCENT} fill={`${CHART_ACCENT}33`} strokeWidth={2} />
                 <Area type="monotone" dataKey="concluidas" name="Concluídas" stroke="#10B981" fill="#10B98133" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
@@ -1328,30 +1316,25 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
           <CardContent className="pt-0">
             <ResponsiveContainer width="100%" height={260}>
               <ComposedChart data={graficosExec?.evolucaoPedidosVendas ?? []} barGap={4} barCategoryGap="18%">
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
-                <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} fontSize={11} />
+                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                <XAxis dataKey="name" stroke={ct.axis} fontSize={11} />
                 <YAxis
                   yAxisId="left"
-                  stroke={isDark ? '#94A3B8' : '#64748B'}
+                  stroke={ct.axis}
                   fontSize={11}
                   allowDecimals={false}
-                  label={{ value: 'Qtd. pedidos', angle: -90, position: 'insideLeft', fill: isDark ? '#94A3B8' : '#64748B', fontSize: 10 }}
+                  label={{ value: 'Qtd. pedidos', angle: -90, position: 'insideLeft', fill: ct.axis, fontSize: 10 }}
                 />
                 <YAxis
                   yAxisId="right"
                   orientation="right"
-                  stroke={isDark ? '#94A3B8' : '#64748B'}
+                  stroke={ct.axis}
                   fontSize={11}
                   tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
-                  label={{ value: 'Valor', angle: 90, position: 'insideRight', fill: isDark ? '#94A3B8' : '#64748B', fontSize: 10 }}
+                  label={{ value: 'Valor', angle: 90, position: 'insideRight', fill: ct.axis, fontSize: 10 }}
                 />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                    borderRadius: 8,
-                    color: isDark ? '#F8FAFC' : '#334155'
-                  }}
+                  contentStyle={chartTooltipStyle(!!isDark)}
                   formatter={(value: number, name: string) =>
                     name === 'Valor (R$)' ? [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), name] : [value, name]
                   }
@@ -1373,19 +1356,14 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
         <CardContent>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={graficosExec?.comparativoMensal ?? []} barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#E5E7EB'} />
-              <XAxis dataKey="name" stroke={isDark ? '#94A3B8' : '#64748B'} />
-              <YAxis stroke={isDark ? '#94A3B8' : '#64748B'} allowDecimals={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+              <XAxis dataKey="name" stroke={ct.axis} />
+              <YAxis stroke={ct.axis} allowDecimals={false} />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: isDark ? '#1E293B' : '#fff',
-                  border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                  borderRadius: 8,
-                  color: isDark ? '#F8FAFC' : '#334155'
-                }}
+                contentStyle={chartTooltipStyle(!!isDark)}
               />
               <Legend />
-              <Bar dataKey="orcamentos" name="Orçamentos" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="orcamentos" name="Orçamentos" fill={CHART_ACCENT} radius={[4, 4, 0, 0]} />
               <Bar dataKey="ordensServico" name="Ordens de serviço" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
               <Bar dataKey="obras" name="Obras" fill="#10B981" radius={[4, 4, 0, 0]} />
               <Bar dataKey="pedidosVendas" name="Pedidos de venda" fill="#F59E0B" radius={[4, 4, 0, 0]} />
@@ -1426,18 +1404,14 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                       <Cell
                         key={i}
                         fill={PIE_COLORS[i % PIE_COLORS.length]}
-                        stroke={isDark ? '#1E293B' : '#fff'}
+                        stroke={isDark ? ct.cardBg : '#fff'}
                         strokeWidth={pieActiveIndex === i ? 3 : 1}
                         style={{ cursor: 'pointer', opacity: pieActiveIndex === i ? 1 : 0.88 }}
                       />
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: isDark ? '1px solid #334155' : '1px solid #E5E7EB',
-                      borderRadius: 8
-                    }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -1490,7 +1464,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                       <Cell
                         key={i}
                         fill={PIE_COLORS[(i + 3) % PIE_COLORS.length]}
-                        stroke={isDark ? '#1E293B' : '#fff'}
+                        stroke={isDark ? ct.cardBg : '#fff'}
                         strokeWidth={piePedidosActiveIndex === i ? 3 : 1}
                         style={{ cursor: 'pointer', opacity: piePedidosActiveIndex === i ? 1 : 0.88 }}
                       />
@@ -1503,11 +1477,7 @@ const DashboardModerno: React.FC<DashboardModernoProps> = ({ toggleSidebar, onNa
                       return (
                         <div
                           className="rounded-lg px-3 py-2 text-xs shadow-lg"
-                          style={{
-                            backgroundColor: isDark ? '#1E293B' : '#fff',
-                            border: `1px solid ${isDark ? '#334155' : '#E5E7EB'}`,
-                            color: isDark ? '#F8FAFC' : '#1E293B'
-                          }}
+                          style={chartTooltipStyle(!!isDark)}
                         >
                           <p className="font-semibold mb-1">{row.name}</p>
                           <p className="tabular-nums">

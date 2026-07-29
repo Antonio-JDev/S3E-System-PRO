@@ -313,6 +313,8 @@ class FinanceiroService {
     dataVencimento: string;
     observacoes?: string;
     classificacao?: string; // Impostos, TRT-ART, Serviço mão de obra eletricista, Brindes, etc.
+    meioPagamento?: string;
+    cartaoCreditoId?: string;
   }): Promise<{ success: boolean; data?: ContaPagar; error?: string }> {
     try {
       console.log('📝 Criando conta a pagar...', data);
@@ -524,6 +526,121 @@ class FinanceiroService {
       return { success: false, error: 'Erro de conexão com o backend' };
     }
   }
+
+  // ========== Cartões de Crédito ==========
+
+  async listarCartoes(ativo?: boolean): Promise<{ success: boolean; data?: CartaoCredito[]; error?: string }> {
+    try {
+      const params = ativo === undefined ? undefined : { ativo: String(ativo) };
+      const response = await axiosApiService.get<CartaoCredito[]>('/api/financeiro/cartoes', params);
+      if (response.success && response.data) {
+        const data = Array.isArray(response.data) ? response.data : (response.data as any)?.data;
+        return { success: true, data: Array.isArray(data) ? data : [] };
+      }
+      return { success: false, error: response.error || 'Erro ao listar cartões' };
+    } catch (error: any) {
+      return { success: false, error: error?.message || 'Erro ao listar cartões' };
+    }
+  }
+
+  async criarCartao(payload: Partial<CartaoCredito>): Promise<{ success: boolean; data?: CartaoCredito; error?: string }> {
+    try {
+      const response = await axiosApiService.post<CartaoCredito>('/api/financeiro/cartoes', payload);
+      if (response.success) {
+        return { success: true, data: (response.data as any)?.data ?? response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao criar cartão' };
+    } catch (error: any) {
+      return { success: false, error: error?.response?.data?.message || error?.message || 'Erro ao criar cartão' };
+    }
+  }
+
+  async atualizarCartao(id: string, payload: Partial<CartaoCredito>): Promise<{ success: boolean; data?: CartaoCredito; error?: string }> {
+    try {
+      const response = await axiosApiService.put<CartaoCredito>(`/api/financeiro/cartoes/${id}`, payload);
+      if (response.success) {
+        return { success: true, data: (response.data as any)?.data ?? response.data };
+      }
+      return { success: false, error: response.error || 'Erro ao atualizar cartão' };
+    } catch (error: any) {
+      return { success: false, error: error?.response?.data?.message || error?.message || 'Erro ao atualizar cartão' };
+    }
+  }
+
+  async excluirCartao(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await axiosApiService.delete(`/api/financeiro/cartoes/${id}`);
+      if (response.success !== false) return { success: true };
+      return { success: false, error: (response as any).error || 'Erro ao excluir cartão' };
+    } catch (error: any) {
+      return { success: false, error: error?.response?.data?.message || error?.message || 'Erro ao excluir cartão' };
+    }
+  }
+
+  async previewFaturaCartao(params: {
+    cartaoCreditoId: string;
+    mesCompetencia: number;
+    anoCompetencia: number;
+  }): Promise<{ success: boolean; data?: FaturaCartaoPreview; error?: string }> {
+    try {
+      const response = await axiosApiService.get<FaturaCartaoPreview>('/api/financeiro/faturas/preview', params);
+      if (response.success) {
+        return { success: true, data: (response.data as any)?.data ?? response.data };
+      }
+      return { success: false, error: response.error || 'Erro no preview da fatura' };
+    } catch (error: any) {
+      return { success: false, error: error?.response?.data?.message || error?.message || 'Erro no preview da fatura' };
+    }
+  }
+
+  async gerarEPagarFatura(payload: {
+    cartaoCreditoId: string;
+    mesCompetencia: number;
+    anoCompetencia: number;
+    dataPagamento?: string;
+    observacoes?: string;
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const response = await axiosApiService.post<any>('/api/financeiro/faturas/gerar-e-pagar', payload);
+      if (response.success) {
+        return { success: true, data: (response.data as any)?.data ?? response.data };
+      }
+      return { success: false, error: response.error || (response as any).message || 'Erro ao liquidar fatura' };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error?.response?.data?.message || error?.message || 'Erro ao liquidar fatura',
+      };
+    }
+  }
+}
+
+export interface CartaoCredito {
+  id: string;
+  nomeOuBanco: string;
+  bandeira: string;
+  ultimosQuatroDigitos: string;
+  diaVencimento: number;
+  diaFechamento: number;
+  ativo: boolean;
+}
+
+export interface FaturaCartaoPreview {
+  cartao: CartaoCredito;
+  mesCompetencia: number;
+  anoCompetencia: number;
+  valorTotal: number;
+  dataVencimento: string;
+  lancamentos: Array<{
+    id: string;
+    descricao: string;
+    valorParcela: number;
+    dataVencimento: string;
+    status: string;
+    fornecedor?: { id: string; nome: string } | null;
+    compra?: { id: string; numeroNF: string; fornecedorNome: string } | null;
+  }>;
+  faturaExistente?: { id: string; status: string; valorTotal: number } | null;
 }
 
 export const financeiroService = new FinanceiroService();

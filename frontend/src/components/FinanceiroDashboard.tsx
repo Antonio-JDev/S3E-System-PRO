@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { financeiroService, type ResumoFinanceiro } from '../services/financeiroService';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ThemeContext } from '../contexts/ThemeContext';
+import { CHART_ACCENT, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 
 // ==================== ICONS ====================
 const CurrencyDollarIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -44,6 +46,9 @@ interface FinanceiroDashboardProps {
 }
 
 const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }) => {
+    const themeContext = useContext(ThemeContext);
+    const isDark = themeContext?.effectiveTheme === 'dark';
+    const ct = getChartTheme(!!isDark);
     const [loading, setLoading] = useState(true);
     const [resumo, setResumo] = useState<ResumoFinanceiro | null>(null);
     const [dadosGraficos, setDadosGraficos] = useState<any[]>([]);
@@ -216,24 +221,20 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                     {dadosFluxoCaixa.length > 0 ? (
                         <ResponsiveContainer width="100%" height={300}>
                             <LineChart data={dadosFluxoCaixa}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                                 <XAxis 
                                     dataKey="mes" 
-                                    stroke="#6b7280"
+                                    stroke={ct.axis}
                                     style={{ fontSize: '12px' }}
                                 />
                                 <YAxis 
-                                    stroke="#6b7280"
+                                    stroke={ct.axis}
                                     style={{ fontSize: '12px' }}
                                     tickFormatter={(value) => `R$ ${(value / 1000).toFixed(0)}k`}
                                 />
                                 <Tooltip 
                                     formatter={(value: any) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                                    contentStyle={{ 
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px'
-                                    }}
+                                    contentStyle={chartTooltipStyle(!!isDark)}
                                 />
                                 <Legend />
                                 <Line 
@@ -255,11 +256,11 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                                 <Line 
                                     type="monotone" 
                                     dataKey="saldo" 
-                                    stroke="#3b82f6" 
+                                    stroke={CHART_ACCENT} 
                                     strokeWidth={2}
                                     strokeDasharray="5 5"
                                     name="Saldo"
-                                    dot={{ fill: '#3b82f6', r: 3 }}
+                                    dot={{ fill: CHART_ACCENT, r: 3 }}
                                 />
                             </LineChart>
                         </ResponsiveContainer>
@@ -282,24 +283,20 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
                     {dadosFluxoCaixa.length > 0 ? (
                         <ResponsiveContainer width="100%" height={300}>
                             <BarChart data={dadosFluxoCaixa}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                                 <XAxis 
                                     dataKey="mes"
-                                    stroke="#6b7280"
+                                    stroke={ct.axis}
                                     style={{ fontSize: '12px' }}
                                 />
                                 <YAxis 
-                                    stroke="#6b7280"
+                                    stroke={ct.axis}
                                     style={{ fontSize: '12px' }}
                                     tickFormatter={(value) => `R$ ${(value / 1000).toFixed(0)}k`}
                                 />
                                 <Tooltip 
                                     formatter={(value: any) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                                    contentStyle={{ 
-                                        backgroundColor: '#fff',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px'
-                                    }}
+                                    contentStyle={chartTooltipStyle(!!isDark)}
                                 />
                                 <Legend />
                                 <Bar dataKey="receita" fill="#10b981" name="Receita" radius={[8, 8, 0, 0]} />
@@ -318,36 +315,36 @@ const FinanceiroDashboard: React.FC<FinanceiroDashboardProps> = ({ setAbaAtiva }
             </div>
 
             {/* Resumo Financeiro do Mês */}
-            <div className="bg-white border-2 border-gray-200 rounded-2xl p-6 shadow-soft">
-                <h3 className="text-lg font-semibold text-gray-900 mb-6 flex items-center gap-2">
+            <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-6 flex items-center gap-2">
                     <CurrencyDollarIcon className="w-6 h-6 text-emerald-600" />
                     Resumo do Mês Atual
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-green-50 border border-green-200 p-4 rounded-xl">
-                        <h4 className="text-xs font-semibold text-green-700 uppercase mb-2">Receita do Mês</h4>
-                        <p className="text-3xl font-bold text-green-700">
+                    <div className="bg-green-50 dark:bg-dark-elevated border border-green-200 dark:border-green-800/40 p-4 rounded-xl">
+                        <h4 className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase mb-2">Receita do Mês</h4>
+                        <p className="text-3xl font-bold text-green-700 dark:text-green-300">
                             R$ {(resumo?.receitaMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                     </div>
-                    <div className="bg-red-50 border border-red-200 p-4 rounded-xl">
-                        <h4 className="text-xs font-semibold text-red-700 uppercase mb-2">Despesa do Mês</h4>
-                        <p className="text-3xl font-bold text-red-700">
+                    <div className="bg-red-50 dark:bg-dark-elevated border border-red-200 dark:border-red-800/40 p-4 rounded-xl">
+                        <h4 className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase mb-2">Despesa do Mês</h4>
+                        <p className="text-3xl font-bold text-red-700 dark:text-red-300">
                             R$ {(resumo?.despesaMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                     </div>
-                    <div className={`border p-4 rounded-xl ${
+                    <div className={`border p-4 rounded-xl dark:bg-dark-elevated ${
                         (resumo?.lucroMes || 0) >= 0 
-                            ? 'bg-blue-50 border-blue-200' 
-                            : 'bg-orange-50 border-orange-200'
+                            ? 'bg-blue-50 border-blue-200 dark:border-blue-800/40' 
+                            : 'bg-orange-50 border-orange-200 dark:border-orange-800/40'
                     }`}>
                         <h4 className={`text-xs font-semibold uppercase mb-2 ${
-                            (resumo?.lucroMes || 0) >= 0 ? 'text-blue-700' : 'text-orange-700'
+                            (resumo?.lucroMes || 0) >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-orange-700 dark:text-orange-400'
                         }`}>
                             Lucro do Mês
                         </h4>
                         <p className={`text-3xl font-bold ${
-                            (resumo?.lucroMes || 0) >= 0 ? 'text-blue-700' : 'text-orange-700'
+                            (resumo?.lucroMes || 0) >= 0 ? 'text-blue-700 dark:text-blue-300' : 'text-orange-700 dark:text-orange-300'
                         }`}>
                             R$ {(resumo?.lucroMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>

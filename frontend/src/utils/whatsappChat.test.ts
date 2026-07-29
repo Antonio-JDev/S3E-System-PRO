@@ -171,6 +171,28 @@ describe('dedupeChatPreviews / upsertChatPreviewInList', () => {
     expect(list[0]?.chatId).toBe('554797304499@c.us');
   });
 
+  it('não associa ao chat ativo mensagem fromMe de OUTRO telefone (vazamento entre operadores)', () => {
+    // Funcionário B está com o Cliente 2 aberto; chega echo fromMe de mensagem
+    // que o Funcionário A mandou para o Cliente 1 (fora da lista local de B).
+    const existing = [
+      {
+        ...base,
+        chatId: '5511911112222@c.us', // Cliente 2 (chat ativo de B)
+        lastAt: '2026-05-28T15:58:00.000Z',
+        lastContent: 'conversa do cliente 2',
+      },
+    ];
+    const ctx = resolveChatPreviewUpdateContext(
+      existing,
+      '5547933334444@c.us', // Cliente 1 (mensagem do Funcionário A)
+      '5511911112222@c.us',
+      true
+    );
+    // Não pode herdar a chave do chat ativo — é outra conversa.
+    expect(ctx.mergeKey).toBe('phone:5547933334444');
+    expect(ctx.messageCacheChatId).toBe('5547933334444@c.us');
+  });
+
   it('upsert não duplica ao enviar rápido com JIDs diferentes', () => {
     const existing = [
       {

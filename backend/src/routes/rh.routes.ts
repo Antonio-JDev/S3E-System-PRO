@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { RhController } from '../controllers/rhController';
 import { LancamentoFolhaController } from '../controllers/lancamentoFolhaController';
 import { ConfiguracaoPontoController } from '../controllers/configuracaoPontoController';
-import { authenticate } from '../middlewares/auth';
+import { authenticate, authorize } from '../middlewares/auth';
 import { uploadFaltaJustificadaDocumento } from '../middlewares/rhFaltaUpload.middleware';
 
 const router = Router();
@@ -18,6 +18,7 @@ router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarInterva
 router.post('/banco-horas/converter-folga', RhController.converterFolga);
 router.post('/banco-horas/incluir-folha', RhController.incluirBancoFolha);
 router.get('/work-shifts', RhController.listarWorkShifts);
+router.post('/work-shifts', RhController.criarWorkShift);
 router.post(
   '/falta-justificada',
   uploadFaltaJustificadaDocumento.single('documento'),
@@ -42,6 +43,12 @@ router.put(
 );
 router.delete('/justificativa-parcial/:id', RhController.excluirJustificativaParcial);
 router.put('/conferencia-ponto/comentario', RhController.salvarComentarioConferencia);
+router.put('/conferencia-ponto/avaliacao', RhController.salvarAvaliacaoConferencia);
+router.put(
+  '/feriado-override',
+  authorize('admin', 'desenvolvedor'),
+  RhController.salvarFeriadoOverride,
+);
 router.post('/divida-horas/propor', RhController.proporDividaHoras);
 router.get('/divida-horas/:funcionarioId/:mes', RhController.listarDividaHoras);
 router.post('/divida-horas/dia/:diaId/aprovar', RhController.aprovarDiaDivida);

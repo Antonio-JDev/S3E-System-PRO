@@ -413,14 +413,14 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         .fc-event-previsao { border-style: dashed !important; border-width: 2px !important; }
         .fc-event-valido { border-width: 2px !important; border-left-width: 4px !important; }
         .calendario-hub .fc { --fc-border-color: #e5e7eb; }
-        .dark .calendario-hub .fc { --fc-border-color: #374151; }
+        .dark .calendario-hub .fc { --fc-border-color: #1B2028; --fc-page-bg-color: #0F0F0F; --fc-neutral-bg-color: #151922; }
         .fc-day-gargalo { background-color: rgba(239, 68, 68, 0.12) !important; }
         .fc-event-alocacao-os { border-left-width: 4px !important; border-style: solid !important; }
       `}</style>
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-white dark:bg-dark-card border-r border-gray-200 dark:border-dark-border p-5 gap-6">
+        <aside className="hidden lg:flex flex-col w-64 shrink-0 bg-white dark:bg-dark-sidebar border-r border-gray-200 dark:border-dark-border-subtle p-5 gap-6">
           <div>
             <h1 className="text-lg font-bold text-gray-900 dark:text-dark-text">Calendário</h1>
             <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
@@ -431,7 +431,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           <button
             type="button"
             onClick={abrirCriar}
-            className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors shadow-sm"
+            className="w-full py-2.5 px-4 rounded-xl bg-dark-accent hover:bg-[#3B82F6] text-white font-semibold text-sm transition-colors"
           >
             + Criar Evento
           </button>
@@ -591,14 +591,14 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               </button>
             </div>
 
-            <div className="flex rounded-xl border border-gray-200 dark:border-dark-border overflow-hidden text-sm">
+            <div className="flex rounded-xl border border-gray-200 dark:border-dark-border overflow-hidden text-sm bg-gray-50 dark:bg-dark-nav">
               <button
                 type="button"
                 onClick={() => mudarView('semana')}
                 className={`px-4 py-2 font-medium transition-colors ${
                   viewMode === 'semana'
-                    ? 'bg-white dark:bg-dark-bg text-blue-600 shadow-sm'
-                    : 'bg-gray-50 dark:bg-dark-card text-gray-600'
+                    ? 'bg-white dark:bg-dark-accent-soft text-blue-600 dark:text-dark-accent-light shadow-sm'
+                    : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-elevated'
                 }`}
               >
                 Semana
@@ -608,8 +608,8 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
                 onClick={() => mudarView('mes')}
                 className={`px-4 py-2 font-medium transition-colors border-l border-gray-200 dark:border-dark-border ${
                   viewMode === 'mes'
-                    ? 'bg-white dark:bg-dark-bg text-blue-600 shadow-sm'
-                    : 'bg-gray-50 dark:bg-dark-card text-gray-600'
+                    ? 'bg-white dark:bg-dark-accent-soft text-blue-600 dark:text-dark-accent-light shadow-sm'
+                    : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-elevated'
                 }`}
               >
                 Mês
@@ -622,7 +622,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
                 value={buscaOrcamento}
                 onChange={(e) => setBuscaOrcamento(e.target.value)}
                 placeholder="Buscar orçamento aberto para vincular..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm text-gray-900 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted focus:ring-2 focus:ring-dark-accent/30 focus:border-dark-accent outline-none"
               />
               <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -651,7 +651,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               value={buscaEvento}
               onChange={(e) => setBuscaEvento(e.target.value)}
               placeholder="Buscar eventos..."
-              className="w-40 sm:w-48 px-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-40 sm:w-48 px-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm text-gray-900 dark:text-dark-text focus:ring-2 focus:ring-dark-accent/30 focus:border-dark-accent outline-none"
             />
 
             <button

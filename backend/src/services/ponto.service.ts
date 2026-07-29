@@ -6,7 +6,8 @@ import {
   diaSemanaCivil,
   ehFimDeSemanaCivil,
   ehDomingoOuFeriado,
-  ehFeriado,
+  ehFeriadoEfetivo,
+  type FeriadoOverrideLookup,
 } from '../utils/datetime-sp.util';
 import { vincularFaltaJustificadaAoRegistro, vincularJustificativaParcialAoRegistro } from './rhJornada.service';
 import { parsePresencaXlsBuffer } from './ponto-import.parser';
@@ -130,12 +131,14 @@ export function calcularMetricasRegistro(params: {
     entrada2: string;
     saida2: string;
   } | null;
+  /** Overrides manuais de feriado (calendário empresa). */
+  feriadoOverrides?: Map<string, FeriadoOverrideLookup> | null;
 }) {
-  const { batidas, ano, mes, dia, tipoContrato, workShift } = params;
+  const { batidas, ano, mes, dia, tipoContrato, workShift, feriadoOverrides } = params;
   const tolerancia = Math.max(0, params.toleranciaMinutos ?? 5);
   const { minutos, status } = calcularMinutosLiquidos(batidas);
-  const ehFer = ehFeriado(ano, mes, dia);
-  const eh100 = ehDomingoOuFeriado(ano, mes, dia);
+  const ehFer = ehFeriadoEfetivo(ano, mes, dia, feriadoOverrides);
+  const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
   const dow = diaSemanaCivil(ano, mes, dia);
   const ehSabado = dow === 6;
 
@@ -243,6 +246,7 @@ export async function importarPresencaXls(
   const funcionarioIdsAfetados = new Set<string>();
   /** Colaboradores que aparecem no arquivo (para desconto diária autônomo, mesmo sem nenhuma batida). */
   const funcionariosPresentesNoArquivo = new Set<string>();
+  const feriadoOverrides = await carregarFeriadoOverridesMes(ano, mes);
 
   for (const colab of colaboradores) {
     const func = await prisma.funcionario.findFirst({
@@ -278,6 +282,7 @@ export async function importarPresencaXls(
         tipoContrato: func.tipoContrato,
         toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
         workShift: cfg?.workShift ?? null,
+        feriadoOverrides,
       });
       const { status } = calc;
       if (status === StatusConsistenciaPonto.INCONSISTENTE) {
@@ -286,7 +291,7 @@ export async function importarPresencaXls(
 
       const dataRef = dataReferenciaDiaCivilUtc(ano, mes, dia);
       const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
-      const eh100 = ehDomingoOuFeriado(ano, mes, dia);
+      const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
 
       // Autônomo sempre recebe HE 100% em domingos/feriados
       // CLT só recebe se permitirHorasExtras100 = true, caso contrário vai para banco de horas (horasNormais)
@@ -398,6 +403,7 @@ export async function atualizarRegistroBatidas(registroId: string, batidasInput:
   const mes = dr.getUTCMonth() + 1;
   const dia = dr.getUTCDate();
 
+  const feriadoOverrides = await carregarFeriadoOverridesMes(ano, mes);
   const calc = calcularMetricasRegistro({
     batidas,
     ano,
@@ -406,11 +412,12 @@ export async function atualizarRegistroBatidas(registroId: string, batidasInput:
     tipoContrato: func.tipoContrato,
     toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
     workShift: cfg?.workShift ?? null,
+    feriadoOverrides,
   });
   const status = calc.status;
 
   const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
-  const eh100 = ehDomingoOuFeriado(ano, mes, dia);
+  const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
   const permitirHE100 = func.permitirHorasExtras100 === true;
   const aplicar100 =
     eh100 && (func.tipoContrato === 'AUTONOMO' || permitirHE100);
@@ -481,6 +488,7 @@ export async function criarRegistroBatidasManual(params: {
     include: { workShift: true },
   });
 
+  const feriadoOverrides = await carregarFeriadoOverridesMes(ano, mes);
   const calc = calcularMetricasRegistro({
     batidas,
     ano,
@@ -489,10 +497,11 @@ export async function criarRegistroBatidasManual(params: {
     tipoContrato: func.tipoContrato,
     toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
     workShift: cfg?.workShift ?? null,
+    feriadoOverrides,
   });
 
   const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
-  const eh100 = ehDomingoOuFeriado(ano, mes, dia);
+  const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
   const permitirHE100 = func.permitirHorasExtras100 === true;
   const aplicar100 = eh100 && (func.tipoContrato === 'AUTONOMO' || permitirHE100);
 
@@ -523,4 +532,207 @@ export async function criarRegistroBatidasManual(params: {
   await sincronizarExcessoCompetencia(func.id, ano, mes);
 
   return criado;
+}
+
+function normalizarBatidasBrutas(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => String(x).trim()).filter((s) => s.length > 0);
+}
+
+async function carregarFeriadoOverridesMes(
+  ano: number,
+  mes: number,
+): Promise<Map<string, FeriadoOverrideLookup>> {
+  const inicio = dataReferenciaDiaCivilUtc(ano, mes, 1);
+  const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const fim = dataReferenciaDiaCivilUtc(ano, mes, ultimoDia);
+  const rows = await prisma.feriadoCalendarioOverride.findMany({
+    where: { dataReferencia: { gte: inicio, lte: fim } },
+  });
+  const map = new Map<string, FeriadoOverrideLookup>();
+  for (const r of rows) {
+    const d = r.dataReferencia;
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    map.set(key, { ehFeriado: r.ehFeriado, nome: r.nome });
+  }
+  return map;
+}
+
+/**
+ * Recalcula métricas de jornada APENAS do funcionário informado, a partir de `batidasBrutas`
+ * e da workshift/config atuais. Nunca exclui registros nem toca overrides de RH (A/B/P/D, comentários, ocorrências).
+ */
+export async function recalcularMetricasFuncionario(funcionarioId: string): Promise<{
+  funcionarioId: string;
+  registrosAtualizados: number;
+  registrosIgnoradosSemBatidas: number;
+}> {
+  const func = await prisma.funcionario.findUnique({ where: { id: funcionarioId } });
+  if (!func) {
+    throw new Error('Funcionário não encontrado');
+  }
+
+  const cfg = await prisma.configuracaoPonto.findUnique({
+    where: { funcionarioId },
+    include: { workShift: true },
+  });
+
+  const registros = await prisma.registroPonto.findMany({
+    where: { funcionarioId },
+    select: {
+      id: true,
+      dataReferencia: true,
+      batidasBrutas: true,
+    },
+  });
+
+  let registrosAtualizados = 0;
+  let registrosIgnoradosSemBatidas = 0;
+  const competencias = new Set<string>();
+  const overridesPorMes = new Map<string, Map<string, FeriadoOverrideLookup>>();
+
+  for (const reg of registros) {
+    const batidas = normalizarBatidasBrutas(reg.batidasBrutas);
+    if (batidas.length === 0) {
+      registrosIgnoradosSemBatidas += 1;
+      continue;
+    }
+
+    const dr = reg.dataReferencia;
+    const ano = dr.getUTCFullYear();
+    const mes = dr.getUTCMonth() + 1;
+    const dia = dr.getUTCDate();
+    const mesKey = `${ano}-${mes}`;
+    if (!overridesPorMes.has(mesKey)) {
+      overridesPorMes.set(mesKey, await carregarFeriadoOverridesMes(ano, mes));
+    }
+    const feriadoOverrides = overridesPorMes.get(mesKey)!;
+
+    const calc = calcularMetricasRegistro({
+      batidas,
+      ano,
+      mes,
+      dia,
+      tipoContrato: func.tipoContrato,
+      toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
+      workShift: cfg?.workShift ?? null,
+      feriadoOverrides,
+    });
+
+    const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
+    const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
+    const permitirHE100 = func.permitirHorasExtras100 === true;
+    const aplicar100 =
+      eh100 && (func.tipoContrato === 'AUTONOMO' || permitirHE100);
+
+    await prisma.registroPonto.update({
+      where: { id: reg.id },
+      data: {
+        entrada: calc.entrada,
+        saida: calc.saida,
+        horasNormais: aplicar100 ? 0 : eh100 ? calc.minutosTrabalhados / 60 : calc.horasNormais,
+        horasExtras50: calc.horasExtras50,
+        horasExtras100: aplicar100 ? calc.horasExtras100 : 0,
+        ehFimDeSemana,
+        statusConsistencia: calc.status,
+        minutosTrabalhados: calc.minutosTrabalhados,
+        minutosAtraso: calc.minutosAtraso,
+        minutosHorasDevidas: calc.minutosHorasDevidas,
+        minutosExtra50: calc.minutosExtra50,
+        minutosExtra100: aplicar100 ? calc.minutosExtra100 : 0,
+        minutosExtra20: calc.minutosExtra20,
+      },
+    });
+
+    registrosAtualizados += 1;
+    competencias.add(`${ano}-${mes}`);
+  }
+
+  for (const key of competencias) {
+    const [anoStr, mesStr] = key.split('-');
+    await sincronizarExcessoCompetencia(funcionarioId, parseInt(anoStr, 10), parseInt(mesStr, 10));
+  }
+
+  return {
+    funcionarioId,
+    registrosAtualizados,
+    registrosIgnoradosSemBatidas,
+  };
+}
+
+/**
+ * Recalcula todos os registros de ponto de um dia civil (todos os funcionários).
+ * Usado após override de feriado — preserva batidas; só atualiza métricas.
+ */
+export async function recalcularMetricasDoDiaCivil(
+  ano: number,
+  mes: number,
+  dia: number,
+): Promise<{ registrosAtualizados: number }> {
+  const dataRef = dataReferenciaDiaCivilUtc(ano, mes, dia);
+  const feriadoOverrides = await carregarFeriadoOverridesMes(ano, mes);
+
+  const registros = await prisma.registroPonto.findMany({
+    where: { dataReferencia: dataRef },
+    include: { funcionario: true },
+  });
+
+  let registrosAtualizados = 0;
+  const funcionariosCompetencia = new Set<string>();
+
+  for (const reg of registros) {
+    const batidas = normalizarBatidasBrutas(reg.batidasBrutas);
+    if (batidas.length === 0) continue;
+
+    const func = reg.funcionario;
+    const cfg = await prisma.configuracaoPonto.findUnique({
+      where: { funcionarioId: func.id },
+      include: { workShift: true },
+    });
+
+    const calc = calcularMetricasRegistro({
+      batidas,
+      ano,
+      mes,
+      dia,
+      tipoContrato: func.tipoContrato,
+      toleranciaMinutos: cfg?.toleranciaMinutos ?? 5,
+      workShift: cfg?.workShift ?? null,
+      feriadoOverrides,
+    });
+
+    const ehFimDeSemana = ehFimDeSemanaCivil(ano, mes, dia);
+    const eh100 = ehDomingoOuFeriado(ano, mes, dia, feriadoOverrides);
+    const permitirHE100 = func.permitirHorasExtras100 === true;
+    const aplicar100 =
+      eh100 && (func.tipoContrato === 'AUTONOMO' || permitirHE100);
+
+    await prisma.registroPonto.update({
+      where: { id: reg.id },
+      data: {
+        entrada: calc.entrada,
+        saida: calc.saida,
+        horasNormais: aplicar100 ? 0 : eh100 ? calc.minutosTrabalhados / 60 : calc.horasNormais,
+        horasExtras50: calc.horasExtras50,
+        horasExtras100: aplicar100 ? calc.horasExtras100 : 0,
+        ehFimDeSemana,
+        statusConsistencia: calc.status,
+        minutosTrabalhados: calc.minutosTrabalhados,
+        minutosAtraso: calc.minutosAtraso,
+        minutosHorasDevidas: calc.minutosHorasDevidas,
+        minutosExtra50: calc.minutosExtra50,
+        minutosExtra100: aplicar100 ? calc.minutosExtra100 : 0,
+        minutosExtra20: calc.minutosExtra20,
+      },
+    });
+
+    registrosAtualizados += 1;
+    funcionariosCompetencia.add(func.id);
+  }
+
+  for (const funcionarioId of funcionariosCompetencia) {
+    await sincronizarExcessoCompetencia(funcionarioId, ano, mes);
+  }
+
+  return { registrosAtualizados };
 }

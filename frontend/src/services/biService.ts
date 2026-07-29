@@ -382,49 +382,6 @@ class BIService {
   }
 
   /**
-   * Busca serviços mais rentáveis
-   */
-  async getServicosRentaveis(
-    dataInicio: string,
-    dataFim: string
-  ): Promise<BIServiceResponse<Array<{
-    servicoNome: string;
-    classificacao: string;
-    receita: number;
-    custo: number;
-    lucro: number;
-    markup: number;
-    quantidade: number;
-  }>>> {
-    try {
-      const response = await axiosApiService.get('/api/bi/servicos-rentaveis', {
-        dataInicio,
-        dataFim,
-      });
-      
-      console.log('📊 [biService] Response getServicosRentaveis:', response);
-      
-      const data = response.data?.data || response.data;
-      
-      if (!data) {
-        console.error('❌ [biService] Dados não encontrados na resposta:', response);
-        return {
-          success: false,
-          error: 'Dados não encontrados na resposta do servidor',
-        };
-      }
-      
-      return { success: true, data };
-    } catch (error: any) {
-      console.error('❌ [biService] Erro ao buscar serviços rentáveis:', error);
-      return {
-        success: false,
-        error: error.response?.data?.error || error.message || 'Erro ao buscar serviços rentáveis',
-      };
-    }
-  }
-
-  /**
    * Busca estatísticas de orçamentos por status
    */
   async getOrcamentosPorStatus(
@@ -519,64 +476,6 @@ class BIService {
   }
 
   /**
-   * Busca markup de vendas por tipo de serviço e período
-   */
-  async getMarkupVendasPorServico(
-    dataInicio: string,
-    dataFim: string,
-    periodo: 'mes' | 'semana' | 'semestre' | 'ano' = 'mes'
-  ): Promise<BIServiceResponse<{
-    periodo: string;
-    dados: Array<{
-      periodo: string;
-      classificacao: string;
-      servicoNome: string;
-      receita: number;
-      custo: number;
-      lucro: number;
-      markup: number;
-      quantidade: number;
-    }>;
-    resumoPorClassificacao: Array<{
-      classificacao: string;
-      receita: number;
-      custo: number;
-      lucro: number;
-      markup: number;
-      quantidade: number;
-    }>;
-  }>> {
-    try {
-      const response = await axiosApiService.get('/api/bi/markup-vendas-por-servico', {
-        dataInicio,
-        dataFim,
-        periodo,
-      });
-      
-      console.log('📊 [biService] Response getMarkupVendasPorServico:', response);
-      
-      // Extrair dados da resposta
-      const data = response.data?.data || response.data;
-      
-      if (!data) {
-        console.error('❌ [biService] Dados não encontrados na resposta:', response);
-        return {
-          success: false,
-          error: 'Dados não encontrados na resposta do servidor',
-        };
-      }
-      
-      return { success: true, data };
-    } catch (error: any) {
-      console.error('❌ [biService] Erro ao buscar markup de vendas por serviço:', error);
-      return {
-        success: false,
-        error: error.response?.data?.error || error.message || 'Erro ao buscar markup de vendas por serviço',
-      };
-    }
-  }
-
-  /**
    * Receita de orçamentos aprovados vs compras por classificação (mesmo período do BI)
    */
   async getVendasComprasClassificacao(
@@ -624,6 +523,51 @@ class BIService {
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Erro ao buscar materiais',
+      };
+    }
+  }
+
+  async getGastosCartaoCredito(dataInicio: string, dataFim: string): Promise<BIServiceResponse<any>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/gastos-cartao-credito', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data || response.data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar gastos em cartão',
+      };
+    }
+  }
+
+  async getMetodosPagamentoComparativo(dataInicio: string, dataFim: string): Promise<BIServiceResponse<any>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/metodos-pagamento-comparativo', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data || response.data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar comparativo de métodos',
+      };
+    }
+  }
+
+  async getEvolucaoFaturasCartao(dataInicio: string, dataFim: string): Promise<BIServiceResponse<any>> {
+    try {
+      const response = await axiosApiService.get('/api/bi/evolucao-faturas-cartao', {
+        dataInicio,
+        dataFim,
+      });
+      return { success: true, data: response.data?.data || response.data };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Erro ao buscar evolução de faturas',
       };
     }
   }

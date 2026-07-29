@@ -72,6 +72,8 @@ import biRoutes from './routes/bi.routes';
 import resumoAdministrativoRoutes from './routes/resumoAdministrativo.routes';
 import dreRoutes from './routes/dre.routes';
 import fluxoCaixaRoutes from './routes/fluxoCaixa.routes';
+import cartaoCreditoRoutes from './routes/cartaoCredito.routes';
+import faturaCartaoRoutes from './routes/faturaCartao.routes';
 import sincronizacaoDeployRoutes from './routes/sincronizacaoDeploy.routes';
 import movimentacoesCaixaRoutes from './routes/movimentacoesCaixa.routes';
 import receitaRoutes from './routes/receita.routes';
@@ -537,6 +539,8 @@ app.use('/api/bi', biRoutes);
 app.use('/api/resumo-administrativo', resumoAdministrativoRoutes);
 app.use('/api/financeiro/dre', dreRoutes);
 app.use('/api/financeiro/fluxo-caixa', fluxoCaixaRoutes);
+app.use('/api/financeiro/cartoes', cartaoCreditoRoutes);
+app.use('/api/financeiro/faturas', faturaCartaoRoutes);
 app.use('/api/sistema', sincronizacaoDeployRoutes);
 app.use('/api/movimentacoes-caixa', movimentacoesCaixaRoutes);
 // Proxy para consultas de CNPJ (resolve problema de CORS do receitaws)
@@ -601,12 +605,43 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   // Coloca o socket em uma room dedicada ao usuário. Permite emitir
   // notificações 1-para-1 (sino, mensagens privadas) sem broadcast.
-  // Eventos públicos do WhatsApp CRM continuam usando `io.emit(...)` para
-  // alcançar todos os operadores conectados.
   const userId = (socket.data as Record<string, unknown> | undefined)?.userId;
   if (typeof userId === 'string' && userId.trim()) {
     socket.join(`user:${userId.trim()}`);
   }
+
+  // WhatsApp CRM: a mensagem completa (`whatsapp:message`) é emitida apenas
+  // para as rooms da conversa aberta. O frontend entra na room ao selecionar
+  // um chat e sai ao trocar/fechar — impede que a conversa de um operador
+  // "vaze" para o chat aberto de outro. Eventos leves (preview da sidebar,
+  // contador de não lidas) continuam em broadcast.
+  const leaveChatRooms = () => {
+    const prev = (socket.data as Record<string, unknown>).waChatRooms;
+    if (Array.isArray(prev)) {
+      for (const room of prev) {
+        if (typeof room === 'string') void socket.leave(room);
+      }
+    }
+    (socket.data as Record<string, unknown>).waChatRooms = undefined;
+  };
+
+  socket.on('whatsapp:chat:join', async (chatIdRaw: unknown) => {
+    const chatId = typeof chatIdRaw === 'string' ? chatIdRaw.trim() : '';
+    if (!chatId) return;
+    try {
+      const { socketRoomsForChat } = await import('./services/whatsappIdentity.service');
+      const rooms = await socketRoomsForChat(chatId);
+      leaveChatRooms();
+      for (const room of rooms) void socket.join(room);
+      (socket.data as Record<string, unknown>).waChatRooms = rooms;
+    } catch (err) {
+      console.warn('⚠ whatsapp:chat:join falhou:', err);
+    }
+  });
+
+  socket.on('whatsapp:chat:leave', () => {
+    leaveChatRooms();
+  });
 });
 
 setSocketServer(io);

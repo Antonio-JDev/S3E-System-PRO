@@ -53,7 +53,7 @@ export const Sidebar = React.forwardRef<
       ref={ref as React.RefObject<HTMLDivElement>}
       data-sidebar="sidebar"
       className={cn(
-        'flex h-full flex-col overflow-x-hidden border-r bg-white text-gray-900 dark:border-dark-border dark:bg-dark-bg dark:text-gray-100',
+        'flex h-full flex-col overflow-x-hidden border-r bg-white text-gray-900 dark:border-dark-border-subtle dark:bg-dark-sidebar dark:text-dark-text',
         'transition-[transform,width] duration-200 ease-out',
         width,
         'fixed inset-y-0 left-0 z-40 lg:relative lg:translate-x-0',
@@ -70,7 +70,7 @@ Sidebar.displayName = 'Sidebar';
 
 export const SidebarHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} data-sidebar="header" className={cn('flex flex-col gap-1 p-3 border-b border-gray-200 dark:border-gray-800', className)} {...props} />
+    <div ref={ref} data-sidebar="header" className={cn('flex flex-col gap-1 p-3 border-b border-gray-200 dark:border-dark-border-subtle', className)} {...props} />
   )
 );
 SidebarHeader.displayName = 'SidebarHeader';
@@ -97,7 +97,7 @@ SidebarGroup.displayName = 'SidebarGroup';
 
 export const SidebarGroupLabel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} data-sidebar="group-label" className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400', className)} {...props} />
+    <div ref={ref} data-sidebar="group-label" className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary', className)} {...props} />
   )
 );
 SidebarGroupLabel.displayName = 'SidebarGroupLabel';
@@ -129,9 +129,9 @@ export const SidebarMenuButton = React.forwardRef<
         collapsed && isActive && 'mx-auto h-9 w-9 shrink-0 justify-center p-0',
         collapsed && !isActive && 'w-full justify-center px-1.5 py-2',
         !collapsed && 'w-full px-2 py-2',
-        'hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800/80 dark:hover:text-white',
+        'hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-surface dark:hover:text-dark-text',
         isActive &&
-          'bg-gray-100 text-gray-900 dark:bg-gray-800/90 dark:text-white [&:hover]:bg-gray-200 dark:[&:hover]:bg-gray-800',
+          'bg-gray-100 text-gray-900 dark:bg-dark-blue-deep dark:text-dark-text [&:hover]:bg-gray-200 dark:[&:hover]:bg-dark-blue-deep',
         collapsed && isActive && 'shadow-sm',
         className
       )}
@@ -140,7 +140,7 @@ export const SidebarMenuButton = React.forwardRef<
     >
       {children}
         {!collapsed && (
-        <span className="ml-auto text-gray-400 dark:text-gray-500 shrink-0">
+        <span className="ml-auto text-gray-400 dark:text-dark-muted shrink-0">
           <ChevronRightIcon className="h-4 w-4" />
         </span>
       )}
@@ -157,7 +157,7 @@ const ChevronRightIcon = (p: React.SVGProps<SVGSVGElement>) => (
 
 export const SidebarFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} data-sidebar="footer" className={cn('border-t border-gray-200 dark:border-dark-border p-3', className)} {...props} />
+    <div ref={ref} data-sidebar="footer" className={cn('border-t border-gray-200 dark:border-dark-border-subtle p-3', className)} {...props} />
   )
 );
 SidebarFooter.displayName = 'SidebarFooter';
@@ -168,7 +168,7 @@ export const SidebarTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHT
       ref={ref}
       data-sidebar="trigger"
       className={cn(
-        'inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white transition-colors',
+        'inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-text-secondary dark:hover:bg-dark-surface dark:hover:text-dark-text transition-colors',
         className
       )}
       onClick={onClick}

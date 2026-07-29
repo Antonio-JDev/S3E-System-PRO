@@ -16,25 +16,23 @@ import {
 } from 'recharts';
 import {
   DollarSign,
-  TrendingUp,
   Package,
   BarChart3,
   PieChart as PieChartIcon,
   Download,
   Calendar,
-  Activity,
   CheckCircle,
   Clock,
   XCircle,
   AlertCircle,
 } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import {
   biService,
   type VendasComprasClassificacao,
   type MateriaisMaisCompradosPeriodo,
 } from '../services/biService';
 import { ThemeContext } from '../contexts/ThemeContext';
+import { CHART_ACCENT, CHART_SERIES_COLORS, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -57,18 +55,16 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
   const [exportando, setExportando] = useState<boolean>(false);
   const [orcamentosPorStatus, setOrcamentosPorStatus] = useState<any>(null);
   const [orcamentosPorTipoServico, setOrcamentosPorTipoServico] = useState<any>(null);
-  const [markupVendasPorServico, setMarkupVendasPorServico] = useState<any>(null);
-  const [periodoMarkup, setPeriodoMarkup] = useState<'mes' | 'semana' | 'semestre' | 'ano'>('mes');
   const [gastosFornecedor, setGastosFornecedor] = useState<any>(null);
-  const [servicosRentaveis, setServicosRentaveis] = useState<any>(null);
   const [vendasCompras, setVendasCompras] = useState<VendasComprasClassificacao | null>(null);
   const [materiaisPeriodo, setMateriaisPeriodo] = useState<MateriaisMaisCompradosPeriodo | null>(null);
+  const [gastosCartao, setGastosCartao] = useState<any>(null);
+  const [metodosPagamento, setMetodosPagamento] = useState<any>(null);
+  const [evolucaoFaturas, setEvolucaoFaturas] = useState<any>(null);
 
   const themeContext = useContext(ThemeContext);
-  const isDark =
-    themeContext?.theme === 'dark' ||
-    (themeContext?.theme === 'system' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = themeContext?.effectiveTheme === 'dark';
+  const ct = getChartTheme(!!isDark);
 
   // Cores para status de orçamentos
   const STATUS_COLORS = {
@@ -78,17 +74,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
     declinados: '#1F2937',  // preto
   };
 
-  // Cores para gráficos
-  const CHART_COLORS = [
-    '#6366F1', // indigo
-    '#8B5CF6', // purple
-    '#3B82F6', // blue
-    '#10B981', // green
-    '#F59E0B', // amber
-    '#EF4444', // red
-    '#EC4899', // pink
-    '#06B6D4', // cyan
-  ];
+  const CHART_COLORS = CHART_SERIES_COLORS;
 
   // Carregar dados
   const carregarDados = async () => {
@@ -101,32 +87,32 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         return;
       }
 
-      console.log('📊 Carregando dados de BI:', { dataInicio, dataFim, periodoMarkup });
+      console.log('📊 Carregando dados de BI:', { dataInicio, dataFim });
       
       const [
         orcamentosStatusResultado,
         orcamentosTipoServicoResultado,
-        markupVendasResultado,
         gastosFornecedorResultado,
-        servicosRentaveisResultado,
         vendasComprasResultado,
         materiaisResultado,
+        gastosCartaoResultado,
+        metodosResultado,
+        evolucaoFaturasResultado,
       ] = await Promise.all([
         biService.getOrcamentosPorStatus(dataInicio, dataFim),
         biService.getOrcamentosPorTipoServicoClassificado(dataInicio, dataFim),
-        biService.getMarkupVendasPorServico(dataInicio, dataFim, periodoMarkup),
         biService.getGastosFornecedor(dataInicio, dataFim),
-        biService.getServicosRentaveis(dataInicio, dataFim),
         biService.getVendasComprasClassificacao(dataInicio, dataFim),
         biService.getMateriaisMaisCompradosPeriodo(dataInicio, dataFim),
+        biService.getGastosCartaoCredito(dataInicio, dataFim),
+        biService.getMetodosPagamentoComparativo(dataInicio, dataFim),
+        biService.getEvolucaoFaturasCartao(dataInicio, dataFim),
       ]);
 
       console.log('📊 Resultados recebidos:', {
         orcamentosStatus: orcamentosStatusResultado,
         orcamentosTipoServico: orcamentosTipoServicoResultado,
-        markupVendas: markupVendasResultado,
         gastosFornecedor: gastosFornecedorResultado,
-        servicosRentaveis: servicosRentaveisResultado,
         vendasCompras: vendasComprasResultado,
       });
 
@@ -148,15 +134,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         toast.error('Erro ao carregar estatísticas de orçamentos por tipo de serviço');
       }
 
-      // Processar markup de vendas
-      if (markupVendasResultado && markupVendasResultado.data) {
-        console.log('✅ Markup de vendas carregado:', markupVendasResultado.data);
-        setMarkupVendasPorServico(markupVendasResultado.data);
-      } else if (markupVendasResultado && !markupVendasResultado.success) {
-        console.error('❌ Erro ao carregar markup de vendas:', markupVendasResultado.error);
-        toast.error('Erro ao carregar estatísticas de markup de vendas');
-      }
-
       // Processar gastos por fornecedor
       if (gastosFornecedorResultado && gastosFornecedorResultado.data) {
         console.log('✅ Gastos por fornecedor carregados:', gastosFornecedorResultado.data);
@@ -175,24 +152,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         setGastosFornecedor([]);
       }
 
-      // Processar serviços rentáveis
-      if (servicosRentaveisResultado && servicosRentaveisResultado.data) {
-        console.log('✅ Serviços rentáveis carregados:', servicosRentaveisResultado.data);
-        // Verificar se é um array e tem dados
-        if (Array.isArray(servicosRentaveisResultado.data) && servicosRentaveisResultado.data.length > 0) {
-          setServicosRentaveis(servicosRentaveisResultado.data);
-        } else {
-          console.warn('⚠️ Array de serviços rentáveis vazio');
-          setServicosRentaveis([]);
-        }
-      } else if (servicosRentaveisResultado && !servicosRentaveisResultado.success) {
-        console.error('❌ Erro ao carregar serviços rentáveis:', servicosRentaveisResultado.error);
-        setServicosRentaveis([]);
-      } else {
-        console.warn('⚠️ Resposta de serviços rentáveis inválida:', servicosRentaveisResultado);
-        setServicosRentaveis([]);
-      }
-
       if (vendasComprasResultado?.success && vendasComprasResultado.data) {
         setVendasCompras(vendasComprasResultado.data);
       } else {
@@ -204,6 +163,10 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       } else {
         setMateriaisPeriodo(null);
       }
+
+      setGastosCartao(gastosCartaoResultado?.success ? gastosCartaoResultado.data : null);
+      setMetodosPagamento(metodosResultado?.success ? metodosResultado.data : null);
+      setEvolucaoFaturas(evolucaoFaturasResultado?.success ? evolucaoFaturasResultado.data : null);
     } catch (error: any) {
       console.error('Erro ao carregar dados de BI:', error);
       toast.error('Erro ao carregar dados do Business Intelligence');
@@ -214,7 +177,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
 
   useEffect(() => {
     carregarDados();
-  }, [dataInicio, dataFim, periodoMarkup]);
+  }, [dataInicio, dataFim]);
 
   const vendasComprasChartData = useMemo(() => {
     if (!vendasCompras) return [];
@@ -250,11 +213,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
       style: 'currency',
       currency: 'BRL',
     }).format(valor);
-  };
-
-  // Formatar percentual
-  const formatarPercentual = (valor: number) => {
-    return `${valor.toFixed(2)}%`;
   };
 
   // Exportar para PDF
@@ -460,17 +418,17 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 data={vendasComprasChartData}
                 margin={{ top: 16, right: 24, left: 8, bottom: 100 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
                 <XAxis
                   dataKey="nome"
-                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 10 }}
+                  tick={{ fill: ct.axis, fontSize: 10 }}
                   interval={0}
                   angle={-35}
                   textAnchor="end"
                   height={90}
                 />
                 <YAxis
-                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
+                  tick={{ fill: ct.axis, fontSize: 11 }}
                   tickFormatter={(v) =>
                     v >= 1_000_000 ? `R$ ${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `R$ ${(v / 1000).toFixed(0)}k` : `R$ ${v}`
                   }
@@ -480,12 +438,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     `${formatarMoeda(value)} (${props.payload.qtd} ${props.payload.tipo === 'venda' ? 'orç.' : 'compras'})`,
                     'Valor',
                   ]}
-                  contentStyle={{
-                    backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: isDark ? '1px solid #334155' : '1px solid #e5e7eb',
-                    borderRadius: '8px',
-                    color: isDark ? '#F8FAFC' : '#111827',
-                  }}
+                  contentStyle={chartTooltipStyle(!!isDark)}
                 />
                 <Legend />
                 <Bar dataKey="valor" name="Valor (R$)" radius={[6, 6, 0, 0]}>
@@ -570,7 +523,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                             <Cell
                               key={`cell-${index}`}
                               fill={entry.cor}
-                              stroke={isDark ? '#1E293B' : '#fff'}
+                              stroke={isDark ? ct.cardBg : '#fff'}
                               strokeWidth={3}
                             />
                           ))}
@@ -580,13 +533,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                             `${value} orçamentos (${formatarMoeda(props.payload.valorTotal)})`,
                             props.payload.status
                           ]}
-                          contentStyle={{
-                            backgroundColor: isDark ? '#1E293B' : '#fff',
-                            border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                            borderRadius: '8px',
-                            color: isDark ? '#F8FAFC' : '#111827',
-                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                          }}
+                          contentStyle={chartTooltipStyle(!!isDark)}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -668,29 +615,29 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 >
                   <CartesianGrid 
                     strokeDasharray="3 3" 
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    stroke={ct.grid}
                     vertical={false}
                   />
                   <XAxis 
                     dataKey="nome" 
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 12 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                   />
                   <YAxis 
                     yAxisId="left"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
-                    label={{ value: 'Quantidade', angle: -90, position: 'insideLeft', style: { fill: isDark ? '#CBD5E1' : '#6b7280' } }}
+                    label={{ value: 'Quantidade', angle: -90, position: 'insideLeft', style: { fill: ct.axis } }}
                   />
                   <YAxis 
                     yAxisId="right"
                     orientation="right"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                     tickFormatter={(value) => {
@@ -706,19 +653,13 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                       }
                       return [formatarMoeda(value), 'Valor Total'];
                     }}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
                   />
                   <Legend />
                   <Bar 
                     yAxisId="left"
                     dataKey="quantidade" 
-                    fill="#6366F1" 
+                    fill={CHART_ACCENT} 
                     name="Quantidade"
                     radius={[8, 8, 0, 0]}
                   />
@@ -804,13 +745,13 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 >
                   <CartesianGrid 
                     strokeDasharray="3 3" 
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    stroke={ct.grid}
                     vertical={false}
                   />
                   <XAxis 
                     dataKey="classificacao" 
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                     angle={-45}
@@ -818,8 +759,8 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     height={80}
                   />
                   <YAxis 
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                     tickFormatter={(value) => {
@@ -830,13 +771,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   />
                   <Tooltip
                     formatter={(value: number) => formatarMoeda(value)}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
                   />
                   <Bar 
                     dataKey="valorTotal" 
@@ -924,19 +859,19 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 <CartesianGrid 
                   strokeDasharray="3 3" 
                   vertical={false}
-                  stroke={isDark ? '#334155' : '#e5e7eb'} 
+                  stroke={ct.grid} 
                 />
                 <XAxis
                   dataKey="mes"
                   tickLine={false}
                   axisLine={false}
                   tickMargin={8}
-                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 12 }}
-                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tick={{ fill: ct.axis, fontSize: 12 }}
+                  stroke={ct.grid}
                 />
                 <YAxis
-                  tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                  stroke={isDark ? '#334155' : '#e5e7eb'}
+                  tick={{ fill: ct.axis, fontSize: 11 }}
+                  stroke={ct.grid}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(value) => {
@@ -947,16 +882,10 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 />
                 <Tooltip
                   formatter={(value: number) => formatarMoeda(value)}
-                  contentStyle={{
-                    backgroundColor: isDark ? '#1E293B' : '#fff',
-                    border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                    borderRadius: '8px',
-                    color: isDark ? '#F8FAFC' : '#111827',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  }}
+                  contentStyle={chartTooltipStyle(!!isDark)}
                 />
                 <Legend 
-                  wrapperStyle={{ color: isDark ? '#CBD5E1' : '#6b7280' }}
+                  wrapperStyle={{ color: ct.legend }}
                 />
                 <Line 
                   type="monotone" 
@@ -969,9 +898,9 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 <Line 
                   type="monotone" 
                   dataKey="Engenharia/Projetos" 
-                  stroke="#6366F1" 
+                  stroke={CHART_ACCENT} 
                   strokeWidth={3}
-                  dot={{ fill: '#6366F1', r: 4 }}
+                  dot={{ fill: CHART_ACCENT, r: 4 }}
                   activeDot={{ r: 6 }}
                 />
                 <Line 
@@ -992,106 +921,6 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 />
               </LineChart>
             </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Detalhamento por serviço (substitui a visão DRE — análise de resultado fica no Financeiro) */}
-      {markupVendasPorServico && markupVendasPorServico.dados && markupVendasPorServico.dados.length > 0 && (
-        <div className="card-primary">
-          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">
-                  Detalhamento por Serviço Individual
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-                  Análise detalhada de cada serviço vendido no período{' '}
-                  {periodoMarkup === 'mes'
-                    ? 'mensal'
-                    : periodoMarkup === 'semana'
-                      ? 'semanal'
-                      : periodoMarkup === 'semestre'
-                        ? 'semestral'
-                        : 'anual'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-700 dark:text-dark-text whitespace-nowrap">
-                  Agregação do período:
-                </label>
-                <Select value={periodoMarkup} onValueChange={(value: any) => setPeriodoMarkup(value)}>
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mes">Mensal</SelectItem>
-                    <SelectItem value="semana">Semanal</SelectItem>
-                    <SelectItem value="semestre">Semestral</SelectItem>
-                    <SelectItem value="ano">Anual</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <div className="p-6">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 dark:bg-slate-800/50 border-b-2 border-gray-300 dark:border-gray-600">
-                    <th className="text-left p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Período</th>
-                    <th className="text-left p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Classificação</th>
-                    <th className="text-left p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Serviço</th>
-                    <th className="text-right p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Receita</th>
-                    <th className="text-right p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Custo</th>
-                    <th className="text-right p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Lucro</th>
-                    <th className="text-right p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Markup %</th>
-                    <th className="text-right p-3 text-xs font-bold text-gray-700 dark:text-dark-text">Qtd</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {markupVendasPorServico.dados.map((item: any, index: number) => (
-                    <tr 
-                      key={index} 
-                      className="border-b border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-slate-800/30 transition-colors"
-                    >
-                      <td className="p-3 text-xs text-gray-700 dark:text-dark-text-secondary">
-                        {item.periodo}
-                      </td>
-                      <td className="p-3 text-xs text-gray-900 dark:text-dark-text font-medium">
-                        {item.classificacao}
-                      </td>
-                      <td className="p-3 text-xs text-gray-900 dark:text-dark-text">
-                        {item.servicoNome}
-                      </td>
-                      <td className="p-3 text-xs text-right text-gray-900 dark:text-dark-text font-semibold">
-                        {formatarMoeda(item.receita)}
-                      </td>
-                      <td className="p-3 text-xs text-right text-gray-700 dark:text-dark-text-secondary">
-                        {formatarMoeda(item.custo)}
-                      </td>
-                      <td className={`p-3 text-xs text-right font-semibold ${
-                        item.lucro >= 0 
-                          ? 'text-green-600 dark:text-green-400' 
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        {formatarMoeda(item.lucro)}
-                      </td>
-                      <td className={`p-3 text-xs text-right font-bold ${
-                        item.markup >= 0 
-                          ? 'text-green-600 dark:text-green-400' 
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        {formatarPercentual(item.markup)}
-                      </td>
-                      <td className="p-3 text-xs text-right text-gray-700 dark:text-dark-text-secondary">
-                        {item.quantidade}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       )}
@@ -1131,7 +960,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                           <Cell
                             key={`cell-${index}`}
                             fill={CHART_COLORS[index % CHART_COLORS.length]}
-                            stroke={isDark ? '#1E293B' : '#fff'}
+                            stroke={isDark ? ct.cardBg : '#fff'}
                             strokeWidth={3}
                           />
                         ))}
@@ -1141,13 +970,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                           formatarMoeda(value),
                           props.payload.fornecedorNome
                         ]}
-                        contentStyle={{
-                          backgroundColor: isDark ? '#1E293B' : '#fff',
-                          border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                          borderRadius: '8px',
-                          color: isDark ? '#F8FAFC' : '#111827',
-                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                        }}
+                        contentStyle={chartTooltipStyle(!!isDark)}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1238,14 +1061,14 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                 >
                   <CartesianGrid 
                     strokeDasharray="3 3" 
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    stroke={ct.grid}
                     horizontal={true}
                     vertical={false}
                   />
                   <XAxis 
                     type="number"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                     tickFormatter={(value) => {
@@ -1258,8 +1081,8 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     dataKey="fornecedorNome"
                     type="category"
                     width={140}
-                    tick={{ fontSize: 11, fill: isDark ? '#CBD5E1' : '#6b7280' }}
-                    stroke={isDark ? '#334155' : '#e5e7eb'}
+                    tick={{ fontSize: 11, fill: ct.axis }}
+                    stroke={ct.grid}
                     tickLine={false}
                     axisLine={false}
                   />
@@ -1268,13 +1091,7 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                       formatarMoeda(value),
                       `${props.payload.quantidadeCompras} compras`
                     ]}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: (isDark ? '1px solid #334155' : '1px solid #e5e7eb'),
-                      borderRadius: '8px',
-                      color: isDark ? '#F8FAFC' : '#111827',
-                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                    }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
                   />
                   <Bar 
                     dataKey="total" 
@@ -1355,10 +1172,10 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                   layout="vertical"
                   margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e5e7eb'} horizontal vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} horizontal vertical={false} />
                   <XAxis
                     type="number"
-                    tick={{ fill: isDark ? '#CBD5E1' : '#6b7280', fontSize: 11 }}
+                    tick={{ fill: ct.axis, fontSize: 11 }}
                     tickFormatter={(v) =>
                       v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`
                     }
@@ -1367,18 +1184,14 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
                     dataKey="nomeCurto"
                     type="category"
                     width={200}
-                    tick={{ fontSize: 10, fill: isDark ? '#CBD5E1' : '#6b7280' }}
+                    tick={{ fontSize: 10, fill: ct.axis }}
                   />
                   <Tooltip
                     formatter={(value: number, _n: string, p: any) => [
                       formatarMoeda(value),
                       `${p.payload.quantidade?.toFixed?.(2) ?? p.payload.quantidade} un.`,
                     ]}
-                    contentStyle={{
-                      backgroundColor: isDark ? '#1E293B' : '#fff',
-                      border: isDark ? '1px solid #334155' : '1px solid #e5e7eb',
-                      borderRadius: 8,
-                    }}
+                    contentStyle={chartTooltipStyle(!!isDark)}
                   />
                   <Bar dataKey="valorTotal" name="Valor comprado" radius={[0, 6, 6, 0]}>
                     {materiaisPeriodo.materiais.map((_, i) => (
@@ -1422,184 +1235,107 @@ const BIDashboard: React.FC<BIDashboardProps> = ({ toggleSidebar }) => {
         </div>
       </div>
 
-      {/* Seção 7: Serviços Mais Rentáveis */}
-      {servicosRentaveis && Array.isArray(servicosRentaveis) && servicosRentaveis.length > 0 ? (
-        <div className="card-primary">
-          <div className="p-6 border-b border-gray-200 dark:border-dark-border">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-green-600 dark:text-green-400" />
-              Serviços Mais Rentáveis
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-              Ranking dos serviços com maior lucratividade nos pedidos de venda
-            </p>
-          </div>
-          <div className="p-6 space-y-6">
-            {/* Top 3 Serviços - Cards Destacados */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {servicosRentaveis.slice(0, 3).map((servico: any, index: number) => (
-                <div
-                  key={index}
-                  className={`p-6 rounded-xl border-2 bg-gradient-to-br ${
-                    index === 0
-                      ? 'border-yellow-400 from-yellow-50 to-yellow-100 dark:from-yellow-900/30 dark:to-yellow-800/30'
-                      : index === 1
-                      ? 'border-gray-400 from-gray-50 to-gray-100 dark:from-gray-800/30 dark:to-gray-700/30'
-                      : 'border-orange-400 from-orange-50 to-orange-100 dark:from-orange-900/30 dark:to-orange-800/30'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className={`text-3xl font-bold ${
-                      index === 0 ? 'text-yellow-600 dark:text-yellow-400' :
-                      index === 1 ? 'text-gray-600 dark:text-gray-400' :
-                      'text-orange-600 dark:text-orange-400'
-                    }`}>
-                      #{index + 1}
-                    </div>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      index === 0 ? 'bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-200' :
-                      index === 1 ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200' :
-                      'bg-orange-200 text-orange-800 dark:bg-orange-800 dark:text-orange-200'
-                    }`}>
-                      {servico.classificacao}
-                    </div>
-                  </div>
-                  <h4 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-3">
-                    {servico.servicoNome}
-                  </h4>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-600 dark:text-gray-400">Lucro:</span>
-                      <span className="text-lg font-bold text-green-600 dark:text-green-400">
-                        {formatarMoeda(servico.lucro)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-600 dark:text-gray-400">Markup:</span>
-                      <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
-                        {formatarPercentual(servico.markup)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-gray-600 dark:text-gray-400">Receita:</span>
-                      <span className="text-sm font-semibold text-gray-900 dark:text-dark-text">
-                        {formatarMoeda(servico.receita)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+      {/* Cartão de Crédito */}
+      <div className="card-primary">
+        <div className="p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center">
+              <DollarSign className="w-5 h-5 text-indigo-600" />
             </div>
-
-            {/* Tabela Completa de Serviços Rentáveis */}
             <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-4">
-                Ranking Completo de Rentabilidade
-              </h4>
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-border">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-green-600 to-green-500 text-white">
-                      <th className="text-center p-4 font-bold w-16">#</th>
-                      <th className="text-left p-4 font-bold">Serviço</th>
-                      <th className="text-left p-4 font-bold">Classificação</th>
-                      <th className="text-right p-4 font-bold">Receita</th>
-                      <th className="text-right p-4 font-bold">Custo</th>
-                      <th className="text-right p-4 font-bold">Lucro</th>
-                      <th className="text-right p-4 font-bold">Markup %</th>
-                      <th className="text-right p-4 font-bold">Qtd</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {servicosRentaveis.map((servico: any, index: number) => (
-                      <tr 
-                        key={index} 
-                        className={`border-b border-gray-200 dark:border-dark-border hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors ${
-                          index < 3 ? 'bg-green-50/50 dark:bg-green-900/10' : ''
-                        }`}
-                      >
-                        <td className="p-4 text-center">
-                          <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm ${
-                            index === 0 ? 'bg-yellow-400 text-yellow-900' :
-                            index === 1 ? 'bg-gray-400 text-gray-900' :
-                            index === 2 ? 'bg-orange-400 text-orange-900' :
-                            'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
-                          }`}>
-                            {index + 1}
-                          </div>
-                        </td>
-                        <td className="p-4 text-gray-900 dark:text-dark-text font-semibold">
-                          {servico.servicoNome}
-                        </td>
-                        <td className="p-4">
-                          <span className="px-2 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded text-xs font-medium">
-                            {servico.classificacao}
-                          </span>
-                        </td>
-                        <td className="p-4 text-right text-gray-900 dark:text-dark-text font-semibold">
-                          {formatarMoeda(servico.receita)}
-                        </td>
-                        <td className="p-4 text-right text-gray-700 dark:text-dark-text-secondary">
-                          {formatarMoeda(servico.custo)}
-                        </td>
-                        <td className="p-4 text-right font-bold text-green-600 dark:text-green-400">
-                          {formatarMoeda(servico.lucro)}
-                        </td>
-                        <td className="p-4 text-right font-bold text-lg text-green-600 dark:text-green-400">
-                          {formatarPercentual(servico.markup)}
-                        </td>
-                        <td className="p-4 text-right text-gray-700 dark:text-dark-text-secondary">
-                          {servico.quantidade}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-gray-100 dark:bg-slate-800 font-bold">
-                      <td colSpan={3} className="p-4 text-gray-900 dark:text-dark-text">TOTAL</td>
-                      <td className="p-4 text-right text-gray-900 dark:text-dark-text">
-                        {formatarMoeda(servicosRentaveis.reduce((sum: number, s: any) => sum + s.receita, 0))}
-                      </td>
-                      <td className="p-4 text-right text-gray-900 dark:text-dark-text">
-                        {formatarMoeda(servicosRentaveis.reduce((sum: number, s: any) => sum + s.custo, 0))}
-                      </td>
-                      <td className="p-4 text-right text-green-600 dark:text-green-400">
-                        {formatarMoeda(servicosRentaveis.reduce((sum: number, s: any) => sum + s.lucro, 0))}
-                      </td>
-                      <td className="p-4 text-right text-green-600 dark:text-green-400 text-lg">
-                        {(() => {
-                          const totalCusto = servicosRentaveis.reduce((sum: number, s: any) => sum + s.custo, 0);
-                          const totalLucro = servicosRentaveis.reduce((sum: number, s: any) => sum + s.lucro, 0);
-                          const markupTotal = totalCusto > 0 ? (totalLucro / totalCusto) * 100 : 0;
-                          return formatarPercentual(markupTotal);
-                        })()}
-                      </td>
-                      <td className="p-4 text-right text-gray-900 dark:text-dark-text">
-                        {servicosRentaveis.reduce((sum: number, s: any) => sum + s.quantidade, 0)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text">Cartão de Crédito</h3>
+              <p className="text-sm text-gray-500">Gastos por cartão, comparativo de métodos e evolução de faturas</p>
             </div>
           </div>
-        </div>
-      ) : servicosRentaveis !== null && (
-        <div className="card-primary">
-          <div className="p-12 text-center">
-            <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
-            <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">
-              Nenhum serviço rentável encontrado
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
-              Não há vendas de serviços registradas no período selecionado.
-            </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 p-4">
+              <p className="text-xs font-medium text-indigo-700">Total em cartão (período)</p>
+              <p className="text-2xl font-bold text-indigo-900 dark:text-indigo-100 mt-1">
+                {formatarMoeda(gastosCartao?.totalGeral || 0)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 p-4">
+              <p className="text-xs font-medium text-emerald-700">Outros métodos (pagos)</p>
+              <p className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 mt-1">
+                {formatarMoeda(metodosPagamento?.comparativo?.outrosMetodos || 0)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 p-4">
+              <p className="text-xs font-medium text-amber-700">Cartão vs Total pago</p>
+              <p className="text-2xl font-bold text-amber-900 dark:text-amber-100 mt-1">
+                {formatarMoeda(metodosPagamento?.comparativo?.cartaoCredito || 0)}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">Gastos por cartão</h4>
+              {gastosCartao?.porCartao?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={gastosCartao.porCartao}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                    <XAxis dataKey="nome" tick={{ fill: ct.axis, fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={60} />
+                    <YAxis tick={{ fill: ct.axis, fontSize: 11 }} tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)} />
+                    <Tooltip formatter={(v: number) => formatarMoeda(v)} contentStyle={chartTooltipStyle(!!isDark)} />
+                    <Bar dataKey="total" name="Total" fill="#6366F1" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-gray-500 py-8 text-center">Sem gastos em cartão no período.</p>
+              )}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">Métodos de pagamento</h4>
+              {metodosPagamento?.porMetodo?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie
+                      data={metodosPagamento.porMetodo}
+                      dataKey="total"
+                      nameKey="metodo"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      label={({ metodo, percent }: any) => `${metodo} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {metodosPagamento.porMetodo.map((_: any, i: number) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => formatarMoeda(v)} contentStyle={chartTooltipStyle(!!isDark)} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-gray-500 py-8 text-center">Sem pagamentos no período.</p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-dark-text mb-3">Evolução de faturas</h4>
+            {evolucaoFaturas?.evolucao?.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={evolucaoFaturas.evolucao}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                  <XAxis dataKey="mes" tick={{ fill: ct.axis, fontSize: 11 }} />
+                  <YAxis tick={{ fill: ct.axis, fontSize: 11 }} tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : `${v}`)} />
+                  <Tooltip formatter={(v: number) => formatarMoeda(v)} contentStyle={chartTooltipStyle(!!isDark)} />
+                  <Legend />
+                  <Line type="monotone" dataKey="total" name="Valor faturas" stroke="#6366F1" strokeWidth={2} dot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-sm text-gray-500 py-8 text-center">Nenhuma fatura no período.</p>
+            )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Mensagem quando não há dados */}
-      {!loading && (!orcamentosPorStatus || !orcamentosPorTipoServico || !markupVendasPorServico) && (
+      {!loading && (!orcamentosPorStatus || !orcamentosPorTipoServico) && (
         <div className="card-primary">
           <div className="p-12 text-center">
             <BarChart3 className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />

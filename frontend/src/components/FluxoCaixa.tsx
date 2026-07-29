@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useContext } from 'react';
 import { axiosApiService } from '../services/axiosApi';
 import {
     BarChart,
@@ -14,6 +14,8 @@ import {
     Area,
     AreaChart
 } from 'recharts';
+import { ThemeContext } from '../contexts/ThemeContext';
+import { CHART_ACCENT, getChartTheme, chartTooltipStyle } from '../styles/chartTheme';
 
 interface FluxoCaixaComponentProps {
     toggleSidebar: () => void;
@@ -23,6 +25,9 @@ interface FluxoCaixaComponentProps {
 const formatarDataParaInput = (d: Date) => d.toISOString().split('T')[0];
 
 export const FluxoCaixa: React.FC<FluxoCaixaComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
+    const themeContext = useContext(ThemeContext);
+    const isDark = themeContext?.effectiveTheme === 'dark';
+    const ct = getChartTheme(!!isDark);
     const [loading, setLoading] = useState(true);
     const [tipoVisao, setTipoVisao] = useState<'projecao' | 'realizado'>('projecao');
     const [periodo, setPeriodo] = useState<30 | 60 | 90>(90);
@@ -128,8 +133,8 @@ export const FluxoCaixa: React.FC<FluxoCaixaComponentProps> = ({ toggleSidebar, 
     const CustomTooltip = ({ active, payload, label }: any) => {
         if (active && payload && payload.length) {
             return (
-                <div className="bg-white p-4 rounded-lg shadow-lg border border-gray-200">
-                    <p className="font-semibold text-gray-900 mb-2">{label}</p>
+                <div className="p-4 rounded-lg shadow-lg" style={chartTooltipStyle(!!isDark)}>
+                    <p className="font-semibold mb-2" style={{ color: ct.tooltipText }}>{label}</p>
                     {payload.map((entry: any, index: number) => (
                         <p key={index} style={{ color: entry.color }} className="text-sm">
                             {entry.name}: {formatarMoeda(entry.value)}
@@ -512,16 +517,16 @@ export const FluxoCaixa: React.FC<FluxoCaixaComponentProps> = ({ toggleSidebar, 
                         <div style={{ height: '350px' }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={dadosGrafico}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                                     <XAxis 
                                         dataKey="periodo" 
-                                        tick={{ fontSize: 11 }}
+                                        tick={{ fontSize: 11, fill: ct.axis }}
                                         angle={-45}
                                         textAnchor="end"
                                         height={70}
                                     />
                                     <YAxis 
-                                        tick={{ fontSize: 11 }}
+                                        tick={{ fontSize: 11, fill: ct.axis }}
                                         tickFormatter={(value) => formatarMoeda(value)}
                                     />
                                     <Tooltip content={<CustomTooltip />} />
@@ -554,20 +559,20 @@ export const FluxoCaixa: React.FC<FluxoCaixaComponentProps> = ({ toggleSidebar, 
                                 <AreaChart data={dadosGrafico}>
                                     <defs>
                                         <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                            <stop offset="5%" stopColor={ct.areaFrom} stopOpacity={0.3}/>
+                                            <stop offset="95%" stopColor={ct.areaTo} stopOpacity={isDark ? 0.15 : 0}/>
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                                     <XAxis 
                                         dataKey="periodo" 
-                                        tick={{ fontSize: 11 }}
+                                        tick={{ fontSize: 11, fill: ct.axis }}
                                         angle={-45}
                                         textAnchor="end"
                                         height={70}
                                     />
                                     <YAxis 
-                                        tick={{ fontSize: 11 }}
+                                        tick={{ fontSize: 11, fill: ct.axis }}
                                         tickFormatter={(value) => `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                     />
                                     <Tooltip content={<CustomTooltip />} />
@@ -576,7 +581,7 @@ export const FluxoCaixa: React.FC<FluxoCaixaComponentProps> = ({ toggleSidebar, 
                                         type="monotone" 
                                         dataKey="saldo" 
                                         name="Saldo Acumulado"
-                                        stroke="#3b82f6" 
+                                        stroke={CHART_ACCENT}
                                         strokeWidth={2.5}
                                         fillOpacity={1} 
                                         fill="url(#colorSaldo)" 

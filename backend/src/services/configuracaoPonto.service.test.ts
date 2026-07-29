@@ -7,7 +7,18 @@ jest.mock('../lib/prisma', () => ({
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
+    funcionario: {
+      findUnique: jest.fn(),
+    },
+    registroPonto: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
   },
+}));
+
+jest.mock('./bancoHorasExcesso.service', () => ({
+  sincronizarExcessoCompetencia: jest.fn().mockResolvedValue(undefined),
 }));
 
 const p = prisma as unknown as {
@@ -15,11 +26,23 @@ const p = prisma as unknown as {
     findUnique: jest.Mock;
     upsert: jest.Mock;
   };
+  funcionario: { findUnique: jest.Mock };
+  registroPonto: { findMany: jest.Mock; update: jest.Mock };
 };
 
 describe('configuracaoPonto.service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    p.configuracaoPonto.findUnique.mockResolvedValue({
+      workShiftId: null,
+      toleranciaMinutos: 5,
+    });
+    p.funcionario.findUnique.mockResolvedValue({
+      id: 'f1',
+      tipoContrato: 'REGISTRADO',
+      permitirHorasExtras100: false,
+    });
+    p.registroPonto.findMany.mockResolvedValue([]);
   });
 
   it('buscarPorFuncionario delega ao Prisma', async () => {
@@ -73,6 +96,28 @@ describe('configuracaoPonto.service', () => {
         trabalhaFimDeSemana: true,
         valorHoraFimDeSemana: 42.5,
       }),
+    );
+  });
+
+  it('upsert com workShiftId diferente dispara recalc só do funcionário', async () => {
+    p.configuracaoPonto.findUnique
+      .mockResolvedValueOnce({ workShiftId: 'ws-old', toleranciaMinutos: 5 })
+      .mockResolvedValueOnce({
+        toleranciaMinutos: 5,
+        workShift: {
+          entrada1: '08:00',
+          saida1: '12:00',
+          entrada2: '13:00',
+          saida2: '17:00',
+        },
+      });
+    p.configuracaoPonto.upsert.mockResolvedValue({ id: 'x', workShiftId: 'ws-new' });
+    p.registroPonto.findMany.mockResolvedValue([]);
+
+    await upsertPorFuncionario('f1', { workShiftId: 'ws-new' });
+
+    expect(p.registroPonto.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { funcionarioId: 'f1' } }),
     );
   });
 });

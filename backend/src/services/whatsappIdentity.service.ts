@@ -353,6 +353,27 @@ export async function resolvePhoneDigitKeysForChat(chatIdRaw: string): Promise<s
   return [...out];
 }
 
+/**
+ * Socket.io rooms de uma conversa. Uma conversa pode aparecer sob JIDs
+ * diferentes (`@lid`, `@c.us`, variantes de 55) — por isso as rooms usam a
+ * identidade estável (chaves de telefone) além do JID canônico. Quem tem a
+ * conversa aberta entra nessas rooms; o webhook emite a mensagem completa
+ * somente para elas (evita vazamento de mensagens entre operadores).
+ */
+export async function socketRoomsForChat(chatIdRaw: string): Promise<string[]> {
+  const canon = canonicalWhatsappChatId((chatIdRaw || '').trim());
+  if (!canon) return [];
+  const rooms = new Set<string>([`chat:jid:${canon}`]);
+  try {
+    for (const key of await resolvePhoneDigitKeysForChat(canon)) {
+      rooms.add(`chat:phone:${key}`);
+    }
+  } catch {
+    // Identidades indisponíveis (bootstrap/testes): room por JID já basta.
+  }
+  return [...rooms];
+}
+
 export function mergeKeyForChatPreviewRow(
   chatId: string,
   identities: IdentityRow[]

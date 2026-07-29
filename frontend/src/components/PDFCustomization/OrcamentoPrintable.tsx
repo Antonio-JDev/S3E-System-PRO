@@ -438,7 +438,7 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                         position: relative;
                         width: 210mm;
                         min-height: 297mm;
-                        background: white;
+                        background-color: white;
                         margin: 0 auto 20px auto;
                         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                         overflow: visible;
@@ -891,28 +891,50 @@ const OrcamentoPrintable = React.forwardRef<HTMLDivElement, OrcamentoPrintablePr
                         z-index: -1;
                     }
 
-                    /* Dark mode: preview do PDF sempre como documento legível (fundo branco, texto opaco) */
+                    /* Dark mode: preview = documento A4 (só background-color p/ não apagar folha timbrada) */
                     .dark .print-container .pdf-page {
-                        background: #fff !important;
-                    }
-                    .dark .print-container .pdf-page *,
-                    .dark .print-container .page *,
-                    .dark .print-container .page-content * {
+                        background-color: #fff !important;
                         color: #1e293b !important;
-                        opacity: 1 !important;
+                    }
+                    .dark .print-container .watermark-background.custom-letterhead {
+                        background-color: transparent !important;
+                    }
+                    .dark .print-container .watermark-center {
+                        opacity: ${opacidade} !important;
+                        color: #1e40af !important;
+                    }
+                    .dark .print-container .watermark-subtitle {
+                        color: #1e40af !important;
+                    }
+                    .dark .print-container .pdf-page thead,
+                    .dark .print-container .pdf-page thead th,
+                    .dark .print-container .pdf-page tbody,
+                    .dark .print-container .pdf-page tbody tr,
+                    .dark .print-container .pdf-page tbody td {
+                        background-color: transparent !important;
+                        background-image: none !important;
+                        color: #1e293b !important;
+                    }
+                    .dark .print-container .pdf-page tbody tr:hover {
+                        background-color: transparent !important;
                     }
                     .dark .print-container .orcamento-title,
                     .dark .print-container .section-title,
                     .dark .print-container .cliente-info-value,
                     .dark .print-container .totais-row.total-final,
                     .dark .print-container .descricao-content,
-                    .dark .print-container .observacoes-content {
+                    .dark .print-container .observacoes-content,
+                    .dark .print-container .page-content,
+                    .dark .print-container .page-content p,
+                    .dark .print-container .page-content span,
+                    .dark .print-container .page-content strong,
+                    .dark .print-container .page-content td,
+                    .dark .print-container .page-content th {
                         color: #1e293b !important;
                     }
                     .dark .print-container .detail-item label,
                     .dark .print-container .cliente-info-label {
                         color: #64748b !important;
-                        opacity: 1 !important;
                     }
                 `}</style>
 

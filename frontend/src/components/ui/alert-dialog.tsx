@@ -66,7 +66,7 @@ export const AlertDialogTitle: React.FC<DialogChildProps> = ({ children, classNa
 };
 
 export const AlertDialogDescription: React.FC<DialogChildProps> = ({ children, className = '' }) => {
-  return <p className={`text-sm text-gray-600 dark:text-gray-400 mt-2 ${className}`}>{children}</p>;
+  return <div className={`text-sm text-gray-600 dark:text-gray-400 mt-2 ${className}`}>{children}</div>;
 };
 
 export const AlertDialogFooter: React.FC<DialogChildProps> = ({ children, className = '' }) => {

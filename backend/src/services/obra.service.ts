@@ -110,9 +110,8 @@ export class ObraService {
   }
 
   /**
-   * Gera uma Obra a partir de um Projeto aprovado
-
-   * Valida disponibilidade de estoque antes de criar a obra
+   * Gera uma Obra a partir de um Projeto aprovado.
+   * Não bloqueia por falta de estoque: cria a obra e dá baixa parcial do disponível.
    */
   async gerarObraAPartirDoProjeto(projetoId: string, nomeObra?: string) {
     try {
@@ -135,41 +134,17 @@ export class ObraService {
         throw new Error('Já existe uma obra para este projeto');
       }
 
-
-      // ✅ VALIDAÇÃO: Verificar disponibilidade de estoque antes de criar obra
-      console.log('🔍 Verificando disponibilidade de estoque para o projeto...');
+      // Consulta informativa — nunca bloqueia a criação da obra
+      console.log('🔍 Verificando disponibilidade de estoque para o projeto (informativo)...');
       const verificacaoEstoque = await EstoqueService.verificarDisponibilidadeProjeto(projetoId);
-      
-      if (!verificacaoEstoque.disponivel) {
-        const itensFaltantes = verificacaoEstoque.itensSemEstoque;
-        const itensBancoFrio = itensFaltantes.filter((item: any) => item.origem === 'Banco Frio');
-        const itensEstoqueReal = itensFaltantes.filter((item: any) => item.origem === 'Estoque Real');
-        
-        let mensagemErro = 'Não é possível criar a obra. Os seguintes materiais estão faltando em estoque:\n\n';
-        
-        if (itensBancoFrio.length > 0) {
-          mensagemErro += '⚠️ ITENS DO BANCO FRIO (precisam ser comprados):\n';
-          itensBancoFrio.forEach((item: any, idx: number) => {
-            mensagemErro += `${idx + 1}. ${item.nome} - Necessário: ${item.quantidadeNecessaria} ${item.falta > 0 ? `(Faltam: ${item.falta})` : ''}\n`;
-          });
-          mensagemErro += '\n';
-        }
-        
-        if (itensEstoqueReal.length > 0) {
-          mensagemErro += '📦 ITENS DO ESTOQUE REAL (faltam unidades):\n';
-          itensEstoqueReal.forEach((item: any, idx: number) => {
-            mensagemErro += `${idx + 1}. ${item.nome} - Necessário: ${item.quantidadeNecessaria}, Disponível: ${item.quantidadeDisponivel} (Faltam: ${item.falta})\n`;
-          });
-          mensagemErro += '\n';
-        }
-        
-        mensagemErro += 'Por favor, realize as compras necessárias antes de criar a obra.';
-        
-        console.error('❌ Validação de estoque falhou:', mensagemErro);
-        throw new Error(mensagemErro);
+      const iniciadoSemEstoque = !verificacaoEstoque.disponivel;
+      if (iniciadoSemEstoque) {
+        console.warn(
+          `⚠️ Estoque incompleto (${verificacaoEstoque.itensSemEstoque?.length || 0} item(ns)). Obra será criada com baixa parcial.`
+        );
+      } else {
+        console.log('✅ Estoque suficiente para todos os materiais.');
       }
-
-      console.log('✅ Validação de estoque passou. Todos os materiais estão disponíveis.');
 
       // Criar obra
       const obra = await prisma.obra.create({
@@ -189,10 +164,18 @@ export class ObraService {
         }
       });
 
-      // Atualizar status do projeto
+      // Atualizar status do projeto (e flag se iniciou sem estoque completo)
       await prisma.projeto.update({
         where: { id: projetoId },
-        data: { status: 'EXECUCAO' }
+        data: {
+          status: 'EXECUCAO',
+          ...(iniciadoSemEstoque
+            ? {
+                iniciadoSemEstoque: true,
+                iniciadoSemEstoqueEm: new Date(),
+              }
+            : {}),
+        },
       });
 
       const reservaPorMaterial = new Map<string, number>();
@@ -209,11 +192,12 @@ export class ObraService {
         }
       } catch (reservaErr) {
         console.error('Erro ao consumir reservas do projeto:', reservaErr);
-        throw reservaErr;
+        // Não reverter obra por falha de reserva
       }
 
       // ✅ Alocar (dar baixa) automaticamente dos materiais do orçamento ao gerar a obra
       // Regra: se a baixa já foi feita no Pedido de Venda, não fazer novamente ao Iniciar obra.
+      // Baixa parcial: só o disponível em estoque.
       try {
         if (projeto.orcamentoId) {
           const orcamentoParaBaixa = await prisma.orcamento.findUnique({
@@ -294,12 +278,29 @@ export class ObraService {
             const reservado = reservaPorMaterial.get(materialId) || 0;
             const qtdRestante = Math.max(0, quantidade - reservado);
             if (qtdRestante <= 0) continue;
+
+            const material = await prisma.material.findUnique({
+              where: { id: materialId },
+              select: { id: true, nome: true, estoque: true },
+            });
+            if (!material) continue;
+
+            const qtdBaixa = Math.min(qtdRestante, Math.max(0, Number(material.estoque) || 0));
+            if (qtdBaixa <= 0) {
+              console.warn(
+                `[Obra] Sem estoque para baixar ${material.nome} (necessário ${qtdRestante}). Continuando.`
+              );
+              continue;
+            }
+
             await EstoqueService.darBaixaMaterial(
               materialId,
-              qtdRestante,
+              qtdBaixa,
               'Alocação para obra',
               obra.id,
-              `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`,
+              qtdBaixa < qtdRestante
+                ? `Baixa parcial ao gerar obra (projeto ${projetoId}): ${qtdBaixa}/${qtdRestante}`
+                : `Alocação automática ao gerar obra (projeto ${projetoId}, orçamento ${projeto.orcamentoId})`,
             );
           }
 
@@ -313,7 +314,6 @@ export class ObraService {
       } catch (alocErr) {
         console.error('Erro ao alocar materiais automaticamente na geração da obra:', alocErr);
         // Importante: não reverter criação da obra por falha de alocação.
-        // A validação de estoque já ocorreu; caso exista concorrência, a alocação pode ser reprocessada manualmente.
       }
 
       console.log('✅ Obra criada com sucesso:', obra.id);

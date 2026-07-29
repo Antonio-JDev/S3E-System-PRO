@@ -1296,7 +1296,7 @@ export class DashboardController {
       concluidas: pB.filter((p) => p.status === 'CONCLUIDO').length,
       emAndamento: pB.filter((p) => p.status === 'EXECUCAO').length,
       planejadas: pB.filter((p) =>
-        ['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(p.status))
+        ['PROPOSTA', 'APROVADO'].includes(String(p.status)) || String(p.status) === 'VALIDADO'
       ).length
     };
   }

@@ -112,12 +112,12 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
 
     const carregarProjetosValidados = async () => {
         try {
-            const response = await projetosService.listar({ status: 'VALIDADO' });
+            const response = await projetosService.listar({ status: 'APROVADO' });
             if (response.success && response.data) {
                 setProjetosValidados(Array.isArray(response.data) ? response.data : []);
             }
         } catch (error) {
-            console.error('Erro ao carregar projetos validados:', error);
+            console.error('Erro ao carregar projetos aprovados:', error);
             setProjetosValidados([]);
         }
     };
@@ -178,7 +178,7 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
         // Validar se projeto foi selecionado
         if (!formState.projetoId) {
             toast.error('Projeto obrigatório', {
-                description: 'Você deve selecionar um projeto validado para gerar uma obra.'
+                description: 'Você deve selecionar uma OS aprovada para gerar uma obra.'
             });
             return;
         }
@@ -387,7 +387,7 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
                                 </div>
                                 <div>
                                     <h2 className="text-2xl font-bold text-white">Gerar Nova Obra</h2>
-                                    <p className="text-sm text-white/80 mt-1">Gere uma obra de campo a partir de um projeto validado</p>
+                                    <p className="text-sm text-white/80 mt-1">Gere uma obra de campo a partir de uma OS aprovada</p>
                                 </div>
                             </div>
                             <button
@@ -414,17 +414,17 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
                                             <strong>Orçamento</strong> → <strong>Projeto</strong> → <strong>Obra (Produção de Campo)</strong>
                                         </p>
                                         <p className="text-xs text-amber-700 mt-2">
-                                            Obras só podem ser criadas a partir de projetos validados. O projeto representa a parte administrativa/documental, e a obra é a execução no campo.
+                                            Obras só podem ser criadas a partir de OS aprovadas. A OS representa a parte administrativa/documental, e a obra é a execução no campo.
                                         </p>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="space-y-4">
-                                {/* Projeto Validado - OBRIGATÓRIO */}
+                                {/* OS Aprovada - OBRIGATÓRIO */}
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Projeto Validado * <span className="text-red-500">(Obrigatório)</span>
+                                        OS Aprovada * <span className="text-red-500">(Obrigatório)</span>
                                     </label>
                                     <select
                                         value={formState.projetoId || ''}
@@ -444,7 +444,7 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
                                         required
                                         className="w-full px-4 py-3 border-2 border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all"
                                     >
-                                        <option value="">Selecione um projeto validado</option>
+                                        <option value="">Selecione uma OS aprovada</option>
                                         {projetosValidados.map(projeto => (
                                             <option key={projeto.id} value={projeto.id}>
                                                 {projeto.titulo} - Cliente: {projeto.cliente?.nome}
@@ -453,12 +453,12 @@ const ObrasKanbanPage: React.FC<ObrasKanbanProps> = ({ toggleSidebar, onNavigate
                                     </select>
                                     {projetosValidados.length === 0 && (
                                         <p className="text-xs text-red-600 mt-2 font-semibold">
-                                            ❌ Nenhum projeto validado encontrado. Você precisa criar e validar um projeto antes de gerar uma obra.
+                                            ❌ Nenhuma OS aprovada encontrada. Aprove uma OS (Pendente → Aprovada) antes de gerar uma obra.
                                         </p>
                                     )}
                                     {formState.projetoId && (
                                         <p className="text-xs text-green-600 mt-2 font-semibold">
-                                            ✅ A obra será gerada a partir deste projeto e adicionada ao Kanban de Obras.
+                                            ✅ A obra será gerada a partir desta OS e adicionada ao Kanban de Obras.
                                         </p>
                                     )}
                                 </div>

@@ -48,6 +48,8 @@ export interface CompraPayload {
     condicoesPagamento?: string;
     parcelas?: number;
     dataPrimeiroVencimento?: Date;
+    meioPagamento?: string;
+    cartaoCreditoId?: string | null;
     // ✅ NOVO: Obra vinculada (para compras avulsas de obras em andamento)
     obraId?: string;
     destinoTipo?: DestinoCompraAvulsa | null;
@@ -204,10 +206,16 @@ export class ComprasService {
             condicoesPagamento,
             parcelas,
             dataPrimeiroVencimento,
+            meioPagamento,
+            cartaoCreditoId,
             obraId,
             destinoTipo,
             projetoId,
         } = data;
+
+        if (meioPagamento && String(meioPagamento).toUpperCase() === 'CARTAO_CREDITO' && !cartaoCreditoId) {
+            throw new Error('Selecione o cartão de crédito para compras pagas no cartão');
+        }
 
         // Validações
         if (!items || items.length === 0) {
@@ -387,7 +395,9 @@ export class ComprasService {
                     statusImportacao: statusImportacao || 'MANUAL',
                     condicoesPagamento: condicoesPagamento || null,
                     parcelas: parcelas || null,
-                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null,
+                    meioPagamento: meioPagamento || null,
+                    cartaoCreditoId: cartaoCreditoId || null
                 };
 
                 const compra = await tx.compra.create({
@@ -466,7 +476,9 @@ export class ComprasService {
                     statusImportacao: statusImportacao || 'MANUAL',
                     condicoesPagamento: condicoesPagamento || null,
                     parcelas: parcelas || null,
-                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null,
+                    meioPagamento: meioPagamento || null,
+                    cartaoCreditoId: cartaoCreditoId || null
                 };
 
                 const compra = await tx.compra.create({
@@ -559,7 +571,9 @@ export class ComprasService {
                     statusImportacao: statusImportacao || 'MANUAL',
                     condicoesPagamento: condicoesPagamento || null,
                     parcelas: parcelas || null,
-                    dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                    dataPrimeiroVencimento: dataPrimeiroVencimento || null,
+                    meioPagamento: meioPagamento || null,
+                    cartaoCreditoId: cartaoCreditoId || null
                 };
 
                 const compra = await tx.compra.create({
@@ -811,7 +825,9 @@ export class ComprasService {
                 // Guardar também informações de pagamento para gerar contas a pagar somente no recebimento
                 condicoesPagamento: condicoesPagamento || null,
                 parcelas: parcelas || null,
-                dataPrimeiroVencimento: dataPrimeiroVencimento || null
+                dataPrimeiroVencimento: dataPrimeiroVencimento || null,
+                meioPagamento: meioPagamento || null,
+                cartaoCreditoId: cartaoCreditoId || null
             };
 
             const compra = await tx.compra.create({
@@ -951,6 +967,8 @@ export class ComprasService {
         const dataPrimeiroVencimentoRaw = xmlMeta?.dataPrimeiroVencimento || undefined;
         const dataPrimeiroVencimento = dataPrimeiroVencimentoRaw ? new Date(dataPrimeiroVencimentoRaw) : undefined;
         const valorTotalNota = xmlMeta?.valorTotalNota ?? compra.valorTotal ?? compra.valorSubtotal;
+        const meioPagamento = xmlMeta?.meioPagamento || undefined;
+        const cartaoCreditoId = xmlMeta?.cartaoCreditoId || undefined;
 
         let contasPagar: any = null;
 
@@ -961,7 +979,9 @@ export class ComprasService {
                 compraId: compra.id,
                 descricao: `Compra NF ${compra.numeroNF} - ${compra.fornecedorNome}`,
                 duplicatas,
-                observacoes: condicoesPagamento
+                observacoes: condicoesPagamento,
+                meioPagamento,
+                cartaoCreditoId,
             });
         } else if (parcelas && parcelas > 0 && valorTotalNota && dataPrimeiroVencimento) {
             console.log(`💰 (Recebimento) Gerando ${parcelas} conta(s) a pagar para compra NF ${compra.numeroNF}`);
@@ -972,7 +992,9 @@ export class ComprasService {
                 valorTotal: valorTotalNota,
                 parcelas,
                 dataPrimeiroVencimento,
-                observacoes: condicoesPagamento
+                observacoes: condicoesPagamento,
+                meioPagamento,
+                cartaoCreditoId,
             });
         } else {
             console.warn(`⚠️ (Recebimento) Nenhuma conta a pagar gerada para compra ${id} - sem duplicatas ou dados de parcelamento suficientes.`);

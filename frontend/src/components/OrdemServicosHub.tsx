@@ -6,6 +6,7 @@ import OsEquipeAnalyticsModal from './OsEquipeAnalyticsModal';
 import { isAdmin, isDeveloper } from '../utils/permissions';
 import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
 import { projetosEngenhariaService, type InfoAtribuicaoOs } from '../services/projetosEngenhariaService';
+import { VistoriasCelescPanel } from './os/VistoriasCelescPanel';
 import { clientesService, type Cliente } from '../services/clientesService';
 import { orcamentosService, type Orcamento } from '../services/orcamentosService';
 import { axiosApiService } from '../services/axiosApi';
@@ -192,9 +193,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [minhasTarefasFilter, setMinhasTarefasFilter] = useState(false);
     const [projetoIdsComMinhasTarefas, setProjetoIdsComMinhasTarefas] = useState<Set<string>>(new Set());
     const [projetoIdsComMinhasTarefasAtrasadas, setProjetoIdsComMinhasTarefasAtrasadas] = useState<Set<string>>(new Set());
-    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'concluidos' | 'projetos'>('listagem');
+    const [abaAtiva, setAbaAtiva] = useState<'listagem' | 'concluidos' | 'projetos' | 'vistorias'>('listagem');
     const [contagemEngenharia, setContagemEngenharia] = useState(0);
+    const [contagemVistorias, setContagemVistorias] = useState(0);
     const [engenhariaRefreshKey, setEngenhariaRefreshKey] = useState(0);
+    const [vistoriasRefreshKey, setVistoriasRefreshKey] = useState(0);
     const [engInfoMap, setEngInfoMap] = useState<Record<string, InfoAtribuicaoOs>>({});
     const [atribuirEngModalOpen, setAtribuirEngModalOpen] = useState(false);
     const [projetoAtribuirEng, setProjetoAtribuirEng] = useState<Projeto | null>(null);
@@ -283,6 +286,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         diariasEquipeOrcadas: 0,
         valorHoraEngenharia: null,
         valorDiariaEquipe: null,
+        exigeVistoriaCelesc: false,
     });
 
     // Search input state para Cliente e Orçamento (filtrar ao digitar)
@@ -471,10 +475,23 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             try {
                 const resEng = await projetosEngenhariaService.listar();
                 if (resEng.success && Array.isArray(resEng.data)) {
-                    setContagemEngenharia(resEng.data.length);
+                    const ativos = resEng.data.filter(
+                        (r: { engenharia?: { statusEngenharia?: string | null } | null }) =>
+                            (r.engenharia?.statusEngenharia ?? 'A fazer') !== 'Concluído',
+                    );
+                    setContagemEngenharia(ativos.length);
                 }
             } catch {
                 setContagemEngenharia(0);
+            }
+
+            try {
+                const resVist = await projetosService.listarVistoriasCelesc();
+                if (resVist.success && Array.isArray(resVist.data)) {
+                    setContagemVistorias(resVist.data.length);
+                }
+            } catch {
+                setContagemVistorias(0);
             }
 
         } catch (err) {
@@ -542,7 +559,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const calcularProgressoProjeto = (projeto: Projeto): number => {
         switch (projeto.status) {
             case 'PROPOSTA': return 10;
-            case 'VALIDADO': return 25;
+            case 'VALIDADO':
             case 'APROVADO': return 40;
             case 'EXECUCAO': return 60;
             case 'CONCLUIDO': return 100;
@@ -658,6 +675,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 diariasEquipeOrcadas: projeto.diariasEquipeOrcadas ?? 0,
                 valorHoraEngenharia: projeto.valorHoraEngenharia ?? null,
                 valorDiariaEquipe: projeto.valorDiariaEquipe ?? null,
+                exigeVistoriaCelesc: Boolean(projeto.exigeVistoriaCelesc),
             });
         } else {
             setProjetoToEdit(null);
@@ -674,6 +692,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 diariasEquipeOrcadas: 0,
                 valorHoraEngenharia: null,
                 valorDiariaEquipe: null,
+                exigeVistoriaCelesc: false,
             });
             setBuscaCliente('');
             setBuscaOrcamento('');
@@ -752,6 +771,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     setProjetos((prev) => prev.map((p) => (p.id === projetoToEdit.id ? merged : p)));
                     setIsCreateModalOpen(false);
                     setProjetoToEdit(null);
+                    setVistoriasRefreshKey((k) => k + 1);
                     toast.success('Ordem de serviço atualizada');
                 }
             } else {
@@ -769,6 +789,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     };
                     setProjetos(prev => [merged, ...prev]);
                     setIsCreateModalOpen(false);
+                    setVistoriasRefreshKey((k) => k + 1);
                 }
             }
         } catch (err: unknown) {
@@ -1106,7 +1127,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             case 'Planejamento':
                 return 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400';
             case 'VALIDADO':
-                return 'bg-cyan-100 text-cyan-800 ring-1 ring-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-400';
             case 'APROVADO':
                 return 'bg-green-100 text-green-800 ring-1 ring-green-200 dark:bg-green-900/30 dark:text-green-400';
             case 'EXECUCAO':
@@ -1220,6 +1240,24 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     </button>
                     <button
                         type="button"
+                        onClick={() => setAbaAtiva('vistorias')}
+                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'vistorias'
+                            ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/20'
+                            : 'text-gray-600 dark:text-dark-text-secondary hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-gray-50 dark:hover:bg-dark-card'
+                        }`}
+                    >
+                        <div className="flex items-center justify-center gap-2">
+                            <span>🔎</span>
+                            <span>Vistorias</span>
+                            {contagemVistorias > 0 && (
+                                <span className={`px-2 py-0.5 text-xs rounded-full ${abaAtiva === 'vistorias' ? 'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
+                                    {contagemVistorias}
+                                </span>
+                            )}
+                        </div>
+                    </button>
+                    <button
+                        type="button"
                         onClick={() => setAbaAtiva('concluidos')}
                         className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'concluidos'
                             ? 'text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
@@ -1254,6 +1292,15 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     onEngenhariaUpdated={(projetoId) => {
                         void refreshEngInfoForProjeto(projetoId);
                     }}
+                    onActiveCountChange={setContagemEngenharia}
+                />
+            ) : abaAtiva === 'vistorias' ? (
+                <VistoriasCelescPanel
+                    refreshKey={vistoriasRefreshKey}
+                    onCountChange={setContagemVistorias}
+                    onOpenOs={(item) => {
+                        void handleOpenViewModal(item as Projeto);
+                    }}
                 />
             ) : (
             <>
@@ -1282,11 +1329,10 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                             className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                         >
                             <option value="Todos">Todos os Status</option>
-                            <option value="PROPOSTA">📋 Proposta</option>
-                            <option value="VALIDADO">✅ Validado</option>
-                            <option value="APROVADO">🎉 Aprovado</option>
-                            <option value="EXECUCAO">🏗️ Em Execução</option>
-                            <option value="CONCLUIDO">🎊 Concluído</option>
+                            <option value="PROPOSTA">📋 Pendente</option>
+                            <option value="APROVADO">🎉 Aprovada</option>
+                            <option value="EXECUCAO">🏗️ Execução</option>
+                            <option value="CONCLUIDO">🎊 Concluída</option>
                             <option value="CANCELADO">❌ Cancelado</option>
                         </select>
                     </div>
@@ -1491,7 +1537,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs text-gray-500">Status:</span>
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusColor(projeto.status)}`}>
-                                            {projeto.status}
+                                            {getStatusLabel(projeto.status)}
                                         </span>
                                     </div>
                                 </div>
@@ -1511,20 +1557,20 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                 </div>
 
                                 {/* Prazo e custo de tempo */}
-                                <div className="mb-4 p-3 bg-blue-50 rounded-xl border border-blue-100 space-y-2">
+                                <div className="mb-4 p-3 bg-blue-50 dark:bg-dark-elevated rounded-xl border border-blue-100 dark:border-dark-border space-y-2">
                                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                                        <span className="text-xs font-medium text-gray-600">Estimativa</span>
-                                        <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
+                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Estimativa</span>
+                                        <span className="text-xs font-bold text-blue-700 dark:text-dark-accent-light bg-blue-100 dark:bg-dark-accent-soft px-2 py-0.5 rounded-md">
                                             {diasEstimadosTexto}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="text-xs font-medium text-gray-600">Custo tempo orçado</span>
-                                        <span className="text-sm font-bold text-gray-900">{formatMoeda(custoTempoOrcado)}</span>
+                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Custo tempo orçado</span>
+                                        <span className="text-sm font-bold text-gray-900 dark:text-dark-text">{formatMoeda(custoTempoOrcado)}</span>
                                     </div>
                                     <div className="flex items-center justify-between gap-2">
-                                        <span className="text-xs font-medium text-gray-600">Data limite</span>
-                                        <span className="text-sm font-bold text-blue-700">
+                                        <span className="text-xs font-medium text-gray-600 dark:text-dark-text-secondary">Data limite</span>
+                                        <span className="text-sm font-bold text-blue-700 dark:text-dark-accent-light">
                                             {formatDateDisplay((cockpitResumo?.dataPrevisao ?? projeto.dataPrevisao) as any) || '—'}
                                         </span>
                                     </div>
@@ -1605,7 +1651,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusColor(projeto.status)}`}>
-                                            {projeto.status}
+                                            {getStatusLabel(projeto.status)}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4" style={{ position: 'relative', overflow: 'visible', zIndex: 'auto' }}>
@@ -1670,12 +1716,12 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                     />
                                 </div>
 
-                                <div className="md:col-span-2 p-4 rounded-xl bg-indigo-50 border border-indigo-200">
-                                    <div className="text-sm font-semibold text-indigo-900">Recursos reservados (homem-hora)</div>
-                                    <div className="text-2xl font-bold text-indigo-700 mt-1">
+                                <div className="md:col-span-2 p-4 rounded-xl bg-indigo-50 dark:bg-dark-elevated border border-indigo-200 dark:border-indigo-800/40">
+                                    <div className="text-sm font-semibold text-indigo-900 dark:text-indigo-300">Recursos reservados (homem-hora)</div>
+                                    <div className="text-2xl font-bold text-indigo-700 dark:text-indigo-300 mt-1">
                                         {homemHoraReservado.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h
                                     </div>
-                                    <p className="text-xs text-indigo-600 mt-1">
+                                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1">
                                         {Number(formState.horasEngenhariaOrcadas) || 0}h engenharia + {Number(formState.diariasEquipeOrcadas) || 0} diárias × 8h
                                     </p>
                                 </div>
@@ -1888,6 +1934,30 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         onChange={(e) => setFormState({...formState, valorDiariaEquipe: e.target.value === '' ? null : Number(e.target.value)})}
                                         className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="flex items-start gap-3 p-4 rounded-xl border border-cyan-200 dark:border-cyan-800/40 bg-cyan-50 dark:bg-dark-elevated cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={Boolean(formState.exigeVistoriaCelesc)}
+                                            onChange={(e) =>
+                                                setFormState({
+                                                    ...formState,
+                                                    exigeVistoriaCelesc: e.target.checked,
+                                                })
+                                            }
+                                            className="mt-1 h-4 w-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                                        />
+                                        <span>
+                                            <span className="block text-sm font-semibold text-cyan-900 dark:text-cyan-300">
+                                                Exige Vistoria CELESC
+                                            </span>
+                                            <span className="block text-xs text-cyan-700 dark:text-cyan-400 mt-0.5">
+                                                Após a aprovação da OS, o projeto entra automaticamente na fila da aba Vistorias.
+                                            </span>
+                                        </span>
+                                    </label>
                                 </div>
                             </div>
 
@@ -2291,12 +2361,24 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 const getStatusIcon = (status: string) => {
     switch (status) {
         case 'PROPOSTA': return '📋';
-        case 'VALIDADO': return '✅';
+        case 'VALIDADO':
         case 'APROVADO': return '🎉';
         case 'EXECUCAO': return '🏗️';
         case 'CONCLUIDO': return '🎊';
         case 'CANCELADO': return '❌';
         default: return '';
+    }
+};
+
+const getStatusLabel = (status: string) => {
+    switch (status) {
+        case 'PROPOSTA': return 'Pendente';
+        case 'VALIDADO':
+        case 'APROVADO': return 'Aprovada';
+        case 'EXECUCAO': return 'Execução';
+        case 'CONCLUIDO': return 'Concluída';
+        case 'CANCELADO': return 'Cancelado';
+        default: return status;
     }
 };
 

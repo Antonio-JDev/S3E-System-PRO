@@ -39,36 +39,40 @@ export function useWhatsappUnreadSync() {
     }
   }, []);
 
-  // Socket único: mensagem + sinal de recálculo
+  // Socket único: preview leve (todas as conversas) + sinal de recálculo.
+  // A mensagem completa (`whatsapp:message`) agora é emitida apenas para a
+  // room da conversa aberta — este hook não entra em room nenhuma, então o
+  // contador/notificação usa o broadcast leve `whatsapp:chat_list_update`.
   useWhatsAppSocket(
-    (msg) => {
-      if (!msg || msg.fromMe) return;
-
-      const focused = isTabFocused();
-      const isActiveChat = !!activeChatId && msg.chatId === activeChatId;
-
-      // Atualiza contador imediatamente (UX rápida), mas também agenda refetch leve para consistência
-      if (!isActiveChat) {
-        incTotalUnread(1);
-      }
-      refreshUnread().catch(() => {});
-
-      // Notificação nativa: só se não estiver em foco OU chat não estiver aberto
-      if (focused && isActiveChat) return;
-      if (!canUseBrowserNotifications()) return;
-      if (Notification.permission !== 'granted') return;
-      if (lastNotifiedId.current === msg.id) return;
-      lastNotifiedId.current = msg.id;
-
-      const title = 'Nova mensagem no WhatsApp';
-      const body = (msg.content || '').trim().slice(0, 120) || 'Mensagem recebida';
-      try {
-        new Notification(title, { body });
-      } catch {
-        // ignore
-      }
-    },
+    () => {},
     {
+      onChatListUpdate: (msg) => {
+        if (!msg || msg.fromMe) return;
+
+        const focused = isTabFocused();
+        const isActiveChat = !!activeChatId && msg.chatId === activeChatId;
+
+        // Atualiza contador imediatamente (UX rápida), mas também agenda refetch leve para consistência
+        if (!isActiveChat) {
+          incTotalUnread(1);
+        }
+        refreshUnread().catch(() => {});
+
+        // Notificação nativa: só se não estiver em foco OU chat não estiver aberto
+        if (focused && isActiveChat) return;
+        if (!canUseBrowserNotifications()) return;
+        if (Notification.permission !== 'granted') return;
+        if (lastNotifiedId.current === msg.id) return;
+        lastNotifiedId.current = msg.id;
+
+        const title = 'Nova mensagem no WhatsApp';
+        const body = (msg.content || '').trim().slice(0, 120) || 'Mensagem recebida';
+        try {
+          new Notification(title, { body });
+        } catch {
+          // ignore
+        }
+      },
       onUnreadCountUpdate: () => {
         refreshUnread().catch(() => {});
       },

@@ -19,13 +19,13 @@ interface ViewToggleProps {
 
 const ViewToggle: React.FC<ViewToggleProps> = ({ view, onViewChange }) => {
     return (
-        <div className="inline-flex items-center bg-gray-100 dark:bg-dark-card rounded-lg p-1 border border-transparent dark:border-dark-border">
+        <div className="inline-flex items-center bg-gray-100 dark:bg-dark-nav rounded-lg p-1 border border-transparent dark:border-dark-border">
             <button
                 onClick={() => onViewChange('grid')}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition-all ${
                     view === 'grid'
-                        ? 'bg-white dark:bg-dark-bg text-purple-700 dark:text-purple-300 shadow-sm font-semibold'
-                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text'
+                        ? 'bg-white dark:bg-dark-accent-soft text-gray-900 dark:text-dark-text shadow-sm font-semibold'
+                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text dark:hover:bg-dark-elevated'
                 }`}
                 title="Visualizar em cards"
             >
@@ -36,8 +36,8 @@ const ViewToggle: React.FC<ViewToggleProps> = ({ view, onViewChange }) => {
                 onClick={() => onViewChange('list')}
                 className={`flex items-center gap-2 px-3 py-2 rounded-md transition-all ${
                     view === 'list'
-                        ? 'bg-white dark:bg-dark-bg text-purple-700 dark:text-purple-300 shadow-sm font-semibold'
-                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text'
+                        ? 'bg-white dark:bg-dark-accent-soft text-gray-900 dark:text-dark-text shadow-sm font-semibold'
+                        : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text dark:hover:bg-dark-elevated'
                 }`}
                 title="Visualizar em lista"
             >

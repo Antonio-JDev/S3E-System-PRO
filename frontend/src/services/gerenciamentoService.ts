@@ -99,6 +99,16 @@ export const rhService = {
         return await axiosApiService.get('/api/rh/work-shifts');
     },
 
+    async criarWorkShiftPersonalizada(data: {
+        entrada1: string;
+        saida1: string;
+        entrada2: string;
+        saida2: string;
+        nome?: string | null;
+    }) {
+        return await axiosApiService.post('/api/rh/work-shifts', data);
+    },
+
     async listarLancamentos(funcionarioId: string, ano: number, mes: number) {
         return await axiosApiService.get('/api/rh/lancamentos', {
             funcionarioId,
@@ -304,6 +314,29 @@ export const rhService = {
         faltaJustificadaOcorrenciaId?: string | null;
     }) {
         return await axiosApiService.put('/api/rh/conferencia-ponto/comentario', data);
+    },
+
+    async salvarAvaliacaoDia(data: {
+        funcionarioId: string;
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        botao: 'A' | 'B' | 'P' | 'D';
+        temDebito?: boolean;
+        temCredito?: boolean;
+    }) {
+        return await axiosApiService.put('/api/rh/conferencia-ponto/avaliacao', data);
+    },
+
+    async salvarFeriadoOverride(data: {
+        referenciaAno: number;
+        referenciaMes: number;
+        dia: number;
+        ehFeriado?: boolean;
+        nome?: string | null;
+        limpar?: boolean;
+    }) {
+        return await axiosApiService.put('/api/rh/feriado-override', data);
     },
 
     async proporDividaHoras(data: {

@@ -320,7 +320,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     {setAbaAtiva && (
                         <button
                             onClick={() => setAbaAtiva('dashboard')}
-                            className="px-4 py-2.5 bg-white text-gray-700 border-2 border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all font-semibold flex items-center gap-2"
+                            className="px-4 py-2.5 bg-white dark:bg-dark-card text-gray-700 dark:text-dark-text border-2 border-gray-200 dark:border-dark-border rounded-xl hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-dark-hover transition-all font-semibold flex items-center gap-2"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -342,14 +342,14 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
             </header>
 
             {/* Tabs de Análise */}
-            <div className="bg-white rounded-2xl p-6 shadow-soft mb-6 animate-fade-in">
+            <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-soft mb-6 animate-fade-in border border-transparent dark:border-dark-border">
                 <div className="flex flex-wrap gap-3 mb-6">
                     <button
                         onClick={() => setAbaAnalise('lucro-real')}
                         className={`px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'lucro-real'
                                 ? 'bg-gradient-to-r from-green-600 to-emerald-500 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
                         }`}
                     >
                         💰 Lucro Real (Produto x Produto)
@@ -359,7 +359,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                         className={`px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'lucro-real-servicos'
                                 ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
                         }`}
                     >
                         🛠️ Lucro Real (Serviço x Serviço)
@@ -369,7 +369,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                         className={`px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'dre-consolidado'
                                 ? 'bg-gradient-to-r from-blue-600 to-indigo-500 text-white shadow-md'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
                         }`}
                     >
                         📈 DRE Consolidado (Visão Macro)
@@ -378,7 +378,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
 
                 {/* Filtros de Período */}
                 <div>
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">Selecionar Período</h2>
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-4">Selecionar Período</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                         {(['mes-atual', 'mes-anterior', 'trimestre', 'semestre', 'ano', 'personalizado'] as Periodo[]).map((p) => (
                             <button
@@ -387,7 +387,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                 className={`px-4 py-2 rounded-xl font-semibold transition-all ${
                                     periodo === p
                                         ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-md'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
                                 }`}
                             >
                                 {p === 'mes-atual' && '📅 Mês Atual'}
@@ -404,21 +404,21 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     {periodo === 'personalizado' && (
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">Data Início</label>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Data Início</label>
                                 <input
                                     type="date"
                                     value={dataInicio}
                                     onChange={(e) => setDataInicio(e.target.value)}
-                                    className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                                    className="w-full px-4 py-2 border-2 border-gray-200 dark:border-dark-border rounded-xl focus:border-purple-500 focus:outline-none bg-white dark:bg-dark-input text-gray-900 dark:text-dark-text"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-2">Data Fim</label>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Data Fim</label>
                                 <input
                                     type="date"
                                     value={dataFim}
                                     onChange={(e) => setDataFim(e.target.value)}
-                                    className="w-full px-4 py-2 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:outline-none"
+                                    className="w-full px-4 py-2 border-2 border-gray-200 dark:border-dark-border rounded-xl focus:border-purple-500 focus:outline-none bg-white dark:bg-dark-input text-gray-900 dark:text-dark-text"
                                 />
                             </div>
                             <div className="flex items-end">
@@ -460,21 +460,21 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                 <div className="space-y-6 animate-fade-in">
                     {/* Cards de Resumo */}
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-blue-600 uppercase">Total Vendas</p>
-                            <p className="text-3xl font-bold text-blue-700 mt-1">{formatMoeda(lucroReal.resumo.totalVenda)}</p>
+                        <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase">Total Vendas</p>
+                            <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-1">{formatMoeda(lucroReal.resumo.totalVenda)}</p>
                         </div>
-                        <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-red-600 uppercase">Custo Real</p>
-                            <p className="text-3xl font-bold text-red-700 mt-1">{formatMoeda(lucroReal.resumo.totalCusto)}</p>
+                        <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase">Custo Real</p>
+                            <p className="text-3xl font-bold text-red-700 dark:text-red-300 mt-1">{formatMoeda(lucroReal.resumo.totalCusto)}</p>
                         </div>
-                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-green-600 uppercase">Lucro Real</p>
-                            <p className="text-3xl font-bold text-green-700 mt-1">{formatMoeda(lucroReal.resumo.totalLucro)}</p>
+                        <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase">Lucro Real</p>
+                            <p className="text-3xl font-bold text-green-700 dark:text-green-300 mt-1">{formatMoeda(lucroReal.resumo.totalLucro)}</p>
                         </div>
-                        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-purple-600 uppercase">Margem Real</p>
-                            <p className="text-3xl font-bold text-purple-700 mt-1">{lucroReal.resumo.margemReal.toFixed(2)}%</p>
+                        <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase">Margem Real</p>
+                            <p className="text-3xl font-bold text-purple-700 dark:text-purple-300 mt-1">{lucroReal.resumo.margemReal.toFixed(2)}%</p>
                         </div>
                     </div>
 
@@ -746,27 +746,27 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                 <div className="space-y-6 animate-fade-in">
                     {/* Cards de Resumo para Serviços */}
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-blue-600 uppercase">Receita de Serviços</p>
-                            <p className="text-3xl font-bold text-blue-700 mt-1">
+                        <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase">Receita de Serviços</p>
+                            <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-1">
                                 {formatMoeda(lucroReal.resumo.totalVendaServicos ?? lucroReal.resumo.totalVenda)}
                             </p>
                         </div>
-                        <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-red-600 uppercase">Custo de Execução</p>
-                            <p className="text-3xl font-bold text-red-700 mt-1">
+                        <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase">Custo de Execução</p>
+                            <p className="text-3xl font-bold text-red-700 dark:text-red-300 mt-1">
                                 {formatMoeda(lucroReal.resumo.totalCustoServicos ?? lucroReal.resumo.totalCusto)}
                             </p>
                         </div>
-                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-green-600 uppercase">Lucro Líquido</p>
-                            <p className="text-3xl font-bold text-green-700 mt-1">
+                        <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase">Lucro Líquido</p>
+                            <p className="text-3xl font-bold text-green-700 dark:text-green-300 mt-1">
                                 {formatMoeda(lucroReal.resumo.totalLucroServicos ?? lucroReal.resumo.totalLucro)}
                             </p>
                         </div>
-                        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-2xl p-6">
-                            <p className="text-sm font-semibold text-purple-600 uppercase">Margem</p>
-                            <p className="text-3xl font-bold text-purple-700 mt-1">
+                        <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-2xl p-6">
+                            <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase">Margem</p>
+                            <p className="text-3xl font-bold text-purple-700 dark:text-purple-300 mt-1">
                                 {(lucroReal.resumo.margemServicos ?? lucroReal.resumo.margemReal).toFixed(2)}%
                             </p>
                         </div>
@@ -986,22 +986,22 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                 <div className="space-y-6 animate-fade-in">
                     {/* Cards de Margem */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6">
+                        <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-2xl p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-green-600 uppercase">Margem Bruta</p>
-                                    <p className="text-3xl font-bold text-green-700 mt-1">
+                                    <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase">Margem Bruta</p>
+                                    <p className="text-3xl font-bold text-green-700 dark:text-green-300 mt-1">
                                         {dre.resumo.margemBruta.toFixed(2)}%
                                     </p>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6">
+                        <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-2xl p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-blue-600 uppercase">Margem Líquida</p>
-                                    <p className="text-3xl font-bold text-blue-700 mt-1">
+                                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase">Margem Líquida</p>
+                                    <p className="text-3xl font-bold text-blue-700 dark:text-blue-300 mt-1">
                                         {dre.resumo.margemLiquida.toFixed(2)}%
                                     </p>
                                 </div>
@@ -1076,9 +1076,9 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                         </>
                                     )}
 
-                                    <tr className="bg-green-50 font-bold">
-                                        <td className="py-4 px-4 text-gray-900">LUCRO BRUTO</td>
-                                        <td className="py-4 px-4 text-right text-green-700">
+                                    <tr className="bg-green-50 dark:bg-green-950/30 font-bold">
+                                        <td className="py-4 px-4 text-gray-900 dark:text-dark-text">LUCRO BRUTO</td>
+                                        <td className="py-4 px-4 text-right text-green-700 dark:text-green-300">
                                             {formatMoeda(dre.resumo.lucroBruto)}
                                         </td>
                                     </tr>
@@ -1113,16 +1113,16 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                                         </>
                                     )}
 
-                                    <tr className="bg-purple-50 font-bold">
-                                        <td className="py-4 px-4 text-gray-900">EBITDA / LUCRO OPERACIONAL</td>
-                                        <td className="py-4 px-4 text-right text-purple-700">
+                                    <tr className="bg-purple-50 dark:bg-purple-950/30 font-bold">
+                                        <td className="py-4 px-4 text-gray-900 dark:text-dark-text">EBITDA / LUCRO OPERACIONAL</td>
+                                        <td className="py-4 px-4 text-right text-purple-700 dark:text-purple-300">
                                             {formatMoeda(dre.resumo.ebitda)}
                                         </td>
                                     </tr>
 
-                                    <tr className="bg-gradient-to-r from-blue-100 to-indigo-100 font-bold text-lg">
-                                        <td className="py-6 px-4 text-gray-900">LUCRO LÍQUIDO FINAL</td>
-                                        <td className="py-6 px-4 text-right text-blue-700">
+                                    <tr className="bg-blue-100 dark:bg-blue-950/40 font-bold text-lg">
+                                        <td className="py-6 px-4 text-gray-900 dark:text-dark-text">LUCRO LÍQUIDO FINAL</td>
+                                        <td className="py-6 px-4 text-right text-blue-700 dark:text-blue-300">
                                             {formatMoeda(dre.resumo.lucroLiquido)}
                                         </td>
                                     </tr>

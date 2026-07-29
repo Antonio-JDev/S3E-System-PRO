@@ -918,14 +918,11 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
       });
 
       if (projetoExistente) {
-        // Se já existe, apenas atualizar o status
-        console.log(`📋 Projeto existente encontrado: ${projetoExistente.id}. Atualizando status para APROVADO`);
-        projeto = await prisma.projeto.update({
-          where: { id: projetoExistente.id },
-          data: { status: 'APROVADO' }
-        });
+        // Se já existe, manter status atual (fluxo OS: Pendente → Aprovada → Execução)
+        console.log(`📋 Projeto existente encontrado: ${projetoExistente.id}. Mantendo status ${projetoExistente.status}`);
+        projeto = projetoExistente;
       } else {
-        // Se não existe, criar novo projeto
+        // Se não existe, criar novo projeto em Pendente (PROPOSTA)
         console.log(`📋 Criando novo projeto para orçamento ${id}`);
         projeto = await prisma.projeto.create({
           data: {
@@ -935,7 +932,7 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
             descricao: orcamento.descricao,
             valorTotal: orcamento.precoVenda,
             dataInicio: new Date(),
-            status: 'APROVADO' // Projeto começa como APROVADO (ainda não em execução)
+            status: 'PROPOSTA',
           }
         });
       }

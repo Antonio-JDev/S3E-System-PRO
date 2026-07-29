@@ -16,9 +16,24 @@ import {
   getStatusEngenhariaStyle,
   getTipoProjetoStyle,
 } from '../constants/engenhariaProjeto';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 
 const inputDark =
   'border border-gray-200 dark:border-dark-border rounded-lg dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-gray-500 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-600';
+
+const STATUS_CONCLUIDO_ENG = 'Concluído';
+
+/** Status ativos na aba Projetos (concluídos somem da lista). */
+const STATUS_FILTRO_ATIVOS = STATUS_ENGENHARIA_OPCOES.filter((s) => s !== STATUS_CONCLUIDO_ENG);
 
 interface ProjetosEngenhariaTableProps {
   onOpenOs?: (projetoId: string) => void;
@@ -26,6 +41,8 @@ interface ProjetosEngenhariaTableProps {
   onProgressRefresh?: () => void;
   /** Chamado após salvar metadados (ex.: status) — atualiza modal de OS aberto. */
   onEngenhariaUpdated?: (projetoId: string) => void;
+  /** Contagem de projetos ativos (sem Concluído) para o badge da aba. */
+  onActiveCountChange?: (count: number) => void;
 }
 
 function useDebouncedPatch(
@@ -59,10 +76,12 @@ function RowEditor({
   row,
   onLocalUpdate,
   onEngenhariaUpdated,
+  onRequestConcluir,
 }: {
   row: ProjetoEngenhariaRow;
   onLocalUpdate: (id: string, patch: Partial<ProjetoEngenhariaRow['engenharia']>) => void;
   onEngenhariaUpdated?: (projetoId: string) => void;
+  onRequestConcluir: (projetoId: string) => void;
 }) {
   const eng = row.engenharia;
   const debouncedPatch = useDebouncedPatch(row.projetoId, onEngenhariaUpdated);
@@ -112,7 +131,14 @@ function RowEditor({
       <td className="px-4 py-3">
         <select
           value={eng?.statusEngenharia ?? 'A fazer'}
-          onChange={(e) => patchField({ statusEngenharia: e.target.value })}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (next === STATUS_CONCLUIDO_ENG) {
+              onRequestConcluir(row.projetoId);
+              return;
+            }
+            patchField({ statusEngenharia: next });
+          }}
           className={`text-xs font-semibold rounded-lg px-2 py-1 border-0 cursor-pointer ${getStatusEngenhariaStyle(eng?.statusEngenharia ?? '')}`}
         >
           {STATUS_ENGENHARIA_OPCOES.map((s) => (
@@ -174,10 +200,14 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
   refreshKey = 0,
   onProgressRefresh,
   onEngenhariaUpdated,
+  onActiveCountChange,
 }) => {
   const [rows, setRows] = useState<ProjetoEngenhariaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('Todos');
+  const [concluirDialogOpen, setConcluirDialogOpen] = useState(false);
+  const [projetoIdConcluir, setProjetoIdConcluir] = useState<string | null>(null);
+  const [concluindo, setConcluindo] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -199,6 +229,15 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
     void load();
   }, [load, refreshKey]);
 
+  const rowsAtivos = useMemo(
+    () => rows.filter((r) => (r.engenharia?.statusEngenharia ?? 'A fazer') !== STATUS_CONCLUIDO_ENG),
+    [rows],
+  );
+
+  useEffect(() => {
+    onActiveCountChange?.(rowsAtivos.length);
+  }, [rowsAtivos.length, onActiveCountChange]);
+
   const handleLocalUpdate = (
     projetoId: string,
     patch: Partial<NonNullable<ProjetoEngenhariaRow['engenharia']>>,
@@ -213,9 +252,43 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
   };
 
   const filteredRows = useMemo(() => {
-    if (statusFilter === 'Todos') return rows;
-    return rows.filter((r) => (r.engenharia?.statusEngenharia ?? 'A fazer') === statusFilter);
-  }, [rows, statusFilter]);
+    if (statusFilter === 'Todos') return rowsAtivos;
+    return rowsAtivos.filter((r) => (r.engenharia?.statusEngenharia ?? 'A fazer') === statusFilter);
+  }, [rowsAtivos, statusFilter]);
+
+  const projetoConcluirLabel = useMemo(() => {
+    if (!projetoIdConcluir) return '';
+    const row = rows.find((r) => r.projetoId === projetoIdConcluir);
+    return row?.engenharia?.nomeProjeto || row?.cliente?.nome || `#${row?.numeroSequencial ?? ''}`;
+  }, [projetoIdConcluir, rows]);
+
+  const handleRequestConcluir = (projetoId: string) => {
+    setProjetoIdConcluir(projetoId);
+    setConcluirDialogOpen(true);
+  };
+
+  const handleConfirmarConcluir = async () => {
+    if (!projetoIdConcluir) return;
+    setConcluindo(true);
+    try {
+      const res = await projetosEngenhariaService.atualizarMetadados(projetoIdConcluir, {
+        statusEngenharia: STATUS_CONCLUIDO_ENG,
+      });
+      if (!res.success) {
+        toast.error(res.error || 'Erro ao concluir projeto');
+        return;
+      }
+      handleLocalUpdate(projetoIdConcluir, { statusEngenharia: STATUS_CONCLUIDO_ENG });
+      onEngenhariaUpdated?.(projetoIdConcluir);
+      toast.success('Projeto concluído e removido da lista ativa');
+      setConcluirDialogOpen(false);
+      setProjetoIdConcluir(null);
+    } catch {
+      toast.error('Erro ao concluir projeto');
+    } finally {
+      setConcluindo(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -227,17 +300,17 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
     );
   }
 
-  const statusFiltros = ['Todos', ...STATUS_ENGENHARIA_OPCOES] as const;
+  const statusFiltros = ['Todos', ...STATUS_FILTRO_ATIVOS] as const;
 
   return (
     <div className="space-y-0">
-      {rows.length === 0 ? (
+      {rowsAtivos.length === 0 ? (
         <div className={`${cardShell} p-12 text-center mb-6`}>
           <span className="text-4xl mb-4 block">📐</span>
           <h3 className="text-lg font-bold text-gray-900 dark:text-dark-text mb-2">Nenhum projeto na sua lista</h3>
           <p className="text-gray-500 dark:text-dark-text-secondary text-sm max-w-md mx-auto">
-            Você só vê projetos em que é o responsável de engenharia. Use &quot;Atribuir à Engenharia&quot; em uma OS
-            para incluí-la na sua lista (você será definido como responsável).
+            Você só vê projetos em que é o responsável de engenharia (status diferente de Concluído). Use
+            &quot;Atribuir à Engenharia&quot; em uma OS para incluí-la na sua lista.
           </p>
         </div>
       ) : (
@@ -290,6 +363,7 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
                       row={row}
                       onLocalUpdate={handleLocalUpdate}
                       onEngenhariaUpdated={onEngenhariaUpdated}
+                      onRequestConcluir={handleRequestConcluir}
                     />
                   ))
                 )}
@@ -305,6 +379,54 @@ const ProjetosEngenhariaTable: React.FC<ProjetosEngenhariaTableProps> = ({
         onProgressRefresh={onProgressRefresh}
       />
       <EngenhariaBibliotecaDocumentos refreshKey={refreshKey} />
+
+      <AlertDialog
+        open={concluirDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !concluindo) {
+            setConcluirDialogOpen(false);
+            setProjetoIdConcluir(null);
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Concluir projeto</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja concluir o projeto
+              {projetoConcluirLabel ? (
+                <>
+                  {' '}
+                  <strong className="text-gray-900 dark:text-dark-text">{projetoConcluirLabel}</strong>
+                </>
+              ) : null}
+              ?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={concluindo}
+              onClick={() => {
+                if (concluindo) return;
+                setConcluirDialogOpen(false);
+                setProjetoIdConcluir(null);
+              }}
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={concluindo}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmarConcluir();
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {concluindo ? 'Concluindo…' : 'Confirmar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

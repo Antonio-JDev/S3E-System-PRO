@@ -42,7 +42,8 @@ import {
   normalizePhoneDigitsKey,
   recordWhatsappChatIdentity,
   resolvePhoneDigitKeysForChat,
-  resolvePreferredChatIdForOutbound
+  resolvePreferredChatIdForOutbound,
+  socketRoomsForChat
 } from './whatsappIdentity.service';
 import { upsertContatoS3eFromInboundMessage } from './contatosS3e.service';
 import * as EvoChat from './whatsappEvolutionChat.service';
@@ -160,11 +161,41 @@ function rewriteProviderMediaUrl(url: string): string {
 }
 
 function emitWhatsAppMessage(m: ChatMessage): void {
+  const dto = toSocketDto(m);
+
+  // Broadcast leve para TODOS os operadores: atualiza preview da sidebar e
+  // contador de não lidas sem entregar o histórico completo — quem não está
+  // com a conversa aberta não recebe (nem renderiza) a mensagem em si.
   try {
-    getSocketServer().emit('whatsapp:message', toSocketDto(m));
+    getSocketServer().emit('whatsapp:chat_list_update', {
+      id: dto.id,
+      chatId: dto.chatId,
+      content: dto.content,
+      fromMe: dto.fromMe,
+      timestamp: dto.timestamp,
+      ack: dto.ack,
+      hasMedia: dto.hasMedia,
+      mediaType: dto.mediaType
+    });
   } catch {
     // Servidor ainda não subiu io (testes / bootstrap)
   }
+
+  // Mensagem completa somente para as rooms da conversa (`chat:jid:*` /
+  // `chat:phone:*`). Sockets entram nelas via `whatsapp:chat:join` ao abrir
+  // o chat — corrige o vazamento de mensagens para conversas erradas.
+  void socketRoomsForChat(dto.chatId)
+    .then((rooms) => {
+      if (rooms.length === 0) return;
+      try {
+        getSocketServer().to(rooms).emit('whatsapp:message', dto);
+      } catch {
+        // io não inicializado (testes / bootstrap)
+      }
+    })
+    .catch(() => {
+      // resolução de identidade falhou — evento leve já cobriu a sidebar
+    });
 }
 
 function emitWhatsAppMessageDeleted(payload: { id: string; chatId: string }): void {

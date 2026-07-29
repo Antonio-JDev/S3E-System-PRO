@@ -16,6 +16,12 @@ import UnitDisplay from '../components/UnitDisplay';
 import { identificarTipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento, normalizarUnidadeMedidaOrcamento } from '../utils/unitConverter';
 import { matchCrossSearch } from '../utils/searchUtils';
 import { roundMoney } from '../utils/currency';
+import {
+    moveArrayItem,
+    remapIndexAfterMove,
+    remapIndexRecordAfterMove,
+    remapIndexSetAfterMove,
+} from '../utils/arrayReorder';
 import { getUploadUrl } from '../config/api';
 import ClienteCombobox from '../components/ui/ClienteCombobox';
 import CriarClienteRapidoModal from '../components/ui/CriarClienteRapidoModal';
@@ -46,6 +52,12 @@ const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
 const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+);
+
+const GripIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9h16.5m-16.5 6.75h16.5" />
     </svg>
 );
 
@@ -258,6 +270,8 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
     // Estado para controlar valores em edição (para melhorar UX ao digitar)
     const [valorEditando, setValorEditando] = useState<{ [index: number]: string }>({});
     const [itensSelecionados, setItensSelecionados] = useState<Set<number>>(new Set()); // Índices dos itens selecionados
+    const [dragFromIndex, setDragFromIndex] = useState<number | null>(null);
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
     const [showItemModal, setShowItemModal] = useState(false);
     const [itemSearchTerm, setItemSearchTerm] = useState('');
     const [modalExpandido, setModalExpandido] = useState(false); // Novo: controla se o modal está expandido
@@ -1576,6 +1590,17 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
             });
             return ajustado;
         });
+    };
+
+    /** Reposiciona um item na listagem (drag and drop). */
+    const handleReorderItem = (fromIndex: number, toIndex: number) => {
+        if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+        setItems(prev => moveArrayItem(prev, fromIndex, toIndex));
+        setItensSelecionados(prev => remapIndexSetAfterMove(prev, fromIndex, toIndex));
+        setValorEditando(prev => remapIndexRecordAfterMove(prev, fromIndex, toIndex));
+        setKitEmEdicao(prev =>
+            prev ? { ...prev, index: remapIndexAfterMove(prev.index, fromIndex, toIndex) } : prev
+        );
     };
 
     // Toggle seleção de item
@@ -3530,8 +3555,60 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                                 const fotoUrl = materialComFoto?.imagemUrl;
 
                                 return (
-                                    <div key={index} className={`bg-white dark:bg-slate-800 border rounded-xl overflow-hidden hover:shadow-md transition-all ${itensSelecionados.has(index) ? 'border-indigo-500 dark:border-indigo-400 bg-indigo-50/30 dark:bg-indigo-900/20' : 'border-gray-200 dark:border-dark-border'}`}>
+                                    <div
+                                        key={index}
+                                        onDragOver={(e) => {
+                                            if (dragFromIndex === null) return;
+                                            e.preventDefault();
+                                            e.dataTransfer.dropEffect = 'move';
+                                            if (dragOverIndex !== index) setDragOverIndex(index);
+                                        }}
+                                        onDragLeave={() => {
+                                            setDragOverIndex((prev) => (prev === index ? null : prev));
+                                        }}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            const fromRaw = e.dataTransfer.getData('text/plain');
+                                            const fromIndex = dragFromIndex ?? Number(fromRaw);
+                                            if (!Number.isNaN(fromIndex)) {
+                                                handleReorderItem(fromIndex, index);
+                                            }
+                                            setDragFromIndex(null);
+                                            setDragOverIndex(null);
+                                        }}
+                                        className={`bg-white dark:bg-slate-800 border rounded-xl overflow-hidden hover:shadow-md transition-all ${
+                                            dragFromIndex === index ? 'opacity-50' : ''
+                                        } ${
+                                            dragOverIndex === index && dragFromIndex !== index
+                                                ? 'border-indigo-500 dark:border-indigo-400 ring-2 ring-indigo-300 dark:ring-indigo-600'
+                                                : itensSelecionados.has(index)
+                                                    ? 'border-indigo-500 dark:border-indigo-400 bg-indigo-50/30 dark:bg-indigo-900/20'
+                                                    : 'border-gray-200 dark:border-dark-border'
+                                        }`}
+                                    >
                                         <div className="flex items-center gap-4 p-4">
+                                            {/* Handle de arrastar para reordenar */}
+                                            <div className="flex-shrink-0">
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                        e.dataTransfer.setData('text/plain', String(index));
+                                                        setDragFromIndex(index);
+                                                    }}
+                                                    onDragEnd={() => {
+                                                        setDragFromIndex(null);
+                                                        setDragOverIndex(null);
+                                                    }}
+                                                    className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-colors select-none"
+                                                    title="Arrastar para reordenar"
+                                                    aria-label="Arrastar para reordenar item"
+                                                >
+                                                    <GripIcon className="w-5 h-5 pointer-events-none" />
+                                                </div>
+                                            </div>
                                             {/* Checkbox de seleção */}
                                             <div className="flex-shrink-0">
                                                 <input

@@ -18,19 +18,29 @@ import {
   labelDiaSemana,
   formatHoraBrasilia,
   ehDomingoOuFeriado,
-  ehFeriado,
-  nomeFeriado,
+  ehFeriadoEfetivo,
+  nomeFeriadoEfetivo,
 } from '../utils/datetime-sp.util';
 import { minutosMeiaNoiteBrasilia, splitMinutosJornadaSegSex } from '../utils/autonomo-folha.util';
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
 import { decomporExcessoBancoHoras } from '../utils/banco-horas-excesso.util';
 import { calculateMonthlyTotal } from '../utils/workshift.util';
+import { listarOverridesFeriadoMes } from './feriadoOverride.service';
 import {
   aplicarClassificacaoNosMinutos,
   minutosAbonadosParaHorasTrabalhadas,
   parseClassificacaoJustificativa,
   type ClassificacaoJustificativaPonto,
 } from '../utils/justificativaPonto.util';
+import {
+  aplicarAvaliacaoRhDia,
+  parseTratamentoCredito,
+  parseTratamentoDebito,
+} from '../utils/avaliacaoPontoRh.util';
+import {
+  calcularDemonstrativoFolha,
+  type FolhaDemonstrativoResumo,
+} from '../utils/rhFolhaDemonstrativo.util';
 
 interface CalcularFolhaMesParams {
   funcionarioId: string;
@@ -45,9 +55,12 @@ export interface ConferenciaPontoDia {
   diaSemanaLabel: string;
   ehFimDeSemana: boolean;
   /** Feriado nacional/municipal (calendário do sistema — mesmo usado na folha autônomo) */
+  /** Feriado (calendário + override manual admin) */
   ehFeriado: boolean;
   /** Nome do feriado quando aplicável */
   nomeFeriado: string | null;
+  /** true se o status de feriado veio de override manual */
+  feriadoOverrideManual?: boolean;
   temRegistro: boolean;
   horasLiquidas: number;
   entrada: string | null;
@@ -86,6 +99,17 @@ export interface ConferenciaPontoDia {
   comentarioRh?: string | null;
   /** Decisão do RH sobre o dia (justificativa/falta); PENDENTE até revisão */
   decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
+  /** Avaliação rápida A|B|D (atraso / saída / falta) */
+  tratamentoDebito?: 'A' | 'B' | 'D' | null;
+  /** Avaliação rápida B|P (hora extra) */
+  tratamentoCredito?: 'B' | 'P' | null;
+  /** Resultado da engine A/B/P/D no dia */
+  avaliacaoRh?: {
+    minutosAbonados: number;
+    minutosBancoDelta: number;
+    minutosPagarFolha: number;
+    minutosDescontarFolha: number;
+  } | null;
 }
 
 export interface FolhaMesResumo {
@@ -200,6 +224,18 @@ export interface FolhaMesResumo {
     subtracoes: number;
     acrescimos: number;
   };
+  demonstrativo: FolhaDemonstrativoResumo;
+  horasNormais: FolhaDemonstrativoResumo['horasNormais'];
+  horasExtrasSegSex50: FolhaDemonstrativoResumo['horasExtrasSegSex50'];
+  horasExtrasSabado50: FolhaDemonstrativoResumo['horasExtrasSabado50'];
+  horasExtras100: FolhaDemonstrativoResumo['horasExtras100'];
+  horasNoturnas20: FolhaDemonstrativoResumo['horasNoturnas20'];
+  descontoAtraso: FolhaDemonstrativoResumo['descontoAtraso'];
+  descontoSaidaAntecipada: FolhaDemonstrativoResumo['descontoSaidaAntecipada'];
+  descontoFalta: FolhaDemonstrativoResumo['descontoFalta'];
+  totalDescontosRef: FolhaDemonstrativoResumo['totalDescontosRef'];
+  lancamentosManuais: FolhaDemonstrativoResumo['lancamentosManuais'];
+  totalAPagar: FolhaDemonstrativoResumo['totalAPagar'];
   conferenciaPonto: ConferenciaPontoDia[];
 }
 
@@ -223,6 +259,7 @@ export const RhService = {
     const { inicio, fim, ano, mes } = getMesReferenciaRange(dataRef);
 
     await sincronizarExcessoCompetencia(funcionarioId, ano, mes);
+    const feriadoOverrides = await listarOverridesFeriadoMes(ano, mes);
 
     const funcionario = await prisma.funcionario.findUnique({
       where: { id: funcionarioId },
@@ -414,6 +451,8 @@ export const RhService = {
         {
           comentario: c.comentario ?? null,
           decisaoRh: c.decisaoRh,
+          tratamentoDebito: parseTratamentoDebito((c as any).tratamentoDebito),
+          tratamentoCredito: parseTratamentoCredito((c as any).tratamentoCredito),
         },
       ]),
     );
@@ -465,7 +504,7 @@ export const RhService = {
           const mo = dr.getUTCMonth() + 1;
           const day = dr.getUTCDate();
           const dow = diaSemanaCivil(y, mo, day);
-          if (dow >= 1 && dow <= 5 && !ehDomingoOuFeriado(y, mo, day)) {
+          if (dow >= 1 && dow <= 5 && !ehDomingoOuFeriado(y, mo, day, feriadoOverrides)) {
             diasComDiaria.add(chaveDiaUtc(dr));
           }
         }
@@ -491,7 +530,7 @@ export const RhService = {
           const dow = diaSemanaCivil(y, mo, day);
           const hLiq = reg.horasNormais + reg.horasExtras50 + reg.horasExtras100;
 
-          if (ehDomingoOuFeriado(y, mo, day)) {
+          if (ehDomingoOuFeriado(y, mo, day, feriadoOverrides)) {
             const rate = v100 > 0 ? v100 : vNorm;
             reais100 += hLiq * rate;
             min100 += Math.round(hLiq * 60);
@@ -637,7 +676,7 @@ export const RhService = {
       for (let dia = 1; dia <= totalDias; dia++) {
         const dow = diaSemanaCivil(ano, mes, dia);
         const ehFds = dow === 0 || dow === 6;
-        const ehFer = ehFeriado(ano, mes, dia);
+        const ehFer = ehFeriadoEfetivo(ano, mes, dia, feriadoOverrides);
         if (!ehFds && !ehFer) uteis += 1;
       }
       return uteis;
@@ -656,8 +695,11 @@ export const RhService = {
       const chave = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
       const dow = diaSemanaCivil(ano, mes, dia);
       const ehFds = dow === 0 || dow === 6;
-      const ehFer = ehFeriado(ano, mes, dia);
-      const nomeFer = nomeFeriado(ano, mes, dia);
+      const ehFer = ehFeriadoEfetivo(ano, mes, dia, feriadoOverrides);
+      const nomeFer = nomeFeriadoEfetivo(ano, mes, dia, feriadoOverrides);
+      const feriadoOverrideManual = feriadoOverrides.has(
+        `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+      );
       const reg = registrosPorDia.get(chave);
 
       const faltaJustificada = faltasJustificadasSet.has(chave);
@@ -734,6 +776,7 @@ export const RhService = {
         ehFimDeSemana: ehFds,
         ehFeriado: ehFer,
         nomeFeriado: nomeFer,
+        feriadoOverrideManual,
         temRegistro: !!reg,
         horasLiquidas: reg
           ? reg.horasNormais +
@@ -797,7 +840,39 @@ export const RhService = {
         intervaloAlmocoFim: reg ? (reg as any).intervaloAlmocoFim ?? null : null,
         comentarioRh: comentarioDia?.comentario ?? null,
         decisaoRh,
+        tratamentoDebito: comentarioDia?.tratamentoDebito ?? null,
+        tratamentoCredito: comentarioDia?.tratamentoCredito ?? null,
+        avaliacaoRh: null as ConferenciaPontoDia['avaliacaoRh'],
       });
+
+      // Engine A/B/P/D: prioridade sobre impacto financeiro/banco quando preenchida.
+      const diaRef = conferenciaPonto[conferenciaPonto.length - 1];
+      const faltaIntegralMin =
+        !reg && !ehFds && !ehFer && !faltaJustificada
+          ? Math.max(0, minutosPrevistosDia)
+          : 0;
+      const aval = aplicarAvaliacaoRhDia({
+        minutosAtraso: diaRef.minutosAtraso,
+        minutosHorasDevidas: diaRef.minutosHorasDevidas,
+        minutosExtra:
+          (diaRef.minutosExtra20 ?? 0) +
+          (reg ? Number((reg as any).minutosExtra50 ?? 0) : 0) +
+          (reg ? Number((reg as any).minutosExtra100 ?? 0) : 0),
+        minutosFaltaIntegral: faltaIntegralMin,
+        tratamentoDebito: comentarioDia?.tratamentoDebito ?? null,
+        tratamentoCredito: comentarioDia?.tratamentoCredito ?? null,
+      });
+      diaRef.avaliacaoRh = {
+        minutosAbonados: aval.minutosAbonados,
+        minutosBancoDelta: aval.minutosBancoDelta,
+        minutosPagarFolha: aval.minutosPagarFolha,
+        minutosDescontarFolha: aval.minutosDescontarFolha,
+      };
+      // A zera impacto de atraso/saída na conferência (saldo zero / sem desconto).
+      if (comentarioDia?.tratamentoDebito === 'A' && aval.minutosAbonados > 0) {
+        diaRef.minutosAtraso = 0;
+        diaRef.minutosHorasDevidas = 0;
+      }
     }
 
     const minutosAtrasoMesEf = conferenciaPonto.reduce((sum, d) => sum + Math.max(0, d.minutosAtraso ?? 0), 0);
@@ -833,7 +908,7 @@ export const RhService = {
         : // Autônomo: base + acréscimos automáticos (já dentro de valorHorasAutonomo)
           valorHorasAutonomo + totalBeneficios;
 
-    return {
+    const folhaBase = {
       funcionarioId: funcionario.id,
       nome: funcionario.nome,
       tipoContrato: funcionario.tipoContrato,
@@ -895,6 +970,24 @@ export const RhService = {
         acrescimos: acrescimosLanc,
       },
       conferenciaPonto,
+    };
+
+    const demonstrativo = calcularDemonstrativoFolha(folhaBase);
+
+    return {
+      ...folhaBase,
+      demonstrativo,
+      horasNormais: demonstrativo.horasNormais,
+      horasExtrasSegSex50: demonstrativo.horasExtrasSegSex50,
+      horasExtrasSabado50: demonstrativo.horasExtrasSabado50,
+      horasExtras100: demonstrativo.horasExtras100,
+      horasNoturnas20: demonstrativo.horasNoturnas20,
+      descontoAtraso: demonstrativo.descontoAtraso,
+      descontoSaidaAntecipada: demonstrativo.descontoSaidaAntecipada,
+      descontoFalta: demonstrativo.descontoFalta,
+      totalDescontosRef: demonstrativo.totalDescontosRef,
+      lancamentosManuais: demonstrativo.lancamentosManuais,
+      totalAPagar: demonstrativo.totalAPagar,
     };
   },
 };

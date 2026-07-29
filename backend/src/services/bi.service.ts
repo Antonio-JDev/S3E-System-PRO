@@ -1188,127 +1188,6 @@ export class BIService {
     return meses;
   }
 
-  /**
-   * Serviços mais rentáveis (maiores lucros) nos pedidos de venda
-   */
-  static async getServicosRentaveis(
-    dataInicio: Date,
-    dataFim: Date
-  ): Promise<Array<{
-    servicoNome: string;
-    classificacao: string;
-    receita: number;
-    custo: number;
-    lucro: number;
-    markup: number;
-    quantidade: number;
-  }>> {
-    // Buscar vendas realizadas no período
-    const vendas = await prisma.venda.findMany({
-      where: whereVendasBI(dataInicio, dataFim),
-      include: {
-        orcamento: {
-          include: {
-            items: {
-              where: {
-                tipo: 'SERVICO',
-              },
-            },
-          },
-        },
-      },
-    });
-
-    // Mapear serviços para suas classificações
-    const servicos = await prisma.servico.findMany({
-      select: {
-        id: true,
-        nome: true,
-        tipoServico: true,
-        custo: true,
-      },
-    });
-
-    const servicoMap = new Map<string, { tipoServico: string; custo: number | null }>();
-    servicos.forEach((s) => {
-      servicoMap.set(s.nome, {
-        tipoServico: s.tipoServico || 'MAO_DE_OBRA',
-        custo: s.custo || null,
-      });
-    });
-
-    const classificacaoLabels: Record<string, string> = {
-      MAO_DE_OBRA: 'Mão de Obra',
-      ENGENHARIA: 'Engenharia',
-      PROJETOS: 'Projetos',
-      ADMINISTRATIVO: 'Administrativo',
-      MONTAGEM: 'Montagem',
-    };
-
-    // Agrupar por serviço
-    const servicosMap = new Map<string, {
-      receita: number;
-      custo: number;
-      quantidade: number;
-      classificacao: string;
-    }>();
-
-    vendas.forEach((venda) => {
-      if (!venda.orcamento?.items) return;
-
-      venda.orcamento.items.forEach((item) => {
-        if ((item as any).vendaDiretaFornecedor) return;
-        if (item.tipo === 'SERVICO' && item.servicoNome) {
-          const servicoNome = item.servicoNome;
-          const servicoInfo = servicoMap.get(servicoNome) || {
-            tipoServico: 'MAO_DE_OBRA',
-            custo: null,
-          };
-          const classificacao = classificacaoLabels[servicoInfo.tipoServico] || 'Mão de Obra';
-
-          const qtd = item.quantidade || 1;
-          const receita = item.subtotal ?? (item.precoUnit || 0) * qtd;
-          const custoUnit = servicoInfo.custo ?? item.custoUnit ?? 0;
-          const custo = custoUnit * qtd;
-
-          if (!servicosMap.has(servicoNome)) {
-            servicosMap.set(servicoNome, {
-              receita: 0,
-              custo: 0,
-              quantidade: 0,
-              classificacao,
-            });
-          }
-
-          const stats = servicosMap.get(servicoNome)!;
-          stats.receita += receita;
-          stats.custo += custo;
-          stats.quantidade += qtd;
-        }
-      });
-    });
-
-    // Converter para array e calcular lucro e markup
-    const resultado = Array.from(servicosMap.entries()).map(([servicoNome, stats]) => {
-      const lucro = stats.receita - stats.custo;
-      const markup = stats.custo > 0 ? (lucro / stats.custo) * 100 : 0;
-
-      return {
-        servicoNome,
-        classificacao: stats.classificacao,
-        receita: stats.receita,
-        custo: stats.custo,
-        lucro,
-        markup,
-        quantidade: stats.quantidade,
-      };
-    });
-
-    // Ordenar por lucro (maior para menor)
-    resultado.sort((a, b) => b.lucro - a.lucro);
-
-    return resultado;
-  }
 
   /**
    * Estatísticas de orçamentos por status (Aprovado, Pendente, Expirado, Declinado)
@@ -1604,221 +1483,6 @@ export class BIService {
     };
   }
 
-  /**
-   * Estatísticas de markup de vendas por tipo de serviço e período
-   * Retorna DRE detalhado por serviço (mês, semana, semestre, ano)
-   */
-  static async getMarkupVendasPorTipoServico(
-    dataInicio: Date,
-    dataFim: Date,
-    periodo: 'mes' | 'semana' | 'semestre' | 'ano' = 'mes'
-  ): Promise<{
-    periodo: string;
-    dados: Array<{
-      periodo: string;
-      classificacao: string;
-      servicoNome: string;
-      receita: number;
-      custo: number;
-      lucro: number;
-      markup: number;
-      quantidade: number;
-    }>;
-    resumoPorClassificacao: Array<{
-      classificacao: string;
-      receita: number;
-      custo: number;
-      lucro: number;
-      markup: number;
-      quantidade: number;
-    }>;
-  }> {
-    // Buscar vendas realizadas no período
-    const vendas = await prisma.venda.findMany({
-      where: whereVendasBI(dataInicio, dataFim),
-      include: {
-        orcamento: {
-          include: {
-            items: {
-              where: {
-                tipo: 'SERVICO',
-              },
-            },
-          },
-        },
-      },
-    });
-
-    // Mapear serviços para suas classificações
-    const servicos = await prisma.servico.findMany({
-      select: {
-        id: true,
-        nome: true,
-        tipoServico: true,
-        custo: true,
-      },
-    });
-
-    const servicoMap = new Map<string, { tipoServico: string; custo: number | null }>();
-    servicos.forEach((s) => {
-      servicoMap.set(s.nome, {
-        tipoServico: s.tipoServico || 'MAO_DE_OBRA',
-        custo: s.custo || null,
-      });
-    });
-
-    const classificacaoLabels: Record<string, string> = {
-      MAO_DE_OBRA: 'Mão de Obra',
-      ENGENHARIA: 'Engenharia',
-      PROJETOS: 'Projetos',
-      ADMINISTRATIVO: 'Administrativo',
-      MONTAGEM: 'Montagem',
-    };
-
-    // Agrupar por período e serviço
-    const dadosMap = new Map<string, Map<string, {
-      receita: number;
-      custo: number;
-      quantidade: number;
-    }>>();
-
-    vendas.forEach((venda) => {
-      if (!venda.orcamento?.items) return;
-
-      venda.orcamento.items.forEach((item) => {
-        if ((item as any).vendaDiretaFornecedor) return;
-        if (item.tipo === 'SERVICO' && item.servicoNome) {
-          const servicoNome = item.servicoNome;
-          const servicoInfo = servicoMap.get(servicoNome) || {
-            tipoServico: 'MAO_DE_OBRA',
-            custo: null,
-          };
-          const classificacao = servicoInfo.tipoServico;
-
-          // Determinar período baseado no parâmetro
-          let periodoKey: string;
-          const dataVenda = venda.dataVenda;
-
-          if (periodo === 'mes') {
-            periodoKey = dataVenda.toISOString().substring(0, 7); // YYYY-MM
-          } else if (periodo === 'semana') {
-            const semana = this.getSemanaAno(dataVenda);
-            periodoKey = `${dataVenda.getFullYear()}-S${semana}`;
-          } else if (periodo === 'semestre') {
-            const semestre = dataVenda.getMonth() < 6 ? 1 : 2;
-            periodoKey = `${dataVenda.getFullYear()}-S${semestre}`;
-          } else {
-            periodoKey = dataVenda.getFullYear().toString();
-          }
-
-          const chaveServico = `${classificacao}::${servicoNome}`;
-
-          if (!dadosMap.has(periodoKey)) {
-            dadosMap.set(periodoKey, new Map());
-          }
-
-          const periodoMap = dadosMap.get(periodoKey)!;
-          const servicoDados = periodoMap.get(chaveServico) || {
-            receita: 0,
-            custo: 0,
-            quantidade: 0,
-          };
-
-          const qtd = item.quantidade || 1;
-          const receita = item.subtotal ?? (item.precoUnit || 0) * qtd;
-          const custoUnit = servicoInfo.custo ?? item.custoUnit ?? 0;
-          const custo = custoUnit * qtd;
-
-          periodoMap.set(chaveServico, {
-            receita: servicoDados.receita + receita,
-            custo: servicoDados.custo + custo,
-            quantidade: servicoDados.quantidade + qtd,
-          });
-        }
-      });
-    });
-
-    // Converter para array
-    const dados: Array<{
-      periodo: string;
-      classificacao: string;
-      servicoNome: string;
-      receita: number;
-      custo: number;
-      lucro: number;
-      markup: number;
-      quantidade: number;
-    }> = [];
-
-    dadosMap.forEach((periodoMap, periodoKey) => {
-      periodoMap.forEach((servicoDados, chaveServico) => {
-        const [classificacao, servicoNome] = chaveServico.split('::');
-        const lucro = servicoDados.receita - servicoDados.custo;
-        const markup = servicoDados.custo > 0
-          ? (lucro / servicoDados.custo) * 100
-          : 0;
-
-        dados.push({
-          periodo: periodoKey,
-          classificacao: classificacaoLabels[classificacao] || classificacao,
-          servicoNome,
-          receita: servicoDados.receita,
-          custo: servicoDados.custo,
-          lucro,
-          markup,
-          quantidade: servicoDados.quantidade,
-        });
-      });
-    });
-
-    // Resumo por classificação
-    const resumoMap = new Map<string, {
-      receita: number;
-      custo: number;
-      quantidade: number;
-    }>();
-
-    dados.forEach((item) => {
-      const resumo = resumoMap.get(item.classificacao) || {
-        receita: 0,
-        custo: 0,
-        quantidade: 0,
-      };
-
-      resumoMap.set(item.classificacao, {
-        receita: resumo.receita + item.receita,
-        custo: resumo.custo + item.custo,
-        quantidade: resumo.quantidade + item.quantidade,
-      });
-    });
-
-    const resumoPorClassificacao = Array.from(resumoMap.entries())
-      .map(([classificacao, dados]) => {
-        const lucro = dados.receita - dados.custo;
-        const markup = dados.custo > 0 ? (lucro / dados.custo) * 100 : 0;
-
-        return {
-          classificacao,
-          receita: dados.receita,
-          custo: dados.custo,
-          lucro,
-          markup,
-          quantidade: dados.quantidade,
-        };
-      })
-      .sort((a, b) => b.receita - a.receita);
-
-    return {
-      periodo,
-      dados: dados.sort((a, b) => {
-        if (a.periodo !== b.periodo) {
-          return a.periodo.localeCompare(b.periodo);
-        }
-        return b.receita - a.receita;
-      }),
-      resumoPorClassificacao,
-    };
-  }
 
   private static readonly CLASSIFICACAO_COMPRA_LABELS: Record<string, string> = {
     COMPOSICAO_ESTOQUE: 'Material / composição de estoque',
@@ -1899,15 +1563,169 @@ export class BIService {
   }
 
   /**
-   * Calcula o número da semana do ano (1-52/53)
+   * Total gasto por cartão de crédito no período (ContasPagar com CARTAO_CREDITO).
    */
-  private static getSemanaAno(data: Date): number {
-    const d = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
-    const diaSemana = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - diaSemana);
-    const anoInicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil(((d.getTime() - anoInicio.getTime()) / 86400000 + 1) / 7);
+  static async getGastosCartaoCredito(dataInicio: Date, dataFim: Date) {
+    const contas = await prisma.contaPagar.findMany({
+      where: {
+        meioPagamento: 'CARTAO_CREDITO',
+        status: { not: 'Cancelado' },
+        OR: [
+          { dataPagamento: { gte: dataInicio, lte: dataFim } },
+          {
+            dataPagamento: null,
+            dataVencimento: { gte: dataInicio, lte: dataFim },
+          },
+        ],
+      },
+      include: {
+        cartaoCredito: true,
+      },
+    });
+
+    const porCartao = new Map<
+      string,
+      { cartaoId: string; nome: string; bandeira: string; ultimosDigitos: string; total: number; quantidade: number }
+    >();
+
+    for (const c of contas) {
+      const key = c.cartaoCreditoId || 'sem-cartao';
+      const nome = c.cartaoCredito
+        ? `${c.cartaoCredito.nomeOuBanco} •••• ${c.cartaoCredito.ultimosQuatroDigitos}`
+        : 'Sem cartão vinculado';
+      const atual = porCartao.get(key) || {
+        cartaoId: key,
+        nome,
+        bandeira: c.cartaoCredito?.bandeira || '-',
+        ultimosDigitos: c.cartaoCredito?.ultimosQuatroDigitos || '----',
+        total: 0,
+        quantidade: 0,
+      };
+      atual.total += Number(c.valorParcela || 0);
+      atual.quantidade += 1;
+      porCartao.set(key, atual);
+    }
+
+    const itens = Array.from(porCartao.values()).sort((a, b) => b.total - a.total);
+    const totalGeral = itens.reduce((acc, i) => acc + i.total, 0);
+
+    return { totalGeral, porCartao: itens };
   }
+
+  /**
+   * Comparativo Cartão de Crédito vs demais métodos de pagamento (contas pagas).
+   */
+  static async getMetodosPagamentoComparativo(dataInicio: Date, dataFim: Date) {
+    const contas = await prisma.contaPagar.findMany({
+      where: {
+        status: 'Pago',
+        dataPagamento: { gte: dataInicio, lte: dataFim },
+      },
+      select: {
+        meioPagamento: true,
+        valorParcela: true,
+        valorJuros: true,
+        valorDesconto: true,
+      },
+    });
+
+    const mapa = new Map<string, { metodo: string; total: number; quantidade: number }>();
+
+    for (const c of contas) {
+      const metodo = (c.meioPagamento || 'NAO_INFORMADO').toUpperCase();
+      const valor =
+        Number(c.valorParcela || 0) +
+        Number(c.valorJuros || 0) -
+        Number(c.valorDesconto || 0);
+      const atual = mapa.get(metodo) || { metodo, total: 0, quantidade: 0 };
+      atual.total += valor;
+      atual.quantidade += 1;
+      mapa.set(metodo, atual);
+    }
+
+    const porMetodo = Array.from(mapa.values()).sort((a, b) => b.total - a.total);
+    const totalCartao = porMetodo
+      .filter((m) => m.metodo === 'CARTAO_CREDITO')
+      .reduce((acc, m) => acc + m.total, 0);
+    const totalOutros = porMetodo
+      .filter((m) => m.metodo !== 'CARTAO_CREDITO')
+      .reduce((acc, m) => acc + m.total, 0);
+
+    return {
+      porMetodo,
+      comparativo: {
+        cartaoCredito: totalCartao,
+        outrosMetodos: totalOutros,
+      },
+    };
+  }
+
+  /**
+   * Evolução de faturas de cartão ao longo dos meses.
+   */
+  static async getEvolucaoFaturasCartao(dataInicio: Date, dataFim: Date) {
+    const faturas = await prisma.faturaCartao.findMany({
+      where: {
+        OR: [
+          {
+            dataPagamento: { gte: dataInicio, lte: dataFim },
+          },
+          {
+            dataPagamento: null,
+            dataVencimento: { gte: dataInicio, lte: dataFim },
+          },
+        ],
+      },
+      include: {
+        cartaoCredito: {
+          select: {
+            id: true,
+            nomeOuBanco: true,
+            ultimosQuatroDigitos: true,
+            bandeira: true,
+          },
+        },
+      },
+      orderBy: [{ anoCompetencia: 'asc' }, { mesCompetencia: 'asc' }],
+    });
+
+    const porMes = new Map<
+      string,
+      { mes: string; ano: number; mesNum: number; total: number; quantidade: number }
+    >();
+
+    for (const f of faturas) {
+      const key = `${f.anoCompetencia}-${String(f.mesCompetencia).padStart(2, '0')}`;
+      const label = `${String(f.mesCompetencia).padStart(2, '0')}/${f.anoCompetencia}`;
+      const atual = porMes.get(key) || {
+        mes: label,
+        ano: f.anoCompetencia,
+        mesNum: f.mesCompetencia,
+        total: 0,
+        quantidade: 0,
+      };
+      atual.total += Number(f.valorTotal || 0);
+      atual.quantidade += 1;
+      porMes.set(key, atual);
+    }
+
+    return {
+      evolucao: Array.from(porMes.values()),
+      faturas: faturas.map((f) => ({
+        id: f.id,
+        mesCompetencia: f.mesCompetencia,
+        anoCompetencia: f.anoCompetencia,
+        valorTotal: f.valorTotal,
+        status: f.status,
+        dataVencimento: f.dataVencimento,
+        dataPagamento: f.dataPagamento,
+        cartao: f.cartaoCredito
+          ? `${f.cartaoCredito.nomeOuBanco} •••• ${f.cartaoCredito.ultimosQuatroDigitos}`
+          : null,
+      })),
+    };
+  }
+
 
   /**
    * Resumo consolidado de todas as métricas

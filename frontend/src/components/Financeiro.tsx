@@ -7,6 +7,7 @@ const ExportarRelatorioFinanceiro = lazy(() => import('./ExportarRelatorioFinanc
 const DRE = lazy(() => import('./DRE'));
 const FluxoCaixa = lazy(() => import('./FluxoCaixa'));
 const MovimentacoesCaixa = lazy(() => import('./MovimentacoesCaixa'));
+const CartaoCreditoFinanceiro = lazy(() => import('./CartaoCreditoFinanceiro'));
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -23,14 +24,14 @@ interface FinanceiroProps {
     onClearInitialContaId?: () => void;
 }
 
-type AbaType = 'dashboard' | 'dre' | 'fluxo-caixa' | 'movimentacoes' | 'receber' | 'pagar' | 'ajuda' | 'exportar';
+type AbaType = 'dashboard' | 'dre' | 'fluxo-caixa' | 'movimentacoes' | 'receber' | 'pagar' | 'cartao-credito' | 'ajuda' | 'exportar';
 
 const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, initialContaId, onClearInitialAba, onClearInitialContaId }) => {
     const [abaAtiva, setAbaAtiva] = useState<AbaType>('dashboard');
 
     useEffect(() => {
         if (initialAba && onClearInitialAba) {
-            const valid = ['dashboard', 'dre', 'fluxo-caixa', 'movimentacoes', 'receber', 'pagar', 'ajuda', 'exportar'];
+            const valid = ['dashboard', 'dre', 'fluxo-caixa', 'movimentacoes', 'receber', 'pagar', 'cartao-credito', 'ajuda', 'exportar'];
             if (valid.includes(initialAba)) {
                 setAbaAtiva(initialAba as AbaType);
             }
@@ -112,6 +113,12 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
                     >
                         💸 Contas a Pagar
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('cartao-credito')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"
+                    >
+                        💳 Cartão de Crédito
                     </button>
                     <button
                         onClick={() => setAbaAtiva('ajuda')}
@@ -204,6 +211,21 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
         );
     }
 
+    if (abaAtiva === 'cartao-credito') {
+        return (
+            <Suspense fallback={
+                <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg">
+                    <div className="text-center">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600 dark:border-indigo-400 mx-auto mb-4"></div>
+                        <p className="text-gray-600 dark:text-dark-text-secondary">Carregando Cartão de Crédito...</p>
+                    </div>
+                </div>
+            }>
+                <CartaoCreditoFinanceiro toggleSidebar={toggleSidebar} setAbaAtiva={(aba: string) => setAbaAtiva(aba as AbaType)} />
+            </Suspense>
+        );
+    }
+
     if (abaAtiva === 'exportar') {
         return (
             <Suspense fallback={
@@ -278,6 +300,12 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
                         className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
                     >
                         💸 Contas a Pagar
+                    </button>
+                    <button
+                        onClick={() => setAbaAtiva('cartao-credito')}
+                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"
+                    >
+                        💳 Cartão de Crédito
                     </button>
                     <button
                         onClick={() => setAbaAtiva('ajuda')}

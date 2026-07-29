@@ -3,6 +3,10 @@ import { prisma } from '../lib/prisma';
 import obraService from './obra.service';
 import { validarConclusaoOsEngenharia } from './projetosEngenharia.service';
 import { ContasReceberService } from './contasReceber.service';
+import {
+  entrarNaFilaSeAplicavel,
+  validarConclusaoVistoriaCelesc,
+} from './vistoriaCelesc.service';
 
 export type OsWorkflowTipo =
   | 'PROJETOS_ELETRICOS'
@@ -57,6 +61,7 @@ export interface CriarProjetoInput {
   diariasEquipeOrcadas?: number;
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
+  exigeVistoriaCelesc?: boolean;
 }
 
 export class EstoqueInsuficienteError extends Error {
@@ -257,6 +262,7 @@ export class ProjetosService {
             data.valorHoraEngenharia != null ? Number(data.valorHoraEngenharia) : null,
           valorDiariaEquipe:
             data.valorDiariaEquipe != null ? Number(data.valorDiariaEquipe) : null,
+          exigeVistoriaCelesc: Boolean(data.exigeVistoriaCelesc),
         },
       });
 
@@ -414,6 +420,15 @@ export class ProjetosService {
       const bloqueio = await validarConclusaoOsEngenharia(projetoId);
       if (bloqueio) throw new Error(bloqueio);
 
+      const bloqueioVistoria = validarConclusaoVistoriaCelesc({
+        exigeVistoriaCelesc: Boolean(
+          (projeto as { exigeVistoriaCelesc?: boolean }).exigeVistoriaCelesc,
+        ),
+        statusVistoria:
+          (projeto as { statusVistoria?: string | null }).statusVistoria ?? null,
+      });
+      if (bloqueioVistoria) throw new Error(bloqueioVistoria);
+
       if (projeto.tipo === 'PROJETOS_ELETRICOS') {
         const taskOrganizacao = await prisma.task.findFirst({
           where: { projetoId, titulo: OS_WORKFLOW_CONCLUSAO_TASK_PROJETOS_ELETRICOS },
@@ -529,6 +544,15 @@ export class ProjetosService {
           descricao: `${atualizado.descricao ?? ''}\n[ALERTA] necessidade_alocacao: atribuir equipe ao projeto.`,
         },
       });
+    }
+
+    if (
+      novoStatus === ProjetoStatus.APROVADO ||
+      novoStatus === ProjetoStatus.EXECUCAO ||
+      novoStatus === ProjetoStatus.CONCLUIDO ||
+      novoStatus === ProjetoStatus.VALIDADO
+    ) {
+      await entrarNaFilaSeAplicavel(projetoId);
     }
 
     return atualizado;

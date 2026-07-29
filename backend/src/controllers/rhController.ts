@@ -24,9 +24,17 @@ import {
   removerAnexoFaltaJustificada,
   listarCompensacoesCompetencia,
   listarWorkShifts,
+  criarWorkShiftPersonalizada,
 } from '../services/rhJornada.service';
 import { buildContentDisposition } from '../utils/filename.util';
-import { salvarComentarioConferenciaDia } from '../services/rhComentarioConferencia.service';
+import {
+  salvarAvaliacaoRhDia,
+  salvarComentarioConferenciaDia,
+} from '../services/rhComentarioConferencia.service';
+import {
+  limparOverrideFeriadoDia,
+  salvarOverrideFeriadoDia,
+} from '../services/feriadoOverride.service';
 
 export const RhController = {
   /**
@@ -333,6 +341,39 @@ export const RhController = {
     }
   },
 
+  /** POST /api/rh/work-shifts — cria jornada personalizada (entrada/almoço/volta/saída) */
+  async criarWorkShift(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const entrada1 = String(body.entrada1 ?? '').trim();
+      const saida1 = String(body.saida1 ?? '').trim();
+      const entrada2 = String(body.entrada2 ?? '').trim();
+      const saida2 = String(body.saida2 ?? '').trim();
+      const nome = body.nome != null ? String(body.nome).trim() : null;
+
+      if (!entrada1 || !saida1 || !entrada2 || !saida2) {
+        return res.status(400).json({
+          success: false,
+          message: 'Informe entrada, saída almoço, volta almoço e saída (HH:mm)',
+        });
+      }
+
+      const data = await criarWorkShiftPersonalizada({
+        entrada1,
+        saida1,
+        entrada2,
+        saida2,
+        nome,
+      });
+      return res.status(201).json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({
+        success: false,
+        message: error?.message ?? 'Erro ao criar jornada personalizada',
+      });
+    }
+  },
+
   /** POST /api/rh/falta-justificada — multipart: documento (opcional) + campos do formulário */
   async registrarFaltaJustificada(req: Request, res: Response) {
     try {
@@ -603,6 +644,128 @@ export const RhController = {
       return res
         .status(400)
         .json({ success: false, message: error?.message ?? 'Erro ao salvar comentário' });
+    }
+  },
+
+  /** PUT /api/rh/conferencia-ponto/avaliacao — botões A/B/P/D */
+  async salvarAvaliacaoConferencia(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const { funcionarioId, referenciaAno, referenciaMes, dia, botao, tratamentoDebito, tratamentoCredito } =
+        body as {
+          funcionarioId?: unknown;
+          referenciaAno?: unknown;
+          referenciaMes?: unknown;
+          dia?: unknown;
+          botao?: unknown;
+          tratamentoDebito?: unknown;
+          tratamentoCredito?: unknown;
+        };
+
+      if (!funcionarioId || referenciaAno == null || referenciaMes == null || dia == null) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId, referenciaAno, referenciaMes e dia são obrigatórios',
+        });
+      }
+
+      const botaoNorm = String(botao ?? '').trim().toUpperCase();
+      const botaoFlag =
+        botaoNorm === 'A' || botaoNorm === 'B' || botaoNorm === 'P' || botaoNorm === 'D'
+          ? botaoNorm
+          : null;
+
+      if (!botaoFlag && tratamentoDebito === undefined && tratamentoCredito === undefined) {
+        return res.status(400).json({
+          success: false,
+          message: 'Informe botao (A|B|P|D) ou tratamentoDebito/tratamentoCredito',
+        });
+      }
+
+      const data = await salvarAvaliacaoRhDia({
+        funcionarioId: String(funcionarioId),
+        referenciaAno: parseInt(String(referenciaAno), 10),
+        referenciaMes: parseInt(String(referenciaMes), 10),
+        dia: parseInt(String(dia), 10),
+        botao: botaoFlag,
+        temDebito:
+          (body as { temDebito?: unknown }).temDebito === undefined
+            ? true
+            : Boolean((body as { temDebito?: unknown }).temDebito),
+        temCredito:
+          (body as { temCredito?: unknown }).temCredito === undefined
+            ? true
+            : Boolean((body as { temCredito?: unknown }).temCredito),
+        tratamentoDebito:
+          botaoFlag
+            ? undefined
+            : tratamentoDebito === null || tratamentoDebito === ''
+              ? null
+              : (String(tratamentoDebito) as any),
+        tratamentoCredito:
+          botaoFlag
+            ? undefined
+            : tratamentoCredito === null || tratamentoCredito === ''
+              ? null
+              : (String(tratamentoCredito) as any),
+      });
+
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao salvar avaliação RH' });
+    }
+  },
+
+  /** PUT /api/rh/feriado-override — admin marca dia como feriado / não feriado */
+  async salvarFeriadoOverride(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const { referenciaAno, referenciaMes, dia, ehFeriado, nome, limpar } = body as {
+        referenciaAno?: unknown;
+        referenciaMes?: unknown;
+        dia?: unknown;
+        ehFeriado?: unknown;
+        nome?: unknown;
+        limpar?: unknown;
+      };
+
+      if (referenciaAno == null || referenciaMes == null || dia == null) {
+        return res.status(400).json({
+          success: false,
+          message: 'referenciaAno, referenciaMes e dia são obrigatórios',
+        });
+      }
+
+      if (limpar === true || limpar === 'true') {
+        const data = await limparOverrideFeriadoDia({
+          referenciaAno: parseInt(String(referenciaAno), 10),
+          referenciaMes: parseInt(String(referenciaMes), 10),
+          dia: parseInt(String(dia), 10),
+        });
+        return res.json({ success: true, data });
+      }
+
+      if (typeof ehFeriado !== 'boolean' && ehFeriado !== 'true' && ehFeriado !== 'false') {
+        return res.status(400).json({
+          success: false,
+          message: 'ehFeriado (boolean) é obrigatório, ou limpar=true para voltar ao calendário padrão',
+        });
+      }
+
+      const data = await salvarOverrideFeriadoDia({
+        referenciaAno: parseInt(String(referenciaAno), 10),
+        referenciaMes: parseInt(String(referenciaMes), 10),
+        dia: parseInt(String(dia), 10),
+        ehFeriado: ehFeriado === true || ehFeriado === 'true',
+        nome: nome != null ? String(nome) : null,
+      });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res
+        .status(400)
+        .json({ success: false, message: error?.message ?? 'Erro ao salvar override de feriado' });
     }
   },
 

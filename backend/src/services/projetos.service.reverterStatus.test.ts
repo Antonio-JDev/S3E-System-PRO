@@ -44,9 +44,13 @@ describe('ProjetosService.reverterStatus', () => {
   it('rejeita destino igual ou posterior ao atual', async () => {
     (prisma.projeto.findUnique as jest.Mock).mockResolvedValue({
       id: 'p1',
-      status: 'VALIDADO',
+      status: 'APROVADO',
     });
 
     await expect(service.reverterStatus('p1', 'APROVADO')).rejects.toThrow(/anterior/);
+  });
+
+  it('rejeita destino VALIDADO (removido do fluxo)', async () => {
+    await expect(service.reverterStatus('p1', 'VALIDADO' as any)).rejects.toThrow(/inválido/);
   });
 });

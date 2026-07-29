@@ -345,41 +345,7 @@ export class BIController {
     }
   }
 
-  /**
-   * GET /api/bi/servicos-rentaveis
-   * Serviços mais rentáveis (maiores lucros) nos pedidos de venda
-   */
-  static async getServicosRentaveis(req: Request, res: Response): Promise<void> {
-    try {
-      const { dataInicio, dataFim } = req.query;
-
-      if (!dataInicio || !dataFim) {
-        res.status(400).json({
-          success: false,
-          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
-        });
-        return;
-      }
-
-      const inicio = new Date(dataInicio as string);
-      const fim = new Date(dataFim as string);
-      fim.setHours(23, 59, 59, 999);
-
-      const resultado = await BIService.getServicosRentaveis(inicio, fim);
-
-      res.json({
-        success: true,
-        data: resultado,
-      });
-    } catch (error: any) {
-      console.error('Erro ao buscar serviços rentáveis:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erro ao buscar serviços rentáveis',
-        message: error.message,
-      });
-    }
-  }
+  
 
   /**
    * GET /api/bi/orcamentos-por-status
@@ -453,54 +419,7 @@ export class BIController {
     }
   }
 
-  /**
-   * GET /api/bi/markup-vendas-por-servico
-   * Estatísticas de markup de vendas por tipo de serviço e período
-   */
-  static async getMarkupVendasPorServico(req: Request, res: Response): Promise<void> {
-    try {
-      const { dataInicio, dataFim, periodo = 'mes' } = req.query;
-
-      if (!dataInicio || !dataFim) {
-        res.status(400).json({
-          success: false,
-          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
-        });
-        return;
-      }
-
-      const periodoValido = ['mes', 'semana', 'semestre', 'ano'].includes(periodo as string);
-      if (!periodoValido) {
-        res.status(400).json({
-          success: false,
-          error: 'Parâmetro periodo deve ser: mes, semana, semestre ou ano',
-        });
-        return;
-      }
-
-      const inicio = new Date(dataInicio as string);
-      const fim = new Date(dataFim as string);
-      fim.setHours(23, 59, 59, 999);
-
-      const resultado = await BIService.getMarkupVendasPorTipoServico(
-        inicio,
-        fim,
-        periodo as 'mes' | 'semana' | 'semestre' | 'ano'
-      );
-
-      res.json({
-        success: true,
-        data: resultado,
-      });
-    } catch (error: any) {
-      console.error('Erro ao buscar markup de vendas por serviço:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erro ao buscar markup de vendas por serviço',
-        message: error.message,
-      });
-    }
-  }
+  
 
   /**
    * GET /api/bi/vendas-compras-classificacao
@@ -577,6 +496,75 @@ export class BIController {
       res.status(500).json({
         success: false,
         error: 'Erro ao buscar materiais mais comprados',
+        message: error.message,
+      });
+    }
+  }
+
+  static async getGastosCartaoCredito(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+      const resultado = await BIService.getGastosCartaoCredito(inicio, fim);
+      res.json({ success: true, data: resultado });
+    } catch (error: any) {
+      console.error('Erro ao buscar gastos cartão:', error);
+      res.status(500).json({
+        error: 'Erro ao buscar gastos em cartão de crédito',
+        message: error.message,
+      });
+    }
+  }
+
+  static async getMetodosPagamentoComparativo(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+      const resultado = await BIService.getMetodosPagamentoComparativo(inicio, fim);
+      res.json({ success: true, data: resultado });
+    } catch (error: any) {
+      console.error('Erro ao buscar comparativo métodos:', error);
+      res.status(500).json({
+        error: 'Erro ao buscar comparativo de métodos de pagamento',
+        message: error.message,
+      });
+    }
+  }
+
+  static async getEvolucaoFaturasCartao(req: Request, res: Response): Promise<void> {
+    try {
+      const { dataInicio, dataFim } = req.query;
+      if (!dataInicio || !dataFim) {
+        res.status(400).json({
+          error: 'Parâmetros dataInicio e dataFim são obrigatórios (formato: YYYY-MM-DD)',
+        });
+        return;
+      }
+      const inicio = new Date(dataInicio as string);
+      const fim = new Date(dataFim as string);
+      fim.setHours(23, 59, 59, 999);
+      const resultado = await BIService.getEvolucaoFaturasCartao(inicio, fim);
+      res.json({ success: true, data: resultado });
+    } catch (error: any) {
+      console.error('Erro ao buscar evolução faturas:', error);
+      res.status(500).json({
+        error: 'Erro ao buscar evolução de faturas de cartão',
         message: error.message,
       });
     }

@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import type { FolhaMesResumo } from './rh.service';
 import { decimalHoursToHHmm, minutesToHHmm } from '../utils/time-format.util';
 import { calculateTimeDifference } from '../utils/workshift.util';
+import { calcularDemonstrativoFolha } from '../utils/rhFolhaDemonstrativo.util';
 
 export type ConferenciaPontoLetterhead = {
   imageBuffer: Buffer;
@@ -374,46 +375,7 @@ export function gerarBufferPdfConferenciaPonto(
       doc.moveDown(1);
 
       // ===== Demonstrativo de Horas e Valores =====
-      const valorHoraBase = Number(folha.valores.valorHoraBase ?? 0);
-      const valorMinuto = valorHoraBase / 60;
-
-      // Jornada diária em horas (para custo da falta)
-      const jornadaHorasDia = (() => {
-        const j = folha.jornada;
-        if (!j?.entrada1 || !j?.saida1 || !j?.entrada2 || !j?.saida2) return 8;
-        const toMin = (hhmm: string): number => {
-          const m = String(hhmm).match(/^(\d{1,2}):(\d{2})$/);
-          if (!m) return 0;
-          return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-        };
-        const totalMin = toMin(j.saida1) - toMin(j.entrada1) + (toMin(j.saida2) - toMin(j.entrada2));
-        return Math.max(1, totalMin / 60);
-      })();
-
-      const valorAtrasoMes = somaAtrasoMin * valorMinuto;
-      const valorSaidaAntMes = somaSaidaAntMin * valorMinuto;
-      const valorFaltaMes = diasFaltados * (valorHoraBase * jornadaHorasDia);
-      const totalDescontosReferencia = valorAtrasoMes + valorSaidaAntMes + valorFaltaMes;
-
-      let horasUteis = 0;
-      let horasSabado = 0;
-      let horasFeriadoDomingo = 0;
-      let minutosExtraUteis = 0;
-      for (const row of folha.conferenciaPonto) {
-        if (!row.temRegistro) continue;
-        const h = row.horasLiquidas;
-        if (row.ehFeriado || row.diaSemana === 0) {
-          horasFeriadoDomingo += h;
-        } else if (row.diaSemana === 6) {
-          horasSabado += h;
-        } else {
-          horasUteis += h;
-          minutosExtraUteis += Math.max(0, Number(row.minutosExtra20 ?? 0));
-        }
-      }
-      const horasNoturnas = folha.autonomo?.horasNoturna ?? 0;
-      const horasExtraUteis = minutosExtraUteis / 60;
-      const valorHorasExtraUteis = horasExtraUteis * valorHoraBase;
+      const demonstrativo = folha.demonstrativo ?? calcularDemonstrativoFolha(folha);
 
       // Garante espaço (se não, nova página)
       if (y + 200 > doc.page.height - doc.page.margins.bottom) {
@@ -462,42 +424,32 @@ export function gerarBufferPdfConferenciaPonto(
       // ----- Bloco horas ganhas (por tipo de dia) -----
       linhaResumo(
         'Horas Normais (dias úteis)',
-        decimalHoursToHHmm(horasUteis),
-        folha.tipoContrato === 'AUTONOMO'
-          ? fmtBRL(Number(folha.valores.valorHorasNormais ?? 0))
-          : fmtBRL(Number(folha.valores.salarioBase ?? 0)),
+        decimalHoursToHHmm(demonstrativo.horasNormais.horas),
+        fmtBRL(Number(demonstrativo.horasNormais.valor ?? 0)),
         { bold: true },
       );
       linhaResumo(
         'Horas Extras (dias úteis seg-sex)',
-        minutesToHHmm(minutosExtraUteis),
-        fmtBRL(valorHorasExtraUteis),
+        decimalHoursToHHmm(demonstrativo.horasExtrasSegSex50.horas),
+        fmtBRL(Number(demonstrativo.horasExtrasSegSex50.valor ?? 0)),
         { bold: true },
       );
       linhaResumo(
         'Horas Extras (50%) — Sábado',
-        decimalHoursToHHmm(horasSabado > 0 ? horasSabado : folha.horas.extras50),
-        folha.tipoContrato === 'AUTONOMO'
-          ? fmtBRL(Number(folha.valores.valorHorasExtras50 ?? 0))
-          : permitirHE
-            ? fmtBRL(Number(folha.valores.valorHorasExtras50 ?? 0))
-            : null,
+        decimalHoursToHHmm(demonstrativo.horasExtrasSabado50.horas),
+        fmtBRL(Number(demonstrativo.horasExtrasSabado50.valor ?? 0)),
         { bold: true },
       );
       linhaResumo(
         'Horas Extras (100%) — Domingo e feriados',
-        decimalHoursToHHmm(horasFeriadoDomingo > 0 ? horasFeriadoDomingo : folha.horas.extras100),
-        folha.tipoContrato === 'AUTONOMO'
-          ? fmtBRL(Number(folha.valores.valorHorasExtras100 ?? 0))
-          : permitirHE
-            ? fmtBRL(Number(folha.valores.valorHorasExtras100 ?? 0))
-            : null,
+        decimalHoursToHHmm(demonstrativo.horasExtras100.horas),
+        fmtBRL(Number(demonstrativo.horasExtras100.valor ?? 0)),
         { bold: true },
       );
       linhaResumo(
         'Horas Noturnas (+20%)',
-        decimalHoursToHHmm(horasNoturnas),
-        horasNoturnas > 0 ? fmtBRL(Number(folha.valores.valorHorasNoturnaAutonomo ?? 0)) : null,
+        decimalHoursToHHmm(demonstrativo.horasNoturnas20.horas),
+        fmtBRL(Number(demonstrativo.horasNoturnas20.valor ?? 0)),
         { bold: true },
       );
       linhaResumo(
@@ -519,8 +471,8 @@ export function gerarBufferPdfConferenciaPonto(
       if (somaAtrasoMin > 0) {
         linhaResumo(
           '   Desconto Atraso',
-          minutesToHHmm(somaAtrasoMin),
-          fmtBRL(valorAtrasoMes),
+          decimalHoursToHHmm(demonstrativo.descontoAtraso.horas),
+          fmtBRL(Number(demonstrativo.descontoAtraso.valor ?? 0)),
           { color: COLOR_RED },
         );
       } else {
@@ -529,8 +481,8 @@ export function gerarBufferPdfConferenciaPonto(
       if (somaSaidaAntMin > 0) {
         linhaResumo(
           '   Desconto Saída Antecipada',
-          minutesToHHmm(somaSaidaAntMin),
-          fmtBRL(valorSaidaAntMes),
+          decimalHoursToHHmm(demonstrativo.descontoSaidaAntecipada.horas),
+          fmtBRL(Number(demonstrativo.descontoSaidaAntecipada.valor ?? 0)),
           { color: COLOR_RED },
         );
       } else {
@@ -541,9 +493,9 @@ export function gerarBufferPdfConferenciaPonto(
       }
       if (diasFaltados > 0) {
         linhaResumo(
-          `   Desconto Falta — ${diasFaltados} dia(s)`,
-          `${decimalHoursToHHmm(diasFaltados * jornadaHorasDia)}`,
-          fmtBRL(valorFaltaMes),
+          `   Desconto Falta — ${demonstrativo.descontoFalta.dias} dia(s)`,
+          `${decimalHoursToHHmm(demonstrativo.descontoFalta.horas)}`,
+          fmtBRL(Number(demonstrativo.descontoFalta.valor ?? 0)),
           { color: COLOR_RED },
         );
       } else {
@@ -553,12 +505,10 @@ export function gerarBufferPdfConferenciaPonto(
         });
       }
 
-      const minDescontos =
-        somaAtrasoMin + somaSaidaAntMin + Math.round(diasFaltados * jornadaHorasDia * 60);
       linhaResumo(
         '   Total a descontar (referência)',
-        minutesToHHmm(minDescontos),
-        fmtBRL(totalDescontosReferencia),
+        decimalHoursToHHmm(demonstrativo.totalDescontosRef.horas),
+        fmtBRL(Number(demonstrativo.totalDescontosRef.valor ?? 0)),
         { bold: true, color: COLOR_RED },
       );
 
@@ -622,22 +572,7 @@ export function gerarBufferPdfConferenciaPonto(
       y += 6;
 
       // ----- Totais finais -----
-      const creditosHoras =
-        folha.tipoContrato === 'AUTONOMO'
-          ? Number(folha.valores.valorHorasAutonomo ?? 0)
-          : Number(folha.valores.salarioBase ?? 0) +
-            (permitirHE
-              ? Number(folha.valores.valorHorasExtras50 ?? 0) +
-                Number(folha.valores.valorHorasExtras100 ?? 0) +
-                Number(folha.valores.valorHorasNoturnaAutonomo ?? 0)
-              : 0);
-
-      const totalBeneficios = Number(folha.valores.totalBeneficios ?? 0);
-      const acrescimosLanc = Number(folha.totaisLancamentos?.acrescimos ?? 0);
-      const subtracoesLanc = Number(folha.totaisLancamentos?.subtracoes ?? 0);
-
-      const totalAPagarPdf =
-        creditosHoras + totalBeneficios + acrescimosLanc - subtracoesLanc - totalDescontosReferencia;
+      const totalAPagarPdf = Number(demonstrativo.totalAPagar ?? 0);
 
       linhaResumo(
         'TOTAL A PAGAR (com lançamentos)',

@@ -86,7 +86,7 @@ const FERIADOS_FIXOS: string[] = [
   '11-02', // Finados
   '11-15', // Proclamação da República
   '12-25', // Natal
-  '06-11', // Aniversário de Itajaí (municipal)
+  '06-15', // Aniversário de Itajaí (municipal)
 ];
 
 /** Nome exibido em telas de RH (conferência de ponto, etc.) */
@@ -99,7 +99,7 @@ const NOME_FERIADO_FIXO: Record<string, string> = {
   '11-02': 'Finados',
   '11-15': 'Proclamação da República',
   '12-25': 'Natal',
-  '06-11': 'Aniversário de Itajaí',
+  '06-15': 'Aniversário de Itajaí',
 };
 
 /**
@@ -177,7 +177,28 @@ export function ehFeriado(ano: number, mes: number, dia: number): boolean {
   return moveis.includes(chave);
 }
 
+export type FeriadoOverrideLookup = {
+  ehFeriado: boolean;
+  nome?: string | null;
+};
+
 const NOMES_FERIADOS_MOVEIS = ['Carnaval', 'Sexta-feira Santa', 'Corpus Christi'] as const;
+
+/**
+ * Feriado efetivo considerando override manual do calendário (RH/admin).
+ * `overrides` keyed by `YYYY-MM-DD` (dia civil).
+ */
+export function ehFeriadoEfetivo(
+  ano: number,
+  mes: number,
+  dia: number,
+  overrides?: Map<string, FeriadoOverrideLookup> | null,
+): boolean {
+  const key = `${ano}-${pad2(mes)}-${pad2(dia)}`;
+  const ov = overrides?.get(key);
+  if (ov) return ov.ehFeriado;
+  return ehFeriado(ano, mes, dia);
+}
 
 /**
  * Nome do feriado para exibição (fixo ou móvel). Retorna null se não for feriado.
@@ -194,10 +215,34 @@ export function nomeFeriado(ano: number, mes: number, dia: number): string | nul
 }
 
 /**
+ * Nome efetivo com override (ex.: "Aniversário de Itajaí" movido manualmente).
+ */
+export function nomeFeriadoEfetivo(
+  ano: number,
+  mes: number,
+  dia: number,
+  overrides?: Map<string, FeriadoOverrideLookup> | null,
+): string | null {
+  const key = `${ano}-${pad2(mes)}-${pad2(dia)}`;
+  const ov = overrides?.get(key);
+  if (ov) {
+    if (!ov.ehFeriado) return null;
+    const nome = String(ov.nome ?? '').trim();
+    return nome || 'Feriado (ajuste manual)';
+  }
+  return nomeFeriado(ano, mes, dia);
+}
+
+/**
  * Verifica se uma data é domingo ou feriado (adicional de 100%).
  */
-export function ehDomingoOuFeriado(ano: number, mes: number, dia: number): boolean {
-  return diaSemanaCivil(ano, mes, dia) === 0 || ehFeriado(ano, mes, dia);
+export function ehDomingoOuFeriado(
+  ano: number,
+  mes: number,
+  dia: number,
+  overrides?: Map<string, FeriadoOverrideLookup> | null,
+): boolean {
+  return diaSemanaCivil(ano, mes, dia) === 0 || ehFeriadoEfetivo(ano, mes, dia, overrides);
 }
 
 // ============================================================================

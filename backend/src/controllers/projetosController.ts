@@ -10,6 +10,7 @@ import {
   type CamposPlanejamentoOsInput,
 } from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
+import { entrarNaFilaSeAplicavel } from '../services/vistoriaCelesc.service';
 
 /** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
 export const buscarProjetos = async (req: Request, res: Response): Promise<void> => {
@@ -251,7 +252,7 @@ export const getProjetoById = async (req: Request, res: Response): Promise<void>
 // Criar projeto
 export const createProjeto = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { orcamentoId, clienteId, titulo, descricao, tipo, responsavelId, dataInicio, dataPrevisao, horasEngenhariaOrcadas, diariasEquipeOrcadas, valorHoraEngenharia, valorDiariaEquipe } = req.body;
+    const { orcamentoId, clienteId, titulo, descricao, tipo, responsavelId, dataInicio, dataPrevisao, horasEngenhariaOrcadas, diariasEquipeOrcadas, valorHoraEngenharia, valorDiariaEquipe, exigeVistoriaCelesc } = req.body;
 
     console.log('🏗️ Criando projeto/obra com dados:', {
       orcamentoId,
@@ -370,6 +371,7 @@ export const createProjeto = async (req: Request, res: Response): Promise<void> 
       diariasEquipeOrcadas: diariasEquipeOrcadas != null ? Number(diariasEquipeOrcadas) : 0,
       valorHoraEngenharia: valorHoraEngenharia != null ? Number(valorHoraEngenharia) : null,
       valorDiariaEquipe: valorDiariaEquipe != null ? Number(valorDiariaEquipe) : null,
+      exigeVistoriaCelesc: Boolean(exigeVistoriaCelesc),
     });
 
     const projeto = await prisma.projeto.findUnique({
@@ -437,6 +439,7 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
       diariasEquipeOrcadas,
       valorHoraEngenharia,
       valorDiariaEquipe,
+      exigeVistoriaCelesc,
     } = req.body;
 
     const projetoExistente = await prisma.projeto.findUnique({
@@ -500,6 +503,22 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
     if (typeof justificativaSemObra !== 'undefined') {
       data.justificativaSemObra = justificativaSemObra || null;
     }
+    if (typeof exigeVistoriaCelesc !== 'undefined') {
+      data.exigeVistoriaCelesc = Boolean(exigeVistoriaCelesc);
+      if (data.exigeVistoriaCelesc && !projetoExistente.statusVistoria) {
+        // entrada na fila ocorre após update via entrarNaFilaSeAplicavel
+      }
+      if (!data.exigeVistoriaCelesc) {
+        // Mantém histórico; limpa apenas status ativo da fila se desligar a flag
+        if (
+          projetoExistente.statusVistoria &&
+          projetoExistente.statusVistoria !== 'VISTORIA_APROVADA'
+        ) {
+          data.statusVistoria = null;
+          data.dataProtocoloVistoria = null;
+        }
+      }
+    }
 
     if (!isConcluido) {
       if (horasEngenhariaOrcadas !== undefined) {
@@ -562,12 +581,25 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
       }
     });
 
+    if (Boolean(projeto.exigeVistoriaCelesc)) {
+      await entrarNaFilaSeAplicavel(id);
+    }
+
+    const projetoFinal = await prisma.projeto.findUnique({
+      where: { id },
+      include: {
+        cliente: { select: { id: true, nome: true } },
+        orcamento: { select: { id: true, precoVenda: true, numeroSequencial: true } },
+        responsavel: { select: { id: true, name: true } },
+      },
+    });
+
     res.json({
       success: true,
       data: {
-        ...projeto,
-        responsavel: projeto.responsavel
-          ? { id: projeto.responsavel.id, nome: projeto.responsavel.name }
+        ...(projetoFinal ?? projeto),
+        responsavel: (projetoFinal ?? projeto).responsavel
+          ? { id: (projetoFinal ?? projeto).responsavel!.id, nome: (projetoFinal ?? projeto).responsavel!.name }
           : null
       },
       message: 'Projeto atualizado com sucesso'
@@ -591,17 +623,24 @@ export const updateProjetoStatus = async (req: Request, res: Response): Promise<
     };
     const authUser = (req as AuthRequest).user;
 
-    if (!['PROPOSTA','VALIDADO','APROVADO','EXECUCAO','CONCLUIDO','CANCELADO'].includes(String(status))) {
-      res.status(400).json({ success: false, error: 'Status inválido. Use: PROPOSTA, VALIDADO, APROVADO, EXECUCAO, CONCLUIDO, CANCELADO' });
-      return;
+    if (!['PROPOSTA','APROVADO','EXECUCAO','CONCLUIDO','CANCELADO'].includes(String(status))) {
+      // VALIDADO ainda aceito por compatibilidade, mapeado como APROVADO
+      if (String(status) === 'VALIDADO') {
+        // fall through to map below
+      } else {
+        res.status(400).json({ success: false, error: 'Status inválido. Use: PROPOSTA (pendente), APROVADO, EXECUCAO, CONCLUIDO, CANCELADO' });
+        return;
+      }
     }
 
-    const atualizado = await projetosService.atualizarStatus(id, status as ProjetoStatus, {
+    const statusEfetivo = (String(status) === 'VALIDADO' ? 'APROVADO' : status) as ProjetoStatus;
+
+    const atualizado = await projetosService.atualizarStatus(id, statusEfetivo, {
       ignorarEstoque: Boolean(ignorarEstoque),
       userId: authUser?.userId,
     });
 
-    res.json({ success: true, data: atualizado, message: `Status atualizado para ${status}` });
+    res.json({ success: true, data: atualizado, message: `Status atualizado para ${statusEfetivo}` });
   } catch (error) {
     console.error('Erro ao atualizar status do projeto:', error);
     if (error instanceof EstoqueInsuficienteError) {
@@ -647,17 +686,17 @@ export const reverterProjetoStatus = async (req: Request, res: Response): Promis
       return;
     }
 
-    if (!['PROPOSTA', 'VALIDADO', 'APROVADO'].includes(String(status))) {
+    if (!['PROPOSTA', 'APROVADO'].includes(String(status))) {
       res.status(400).json({
         success: false,
-        error: 'Status de destino inválido. Use: PROPOSTA (pendente), VALIDADO ou APROVADO',
+        error: 'Status de destino inválido. Use: PROPOSTA (pendente) ou APROVADO',
       });
       return;
     }
 
     const atualizado = await projetosService.reverterStatus(
       id,
-      status as 'PROPOSTA' | 'VALIDADO' | 'APROVADO',
+      status as 'PROPOSTA' | 'APROVADO',
     );
 
     res.json({

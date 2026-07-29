@@ -31,7 +31,17 @@ import {
   visualizarDocumento,
   uploadDocumento
 } from '../controllers/projetoDocumentosController';
-import { getQualidade, putQualidade, aprovarInspecao } from '../controllers/qualidadeController';
+import {
+  getQualidade,
+  putQualidade,
+  aprovarInspecao,
+} from '../controllers/qualidadeController';
+import {
+  listarVistoriasCelesc,
+  protocolarVistoria,
+  reprovarVistoria,
+  aprovarVistoria,
+} from '../controllers/vistoriaCelescController';
 import {
   listarEngenharia,
   listarResumoTarefasEngenharia,
@@ -86,6 +96,12 @@ router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUs
 // Relatório global de cumprimento de estimativa de prazo (Admin/Dev)
 router.get('/relatorios/cumprimento-estimativa', getRelatorioCumprimentoEstimativa);
 router.get('/busca', buscarProjetos);
+
+/**
+ * @route GET /api/projetos/vistorias-celesc
+ * @desc Fila de vistorias CELESC (pendente protocolo, aguardando, reprovado)
+ */
+router.get('/vistorias-celesc', listarVistoriasCelesc);
 
 /**
  * @route GET /api/projetos/engenharia
@@ -160,6 +176,24 @@ router.put('/:id/status', updateProjetoStatus);
  * @desc Reverte status da OS (admin) — remove obra se necessário
  */
 router.put('/:id/reverter-status', reverterProjetoStatus);
+
+/**
+ * @route PATCH /api/projetos/:id/protocolar-vistoria
+ * @desc Confirma protocolo da vistoria CELESC
+ */
+router.patch('/:id/protocolar-vistoria', protocolarVistoria);
+
+/**
+ * @route POST /api/projetos/:id/reprovar-vistoria
+ * @desc Registra reprovação CELESC no histórico
+ */
+router.post('/:id/reprovar-vistoria', reprovarVistoria);
+
+/**
+ * @route PATCH /api/projetos/:id/aprovar-vistoria
+ * @desc Marca vistoria CELESC como aprovada
+ */
+router.patch('/:id/aprovar-vistoria', aprovarVistoria);
 
 /**
  * @route DELETE /api/projetos/:id

@@ -45,6 +45,7 @@ model User {
   apontamentosOsCriados    ApontamentoOs[]      @relation("ApontamentosOsCriados")
   apontamentosOsItens      ApontamentoOsItem[]
   contatoLeadsResponsavel  ContatoLead[]        @relation("ContatoLeadResponsavel")
+  historicoReprovacoesVistoria HistoricoReprovacaoVistoria[] @relation("HistoricoReprovacaoVistoriaCriadoPor")
 
   @@map("users")
 }
@@ -752,6 +753,13 @@ enum TipoRecursoApontamento {
   DIARIA_EQUIPE
 }
 
+enum StatusVistoriaCelesc {
+  PENDENTE_PROTOCOLO
+  AGUARDANDO_CELESC
+  REPROVADO
+  VISTORIA_APROVADA
+}
+
 model Projeto {
   id                   String        @id @default(uuid())
   orcamentoId          String        @unique
@@ -783,6 +791,10 @@ model Projeto {
   iniciadoSemEstoque       Boolean   @default(false)
   iniciadoSemEstoqueEm     DateTime?
   iniciadoSemEstoquePorId  String?
+  // Vistoria CELESC
+  exigeVistoriaCelesc      Boolean               @default(false)
+  statusVistoria           StatusVistoriaCelesc?
+  dataProtocoloVistoria    DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
@@ -803,8 +815,25 @@ model Projeto {
   reservasMaterial ReservaMaterialProjeto[]
   iniciadoSemEstoquePor User? @relation("OsInicioSemEstoque", fields: [iniciadoSemEstoquePorId], references: [id], onDelete: SetNull)
   apontamentos         ApontamentoOs[]
+  historicoReprovacoesVistoria HistoricoReprovacaoVistoria[]
 
   @@map("projetos")
+}
+
+model HistoricoReprovacaoVistoria {
+  id              String   @id @default(uuid())
+  projetoId       String
+  dataReprovacao  DateTime
+  motivos         String   @db.Text
+  itensReprovados Json // string[]
+  criadoEm        DateTime @default(now())
+  criadoPorId     String?
+
+  projeto   Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  criadoPor User?   @relation("HistoricoReprovacaoVistoriaCriadoPor", fields: [criadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([projetoId])
+  @@map("historico_reprovacao_vistoria")
 }
 
 model ApontamentoOs {
@@ -1375,6 +1404,8 @@ model ContaPagar {
   descontoFolhaReferenciaAno Int?
   descontoFolhaReferenciaMes Int?
   rhParcelamentoId String?
+  cartaoCreditoId String? // Quando meioPagamento = CARTAO_CREDITO
+  faturaCartaoId  String? // Vínculo com fatura consolidada do cartão
   descricao       String
   valorParcela    Float // Valor da parcela/despesa
   dataVencimento  DateTime
@@ -1397,6 +1428,8 @@ model ContaPagar {
   despesaFixa DespesaFixa? @relation(fields: [despesaFixaId], references: [id], onDelete: Cascade)
   rhParcelamento RhAdiantamentoParcelamento? @relation("RhParcelamentoVinculo", fields: [rhParcelamentoId], references: [id], onDelete: SetNull)
   parcelamentoOrigemRh RhAdiantamentoParcelamento[] @relation("RhParcelamentoContaOrigem")
+  cartaoCredito CartaoCredito? @relation(fields: [cartaoCreditoId], references: [id], onDelete: SetNull)
+  faturaCartao  FaturaCartao?  @relation(fields: [faturaCartaoId], references: [id], onDelete: SetNull)
 
   @@index([tipo])
   @@index([status])
@@ -1404,7 +1437,51 @@ model ContaPagar {
   @@index([funcionarioId])
   @@index([despesaFixaId])
   @@index([rhParcelamentoId])
+  @@index([cartaoCreditoId])
+  @@index([faturaCartaoId])
   @@map("contas_pagar")
+}
+
+// ============================================
+// CARTÃO DE CRÉDITO E FATURAS
+// ============================================
+
+model CartaoCredito {
+  id                  String   @id @default(uuid())
+  nomeOuBanco         String
+  bandeira            String
+  ultimosQuatroDigitos String
+  diaVencimento       Int // 1-31
+  diaFechamento       Int // 1-31
+  ativo               Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  faturas     FaturaCartao[]
+  contasPagar ContaPagar[]
+
+  @@map("cartoes_credito")
+}
+
+model FaturaCartao {
+  id              String    @id @default(uuid())
+  cartaoCreditoId String
+  mesCompetencia  Int // 1-12
+  anoCompetencia  Int
+  valorTotal      Float     @default(0)
+  status          String    @default("ABERTA") // ABERTA, FECHADA, PAGA
+  dataVencimento  DateTime
+  dataPagamento   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  cartaoCredito CartaoCredito @relation(fields: [cartaoCreditoId], references: [id], onDelete: Cascade)
+  contasPagar   ContaPagar[]
+
+  @@unique([cartaoCreditoId, mesCompetencia, anoCompetencia])
+  @@index([cartaoCreditoId])
+  @@index([status])
+  @@map("faturas_cartao")
 }
 
 // ============================================
@@ -2080,6 +2157,10 @@ model ComentarioConferenciaPontoRh {
   dataReferencia DateTime
   comentario     String?           @db.Text
   decisaoRh      StatusAprovacaoRh @default(PENDENTE)
+  /// Avaliação rápida A|B|D para atraso / saída antecipada / falta (não mistura com batidas brutas).
+  tratamentoDebito  String?
+  /// Avaliação rápida B|P para hora extra além da workshift.
+  tratamentoCredito String?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -2088,6 +2169,20 @@ model ComentarioConferenciaPontoRh {
   @@unique([funcionarioId, dataReferencia])
   @@index([funcionarioId, dataReferencia])
   @@map("comentarios_conferencia_ponto_rh")
+}
+
+/// Override manual de feriado no calendário civil (empresa). Contorna erro de data no calendário base.
+model FeriadoCalendarioOverride {
+  id             String   @id @default(uuid())
+  /// Dia civil em UTC meio-dia (mesmo padrão de RegistroPonto.dataReferencia)
+  dataReferencia DateTime @unique
+  ehFeriado      Boolean
+  /// Nome opcional quando ehFeriado=true
+  nome           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("feriado_calendario_overrides")
 }
 
 model CompensacaoHorasRh {

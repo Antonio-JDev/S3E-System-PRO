@@ -473,6 +473,10 @@ const DashboardView: React.FC = () => {
 
 // ==================== RH VIEW ====================
 const RHView: React.FC = () => {
+    const authRh = useAuth();
+    const podeEditarFeriado =
+        authRh.user?.role?.toLowerCase() === 'admin' ||
+        authRh.user?.role?.toLowerCase() === 'desenvolvedor';
     const [activeTab, setActiveTab] = useState<'funcionarios' | 'estoque'>('funcionarios');
     const [funcionarios, setFuncionarios] = useState<any[]>([]);
     const [metricas, setMetricas] = useState<{
@@ -544,6 +548,14 @@ const RHView: React.FC = () => {
     
     const [beneficios, setBeneficios] = useState<any[]>([]);
     const [workShifts, setWorkShifts] = useState<any[]>([]);
+    const [mostrarWorkShiftPersonalizada, setMostrarWorkShiftPersonalizada] = useState(false);
+    const [workShiftPersonalizadaBusy, setWorkShiftPersonalizadaBusy] = useState(false);
+    const [workShiftPersonalizadaForm, setWorkShiftPersonalizadaForm] = useState({
+        entrada1: '08:00',
+        saida1: '12:00',
+        entrada2: '13:00',
+        saida2: '17:00',
+    });
     const [beneficioEmEdicao, setBeneficioEmEdicao] = useState<any | null>(null);
     const [beneficioForm, setBeneficioForm] = useState({ nome: '', valorPadrao: '', ativo: true });
 
@@ -583,6 +595,8 @@ const RHView: React.FC = () => {
         Record<number, { comentario: string; decisaoRh: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' }>
     >({});
     const [salvandoComentarioRhDia, setSalvandoComentarioRhDia] = useState<number | null>(null);
+    const [salvandoAvaliacaoRhDia, setSalvandoAvaliacaoRhDia] = useState<number | null>(null);
+    const [salvandoFeriadoDia, setSalvandoFeriadoDia] = useState<number | null>(null);
     const [faltaJustificadaModal, setFaltaJustificadaModal] = useState<{
         dia: number;
         modo: 'criar' | 'editar';
@@ -990,6 +1004,80 @@ const RHView: React.FC = () => {
             toast.error('Erro ao salvar comentário RH');
         } finally {
             setSalvandoComentarioRhDia(null);
+        }
+    };
+
+    const handleAvaliacaoRhDia = async (
+        dia: number,
+        botao: 'A' | 'B' | 'P' | 'D',
+        opts?: { temDebito?: boolean; temCredito?: boolean },
+    ) => {
+        if (!funcionarioFolha?.id || !folhaDetalhada?.referencia) return;
+        setSalvandoAvaliacaoRhDia(dia);
+        try {
+            const r = await rhService.salvarAvaliacaoDia({
+                funcionarioId: funcionarioFolha.id,
+                referenciaAno: folhaDetalhada.referencia.ano,
+                referenciaMes: folhaDetalhada.referencia.mes,
+                dia,
+                botao,
+                temDebito: opts?.temDebito,
+                temCredito: opts?.temCredito,
+            });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao salvar avaliação',
+                );
+                return;
+            }
+            const labels: Record<string, string> = {
+                A: 'Abonado',
+                B: 'Banco de horas',
+                P: 'Pagar HE',
+                D: 'Descontar',
+            };
+            toast.success(`Avaliação: ${labels[botao]}`);
+            await recarregarFolhaAberta();
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao salvar avaliação RH');
+        } finally {
+            setSalvandoAvaliacaoRhDia(null);
+        }
+    };
+
+    const handleToggleFeriadoDia = async (dia: number, tornarFeriado: boolean) => {
+        if (!folhaDetalhada?.referencia || !podeEditarFeriado) return;
+        setSalvandoFeriadoDia(dia);
+        try {
+            const r = await rhService.salvarFeriadoOverride({
+                referenciaAno: folhaDetalhada.referencia.ano,
+                referenciaMes: folhaDetalhada.referencia.mes,
+                dia,
+                ehFeriado: tornarFeriado,
+                nome: tornarFeriado ? 'Feriado (ajuste manual)' : null,
+            });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao alterar feriado',
+                );
+                return;
+            }
+            toast.success(
+                tornarFeriado
+                    ? `Dia ${String(dia).padStart(2, '0')} marcado como feriado`
+                    : `Dia ${String(dia).padStart(2, '0')} marcado como dia útil (não é feriado)`,
+            );
+            await recarregarFolhaAberta();
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao alterar feriado do dia');
+        } finally {
+            setSalvandoFeriadoDia(null);
         }
     };
 
@@ -2015,7 +2103,7 @@ const RHView: React.FC = () => {
                 const rawFds = String(funcionarioForm.valorHoraFimDeSemana ?? '').trim();
                 const vFds = rawFds === '' ? null : parseFloat(rawFds.replace(',', '.'));
                 const tol = parseInt(String(funcionarioForm.toleranciaMinutos ?? '5'), 10);
-                await rhService.salvarConfigPonto(funcionarioId, {
+                const cfgResp = await rhService.salvarConfigPonto(funcionarioId, {
                     trabalhaFimDeSemana: funcionarioForm.trabalhaFimDeSemana,
                     valorHoraFimDeSemana:
                         vFds !== null && Number.isFinite(vFds) ? vFds : null,
@@ -2029,6 +2117,24 @@ const RHView: React.FC = () => {
                             ? String(funcionarioForm.inicioNoturno)
                             : null,
                 });
+                const nRecalc = Number(
+                    (cfgResp?.data as { recalculo?: { registrosAtualizados?: number } | null } | null)?.recalculo
+                        ?.registrosAtualizados ?? 0,
+                );
+                if (nRecalc > 0) {
+                    toast.success(
+                        editandoFuncionario
+                            ? 'Funcionário atualizado com sucesso!'
+                            : 'Funcionário cadastrado com sucesso!',
+                        {
+                            description: `${nRecalc} dia(s) de ponto recalculados com a jornada (atraso, saída e extras).`,
+                            duration: 4500,
+                        },
+                    );
+                    handleFecharModal();
+                    carregarDados();
+                    return;
+                }
             }
 
             toast.success(
@@ -2160,22 +2266,22 @@ const RHView: React.FC = () => {
                 <>
                     {/* Métricas RH */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-blue-700">Folha de Pagamento</p>
-                            <p className="text-2xl font-bold text-blue-900">
+                        <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Folha de Pagamento</p>
+                            <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                                 R$ {(metricas.folhaPagamento || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
-                            <p className="text-xs text-blue-600 mt-1">Mensal</p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400/80 mt-1">Mensal</p>
                         </div>
-                        <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-green-700">Vales do Mês</p>
-                            <p className="text-2xl font-bold text-green-900">
+                        <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-green-700 dark:text-green-400">Vales do Mês</p>
+                            <p className="text-2xl font-bold text-green-900 dark:text-green-300">
                                 R$ {(metricas.valesMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
-                        <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                            <p className="text-sm font-medium text-purple-700">Custo Total</p>
-                            <p className="text-2xl font-bold text-purple-900">
+                        <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                            <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Custo Total</p>
+                            <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">
                                 R$ {(metricas.custoTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </p>
                         </div>
@@ -2343,56 +2449,63 @@ const RHView: React.FC = () => {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                            <div className="flex items-center justify-center gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => handleVerDadosColaborador(func)}
-                                                    className="text-indigo-600 hover:text-indigo-800 font-medium text-sm flex items-center gap-1"
+                                                    className="p-2 bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/70 transition-colors"
+                                                    title="Ver dados"
+                                                    aria-label="Ver dados"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                     </svg>
-                                                    Ver dados
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleAbrirHistoricoPagamentos(func)}
-                                                    className="text-amber-600 hover:text-amber-800 font-medium text-sm flex items-center gap-1"
+                                                    className="p-2 bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/70 transition-colors"
+                                                    title="Histórico"
+                                                    aria-label="Histórico"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                     </svg>
-                                                    Histórico
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleDetalharFolha(func)}
-                                                    className="text-emerald-600 hover:text-emerald-800 font-medium text-sm flex items-center gap-1"
+                                                    className="p-2 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-lg hover:bg-emerald-200 dark:hover:bg-emerald-900/70 transition-colors"
+                                                    title="Detalhar Folha"
+                                                    aria-label="Detalhar Folha"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h4l2 2h10a1 1 0 011 1v2H3V4z" />
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9h18v8a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" />
                                                     </svg>
-                                                    Detalhar Folha
                                                 </button>
-                                                <button 
+                                                <button
+                                                    type="button"
                                                     onClick={() => handleAbrirModalEdicao(func)}
-                                                    className="text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center gap-1"
+                                                    className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors"
+                                                    title="Editar"
+                                                    aria-label="Editar"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                     </svg>
-                                                    Editar
                                                 </button>
-                                                <button 
+                                                <button
+                                                    type="button"
                                                     onClick={() => handleDeletarFuncionario(func.id, func.nome)}
-                                                    className="text-red-600 hover:text-red-800 font-medium text-sm flex items-center gap-1"
+                                                    className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/70 transition-colors"
+                                                    title="Deletar"
+                                                    aria-label="Deletar"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                                     </svg>
-                                                    Deletar
                                                 </button>
                                             </div>
                                         </td>
@@ -2892,8 +3005,23 @@ const RHView: React.FC = () => {
                             placeholder="Horas acumuladas"
                           />
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Jornada padrão (WorkShift)</label>
+                        <div className="md:col-span-2">
+                          <div className="flex items-end gap-2 mb-1">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 flex-1">
+                              Jornada padrão (WorkShift)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setMostrarWorkShiftPersonalizada((v) => !v)}
+                              className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                                mostrarWorkShiftPersonalizada
+                                  ? 'bg-indigo-600 text-white border-indigo-700'
+                                  : 'bg-white dark:bg-dark-card text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'
+                              }`}
+                            >
+                              Personalizadas
+                            </button>
+                          </div>
                           <select
                             value={funcionarioForm.workShiftId}
                             onChange={(e) => {
@@ -2923,6 +3051,178 @@ const RHView: React.FC = () => {
                               </option>
                             ))}
                           </select>
+                          {mostrarWorkShiftPersonalizada && (
+                            <div className="mt-2 rounded-lg border border-indigo-200 dark:border-indigo-800/50 bg-indigo-50/60 dark:bg-indigo-950/20 p-3 space-y-2">
+                              <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">
+                                Criar jornada personalizada
+                              </p>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-gray-600 dark:text-gray-400 mb-0.5">Entrada</label>
+                                  <input
+                                    type="time"
+                                    value={workShiftPersonalizadaForm.entrada1}
+                                    onChange={(e) =>
+                                      setWorkShiftPersonalizadaForm((prev) => ({
+                                        ...prev,
+                                        entrada1: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-600 dark:text-gray-400 mb-0.5">Almoço</label>
+                                  <input
+                                    type="time"
+                                    value={workShiftPersonalizadaForm.saida1}
+                                    onChange={(e) =>
+                                      setWorkShiftPersonalizadaForm((prev) => ({
+                                        ...prev,
+                                        saida1: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-600 dark:text-gray-400 mb-0.5">Volta almoço</label>
+                                  <input
+                                    type="time"
+                                    value={workShiftPersonalizadaForm.entrada2}
+                                    onChange={(e) =>
+                                      setWorkShiftPersonalizadaForm((prev) => ({
+                                        ...prev,
+                                        entrada2: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-600 dark:text-gray-400 mb-0.5">Saída</label>
+                                  <input
+                                    type="time"
+                                    value={workShiftPersonalizadaForm.saida2}
+                                    onChange={(e) =>
+                                      setWorkShiftPersonalizadaForm((prev) => ({
+                                        ...prev,
+                                        saida2: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-2 py-1.5 border border-gray-300 dark:border-dark-border rounded-lg text-xs bg-white dark:bg-dark-card"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  disabled={workShiftPersonalizadaBusy}
+                                  onClick={async () => {
+                                    setWorkShiftPersonalizadaBusy(true);
+                                    try {
+                                      const resp = await rhService.criarWorkShiftPersonalizada({
+                                        entrada1: workShiftPersonalizadaForm.entrada1,
+                                        saida1: workShiftPersonalizadaForm.saida1,
+                                        entrada2: workShiftPersonalizadaForm.entrada2,
+                                        saida2: workShiftPersonalizadaForm.saida2,
+                                      });
+                                      if (!resp?.success || !resp?.data) {
+                                        toast.error(
+                                          typeof (resp as { message?: string })?.message === 'string'
+                                            ? (resp as { message: string }).message
+                                            : 'Erro ao criar jornada personalizada',
+                                        );
+                                        return;
+                                      }
+                                      const criada = resp.data as {
+                                        id: string;
+                                        nome: string;
+                                        entrada1: string;
+                                        saida1: string;
+                                        entrada2: string;
+                                        saida2: string;
+                                      };
+                                      setWorkShifts((prev) => {
+                                        if (prev.some((s) => String(s.id) === String(criada.id))) return prev;
+                                        return [...prev, criada].sort((a, b) =>
+                                          String(a.nome).localeCompare(String(b.nome), 'pt-BR'),
+                                        );
+                                      });
+                                      const minutosDia =
+                                        (() => {
+                                          const toMin = (hhmm: string) => {
+                                            const m = String(hhmm).match(/^(\d{1,2}):(\d{2})$/);
+                                            if (!m) return 0;
+                                            return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+                                          };
+                                          return (
+                                            Math.max(0, toMin(criada.saida1) - toMin(criada.entrada1)) +
+                                            Math.max(0, toMin(criada.saida2) - toMin(criada.entrada2))
+                                          );
+                                        })();
+                                      const horasSemana = Math.round((minutosDia * 5) / 60);
+                                      setFuncionarioForm((prev) => ({
+                                        ...prev,
+                                        workShiftId: criada.id,
+                                        ...(horasSemana <= 40 && prev.tipoContrato !== 'AUTONOMO'
+                                          ? { cargaHorariaMensal: '160' }
+                                          : null),
+                                      }));
+
+                                      // Se já está editando colaborador com batidas importadas:
+                                      // vincula a jornada e recalcula atraso/saída/HE dinâmicos.
+                                      let recalculoMsg = '';
+                                      if (editandoFuncionario) {
+                                        const rawFds = String(funcionarioForm.valorHoraFimDeSemana ?? '').trim();
+                                        const vFds = rawFds === '' ? null : parseFloat(rawFds.replace(',', '.'));
+                                        const tol = parseInt(String(funcionarioForm.toleranciaMinutos ?? '5'), 10);
+                                        const cfgResp = await rhService.salvarConfigPonto(editandoFuncionario, {
+                                          trabalhaFimDeSemana: funcionarioForm.trabalhaFimDeSemana,
+                                          valorHoraFimDeSemana:
+                                            vFds !== null && Number.isFinite(vFds) ? vFds : null,
+                                          workShiftId: criada.id,
+                                          toleranciaMinutos: Number.isFinite(tol) ? tol : 5,
+                                          inicioNoturno:
+                                            funcionarioForm.inicioNoturno &&
+                                            String(funcionarioForm.inicioNoturno).trim() !== ''
+                                              ? String(funcionarioForm.inicioNoturno)
+                                              : null,
+                                        });
+                                        const recalculo = (cfgResp?.data as {
+                                          recalculo?: {
+                                            registrosAtualizados?: number;
+                                            registrosIgnoradosSemBatidas?: number;
+                                          } | null;
+                                        } | null)?.recalculo;
+                                        const n = Number(recalculo?.registrosAtualizados ?? 0);
+                                        if (n > 0) {
+                                          recalculoMsg = ` · ${n} dia(s) de ponto recalculados (atraso, saída e extras)`;
+                                        } else if (cfgResp?.success) {
+                                          recalculoMsg =
+                                            ' · jornada vinculada (sem batidas importadas para recalcular)';
+                                        }
+                                      }
+
+                                      setMostrarWorkShiftPersonalizada(false);
+                                      toast.success(`Jornada criada: ${criada.nome}${recalculoMsg}`);
+                                    } catch (err) {
+                                      console.error(err);
+                                      toast.error('Erro ao criar jornada personalizada');
+                                    } finally {
+                                      setWorkShiftPersonalizadaBusy(false);
+                                    }
+                                  }}
+                                  className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-60"
+                                >
+                                  {workShiftPersonalizadaBusy ? 'Salvando…' : 'Salvar jornada'}
+                                </button>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                  Cria a jornada, vincula ao colaborador e recalcula batidas já importadas.
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-600 mb-1">Tolerância (minutos)</label>
@@ -3376,317 +3676,134 @@ const RHView: React.FC = () => {
                                 <p className="text-sm text-gray-500 dark:text-gray-400">Carregando detalhes da folha...</p>
                             ) : (
                                 <>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Horas normais:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.horas.normais)}</span>{' '}
-                                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                    ({folhaDetalhada.horas.normais.toFixed(2)} h)
-                                                </span>
-                                            </p>
-                                            {folhaDetalhada.tipoContrato === 'AUTONOMO' &&
-                                                folhaDetalhada.autonomo?.modo === 'por_hora' && (
-                                                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 leading-snug">
-                                                        Auditoria: horas em jornada/sábado registradas no ponto. O valor base do mês usa{' '}
-                                                        <strong>diária × dias úteis</strong> (seg–sex, exceto feriados), não esta quantidade ×
-                                                        valor hora.
-                                                    </p>
-                                                )}
+                                    <div className="space-y-3 text-sm">
+                                        <div className="rounded-lg border border-gray-200 dark:border-dark-border p-3 space-y-2">
+                                            <p className="font-semibold text-gray-700 dark:text-gray-300">Demonstrativo de Horas e Valores</p>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                {(
+                                                    [
+                                                        {
+                                                            label: 'Horas Normais (dias úteis)',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.horasNormais?.horas ?? 0))} → ${Number(folhaDetalhada.horasNormais?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Horas Extras (50%) — Seg-Sex',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.horasExtrasSegSex50?.horas ?? 0))} → ${Number(folhaDetalhada.horasExtrasSegSex50?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Horas Extras (50%) — Sábado',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.horasExtrasSabado50?.horas ?? 0))} → ${Number(folhaDetalhada.horasExtrasSabado50?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Horas Extras (100%) — Domingo e feriados',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.horasExtras100?.horas ?? 0))} → ${Number(folhaDetalhada.horasExtras100?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Horas Noturnas (+20%)',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.horasNoturnas20?.horas ?? 0))} → ${Number(folhaDetalhada.horasNoturnas20?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Total de Horas do Mês',
+                                                            valor: decimalHoursToHHmm(
+                                                                Number(
+                                                                    folhaDetalhada.totalHorasMes?.horas ??
+                                                                        folhaDetalhada.resumoPonto?.horasTrabalhadas ??
+                                                                        folhaDetalhada.horas?.total ??
+                                                                        0,
+                                                                ),
+                                                            ),
+                                                            destaque: true,
+                                                        },
+                                                    ] as const
+                                                ).map((item) => (
+                                                    <div
+                                                        key={item.label}
+                                                        className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${
+                                                            item.destaque
+                                                                ? 'border-emerald-300 bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/30 md:col-span-2'
+                                                                : 'border-gray-200 bg-white dark:border-dark-border dark:bg-dark-card'
+                                                        }`}
+                                                    >
+                                                        <span
+                                                            className={`min-w-0 text-gray-700 dark:text-gray-300 ${
+                                                                item.destaque ? 'font-semibold' : ''
+                                                            }`}
+                                                        >
+                                                            {item.label}
+                                                        </span>
+                                                        <span
+                                                            className={`shrink-0 font-mono text-gray-900 dark:text-gray-100 ${
+                                                                item.destaque ? 'font-semibold' : ''
+                                                            }`}
+                                                        >
+                                                            {item.valor}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Horas extras 50%:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.horas.extras50)}</span>{' '}
-                                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                    ({folhaDetalhada.horas.extras50.toFixed(2)} h)
-                                                </span>
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Horas extras 100%:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.horas.extras100)}</span>{' '}
-                                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                    ({folhaDetalhada.horas.extras100.toFixed(2)} h)
-                                                </span>
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Horas fim de semana:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.horas.fimDeSemana)}</span>{' '}
-                                                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                                                    ({folhaDetalhada.horas.fimDeSemana.toFixed(2)} h)
-                                                </span>
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Salário base:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                {Number(folhaDetalhada.valores.salarioBase).toLocaleString('pt-BR', {
-                                                    style: 'currency',
-                                                    currency: 'BRL',
-                                                })}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span className="font-semibold text-gray-600 dark:text-gray-400">Valor hora base:</span>
-                                            <p className="text-gray-900 dark:text-gray-100">
-                                                {Number(folhaDetalhada.valores.valorHoraBase).toLocaleString('pt-BR', {
-                                                    style: 'currency',
-                                                    currency: 'BRL',
-                                                })}
-                                            </p>
+                                        <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3 space-y-2">
+                                            <p className="font-semibold text-gray-700 dark:text-gray-300">Descontos Automáticos (referência - ponto)</p>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                {(
+                                                    [
+                                                        {
+                                                            label: 'Desconto Atraso',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.descontoAtraso?.horas ?? 0))} → ${Number(folhaDetalhada.descontoAtraso?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Desconto Saída Antecipada',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.descontoSaidaAntecipada?.horas ?? 0))} → ${Number(folhaDetalhada.descontoSaidaAntecipada?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Desconto Falta',
+                                                            valor: `${Number(folhaDetalhada.descontoFalta?.dias ?? 0)} dia(s) / ${decimalHoursToHHmm(Number(folhaDetalhada.descontoFalta?.horas ?? 0))} → ${Number(folhaDetalhada.descontoFalta?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: false,
+                                                        },
+                                                        {
+                                                            label: 'Total a Descontar (referência)',
+                                                            valor: `${decimalHoursToHHmm(Number(folhaDetalhada.totalDescontosRef?.horas ?? 0))} → ${Number(folhaDetalhada.totalDescontosRef?.valor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`,
+                                                            destaque: true,
+                                                        },
+                                                    ] as const
+                                                ).map((item) => (
+                                                    <div
+                                                        key={item.label}
+                                                        className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2 ${
+                                                            item.destaque
+                                                                ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40 md:col-span-2'
+                                                                : 'border-red-200/80 bg-white dark:border-red-900/50 dark:bg-dark-card'
+                                                        }`}
+                                                    >
+                                                        <span
+                                                            className={`min-w-0 ${
+                                                                item.destaque
+                                                                    ? 'font-semibold text-red-700 dark:text-red-300'
+                                                                    : 'text-gray-700 dark:text-gray-300'
+                                                            }`}
+                                                        >
+                                                            {item.label}
+                                                        </span>
+                                                        <span
+                                                            className={`shrink-0 font-mono text-red-700 dark:text-red-300 ${
+                                                                item.destaque ? 'font-semibold' : ''
+                                                            }`}
+                                                        >
+                                                            {item.valor}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="border-t border-gray-200 dark:border-dark-border pt-4 space-y-2 text-sm">
-                                        <p className="font-semibold text-gray-700 dark:text-gray-300">Resumo de valores</p>
-                                        {folhaDetalhada.tipoContrato === 'AUTONOMO' &&
-                                        folhaDetalhada.autonomo?.modo === 'por_hora' ? (
-                                            <>
-                                                <p className="flex justify-between">
-                                                    <span className="text-gray-600 dark:text-gray-400">
-                                                        Diárias (dias úteis com ponto, exceto feriado)
-                                                    </span>
-                                                    <span className="text-gray-900 dark:text-gray-100">
-                                                        {folhaDetalhada.autonomo.diasUteisComRegistro} ×{' '}
-                                                        {Number(folhaDetalhada.autonomo.valorDiaria).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}{' '}
-                                                        ={' '}
-                                                        {Number(folhaDetalhada.autonomo.subtotalDiarias).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                {(Number(folhaDetalhada.autonomo.subtotalSabado ?? 0) > 0 ||
-                                                    (folhaDetalhada.autonomo.horasSabado ?? 0) > 0) && (
-                                                    <p className="flex justify-between">
-                                                        <span className="text-gray-600 dark:text-gray-400">Sábado (hora normal)</span>
-                                                        <span className="text-gray-900 dark:text-gray-100">
-                                                            {(folhaDetalhada.autonomo.horasSabado ?? 0).toFixed(2)} h →{' '}
-                                                            {Number(folhaDetalhada.autonomo.subtotalSabado ?? 0).toLocaleString('pt-BR', {
-                                                                style: 'currency',
-                                                                currency: 'BRL',
-                                                            })}
-                                                        </span>
-                                                    </p>
-                                                )}
-                                                <p className="flex justify-between font-medium border-b border-gray-100 dark:border-dark-border pb-2">
-                                                    <span className="text-gray-700 dark:text-gray-300">Total base (diárias + sábado)</span>
-                                                    <span className="text-gray-900 dark:text-gray-100">
-                                                        {Number(folhaDetalhada.valores.valorHorasNormais).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                                                    Acréscimos por HE 50%, noturna e domingo/feriado aparecem na caixa &quot;Acréscimos
-                                                    automáticos&quot; abaixo, somados ao total a pagar.
-                                                </p>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <p className="flex justify-between">
-                                                    <span className="text-gray-600 dark:text-gray-400">Horas normais</span>
-                                                    <span className="text-gray-900 dark:text-gray-100">
-                                                        {Number(folhaDetalhada.valores.valorHorasNormais).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                <p className="flex justify-between">
-                                                    <span className="text-gray-600 dark:text-gray-400">Horas extras 50%</span>
-                                                    <span className="text-gray-900 dark:text-gray-100">
-                                                        {Number(folhaDetalhada.valores.valorHorasExtras50).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                <p className="flex justify-between">
-                                                    <span className="text-gray-600 dark:text-gray-400">Horas extras 100%</span>
-                                                    <span className="text-gray-900 dark:text-gray-100">
-                                                        {Number(folhaDetalhada.valores.valorHorasExtras100).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                {folhaDetalhada.valores.valorHorasNoturnaAutonomo != null &&
-                                                    folhaDetalhada.valores.valorHorasNoturnaAutonomo > 0 && (
-                                                        <p className="flex justify-between">
-                                                            <span className="text-gray-600 dark:text-gray-400">Hora noturna (autônomo)</span>
-                                                            <span className="text-gray-900 dark:text-gray-100">
-                                                                {Number(folhaDetalhada.valores.valorHorasNoturnaAutonomo).toLocaleString(
-                                                                    'pt-BR',
-                                                                    {
-                                                                        style: 'currency',
-                                                                        currency: 'BRL',
-                                                                    },
-                                                                )}
-                                                            </span>
-                                                        </p>
-                                                    )}
-                                            </>
-                                        )}
-                                        {folhaDetalhada.autonomo && folhaDetalhada.autonomo.modo === 'legacy' && (
-                                            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3 space-y-1 text-xs">
-                                                <p className="font-semibold text-emerald-900 dark:text-emerald-200">Autônomo — diárias + fim de semana (legado)</p>
-                                                <p className="flex justify-between">
-                                                    <span>Dias úteis com ponto × diária</span>
-                                                    <span>
-                                                        {folhaDetalhada.autonomo.diasUteisComRegistro} ×{' '}
-                                                        {Number(folhaDetalhada.autonomo.valorDiaria).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}{' '}
-                                                        ={' '}
-                                                        {Number(folhaDetalhada.autonomo.subtotalDiarias).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                                <p className="flex justify-between">
-                                                    <span>Horas FDS × valor hora FDS</span>
-                                                    <span>
-                                                        {folhaDetalhada.horas.fimDeSemana.toFixed(2)} h ×{' '}
-                                                        {Number(folhaDetalhada.autonomo.valorHoraFimDeSemana).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}{' '}
-                                                        ={' '}
-                                                        {Number(folhaDetalhada.autonomo.subtotalFimDeSemana).toLocaleString('pt-BR', {
-                                                            style: 'currency',
-                                                            currency: 'BRL',
-                                                        })}
-                                                    </span>
-                                                </p>
-                                            </div>
-                                        )}
-                                        {folhaDetalhada.autonomo && folhaDetalhada.autonomo.modo === 'por_hora' && (
-                                            <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 p-3 space-y-2 text-xs">
-                                                <p className="font-semibold text-emerald-900 dark:text-emerald-200">
-                                                    Autônomo — auditoria de horas (ponto)
-                                                </p>
-                                                <p className="flex justify-between gap-2">
-                                                    <span className="text-emerald-800/90 dark:text-emerald-200/90">
-                                                        Horas em jornada 8h–17h30 (seg–sex, exceto feriado)
-                                                    </span>
-                                                    <span className="font-mono shrink-0">
-                                                        {decimalHoursToHHmm(folhaDetalhada.autonomo.horasNormaisJornadaAuditoria ?? 0)}
-                                                        <span className="text-[10px] text-emerald-700/70 dark:text-emerald-300/70 ml-1">
-                                                            ({(folhaDetalhada.autonomo.horasNormaisJornadaAuditoria ?? 0).toFixed(2)} h)
-                                                        </span>
-                                                    </span>
-                                                </p>
-                                                {(folhaDetalhada.autonomo.horasSabado ?? 0) > 0 && (
-                                                    <p className="flex justify-between gap-2">
-                                                        <span className="text-emerald-800/90 dark:text-emerald-200/90">
-                                                            Horas em sábado (pagas por valor hora normal)
-                                                        </span>
-                                                        <span className="font-mono shrink-0">
-                                                            {decimalHoursToHHmm(folhaDetalhada.autonomo.horasSabado ?? 0)}
-                                                            <span className="text-[10px] text-emerald-700/70 dark:text-emerald-300/70 ml-1">
-                                                                ({(folhaDetalhada.autonomo.horasSabado ?? 0).toFixed(2)} h)
-                                                            </span>
-                                                        </span>
-                                                    </p>
-                                                )}
-                                                <p className="text-[10px] text-emerald-800/80 dark:text-emerald-300/80 border-t border-emerald-200/60 dark:border-emerald-800/40 pt-2">
-                                                    Soma para conferência (jornada + sábado):{' '}
-                                                    <strong>{decimalHoursToHHmm(folhaDetalhada.autonomo.horasHoraNormal ?? 0)}</strong>{' '}
-                                                    ({(folhaDetalhada.autonomo.horasHoraNormal ?? 0).toFixed(2)} h) — alinhada ao quadro
-                                                    &quot;Horas normais&quot; acima.
-                                                </p>
-                                            </div>
-                                        )}
-                                        {folhaDetalhada.registrado && (
-                                            <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2 text-xs">
-                                                <p className="font-semibold text-blue-900 dark:text-blue-200">CLT — salário fixo + banco de horas</p>
-                                                <p>
-                                                    Carga mensal: {folhaDetalhada.registrado.cargaHorariaMensal} h · Trabalhadas:{' '}
-                                                    <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.registrado.horasTrabalhadasNoMes)}</span>{' '}
-                                                    ({folhaDetalhada.registrado.horasTrabalhadasNoMes.toFixed(2)} h) · Excedente total p/ banco:{' '}
-                                                    <span className="font-mono">{decimalHoursToHHmm(folhaDetalhada.registrado.horasExcedentesParaBanco)}</span>{' '}
-                                                    ({folhaDetalhada.registrado.horasExcedentesParaBanco.toFixed(2)} h)
-                                                </p>
-                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-md bg-white/60 dark:bg-dark-card/30 p-2 border border-blue-100/80 dark:border-blue-900/40">
-                                                    <div>
-                                                        <span className="text-[10px] font-semibold text-blue-800/90 dark:text-blue-200">
-                                                            Excedente (jornada / não 100%)
-                                                        </span>
-                                                        <p className="font-mono font-semibold text-gray-900 dark:text-gray-100">
-                                                            {decimalHoursToHHmm(
-                                                                Number(folhaDetalhada.registrado.horasExcedentesNormaisCompetencia ?? 0),
-                                                            )}
-                                                            <span className="block text-[10px] font-normal text-gray-500 dark:text-gray-400">
-                                                                ({Number(
-                                                                    folhaDetalhada.registrado.horasExcedentesNormaisCompetencia ?? 0,
-                                                                ).toFixed(2)}{' '}
-                                                                h)
-                                                            </span>
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <span className="text-[10px] font-semibold text-blue-800/90 dark:text-blue-200">
-                                                            Excedente HE 100%
-                                                        </span>
-                                                        <p className="font-mono font-semibold text-gray-900 dark:text-gray-100">
-                                                            {decimalHoursToHHmm(
-                                                                Number(folhaDetalhada.registrado.horasExcedentesExtras100Competencia ?? 0),
-                                                            )}
-                                                            <span className="block text-[10px] font-normal text-gray-500 dark:text-gray-400">
-                                                                ({Number(
-                                                                    folhaDetalhada.registrado.horasExcedentesExtras100Competencia ?? 0,
-                                                                ).toFixed(2)}{' '}
-                                                                h)
-                                                            </span>
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <span className="text-[10px] font-semibold text-blue-800/90 dark:text-blue-200">
-                                                            Saldo no cadastro (total)
-                                                        </span>
-                                                        <p className="font-mono font-semibold text-gray-900 dark:text-gray-100">
-                                                            {decimalHoursToHHmm(Number(folhaDetalhada.registrado.saldoBancoHorasAtual))}{' '}
-                                                            <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400">
-                                                                ({Number(folhaDetalhada.registrado.saldoBancoHorasAtual).toFixed(2)} h)
-                                                            </span>
-                                                            <span className="block text-[10px] font-normal text-gray-500 dark:text-gray-400 mt-0.5">
-                                                                Normais:{' '}
-                                                                {decimalHoursToHHmm(
-                                                                    Number(folhaDetalhada.registrado.saldoBancoHorasNormaisAtual ?? 0),
-                                                                )}{' '}
-                                                                · 100%:{' '}
-                                                                {decimalHoursToHHmm(
-                                                                    Number(folhaDetalhada.registrado.saldoBancoHorasExtras100Atual ?? 0),
-                                                                )}
-                                                            </span>
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                {Math.abs(
-                                                    Number(folhaDetalhada.registrado.saldoBancoHorasProjetado) -
-                                                        Number(folhaDetalhada.registrado.saldoBancoHorasAtual),
-                                                ) > 0.01 && (
-                                                    <p className="text-gray-600 dark:text-gray-400">
-                                                        Projetado (legado):{' '}
-                                                        {Number(folhaDetalhada.registrado.saldoBancoHorasProjetado).toFixed(2)} h
-                                                    </p>
-                                                )}
-                                                <p className="text-gray-600 dark:text-gray-400">
-                                                    O total a pagar usa salário fixo + benefícios. A exibição separa jornada e HE 100% só para conferência;
-                                                    folga ou pagamento dependem das ações no modal &quot;Dados do colaborador&quot;, não desta tela.
-                                                </p>
-                                            </div>
-                                        )}
                                         {folhaDetalhada.totaisLancamentos &&
                                             (folhaDetalhada.totaisLancamentos.subtracoes > 0 ||
                                                 folhaDetalhada.totaisLancamentos.acrescimos > 0) && (
@@ -3928,7 +4045,7 @@ const RHView: React.FC = () => {
                                         <p className="flex justify-between text-base font-semibold border-t border-gray-200 dark:border-dark-border pt-2 mt-1">
                                             <span className="text-gray-800 dark:text-gray-200">Total a pagar</span>
                                             <span className="text-emerald-600 dark:text-emerald-400">
-                                                {Number(folhaDetalhada.valores.totalAPagar).toLocaleString('pt-BR', {
+                                                {Number(folhaDetalhada.totalAPagar ?? folhaDetalhada.valores.totalAPagar).toLocaleString('pt-BR', {
                                                     style: 'currency',
                                                     currency: 'BRL',
                                                 })}
@@ -4008,7 +4125,7 @@ const RHView: React.FC = () => {
                                                             <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-20" title="Saída antecipada (vermelho) ou horas extras além da jornada no dia (verde)">
                                                                 Saída ant. / Extra
                                                             </th>
-                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-24">Situação</th>
+                                                            <th className="px-2 py-1.5 text-center border border-gray-200 dark:border-dark-border w-36" title="Situação do dia e avaliação RH rápida (A/B/P/D)">Situação</th>
                                                             <th
                                                                 className="px-2 py-1.5 text-left border border-gray-200 dark:border-dark-border min-w-[200px]"
                                                                 title="Motivo da falta/justificativa e parecer do RH (aprovar ou reprovar)"
@@ -4025,6 +4142,7 @@ const RHView: React.FC = () => {
                                                             ehFimDeSemana: boolean;
                                                             ehFeriado?: boolean;
                                                             nomeFeriado?: string | null;
+                                                            feriadoOverrideManual?: boolean;
                                                             temRegistro: boolean;
                                                             horasLiquidas: number;
                                                             batidas?: string[];
@@ -4056,12 +4174,46 @@ const RHView: React.FC = () => {
                                                             intervaloAlmocoFim?: string | null;
                                                             comentarioRh?: string | null;
                                                             decisaoRh?: 'PENDENTE' | 'APROVADO_RH' | 'REPROVADO' | null;
+                                                            tratamentoDebito?: 'A' | 'B' | 'D' | null;
+                                                            tratamentoCredito?: 'B' | 'P' | null;
+                                                            avaliacaoRh?: {
+                                                                minutosAbonados: number;
+                                                                minutosBancoDelta: number;
+                                                                minutosPagarFolha: number;
+                                                                minutosDescontarFolha: number;
+                                                            } | null;
                                                         }) => {
                                                             const ehFaltaDia =
                                                                 !d.temRegistro &&
                                                                 !d.ehFimDeSemana &&
                                                                 !d.ehFeriado &&
                                                                 !d.faltaJustificada;
+                                                            const temDebitoAvaliacao =
+                                                                (d.minutosAtraso ?? 0) > 0 ||
+                                                                (d.minutosHorasDevidas ?? 0) > 0 ||
+                                                                ehFaltaDia ||
+                                                                d.tratamentoDebito === 'A' ||
+                                                                d.tratamentoDebito === 'B' ||
+                                                                d.tratamentoDebito === 'D';
+                                                            const temCreditoAvaliacao =
+                                                                (d.minutosExtra20 ?? 0) > 0 ||
+                                                                d.tratamentoCredito === 'P' ||
+                                                                (d.tratamentoCredito === 'B' && (d.minutosExtra20 ?? 0) > 0);
+                                                            const mostrarBotoesAvaliacao =
+                                                                temDebitoAvaliacao ||
+                                                                temCreditoAvaliacao ||
+                                                                !!d.tratamentoDebito ||
+                                                                !!d.tratamentoCredito;
+                                                            const botaoAtivo: 'A' | 'B' | 'P' | 'D' | null =
+                                                                d.tratamentoDebito === 'A'
+                                                                    ? 'A'
+                                                                    : d.tratamentoDebito === 'D'
+                                                                      ? 'D'
+                                                                      : d.tratamentoCredito === 'P'
+                                                                        ? 'P'
+                                                                        : d.tratamentoDebito === 'B' || d.tratamentoCredito === 'B'
+                                                                          ? 'B'
+                                                                          : null;
                                                             const bgRow = ehFaltaDia
                                                                 ? 'bg-red-50/90 dark:bg-red-950/30'
                                                                 : d.statusCompensacaoRh === 'PENDENTE'
@@ -4166,19 +4318,65 @@ const RHView: React.FC = () => {
                                                                     >
                                                                         {d.diaSemanaLabel}
                                                                     </td>
-                                                                    <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top text-[11px]">
-                                                                        {d.ehFeriado ? (
-                                                                            <span className="inline-flex flex-col gap-0.5 text-violet-800 dark:text-violet-200">
-                                                                                <span className="font-semibold">Sim</span>
-                                                                                {d.nomeFeriado ? (
-                                                                                    <span className="font-normal leading-tight">
-                                                                                        {d.nomeFeriado}
+                                                                    <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top text-[11px] group/feriado relative">
+                                                                        <div className="flex items-start gap-1">
+                                                                            <div className="flex-1 min-w-0">
+                                                                                {d.ehFeriado ? (
+                                                                                    <span className="inline-flex flex-col gap-0.5 text-violet-800 dark:text-violet-200">
+                                                                                        <span className="font-semibold">
+                                                                                            Sim
+                                                                                            {d.feriadoOverrideManual ? (
+                                                                                                <span className="ml-1 text-[9px] font-medium text-violet-500">(manual)</span>
+                                                                                            ) : null}
+                                                                                        </span>
+                                                                                        {d.nomeFeriado ? (
+                                                                                            <span className="font-normal leading-tight">
+                                                                                                {d.nomeFeriado}
+                                                                                            </span>
+                                                                                        ) : null}
                                                                                     </span>
-                                                                                ) : null}
-                                                                            </span>
-                                                                        ) : (
-                                                                            <span className="text-gray-400 dark:text-gray-500">—</span>
-                                                                        )}
+                                                                                ) : (
+                                                                                    <span className="text-gray-400 dark:text-gray-500">
+                                                                                        —
+                                                                                        {d.feriadoOverrideManual ? (
+                                                                                            <span className="ml-1 text-[9px] text-amber-600">(não feriado · manual)</span>
+                                                                                        ) : null}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                            {podeEditarFeriado && (
+                                                                                <div className="relative opacity-0 group-hover/feriado:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+                                                                                    <details className="relative">
+                                                                                        <summary
+                                                                                            className="list-none cursor-pointer p-1 rounded-md bg-violet-50 dark:bg-violet-900/40 text-violet-700 dark:text-violet-200 hover:bg-violet-100 dark:hover:bg-violet-900/60 border border-violet-200 dark:border-violet-700 [&::-webkit-details-marker]:hidden"
+                                                                                            title="Ajustar feriado (admin)"
+                                                                                        >
+                                                                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                                                            </svg>
+                                                                                        </summary>
+                                                                                        <div className="absolute right-0 z-30 mt-1 w-44 rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card shadow-lg py-1 text-[11px]">
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                disabled={salvandoFeriadoDia === d.dia}
+                                                                                                className="w-full text-left px-3 py-1.5 hover:bg-violet-50 dark:hover:bg-violet-900/30 text-violet-800 dark:text-violet-200 disabled:opacity-50"
+                                                                                                onClick={() => void handleToggleFeriadoDia(d.dia, true)}
+                                                                                            >
+                                                                                                Marcar como feriado
+                                                                                            </button>
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                disabled={salvandoFeriadoDia === d.dia}
+                                                                                                className="w-full text-left px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-dark-hover text-gray-700 dark:text-gray-200 disabled:opacity-50"
+                                                                                                onClick={() => void handleToggleFeriadoDia(d.dia, false)}
+                                                                                            >
+                                                                                                Não é feriado
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </details>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top">
                                                                         {podeEditarBatidas ? (
@@ -4413,6 +4611,71 @@ const RHView: React.FC = () => {
                                                                                 <span className="text-[10px] text-orange-600 dark:text-orange-300 font-medium">
                                                                                     Compensação pendente RH
                                                                                 </span>
+                                                                            )}
+                                                                            {(mostrarBotoesAvaliacao) && (
+                                                                                <div
+                                                                                    className="mt-1 flex flex-wrap items-center justify-center gap-0.5"
+                                                                                    title="A=Abonar · B=Banco · P=Pagar HE · D=Descontar"
+                                                                                >
+                                                                                    {(
+                                                                                        [
+                                                                                            {
+                                                                                                key: 'A' as const,
+                                                                                                title: 'Abonar (zera impacto de atraso/falta)',
+                                                                                                enabled: temDebitoAvaliacao,
+                                                                                            },
+                                                                                            {
+                                                                                                key: 'B' as const,
+                                                                                                title: 'Banco de horas (+ HE / − atraso)',
+                                                                                                enabled: temDebitoAvaliacao || temCreditoAvaliacao,
+                                                                                            },
+                                                                                            {
+                                                                                                key: 'P' as const,
+                                                                                                title: 'Pagar hora extra na folha',
+                                                                                                enabled: temCreditoAvaliacao,
+                                                                                            },
+                                                                                            {
+                                                                                                key: 'D' as const,
+                                                                                                title: 'Descontar na folha',
+                                                                                                enabled: temDebitoAvaliacao,
+                                                                                            },
+                                                                                        ] as const
+                                                                                    ).map((btn) => {
+                                                                                        const ativo = botaoAtivo === btn.key;
+                                                                                        return (
+                                                                                            <button
+                                                                                                key={btn.key}
+                                                                                                type="button"
+                                                                                                title={btn.title}
+                                                                                                disabled={
+                                                                                                    !btn.enabled ||
+                                                                                                    salvandoAvaliacaoRhDia === d.dia
+                                                                                                }
+                                                                                                onClick={() =>
+                                                                                                    void handleAvaliacaoRhDia(d.dia, btn.key, {
+                                                                                                        temDebito: temDebitoAvaliacao,
+                                                                                                        temCredito: temCreditoAvaliacao,
+                                                                                                    })
+                                                                                                }
+                                                                                                className={`min-w-[1.5rem] rounded px-1 py-0.5 text-[10px] font-bold border transition-colors ${
+                                                                                                    !btn.enabled
+                                                                                                        ? 'opacity-30 cursor-not-allowed border-gray-200 text-gray-400'
+                                                                                                        : ativo
+                                                                                                          ? btn.key === 'D'
+                                                                                                            ? 'bg-red-600 text-white border-red-700'
+                                                                                                            : btn.key === 'A'
+                                                                                                              ? 'bg-emerald-600 text-white border-emerald-700'
+                                                                                                              : btn.key === 'P'
+                                                                                                                ? 'bg-blue-600 text-white border-blue-700'
+                                                                                                                : 'bg-indigo-600 text-white border-indigo-700'
+                                                                                                          : 'bg-white dark:bg-dark-card border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-dark-hover'
+                                                                                                }`}
+                                                                                            >
+                                                                                                {btn.key}
+                                                                                            </button>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
                                                                             )}
                                                                         </div>
                                                                     </td>
@@ -6949,27 +7212,27 @@ const CarrosView: React.FC = () => {
 
             {/* Métricas Frota */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-orange-700">Gastos do Mês</p>
-                    <p className="text-2xl font-bold text-orange-900">
+                <div className="bg-orange-50 dark:bg-dark-elevated border-2 border-orange-200 dark:border-orange-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-400">Gastos do Mês</p>
+                    <p className="text-2xl font-bold text-orange-900 dark:text-orange-300">
                         R$ {(metricas.gastosMes || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-blue-700">Combustível</p>
-                    <p className="text-2xl font-bold text-blue-900">
+                <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Combustível</p>
+                    <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                         R$ {(metricas.combustivel || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Manutenção</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Manutenção</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         R$ {(metricas.manutencao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-purple-700">Veículos Ativos</p>
-                    <p className="text-2xl font-bold text-purple-900">{metricas.totalVeiculos || 0}</p>
+                <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Veículos Ativos</p>
+                    <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">{metricas.totalVeiculos || 0}</p>
                 </div>
             </div>
 
@@ -7731,21 +7994,21 @@ const PlanosView: React.FC = () => {
 
             {/* Categorias de Prioridade */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Alta Prioridade</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Alta Prioridade</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         {planos.filter(p => p.prioridade === 'Alta' && p.status !== 'Concluído').length}
                     </p>
                 </div>
-                <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-yellow-700">Média Prioridade</p>
-                    <p className="text-2xl font-bold text-yellow-900">
+                <div className="bg-yellow-50 dark:bg-dark-elevated border-2 border-yellow-200 dark:border-yellow-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">Média Prioridade</p>
+                    <p className="text-2xl font-bold text-yellow-900 dark:text-yellow-300">
                         {planos.filter(p => p.prioridade === 'Média' && p.status !== 'Concluído').length}
                     </p>
                 </div>
-                <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-green-700">Concluídos</p>
-                    <p className="text-2xl font-bold text-green-900">
+                <div className="bg-green-50 dark:bg-dark-elevated border-2 border-green-200 dark:border-green-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">Concluídos</p>
+                    <p className="text-2xl font-bold text-green-900 dark:text-green-300">
                         {planos.filter(p => p.status === 'Concluído').length}
                     </p>
                 </div>
@@ -8322,25 +8585,25 @@ const DespesasFixasView: React.FC = () => {
 
             {/* Métricas */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-red-700">Total Mensal</p>
-                    <p className="text-2xl font-bold text-red-900">
+                <div className="bg-red-50 dark:bg-dark-elevated border-2 border-red-200 dark:border-red-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Total Mensal</p>
+                    <p className="text-2xl font-bold text-red-900 dark:text-red-300">
                         R$ {(metricas.totalMensal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-blue-700">Total Anual</p>
-                    <p className="text-2xl font-bold text-blue-900">
+                <div className="bg-blue-50 dark:bg-dark-elevated border-2 border-blue-200 dark:border-blue-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Total Anual</p>
+                    <p className="text-2xl font-bold text-blue-900 dark:text-blue-300">
                         R$ {(metricas.totalAnual || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                 </div>
-                <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-purple-700">Despesas Ativas</p>
-                    <p className="text-2xl font-bold text-purple-900">{metricas.totalDespesas || 0}</p>
+                <div className="bg-purple-50 dark:bg-dark-elevated border-2 border-purple-200 dark:border-purple-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-purple-700 dark:text-purple-400">Despesas Ativas</p>
+                    <p className="text-2xl font-bold text-purple-900 dark:text-purple-300">{metricas.totalDespesas || 0}</p>
                 </div>
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-4">
-                    <p className="text-sm font-medium text-orange-700">Média por Despesa</p>
-                    <p className="text-2xl font-bold text-orange-900">
+                <div className="bg-orange-50 dark:bg-dark-elevated border-2 border-orange-200 dark:border-orange-800/40 rounded-xl p-4">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-400">Média por Despesa</p>
+                    <p className="text-2xl font-bold text-orange-900 dark:text-orange-300">
                         R$ {metricas.totalDespesas > 0 
                             ? ((metricas.totalMensal || 0) / metricas.totalDespesas).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
                             : '0,00'

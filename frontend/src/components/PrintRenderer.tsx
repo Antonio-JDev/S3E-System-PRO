@@ -327,7 +327,7 @@ const PrintRenderer: React.FC<PrintRendererProps> = ({
         .printable-page {
           width: 210mm;
           height: 297mm;
-          background: white;
+          background-color: white;
           box-shadow: 0 2px 12px rgba(0,0,0,0.15);
           box-sizing: border-box;
           overflow: hidden;
@@ -499,18 +499,39 @@ const PrintRenderer: React.FC<PrintRendererProps> = ({
           opacity: 1 !important;
         }
 
-        /* Dark mode: preview do PDF sempre como documento legível (fundo branco, texto opaco) */
+        /* Dark mode: só background-color — background: shorthand apaga background-image (folha timbrada) */
         .dark .print-renderer .printable-page {
-          background: #fff !important;
-        }
-        .dark .print-renderer .printable-page *,
-        .dark .print-renderer .printable-page-content * {
+          background-color: #fff !important;
           color: #1e293b !important;
-          opacity: 1 !important;
+        }
+        .dark .print-renderer .printable-page-content,
+        .dark .print-renderer .printable-page-content p,
+        .dark .print-renderer .printable-page-content span,
+        .dark .print-renderer .printable-page-content li,
+        .dark .print-renderer .printable-page-content td,
+        .dark .print-renderer .printable-page-content strong,
+        .dark .print-renderer .printable-page-content h1,
+        .dark .print-renderer .printable-page-content h2,
+        .dark .print-renderer .printable-page-content h3 {
+          color: #1e293b !important;
+        }
+        .dark .print-renderer .printable-page thead,
+        .dark .print-renderer .printable-page thead th,
+        .dark .print-renderer .printable-page tbody,
+        .dark .print-renderer .printable-page tbody tr,
+        .dark .print-renderer .printable-page tbody td,
+        .dark .print-renderer .printable-page-content thead,
+        .dark .print-renderer .printable-page-content thead th,
+        .dark .print-renderer .printable-page-content tbody,
+        .dark .print-renderer .printable-page-content tbody tr,
+        .dark .print-renderer .printable-page-content tbody td {
+          background-color: transparent !important;
+          background-image: none !important;
+          color: #1e293b !important;
         }
         .dark .print-renderer .printable-page th,
         .dark .print-renderer .printable-page-content th {
-          background: #f3f4f6 !important;
+          background-color: #f3f4f6 !important;
           color: #1e293b !important;
         }
       `}</style>

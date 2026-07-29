@@ -97,6 +97,8 @@ interface ContaPagar {
     observacoes?: string;
     compra?: CompraBasica;
     tipo?: string; // FORNECEDOR, RH, DESPESA_FIXA
+    meioPagamento?: string | null;
+    cartaoCreditoId?: string | null;
 }
 
 interface ItemCompra {
@@ -251,6 +253,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     // Modal de Atualização de Conta
     const [isAtualizarModalOpen, setIsAtualizarModalOpen] = useState(false);
     const [novaDataVencimento, setNovaDataVencimento] = useState('');
+    const [meioPagamentoEdit, setMeioPagamentoEdit] = useState<string>('');
+    const [cartaoCreditoIdEdit, setCartaoCreditoIdEdit] = useState<string>('');
+    const [cartoesCredito, setCartoesCredito] = useState<Array<{ id: string; nomeOuBanco: string; ultimosQuatroDigitos: string; bandeira: string }>>([]);
+    const [novaContaMeioPagamento, setNovaContaMeioPagamento] = useState<string>('');
+    const [novaContaCartaoId, setNovaContaCartaoId] = useState<string>('');
     const [novasObservacoes, setNovasObservacoes] = useState('');
     const [novoCredorNome, setNovoCredorNome] = useState('');
     
@@ -326,6 +333,12 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     };
 
     const handleOpenPagamentoModal = (conta: ContaPagar) => {
+        if (conta.meioPagamento === 'CARTAO_CREDITO' || conta.cartaoCreditoId) {
+            toast.error('Este lançamento está no cartão de crédito', {
+                description: 'Liquide pela aba Financeiro → Cartão de Crédito (Fechar e Pagar Fatura).',
+            });
+            return;
+        }
         setContaSelecionada(conta);
         setDataPagamento(new Date().toISOString().split('T')[0]);
         setValorPago(conta.valor.toString());
@@ -505,6 +518,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         carregarOpcoesNovaConta();
     }, []);
 
+    useEffect(() => {
+        const carregarCartoes = async () => {
+            const res = await financeiroService.listarCartoes(true);
+            if (res.success && res.data) setCartoesCredito(res.data);
+        };
+        carregarCartoes();
+    }, []);
+
     // Sincronizar “atalhos” de período com os campos de data (calendário)
     useEffect(() => {
         const hoje = new Date();
@@ -604,7 +625,9 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         tipo: tipoConta,
                         funcionario: conta.funcionario ?? null,
                         compra: conta.compra, // Incluir dados da compra (numeroSequencial, numeroNF, etc)
-                        despesaFixa: (conta as any).despesaFixa // ✅ NOVO: Dados da despesa fixa (se existir)
+                        despesaFixa: (conta as any).despesaFixa, // ✅ NOVO: Dados da despesa fixa (se existir)
+                        meioPagamento: conta.meioPagamento || null,
+                        cartaoCreditoId: conta.cartaoCreditoId || null,
                     };
                 });
                 
@@ -749,9 +772,24 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         const totalPagar = contasFiltradas
             .filter(c => c.status === 'Pendente' || c.status === 'Atrasado')
             .reduce((sum, c) => sum + c.valor, 0);
-        
+
+        // Pago: respeita período/tipo (não usa contasFiltradas — "Em aberto" exclui status Pago)
+        const inicio = dataInicio ? new Date(`${dataInicio}T00:00:00`) : null;
+        const fim = dataFim ? new Date(`${dataFim}T23:59:59`) : null;
         const totalPago = contasPagar
-            .filter(c => c.status === 'Pago')
+            .filter((c) => {
+                if (c.status !== 'Pago') return false;
+                if (filterTipo !== 'TODOS') {
+                    const contaTipo = (c as any).tipo || 'FORNECEDOR';
+                    if (contaTipo !== filterTipo) return false;
+                }
+                // Preferir data do pagamento; fallback no vencimento
+                const dataRef = c.dataPagamento || c.dataVencimento;
+                const d = new Date(dataRef);
+                if (inicio && d < inicio) return false;
+                if (fim && d > fim) return false;
+                return true;
+            })
             .reduce((sum, c) => sum + (c.valorPago || c.valor || 0), 0);
         
         const totalAtrasado = contasFiltradas
@@ -768,7 +806,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             qtdPendente,
             qtdAtrasado
         };
-    }, [contasPagar, contasFiltradas]);
+    }, [contasPagar, contasFiltradas, dataInicio, dataFim, filterTipo]);
 
     // Handlers (handleOpenPagamentoModal já definido acima com setMeioPagamento)
     const handleOpenConfirmPagamento = () => {
@@ -825,6 +863,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             }
         }
 
+        if (novaContaMeioPagamento === 'CARTAO_CREDITO' && !novaContaCartaoId) {
+            toast.error('Selecione o cartão de crédito');
+            return;
+        }
+
         const [descontoAno, descontoMes] = novaContaRhReferencia.split('-').map(Number);
         const isFornecedorCadastrado = novaContaTipoDespesa === 'FORNECEDOR' && novaContaFornecedorModo === 'CADASTRADO';
         const fornecedorSelecionado = isFornecedorCadastrado
@@ -865,7 +908,10 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                 descontoFolhaReferenciaAno: novaContaTipoDespesa === 'RH' ? descontoAno : undefined,
                 descontoFolhaReferenciaMes: novaContaTipoDespesa === 'RH' ? descontoMes : undefined,
                 observacoes: novaContaObservacoes || undefined,
-                classificacao: novaContaClassificacao.trim() || undefined
+                classificacao: novaContaClassificacao.trim() || undefined,
+                meioPagamento: novaContaMeioPagamento || undefined,
+                cartaoCreditoId:
+                    novaContaMeioPagamento === 'CARTAO_CREDITO' ? novaContaCartaoId || undefined : undefined,
             });
             if (response.success) {
                 toast.success('Conta a pagar criada com sucesso!', {
@@ -1000,6 +1046,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         setNovaDataVencimento(conta.dataVencimento.split('T')[0]);
         setNovasObservacoes(conta.observacoes || '');
         setNovoCredorNome(conta.fornecedorNome || '');
+        setMeioPagamentoEdit((conta as any).meioPagamento || '');
+        setCartaoCreditoIdEdit((conta as any).cartaoCreditoId || '');
         setIsAtualizarModalOpen(true);
     };
 
@@ -1016,7 +1064,10 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}`, {
                 credorNome: (novoCredorNome || '').trim() || null,
                 dataVencimento: novaDataVencimento,
-                observacoes: novasObservacoes
+                observacoes: novasObservacoes,
+                meioPagamento: meioPagamentoEdit || null,
+                cartaoCreditoId:
+                    meioPagamentoEdit === 'CARTAO_CREDITO' ? cartaoCreditoIdEdit || null : null,
             });
 
             if (response.success) {
@@ -1028,7 +1079,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                 await loadContasPagar();
             } else {
                 toast.error('❌ Erro ao atualizar conta', {
-                    description: response.error || 'Tente novamente.'
+                    description: (response as any).message || response.error || 'Tente novamente.'
                 });
             }
         } catch (error) {
@@ -1393,23 +1444,6 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                             <p className="text-sm font-medium text-gray-600">Total de Contas</p>
                             <p className="text-2xl font-bold text-purple-600">{contasFiltradas.length}</p>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Alerta informativo sobre geração de contas */}
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-6">
-                <div className="flex items-start gap-3">
-                    <svg className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div>
-                        <h4 className="font-bold text-blue-900 mb-1">💡 Como Funciona a Classificação</h4>
-                        <p className="text-sm text-blue-800">
-                            <strong>FORNECEDORES:</strong> Contas geradas automaticamente ao importar compras XML. <br/>
-                            <strong>RECURSOS HUMANOS:</strong> Clique em "+ Gerar" para criar contas de salários dos funcionários cadastrados. <br/>
-                            <strong>DESPESAS VARIADAS:</strong> Clique em "+ Gerar" para criar contas das despesas cadastradas.
-                        </p>
                     </div>
                 </div>
             </div>
@@ -2136,6 +2170,51 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                        Método de Pagamento
+                                    </label>
+                                    <select
+                                        value={meioPagamentoEdit}
+                                        onChange={(e) => {
+                                            setMeioPagamentoEdit(e.target.value);
+                                            if (e.target.value !== 'CARTAO_CREDITO') setCartaoCreditoIdEdit('');
+                                        }}
+                                        className="select-field"
+                                    >
+                                        <option value="">Não informado</option>
+                                        <option value="PIX">PIX</option>
+                                        <option value="DINHEIRO">Cédulas</option>
+                                        <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                        <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                        <option value="BOLETO">Boleto</option>
+                                        <option value="TRANSFERENCIA">Transferência</option>
+                                    </select>
+                                </div>
+
+                                {meioPagamentoEdit === 'CARTAO_CREDITO' && (
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                            Cartão de Crédito *
+                                        </label>
+                                        <select
+                                            value={cartaoCreditoIdEdit}
+                                            onChange={(e) => setCartaoCreditoIdEdit(e.target.value)}
+                                            className="select-field"
+                                        >
+                                            <option value="">Selecione...</option>
+                                            {cartoesCredito.map((c) => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.nomeOuBanco} ({c.bandeira}) •••• {c.ultimosQuatroDigitos}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-amber-600 mt-1">
+                                            A liquidação será feita pela fatura consolidada em Financeiro → Cartão de Crédito.
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Observações
                                     </label>
                                     <textarea
@@ -2175,14 +2254,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             {isNovaContaModalOpen && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-teal-50">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-emerald-50 dark:bg-dark-elevated">
                             <div>
-                                <h2 className="text-2xl font-bold text-gray-900">Nova Conta a Pagar</h2>
-                                <p className="text-sm text-gray-600 mt-1">Conta que não vem de compra (mesma rota de contas fixas)</p>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Nova Conta a Pagar</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Conta que não vem de compra (mesma rota de contas fixas)</p>
                             </div>
                             <button
                                 onClick={handleCloseNovaContaModal}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                                className="p-2 text-gray-400 dark:text-dark-muted hover:text-gray-600 dark:hover:text-dark-text hover:bg-white/80 dark:hover:bg-dark-hover rounded-xl"
                             >
                                 <XMarkIcon className="w-6 h-6" />
                             </button>
@@ -2363,6 +2442,42 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                 </select>
                                 <p className="text-xs text-gray-500 mt-1">Importante para movimentações, fluxo de caixa e DRE (ex.: Impostos)</p>
                             </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Método de Pagamento</label>
+                                <select
+                                    value={novaContaMeioPagamento}
+                                    onChange={(e) => {
+                                        setNovaContaMeioPagamento(e.target.value);
+                                        if (e.target.value !== 'CARTAO_CREDITO') setNovaContaCartaoId('');
+                                    }}
+                                    className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                >
+                                    <option value="">Não informado</option>
+                                    <option value="PIX">PIX</option>
+                                    <option value="DINHEIRO">Cédulas</option>
+                                    <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                    <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                    <option value="BOLETO">Boleto</option>
+                                    <option value="TRANSFERENCIA">Transferência</option>
+                                </select>
+                            </div>
+                            {novaContaMeioPagamento === 'CARTAO_CREDITO' && (
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Cartão de Crédito *</label>
+                                    <select
+                                        value={novaContaCartaoId}
+                                        onChange={(e) => setNovaContaCartaoId(e.target.value)}
+                                        className="select-field focus:ring-emerald-500 focus:border-emerald-500"
+                                    >
+                                        <option value="">Selecione...</option>
+                                        {cartoesCredito.map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.nomeOuBanco} ({c.bandeira}) •••• {c.ultimosQuatroDigitos}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">Valor (R$) *</label>
@@ -2415,10 +2530,10 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-emerald-50 to-green-50 border-2 border-emerald-300 p-4 rounded-xl">
+                            <div className="bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800/60 p-4 rounded-xl">
                                 <div className="flex justify-between items-center">
-                                    <span className="text-sm font-semibold text-emerald-700">Valor a Registrar:</span>
-                                    <span className="text-xl font-bold text-emerald-700">R$ {formatBRL(valorARegistrarNovaConta)}</span>
+                                    <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Valor a Registrar:</span>
+                                    <span className="text-xl font-bold text-emerald-700 dark:text-emerald-300">R$ {formatBRL(valorARegistrarNovaConta)}</span>
                                 </div>
                             </div>
                             <div>
@@ -2542,12 +2657,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         className="select-field focus:ring-red-500 focus:border-red-500"
                                     >
                                         <option value="PIX">PIX</option>
-                                        <option value="CARTAO_CREDITO">Cartão de Crédito</option>
                                         <option value="CARTAO_DEBITO">Cartão de Débito</option>
                                         <option value="BOLETO">Boleto</option>
                                         <option value="TRANSFERENCIA">Transferência</option>
-                                        <option value="DINHEIRO">Dinheiro</option>
+                                        <option value="DINHEIRO">Cédulas</option>
                                     </select>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Cartão de crédito: liquide pela aba Financeiro → Cartão de Crédito.
+                                    </p>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

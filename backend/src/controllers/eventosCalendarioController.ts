@@ -216,7 +216,8 @@ export const obterCapacidadeCalendario = async (req: AuthRequest, res: Response)
         .split(',')
         .map((s) => s.trim())
         .filter((s): s is ProjetoStatus =>
-          ['PROPOSTA', 'VALIDADO', 'APROVADO', 'EXECUCAO', 'CONCLUIDO', 'CANCELADO'].includes(s)
+          ['PROPOSTA', 'APROVADO', 'EXECUCAO', 'CONCLUIDO', 'CANCELADO'].includes(s) ||
+            s === 'VALIDADO'
         );
     }
 

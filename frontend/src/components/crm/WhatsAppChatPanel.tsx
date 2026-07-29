@@ -131,7 +131,7 @@ import WhatsAppChatLabelEditDrawer from './WhatsAppChatLabelEditDrawer';
 import WhatsAppChatLabelPickChatsDrawer, { type SelectableChat } from './WhatsAppChatLabelPickChatsDrawer';
 import { listChatLabels, type WhatsappChatLabelDto } from '../../services/whatsappChatLabelsService';
 import { AuthContext } from '../../contexts/AuthContext';
-import { useWhatsAppSocket } from '../../hooks/useWhatsAppSocket';
+import { useWhatsAppSocket, type WhatsappChatListUpdateDto } from '../../hooks/useWhatsAppSocket';
 import { useWhatsAppRealtimeStatus } from '../../hooks/useWhatsAppSocket';
 import { ComposerEmojiGifStickerModal, type ComposerPickerTab } from './ComposerEmojiGifStickerModal';
 import { WhatsappComposerEditor, type WhatsappComposerEditorHandle } from './WhatsappComposerEditor';
@@ -3768,7 +3768,22 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
       const cid = canonicalWhatsappChatId(msg.chatId);
       const list = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey) ?? [];
       const ctx = resolveChatPreviewUpdateContext(list, cid, chatId, msg.fromMe);
-      const storageCid = ctx.messageCacheChatId || ctx.preferredChatId || cid;
+      let storageCid = ctx.messageCacheChatId || ctx.preferredChatId || cid;
+
+      // Guarda anti-vazamento: nunca gravar no histórico da conversa ABERTA
+      // uma mensagem que não pertence a ela (mergeKey diferente). Sem isso,
+      // mensagem enviada por outro operador poderia renderizar no chat errado.
+      const activeCanon = chatId ? canonicalWhatsappChatId(chatId) : '';
+      if (activeCanon && canonicalWhatsappChatId(storageCid) === activeCanon) {
+        const activeKey = chatPreviewMergeKey(
+          activeCanon,
+          list.find((c) => canonicalWhatsappChatId(c.chatId) === activeCanon)?.phoneNumberFromS3e ??
+            ctx.phoneHint
+        );
+        if (ctx.mergeKey !== activeKey) {
+          storageCid = cid;
+        }
+      }
       const normalizedMsg = { ...msg, chatId: storageCid };
 
       queryClient.setQueryData<WhatsappMessageDto[]>(messagesQueryKey(storageCid), (old) => {
@@ -4097,18 +4112,75 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     [queryClient]
   );
 
-  useWhatsAppSocket(mergeMessage, {
-    onDeleted: onSocketMessageDeleted,
-    onEdited: onSocketMessageEdited,
-    onAck: onSocketAck,
-    onReaction: onSocketReaction,
-    onPresence: onSocketPresence,
-    onChatRemoved: onSocketChatRemoved,
-    onChatArchived: onSocketChatArchived,
-    onChatFlags: onSocketChatFlags,
-    onChatMeta: onSocketChatMeta,
-    onConnectionStatus: onSocketConnectionStatus,
-  });
+  /**
+   * Evento leve broadcast para todos os operadores: atualiza SOMENTE o preview
+   * da sidebar (última mensagem + contador de não lidas). Nunca toca no cache
+   * de mensagens — a mensagem completa (`whatsapp:message`) chega apenas para
+   * quem está na room da conversa (chat aberto).
+   */
+  const onSocketChatListUpdate = useCallback(
+    (payload: WhatsappChatListUpdateDto) => {
+      const cid = canonicalWhatsappChatId(payload.chatId);
+      const list = queryClient.getQueryData<WhatsappChatPreview[]>(chatsQueryKey) ?? [];
+      const ctx = resolveChatPreviewUpdateContext(list, cid, chatId, payload.fromMe);
+
+      // Conversa aberta: o evento completo (`whatsapp:message`) já atualiza
+      // histórico e preview via `mergeMessage` — evita dupla contagem.
+      const activeCanon = chatId ? canonicalWhatsappChatId(chatId) : '';
+      if (activeCanon) {
+        const activeKey = chatPreviewMergeKey(
+          activeCanon,
+          list.find((c) => canonicalWhatsappChatId(c.chatId) === activeCanon)?.phoneNumberFromS3e ??
+            ctx.phoneHint
+        );
+        if (ctx.mergeKey === activeKey) return;
+      }
+
+      queryClient.setQueryData<WhatsappChatPreview[]>(chatsQueryKey, (old) => {
+        const previews = old ?? [];
+        const prevRows = ctx.matchedRows;
+        const prevRow = prevRows.length
+          ? prevRows.reduce((a, b) => (new Date(b.lastAt ?? 0) > new Date(a.lastAt ?? 0) ? b : a))
+          : undefined;
+        const baseUnread = prevRows.reduce((s, r) => s + (r.unreadCount ?? 0), 0);
+        const preview: WhatsappChatPreview = {
+          chatId: ctx.preferredChatId,
+          lastContent: payload.content,
+          lastAt: payload.timestamp,
+          lastFromMe: payload.fromMe,
+          lastAck: payload.fromMe ? (payload.ack ?? null) : null,
+          unreadCount: payload.fromMe ? baseUnread : baseUnread + 1,
+          contactName: prevRow?.contactName,
+          providerCachedName: prevRow?.providerCachedName,
+          phoneNumberFromS3e: prevRow?.phoneNumberFromS3e ?? ctx.phoneHint,
+          cachedProfilePictureUrl: prevRow?.cachedProfilePictureUrl,
+        };
+        return sortChatsByRecent(
+          upsertChatPreviewInList(previews, preview, { activeChatId: chatId, mergeKey: ctx.mergeKey })
+        );
+      });
+    },
+    [queryClient, chatId]
+  );
+
+  useWhatsAppSocket(
+    mergeMessage,
+    {
+      onDeleted: onSocketMessageDeleted,
+      onEdited: onSocketMessageEdited,
+      onAck: onSocketAck,
+      onReaction: onSocketReaction,
+      onPresence: onSocketPresence,
+      onChatRemoved: onSocketChatRemoved,
+      onChatArchived: onSocketChatArchived,
+      onChatFlags: onSocketChatFlags,
+      onChatMeta: onSocketChatMeta,
+      onConnectionStatus: onSocketConnectionStatus,
+      onChatListUpdate: onSocketChatListUpdate,
+    },
+    // Entra na Socket.io room da conversa aberta (sai ao trocar/fechar).
+    { activeChatId: chatId || null }
+  );
 
   const deleteMessageMut = useMutation({
     mutationFn: async (messageId: string) => {
@@ -5530,13 +5602,13 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
 
   const rootClass =
     layout === 'full'
-      ? 'flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 border-y border-[#e9edef] bg-white shadow-none dark:border-dark-border dark:bg-[#161717]'
-      : 'flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border border-[#d1d7db] bg-white shadow-[0_6px_18px_rgba(11,20,26,0.15)] dark:border-dark-border dark:bg-[#161717]';
+      ? 'flex h-full min-h-0 w-full max-w-none flex-1 overflow-hidden rounded-none border-0 bg-white shadow-none dark:bg-[#161717]'
+      : 'flex h-[min(72vh,680px)] w-full max-w-full overflow-hidden rounded border-0 bg-white shadow-[0_6px_18px_rgba(11,20,26,0.15)] dark:bg-[#161717]';
 
   const asideClass =
     layout === 'full'
-      ? `flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] min-[780px]:w-[var(--wa-aside-w,408px)] min-[780px]:max-w-[60vw] min-[780px]:shrink-0${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none max-[779px]:border-r-0'}`
-      : `flex w-full max-w-[300px] shrink-0 flex-col border-r border-[#e9edef] bg-white dark:border-dark-border dark:bg-[#161717] min-[780px]:max-w-[320px]${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none max-[779px]:border-r-0'}`;
+      ? `flex h-full min-h-0 w-full min-w-0 shrink-0 flex-col border-r-0 bg-white dark:bg-[#161717] min-[780px]:w-[var(--wa-aside-w,408px)] min-[780px]:max-w-[60vw] min-[780px]:shrink-0${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`
+      : `flex w-full max-w-[300px] shrink-0 flex-col border-r-0 bg-white dark:bg-[#161717] min-[780px]:max-w-[320px]${mobileChatOnly ? ' max-[779px]:hidden' : ' max-[779px]:w-full max-[779px]:max-w-none'}`;
 
   const chatColumnClass = `relative flex min-h-0 min-w-0 flex-1 flex-col bg-[#efeae2] dark:bg-[#161717]${mobileListOnly ? ' max-[779px]:hidden' : ''}${mobileChatOnly ? ' max-[779px]:w-full max-[779px]:flex-1' : ''}`;
 
@@ -5552,7 +5624,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             : undefined
         }
       >
-        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b border-[#e9edef] bg-white px-3 max-[779px]:pl-14 dark:border-[#2a3942] dark:bg-[#161717]">
+        <div className="flex h-[60px] shrink-0 items-center justify-between gap-3 border-b-0 bg-white px-3 max-[779px]:pl-14 dark:bg-[#161717]">
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <h1 className="truncate text-[19px] font-bold tracking-tight text-[#1daa61] dark:text-white">WhatsApp</h1>
             {totalUnreadMsgs > 0 ? (
@@ -5767,7 +5839,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
             </div>
           </div>
         </div>
-        <div className="shrink-0 space-y-2 border-b border-[#e9edef] bg-white px-3 py-2 dark:border-[#2a3942] dark:bg-[#161717]">
+        <div className="shrink-0 space-y-2 border-b-0 bg-white px-3 py-2 dark:bg-[#161717]">
           <div className="relative" role="search">
             <span className="pointer-events-none absolute left-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#8696a0] dark:text-[#8696a0]">
               <Search className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} aria-hidden />
@@ -6071,7 +6143,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           })}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#e9edef] bg-white px-2 py-2 dark:border-[#2a3942] dark:bg-[#202c33]">
+        <div className="flex shrink-0 items-center gap-2 border-t-0 bg-white px-2 py-2 dark:bg-[#202c33]">
           <button
             type="button"
             onClick={() => setProfilePanelOpen(true)}
@@ -7375,7 +7447,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
           </div>
         ) : (
           <>
-            <header className="flex h-[60px] shrink-0 items-center gap-1 border-b border-[#e9edef] bg-white px-2 min-[780px]:gap-2 min-[780px]:px-3 dark:border-[#2a3942] dark:bg-[#161717]">
+            <header className="flex h-[60px] shrink-0 items-center gap-1 border-b-0 bg-white px-2 min-[780px]:gap-2 min-[780px]:px-3 dark:bg-[#161717]">
               {onClose ? (
                 <button
                   type="button"
@@ -7927,7 +7999,7 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
                 </button>
               </div>
             ) : (
-              <footer className="flex shrink-0 flex-col gap-2 border-t border-[#e9edef]/90 bg-[#f0f2f5] px-2 py-2 max-[779px]:pb-[max(0.5rem,env(safe-area-inset-bottom))] min-[780px]:px-3 dark:border-[#2a3942]/50 dark:bg-[#161717]">
+              <footer className="flex shrink-0 flex-col gap-2 border-t-0 bg-[#f0f2f5] px-2 py-2 max-[779px]:pb-[max(0.5rem,env(safe-area-inset-bottom))] min-[780px]:px-3 dark:bg-[#161717]">
                 {(sendMediaMut.isPending && !pendingMediaList.length) || batchUploadProgress ? (
                   <div
                     className="flex items-center gap-2 rounded-lg border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-[13px] font-medium text-[#075e54] dark:border-[#00a884]/40 dark:bg-[#00a884]/15 dark:text-[#5ee8a2]"

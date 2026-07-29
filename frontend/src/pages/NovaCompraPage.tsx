@@ -10,6 +10,7 @@ import { getUploadUrl } from '../config/api';
 import { fornecedoresService, type Fornecedor } from '../services/fornecedoresService';
 import { formatCNPJ, formatTelefoneBR } from '../utils/inputMasks';
 import { empresaFiscalService } from '../services/empresaFiscalService';
+import { financeiroService } from '../services/financeiroService';
 import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
 import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
@@ -112,6 +113,9 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
     const [outrasDespesas, setOutrasDespesas] = useState<string>('0');
     const [descontos, setDescontos] = useState<string>('0');
     const [condicaoPagamento, setCondicaoPagamento] = useState<'AVISTA' | 'PARCELADO'>('AVISTA');
+    const [meioPagamento, setMeioPagamento] = useState<string>('PIX');
+    const [cartaoCreditoId, setCartaoCreditoId] = useState<string>('');
+    const [cartoesCredito, setCartoesCredito] = useState<Array<{ id: string; nomeOuBanco: string; ultimosQuatroDigitos: string; bandeira: string }>>([]);
 
     // Campos fiscais
     const [destinatarioCNPJ, setDestinatarioCNPJ] = useState<string>('');
@@ -190,6 +194,16 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             }
         };
         carregarMateriais();
+    }, []);
+
+    useEffect(() => {
+        const carregarCartoes = async () => {
+            const res = await financeiroService.listarCartoes(true);
+            if (res.success && res.data) {
+                setCartoesCredito(res.data);
+            }
+        };
+        carregarCartoes();
     }, []);
 
     // Carregar fornecedores cadastrados para busca no preenchimento manual
@@ -713,6 +727,11 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        if (meioPagamento === 'CARTAO_CREDITO' && !cartaoCreditoId) {
+            toast.error('Selecione o cartão de crédito');
+            return;
+        }
+
         try {
             const payload: any = {
                 fornecedorNome: supplierName,
@@ -741,6 +760,8 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                 })),
                 observacoes: observacoes.trim() || undefined,
                 condicoesPagamento: condicaoPagamento === 'PARCELADO' ? 'PARCELADO' : 'AVISTA',
+                meioPagamento,
+                cartaoCreditoId: meioPagamento === 'CARTAO_CREDITO' ? cartaoCreditoId : null,
                 destinatarioCNPJ: destinatarioCNPJ || empresaCompradoraCNPJ,
                 statusImportacao,
                 empresaCompradoraNome: empresaCompradoraNome || undefined,
@@ -1960,6 +1981,46 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                 <option value="PARCELADO">Parcelado</option>
                             </select>
                         </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Método de Pagamento</label>
+                            <select
+                                value={meioPagamento}
+                                onChange={(e) => {
+                                    setMeioPagamento(e.target.value);
+                                    if (e.target.value !== 'CARTAO_CREDITO') setCartaoCreditoId('');
+                                }}
+                                className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                            >
+                                <option value="PIX">PIX</option>
+                                <option value="DINHEIRO">Cédulas</option>
+                                <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                                <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                                <option value="BOLETO">Boleto</option>
+                                <option value="TRANSFERENCIA">Transferência</option>
+                            </select>
+                        </div>
+                        {meioPagamento === 'CARTAO_CREDITO' && (
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Cartão de Crédito *</label>
+                                <select
+                                    value={cartaoCreditoId}
+                                    onChange={(e) => setCartaoCreditoId(e.target.value)}
+                                    className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-orange-500 dark:bg-dark-bg dark:text-white"
+                                >
+                                    <option value="">Selecione o cartão...</option>
+                                    {cartoesCredito.map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.nomeOuBanco} ({c.bandeira}) •••• {c.ultimosQuatroDigitos}
+                                        </option>
+                                    ))}
+                                </select>
+                                {cartoesCredito.length === 0 && (
+                                    <p className="text-xs text-amber-600 mt-1">
+                                        Cadastre um cartão em Financeiro → Cartão de Crédito.
+                                    </p>
+                                )}
+                            </div>
+                        )}
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                 Status da Compra *

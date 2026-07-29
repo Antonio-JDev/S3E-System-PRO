@@ -684,27 +684,39 @@ export function resolveChatPreviewUpdateContext(
   );
 
   if (matched.length === 0 && fromMe && activeChatId) {
+    // Echo de envio próprio pode voltar com JID variante (@lid vs @c.us).
+    // Associar ao chat ativo SOMENTE quando há evidência de mesmo contato:
+    //  - mensagem com telefone identificável → o telefone precisa bater com o
+    //    do chat ativo; caso contrário é OUTRA conversa (ex.: mensagem enviada
+    //    por outro operador) e associar aqui vazaria a mensagem para o chat
+    //    aberto errado;
+    //  - mensagem `@lid` (sem telefone no JID) → único caso em que aceitamos a
+    //    associação heurística ao ativo (echo do próprio envio).
+    const msgKey = chatPreviewMergeKey(cid);
+    const msgIsLid = msgKey.startsWith('jid:') && cid.toLowerCase().endsWith('@lid');
     const activeCanon = canonicalWhatsappChatId(activeChatId);
     const activeRow = list.find((p) => canonicalWhatsappChatId(p.chatId) === activeCanon);
     if (activeRow) {
-      phoneHint = activeRow.phoneNumberFromS3e;
       const activeKey = chatPreviewMergeKey(activeRow.chatId, activeRow.phoneNumberFromS3e);
-      matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === activeKey);
-      const preferredChatId = pickPreferredPreviewChatId(
-        [...matched.map((m) => m.chatId), cid],
-        activeChatId
-      );
-      return {
-        mergeKey: activeKey,
-        preferredChatId,
-        messageCacheChatId: pickPreferredPreviewChatId([activeCanon, preferredChatId], activeChatId),
-        matchedRows: matched,
-        phoneHint,
-      };
+      const sameContact = msgIsLid || (msgKey.startsWith('phone:') && msgKey === activeKey);
+      if (sameContact) {
+        phoneHint = activeRow.phoneNumberFromS3e;
+        matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === activeKey);
+        const preferredChatId = pickPreferredPreviewChatId(
+          [...matched.map((m) => m.chatId), cid],
+          activeChatId
+        );
+        return {
+          mergeKey: activeKey,
+          preferredChatId,
+          messageCacheChatId: pickPreferredPreviewChatId([activeCanon, preferredChatId], activeChatId),
+          matchedRows: matched,
+          phoneHint,
+        };
+      }
     } else if (activeCanon) {
       const activeKey = chatPreviewMergeKey(activeCanon);
-      const msgKey = chatPreviewMergeKey(cid);
-      if (activeKey.startsWith('phone:') && msgKey.startsWith('jid:')) {
+      if (activeKey.startsWith('phone:') && msgIsLid) {
         matched = list.filter((p) => chatPreviewMergeKey(p.chatId, p.phoneNumberFromS3e) === activeKey);
         const preferredChatId = pickPreferredPreviewChatId([activeCanon, cid], activeChatId);
         return {
