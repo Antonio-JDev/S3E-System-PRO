@@ -19,7 +19,12 @@ export type AvaliacaoRhDiaInput = {
 
 export type AvaliacaoRhDiaResultado = {
   minutosAbonados: number;
+  /** Líquido (crédito − débito) — compat / exibição. */
   minutosBancoDelta: number;
+  /** HE enviada ao banco (positivo). */
+  minutosBancoCredito: number;
+  /** Déficit enviado ao banco (positivo = dívida). */
+  minutosBancoDebito: number;
   minutosPagarFolha: number;
   minutosDescontarFolha: number;
   temDebito: boolean;
@@ -44,11 +49,13 @@ function n(v: number | undefined): number {
 
 /**
  * Aplica avaliação rápida A/B/P/D sobre métricas brutas do dia.
+ * Padrão: sem tratamento explícito → B (tudo vai ao banco), dia a dia.
  * - A: zera impacto financeiro/banco de débitos (atraso, saída antecipada, falta).
- * - B (débito): lança déficit como saldo NEGATIVO no banco.
- * - B (crédito): lança HE como saldo POSITIVO no banco.
- * - P: HE para pagamento em folha (não vai ao banco).
- * - D: déficit/falta para desconto em folha (não vai ao banco).
+ * - B (débito): lança déficit como horas NEGATIVAS no banco (separado do crédito).
+ * - B (crédito): lança HE como horas POSITIVAS no banco (separado do débito).
+ * - P: HE para pagamento em folha (estorna do banco se estava em B).
+ * - D só débito: desconto em folha.
+ * - D com débito + HE no mesmo dia: compensa HE × atraso; o resto (pos/neg) vai ao banco.
  */
 export function aplicarAvaliacaoRhDia(input: AvaliacaoRhDiaInput): AvaliacaoRhDiaResultado {
   const minutosAtraso = n(input.minutosAtraso);
@@ -63,34 +70,53 @@ export function aplicarAvaliacaoRhDia(input: AvaliacaoRhDiaInput): AvaliacaoRhDi
   const temCredito = creditoBruto > 0;
 
   let minutosAbonados = 0;
-  let minutosBancoDelta = 0;
+  let minutosBancoCredito = 0;
+  let minutosBancoDebito = 0;
   let minutosPagarFolha = 0;
   let minutosDescontarFolha = 0;
 
-  const td = input.tratamentoDebito ?? null;
-  const tc = input.tratamentoCredito ?? null;
+  // Padrão B: sem apontamento na Situação, atraso/HE vão ao banco.
+  const td: TratamentoDebitoRh | null =
+    input.tratamentoDebito ?? (temDebito ? 'B' : null);
+  const tc: TratamentoCreditoRh | null =
+    input.tratamentoCredito ?? (temCredito ? 'B' : null);
 
-  if (temDebito && td) {
-    if (td === 'A') {
-      minutosAbonados = debitoBruto;
-    } else if (td === 'B') {
-      minutosBancoDelta -= debitoBruto;
-    } else if (td === 'D') {
-      minutosDescontarFolha = debitoBruto;
+  // D com atraso/saída/falta E HE no mesmo dia: compensa e manda o resto ao banco.
+  const dComCompensacao = td === 'D' && temDebito && temCredito;
+
+  if (dComCompensacao) {
+    const liquido = creditoBruto - debitoBruto;
+    if (liquido > 0) {
+      minutosBancoCredito = liquido;
+    } else if (liquido < 0) {
+      minutosBancoDebito = -liquido;
     }
-  }
+    // HE consumida na compensação — não paga em folha; sem desconto salarial do bruto.
+  } else {
+    if (temDebito && td) {
+      if (td === 'A') {
+        minutosAbonados = debitoBruto;
+      } else if (td === 'B') {
+        minutosBancoDebito = debitoBruto;
+      } else if (td === 'D') {
+        minutosDescontarFolha = debitoBruto;
+      }
+    }
 
-  if (temCredito && tc) {
-    if (tc === 'B') {
-      minutosBancoDelta += creditoBruto;
-    } else if (tc === 'P') {
-      minutosPagarFolha = creditoBruto;
+    if (temCredito && tc) {
+      if (tc === 'B') {
+        minutosBancoCredito = creditoBruto;
+      } else if (tc === 'P') {
+        minutosPagarFolha = creditoBruto;
+      }
     }
   }
 
   return {
     minutosAbonados,
-    minutosBancoDelta,
+    minutosBancoDelta: minutosBancoCredito - minutosBancoDebito,
+    minutosBancoCredito,
+    minutosBancoDebito,
     minutosPagarFolha,
     minutosDescontarFolha,
     temDebito,
@@ -100,14 +126,17 @@ export function aplicarAvaliacaoRhDia(input: AvaliacaoRhDiaInput): AvaliacaoRhDi
 
 /**
  * Resolve tratamentos a partir de um clique único A|B|P|D no espelho.
- * - A/D: só débito
- * - P: só crédito
+ * - A/D: só débito (crédito limpo — D com HE usa compensação via métricas brutas)
+ * - P: só crédito (débito permanece — quem chama deve preservar o lado débito)
  * - B: débito e/ou crédito conforme o que existir no dia
  */
 export function resolverTratamentosDoBotao(
   botao: 'A' | 'B' | 'P' | 'D',
   opts: { temDebito: boolean; temCredito: boolean },
-): { tratamentoDebito: TratamentoDebitoRh | null; tratamentoCredito: TratamentoCreditoRh | null } {
+): {
+  tratamentoDebito: TratamentoDebitoRh | null | undefined;
+  tratamentoCredito: TratamentoCreditoRh | null | undefined;
+} {
   if (botao === 'A') {
     return { tratamentoDebito: opts.temDebito ? 'A' : null, tratamentoCredito: null };
   }
@@ -115,7 +144,11 @@ export function resolverTratamentosDoBotao(
     return { tratamentoDebito: opts.temDebito ? 'D' : null, tratamentoCredito: null };
   }
   if (botao === 'P') {
-    return { tratamentoDebito: null, tratamentoCredito: opts.temCredito ? 'P' : null };
+    // Não zera o débito já gravado (ex.: B no atraso) — só redireciona a HE para pagar.
+    return {
+      tratamentoDebito: undefined,
+      tratamentoCredito: opts.temCredito ? 'P' : null,
+    };
   }
   // B
   return {

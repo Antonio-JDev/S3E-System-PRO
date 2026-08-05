@@ -4,13 +4,15 @@ import { ModoQuitacaoHorasNegativas, PeriodoCompensacaoHoras } from '@prisma/cli
 import { prisma } from '../lib/prisma';
 import { RhService } from '../services/rh.service';
 import { ContasPagarService } from '../services/contasPagar.service';
-import { atualizarRegistroBatidas, criarRegistroBatidasManual } from '../services/ponto.service';
+import { atualizarRegistroBatidas, criarRegistroBatidasManual, recalcularMetricasFuncionario } from '../services/ponto.service';
 import { gerarBufferPdfConferenciaPonto } from '../services/rhConferenciaPdf.service';
 import { resolveLetterheadForUser, readLetterheadImageBuffer } from '../services/pdfLetterhead.service';
 import {
   type AlocacaoPagamentoBanco,
   converterHorasParaFolga,
+  faturarBancoHoras as faturarBancoHorasService,
   incluirPagamentoBancoNaFolha,
+  zerarBancoHoras as zerarBancoHorasService,
 } from '../services/bancoHorasRh.service';
 import {
   aprovarDiaCompensacao,
@@ -81,6 +83,74 @@ export const RhController = {
         success: false,
         message: 'Erro ao calcular folha do mês',
         error: error.message,
+      });
+    }
+  },
+
+  /**
+   * POST /api/rh/folha/:funcionarioId/:mes/recalcular-ponto
+   * Recalcula métricas (atraso/extra) dos registros do mês — sem apagar batidas.
+   */
+  async recalcularPontoMes(req: Request, res: Response) {
+    try {
+      const { funcionarioId, mes } = req.params;
+      if (!funcionarioId || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
+        return res.status(400).json({
+          success: false,
+          message: 'funcionarioId e mes (YYYY-MM) são obrigatórios',
+        });
+      }
+      const [ano, mesNum] = mes.split('-').map((v) => parseInt(v, 10));
+      const data = await recalcularMetricasFuncionario(funcionarioId, { ano, mes: mesNum });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('❌ Erro ao recalcular ponto do mês:', error);
+      return res.status(500).json({
+        success: false,
+        message: error?.message || 'Erro ao recalcular ponto do mês',
+      });
+    }
+  },
+
+  /**
+   * GET /api/rh/folha/:funcionarioId/:mes/comparar-contratos
+   * Simula CLT vs Autônomo+banco horas nas mesmas batidas (sem persistir).
+   */
+  async compararContratos(req: Request, res: Response) {
+    try {
+      const { funcionarioId, mes } = req.params;
+      if (!funcionarioId || !mes) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parâmetros funcionarioId e mes são obrigatórios',
+        });
+      }
+
+      let dataReferencia: Date;
+      if (/^\d{4}-\d{2}$/.test(mes)) {
+        const [ano, mesNum] = mes.split('-').map((v) => parseInt(v, 10));
+        dataReferencia = new Date(Date.UTC(ano, mesNum - 1, 1, 12, 0, 0, 0));
+      } else {
+        const parsed = new Date(mes);
+        if (Number.isNaN(parsed.getTime())) {
+          return res.status(400).json({
+            success: false,
+            message: 'Parâmetro mes inválido. Use YYYY-MM ou YYYY-MM-DD.',
+          });
+        }
+        dataReferencia = parsed;
+      }
+
+      const data = await RhService.compararContratosFolha({
+        funcionarioId,
+        dataReferencia,
+      });
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      console.error('❌ Erro ao comparar contratos:', error);
+      return res.status(500).json({
+        success: false,
+        message: error?.message || 'Erro ao comparar contratos',
       });
     }
   },
@@ -328,6 +398,34 @@ export const RhController = {
       return res.status(201).json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error?.message ?? 'Erro' });
+    }
+  },
+
+  /** POST /api/rh/banco-horas/faturar — abate positivas × negativas e persiste o líquido */
+  async faturarBancoHoras(req: Request, res: Response) {
+    try {
+      const { funcionarioId } = req.body ?? {};
+      if (!funcionarioId) {
+        return res.status(400).json({ success: false, message: 'funcionarioId é obrigatório' });
+      }
+      const data = await faturarBancoHorasService(String(funcionarioId));
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao faturar banco' });
+    }
+  },
+
+  /** POST /api/rh/banco-horas/zerar — zera positivas e negativas do banco */
+  async zerarBancoHoras(req: Request, res: Response) {
+    try {
+      const { funcionarioId } = req.body ?? {};
+      if (!funcionarioId) {
+        return res.status(400).json({ success: false, message: 'funcionarioId é obrigatório' });
+      }
+      const data = await zerarBancoHorasService(String(funcionarioId));
+      return res.json({ success: true, data });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao zerar banco' });
     }
   },
 

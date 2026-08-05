@@ -259,3 +259,210 @@ export async function baixarBancoHorasAoPagarSalarioRh(conta: {
 
   return { aplicado: true, horas: horasTotal };
 }
+
+export type BancoHorasResumo = {
+  horasPositivas: number;
+  horasNegativas: number;
+  horasTotalLiquido: number;
+  horasPositivasCadastro: number;
+  horasNegativasCadastro: number;
+};
+
+export function montarBancoHorasResumo(f: {
+  saldoBancoHoras?: unknown;
+  saldoBancoHorasNormaisExcedente?: unknown;
+  saldoBancoHorasExtras100?: unknown;
+  saldoHorasNegativas?: unknown;
+}): BancoHorasResumo {
+  let n = Number(f.saldoBancoHorasNormaisExcedente ?? 0);
+  let e = Number(f.saldoBancoHorasExtras100 ?? 0);
+  const leg = Number(f.saldoBancoHoras ?? n + e);
+  if (n + e <= 0 && leg > 0) {
+    n = leg;
+    e = 0;
+  }
+  const horasPositivas = Math.max(0, n + e);
+  const horasNegativas = Math.max(0, Number(f.saldoHorasNegativas ?? 0));
+  return {
+    horasPositivas,
+    horasNegativas,
+    horasTotalLiquido: horasPositivas - horasNegativas,
+    horasPositivasCadastro: horasPositivas,
+    horasNegativasCadastro: horasNegativas,
+  };
+}
+
+/**
+ * Aplica delta em horas do clique B / troca B↔P/D.
+ * - `creditoDeltaHoras` > 0: soma banco positivo; < 0: estorna do positivo (não vira negativa).
+ * - `debitoDeltaHoras` > 0: soma horas negativas; < 0: estorna dívida (não cria positivo).
+ */
+export async function aplicarDeltasAvaliacaoBancoHoras(
+  funcionarioId: string,
+  opts: { creditoDeltaHoras?: number; debitoDeltaHoras?: number },
+) {
+  const creditoDelta = Number(opts.creditoDeltaHoras ?? 0);
+  const debitoDelta = Number(opts.debitoDeltaHoras ?? 0);
+  if (
+    (!Number.isFinite(creditoDelta) || Math.abs(creditoDelta) < 1e-9) &&
+    (!Number.isFinite(debitoDelta) || Math.abs(debitoDelta) < 1e-9)
+  ) {
+    return montarBancoHorasResumo(
+      (await prisma.funcionario.findUnique({ where: { id: funcionarioId } })) ?? {},
+    );
+  }
+
+  const f = await prisma.funcionario.findUnique({ where: { id: funcionarioId } });
+  if (!f) throw new Error('Funcionário não encontrado');
+
+  let saldoN = Number(f.saldoBancoHorasNormaisExcedente ?? 0);
+  let saldo100 = Number(f.saldoBancoHorasExtras100 ?? 0);
+  const saldoLegado = Number(f.saldoBancoHoras ?? saldoN + saldo100);
+  if (saldoN + saldo100 <= 0 && saldoLegado > 0) {
+    saldoN = saldoLegado;
+    saldo100 = 0;
+  }
+  let negativas = Math.max(0, Number(f.saldoHorasNegativas ?? 0));
+
+  if (Number.isFinite(creditoDelta) && Math.abs(creditoDelta) >= 1e-9) {
+    if (creditoDelta > 0) {
+      saldoN += creditoDelta;
+    } else {
+      let rest = Math.abs(creditoDelta);
+      const fromN = Math.min(Math.max(0, saldoN), rest);
+      saldoN -= fromN;
+      rest -= fromN;
+      const from100 = Math.min(Math.max(0, saldo100), rest);
+      saldo100 -= from100;
+    }
+  }
+
+  if (Number.isFinite(debitoDelta) && Math.abs(debitoDelta) >= 1e-9) {
+    if (debitoDelta > 0) {
+      negativas += debitoDelta;
+    } else {
+      negativas = Math.max(0, negativas - Math.abs(debitoDelta));
+    }
+  }
+
+  const novoTotal = Math.max(0, saldoN) + Math.max(0, saldo100);
+  await prisma.funcionario.update({
+    where: { id: funcionarioId },
+    data: {
+      saldoBancoHorasNormaisExcedente: Math.max(0, saldoN),
+      saldoBancoHorasExtras100: Math.max(0, saldo100),
+      saldoBancoHoras: novoTotal,
+      saldoHorasNegativas: Math.max(0, negativas),
+    },
+  });
+
+  return montarBancoHorasResumo({
+    saldoBancoHoras: novoTotal,
+    saldoBancoHorasNormaisExcedente: Math.max(0, saldoN),
+    saldoBancoHorasExtras100: Math.max(0, saldo100),
+    saldoHorasNegativas: Math.max(0, negativas),
+  });
+}
+
+/**
+ * Compat: delta assinado único (positivo = crédito; negativo = dívida).
+ * Preferir `aplicarDeltasAvaliacaoBancoHoras` quando crédito e débito coexistem no dia.
+ */
+export async function aplicarDeltaAvaliacaoBancoHoras(funcionarioId: string, horasDelta: number) {
+  if (!Number.isFinite(horasDelta) || Math.abs(horasDelta) < 1e-9) {
+    return montarBancoHorasResumo(
+      (await prisma.funcionario.findUnique({ where: { id: funcionarioId } })) ?? {},
+    );
+  }
+  if (horasDelta > 0) {
+    return aplicarDeltasAvaliacaoBancoHoras(funcionarioId, { creditoDeltaHoras: horasDelta });
+  }
+  return aplicarDeltasAvaliacaoBancoHoras(funcionarioId, {
+    debitoDeltaHoras: Math.abs(horasDelta),
+  });
+}
+
+/**
+ * Abate horas positivas × negativas e persiste o líquido no cadastro.
+ * liquido >= 0 → só banco positivo; liquido < 0 → só saldoHorasNegativas.
+ */
+export async function faturarBancoHoras(funcionarioId: string): Promise<BancoHorasResumo> {
+  const f = await prisma.funcionario.findUnique({ where: { id: funcionarioId } });
+  if (!f) throw new Error('Funcionário não encontrado');
+  if (f.tipoContrato !== TipoContratoFuncionario.REGISTRADO &&
+      f.tipoContrato !== TipoContratoFuncionario.AUTONOMO &&
+      f.tipoContrato !== TipoContratoFuncionario.AUTONOMO_BANCO_HORAS) {
+    throw new Error('Faturar banco aplica-se a colaboradores CLT, autônomo ou autônomo + banco horas');
+  }
+
+  const atual = montarBancoHorasResumo(f);
+  const liquido = atual.horasTotalLiquido;
+
+  if (liquido >= 0) {
+    await prisma.funcionario.update({
+      where: { id: funcionarioId },
+      data: {
+        saldoBancoHorasNormaisExcedente: liquido,
+        saldoBancoHorasExtras100: 0,
+        saldoBancoHoras: liquido,
+        saldoHorasNegativas: 0,
+      },
+    });
+    return montarBancoHorasResumo({
+      saldoBancoHoras: liquido,
+      saldoBancoHorasNormaisExcedente: liquido,
+      saldoBancoHorasExtras100: 0,
+      saldoHorasNegativas: 0,
+    });
+  }
+
+  const debito = Math.abs(liquido);
+  await prisma.funcionario.update({
+    where: { id: funcionarioId },
+    data: {
+      saldoBancoHorasNormaisExcedente: 0,
+      saldoBancoHorasExtras100: 0,
+      saldoBancoHoras: 0,
+      saldoHorasNegativas: debito,
+    },
+  });
+  return montarBancoHorasResumo({
+    saldoBancoHoras: 0,
+    saldoBancoHorasNormaisExcedente: 0,
+    saldoBancoHorasExtras100: 0,
+    saldoHorasNegativas: debito,
+  });
+}
+
+/**
+ * Zera completamente o banco (positivas, HE 100% e negativas).
+ * Não altera horas de folga acumuladas.
+ */
+export async function zerarBancoHoras(funcionarioId: string): Promise<BancoHorasResumo> {
+  const f = await prisma.funcionario.findUnique({ where: { id: funcionarioId } });
+  if (!f) throw new Error('Funcionário não encontrado');
+  if (
+    f.tipoContrato !== TipoContratoFuncionario.REGISTRADO &&
+    f.tipoContrato !== TipoContratoFuncionario.AUTONOMO &&
+    f.tipoContrato !== TipoContratoFuncionario.AUTONOMO_BANCO_HORAS
+  ) {
+    throw new Error('Zerar banco aplica-se a colaboradores CLT, autônomo ou autônomo + banco horas');
+  }
+
+  await prisma.funcionario.update({
+    where: { id: funcionarioId },
+    data: {
+      saldoBancoHorasNormaisExcedente: 0,
+      saldoBancoHorasExtras100: 0,
+      saldoBancoHoras: 0,
+      saldoHorasNegativas: 0,
+    },
+  });
+
+  return montarBancoHorasResumo({
+    saldoBancoHoras: 0,
+    saldoBancoHorasNormaisExcedente: 0,
+    saldoBancoHorasExtras100: 0,
+    saldoHorasNegativas: 0,
+  });
+}

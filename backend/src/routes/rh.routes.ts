@@ -11,12 +11,16 @@ router.use(authenticate);
 
 router.get('/folha/:funcionarioId/:mes', RhController.folhaMes);
 router.get('/folha/:funcionarioId/:mes/pdf', RhController.folhaPdf);
+router.post('/folha/:funcionarioId/:mes/recalcular-ponto', RhController.recalcularPontoMes);
+router.get('/folha/:funcionarioId/:mes/comparar-contratos', RhController.compararContratos);
 router.post('/sincronizar-parcela', RhController.sincronizarParcela);
 router.post('/registro-ponto/manual', RhController.criarRegistroPontoManual);
 router.put('/registro-ponto/:id', RhController.atualizarRegistroPonto);
 router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarIntervaloAlmoco);
 router.post('/banco-horas/converter-folga', RhController.converterFolga);
 router.post('/banco-horas/incluir-folha', RhController.incluirBancoFolha);
+router.post('/banco-horas/faturar', RhController.faturarBancoHoras);
+router.post('/banco-horas/zerar', RhController.zerarBancoHoras);
 router.get('/work-shifts', RhController.listarWorkShifts);
 router.post('/work-shifts', RhController.criarWorkShift);
 router.post(

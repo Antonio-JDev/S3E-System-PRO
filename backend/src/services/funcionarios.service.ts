@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { RhService } from './rh.service';
 import { inicioFimMesCivilUtc } from '../utils/datetime-sp.util';
+import { recalcularMetricasFuncionario } from './ponto.service';
 
 export const FuncionariosService = {
     // Listar todos os funcionários
@@ -43,7 +44,7 @@ export const FuncionariosService = {
         uniformeBermuda?: string;
         uniformeSapato?: string;
         // Campos adicionais do módulo de RH
-        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO' | 'AUTONOMO_BANCO_HORAS';
         salarioBase?: number;
         valorHora?: number;
         codigoRelogio?: number | null;
@@ -83,7 +84,7 @@ export const FuncionariosService = {
         uniformeBermuda?: string;
         uniformeSapato?: string;
         // Campos adicionais do módulo de RH
-        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO' | 'AUTONOMO_BANCO_HORAS';
         salarioBase?: number;
         valorHora?: number;
         codigoRelogio?: number | null;
@@ -102,10 +103,36 @@ export const FuncionariosService = {
             updateData.dataAdmissao = new Date(data.dataAdmissao);
         }
 
-        return await prisma.funcionario.update({
+        const antes =
+            data.tipoContrato != null
+                ? await prisma.funcionario.findUnique({
+                      where: { id },
+                      select: { tipoContrato: true },
+                  })
+                : null;
+
+        const updated = await prisma.funcionario.update({
             where: { id },
-            data: updateData
+            data: updateData,
         });
+
+        // Troca CLT ↔ Autônomo: recalcula métricas de ponto (atraso/extra vs diária/tarifas)
+        if (
+            data.tipoContrato != null &&
+            antes &&
+            String(antes.tipoContrato) !== String(data.tipoContrato)
+        ) {
+            try {
+                await recalcularMetricasFuncionario(id);
+            } catch (e) {
+                console.error(
+                    `[FuncionariosService] Falha ao recalcular ponto após troca de contrato (${id}):`,
+                    e,
+                );
+            }
+        }
+
+        return updated;
     },
 
     // Histórico de pagamentos (contas a pagar RH) do funcionário

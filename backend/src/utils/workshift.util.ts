@@ -98,14 +98,23 @@ export function calculateTimeDifference(params: {
   const saidaMax = new Date(shiftSaida.getTime() + tolerance * 60000);
 
   const minutosExtraEntrada =
-    params.batidaEntrada < entradaMin ? Math.round((shiftEntrada.getTime() - params.batidaEntrada.getTime()) / 60000) : 0;
+    params.batidaEntrada < entradaMin
+      ? Math.round((entradaMin.getTime() - params.batidaEntrada.getTime()) / 60000)
+      : 0;
+  // Atraso/saída antecipada: só o que passar da janela de tolerância (evita minutos “fantasma”).
   const minutosAtrasoEntrada =
-    params.batidaEntrada > entradaMax ? Math.round((params.batidaEntrada.getTime() - shiftEntrada.getTime()) / 60000) : 0;
+    params.batidaEntrada > entradaMax
+      ? Math.round((params.batidaEntrada.getTime() - entradaMax.getTime()) / 60000)
+      : 0;
 
   const minutosSaidaAntecipada =
-    params.batidaSaida < saidaMin ? Math.round((shiftSaida.getTime() - params.batidaSaida.getTime()) / 60000) : 0;
+    params.batidaSaida < saidaMin
+      ? Math.round((saidaMin.getTime() - params.batidaSaida.getTime()) / 60000)
+      : 0;
   const minutosExtraSaida =
-    params.batidaSaida > saidaMax ? Math.round((params.batidaSaida.getTime() - shiftSaida.getTime()) / 60000) : 0;
+    params.batidaSaida > saidaMax
+      ? Math.round((params.batidaSaida.getTime() - saidaMax.getTime()) / 60000)
+      : 0;
 
   return {
     minutosAtrasoEntrada,

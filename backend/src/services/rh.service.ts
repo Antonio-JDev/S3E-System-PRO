@@ -23,9 +23,12 @@ import {
 } from '../utils/datetime-sp.util';
 import { minutosMeiaNoiteBrasilia, splitMinutosJornadaSegSex } from '../utils/autonomo-folha.util';
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
+import { montarBancoHorasResumo } from './bancoHorasRh.service';
+import { sincronizarBancoAvaliacoesCompetencia } from './rhComentarioConferencia.service';
 import { decomporExcessoBancoHoras } from '../utils/banco-horas-excesso.util';
-import { calculateMonthlyTotal } from '../utils/workshift.util';
+import { calculateMonthlyTotal, jornadaMinutosPorDia } from '../utils/workshift.util';
 import { listarOverridesFeriadoMes } from './feriadoOverride.service';
+import { usaJornadaEBanco } from '../utils/tipoContrato.util';
 import {
   aplicarClassificacaoNosMinutos,
   minutosAbonadosParaHorasTrabalhadas,
@@ -45,6 +48,14 @@ import {
 interface CalcularFolhaMesParams {
   funcionarioId: string;
   dataReferencia: Date | string;
+  /** Simulação sem persistir: força tipo/valores e pode pular sync de excedente. */
+  override?: {
+    tipoContrato?: TipoContratoFuncionario;
+    salarioBase?: number;
+    valorDiaria?: number;
+    valorHoraNormalAutonomo?: number;
+    skipSyncExcesso?: boolean;
+  };
 }
 
 export type SituacaoPontoDia = 'OK' | 'OK_PARCIAL' | 'Sem registro' | 'Inconsistente';
@@ -73,6 +84,8 @@ export interface ConferenciaPontoDia {
   minutosAtraso: number;
   minutosHorasDevidas: number;
   minutosExtra20: number;
+  /** Soma HE (20+50+100) em minutos — habilita botões B/P */
+  minutosExtraTotal?: number;
   faltaJustificada: boolean;
   faltaJustificadaOcorrenciaId?: string | null;
   faltaJustificadaDescricao?: string | null;
@@ -107,6 +120,8 @@ export interface ConferenciaPontoDia {
   avaliacaoRh?: {
     minutosAbonados: number;
     minutosBancoDelta: number;
+    minutosBancoCredito: number;
+    minutosBancoDebito: number;
     minutosPagarFolha: number;
     minutosDescontarFolha: number;
   } | null;
@@ -154,7 +169,7 @@ export interface FolhaMesResumo {
   };
   /** Detalhe autônomo: diárias legado ou breakdown por tarifas de hora */
   autonomo?: {
-    modo: 'legacy' | 'por_hora';
+    modo: 'legacy' | 'por_hora' | 'diaria_banco';
     /** Com tarifas: dias seg–sex (não feriado) com registro de ponto × diária. Legado: seg–sex com registro. */
     diasUteisComRegistro: number;
     valorDiaria: number;
@@ -178,6 +193,12 @@ export interface FolhaMesResumo {
     horasExtra50?: number;
     horasExtra100?: number;
     horasNoturna?: number;
+    /** diaria_banco: valor hora usado em P/D */
+    valorHoraParaPd?: number;
+    /** diaria_banco: acréscimo monetário das HE com tratamento P */
+    valorHePagas?: number;
+    /** diaria_banco: desconto monetário com tratamento D */
+    valorDescontosD?: number;
   };
   /** Detalhe CLT: banco de horas */
   registrado?: {
@@ -210,6 +231,14 @@ export interface FolhaMesResumo {
     horasNegativas: number;
     horasCompensacaoPendente: number;
     horasCompensacaoAprovadas: number;
+  };
+  /** Resumo do banco (positivas / negativas / líquido) para UI e PDF */
+  bancoHorasResumo?: {
+    horasPositivas: number;
+    horasNegativas: number;
+    horasTotalLiquido: number;
+    horasPositivasCadastro: number;
+    horasNegativasCadastro: number;
   };
   lancamentos: Array<{
     id: string;
@@ -258,7 +287,22 @@ export const RhService = {
 
     const { inicio, fim, ano, mes } = getMesReferenciaRange(dataRef);
 
-    await sincronizarExcessoCompetencia(funcionarioId, ano, mes);
+    if (!params.override?.skipSyncExcesso) {
+      await sincronizarExcessoCompetencia(funcionarioId, ano, mes);
+    }
+
+    // Alinha banco A/B/P/D (padrão B) com as métricas do mês — inclui faltas sem registro.
+    if (!params.override?.skipSyncExcesso) {
+      const tipoPre = await prisma.funcionario.findUnique({
+        where: { id: funcionarioId },
+        select: { tipoContrato: true },
+      });
+      const tipoEfetivo = params.override?.tipoContrato ?? tipoPre?.tipoContrato;
+      if (tipoEfetivo && usaJornadaEBanco(tipoEfetivo)) {
+        await sincronizarBancoAvaliacoesCompetencia(funcionarioId, ano, mes);
+      }
+    }
+
     const feriadoOverrides = await listarOverridesFeriadoMes(ano, mes);
 
     const funcionario = await prisma.funcionario.findUnique({
@@ -304,6 +348,22 @@ export const RhService = {
 
     if (!funcionario) {
       throw new Error('Funcionário não encontrado');
+    }
+
+    const ov = params.override;
+    if (ov?.tipoContrato) {
+      (funcionario as { tipoContrato: TipoContratoFuncionario }).tipoContrato = ov.tipoContrato;
+    }
+    if (ov?.salarioBase != null && Number.isFinite(ov.salarioBase)) {
+      (funcionario as unknown as { salarioBase: number | null }).salarioBase = ov.salarioBase;
+      (funcionario as unknown as { salario: number }).salario = ov.salarioBase;
+    }
+    if (ov?.valorDiaria != null && Number.isFinite(ov.valorDiaria)) {
+      (funcionario as unknown as { valorDiaria: number | null }).valorDiaria = ov.valorDiaria;
+    }
+    if (ov?.valorHoraNormalAutonomo != null && Number.isFinite(ov.valorHoraNormalAutonomo)) {
+      (funcionario as unknown as { valorHoraNormalAutonomo: number | null }).valorHoraNormalAutonomo =
+        ov.valorHoraNormalAutonomo;
     }
 
     const lancamentosDb = await prisma.lancamentoFolha.findMany({
@@ -618,6 +678,61 @@ export const RhService = {
           subtotalFimDeSemana,
         };
       }
+    } else if (funcionario.tipoContrato === TipoContratoFuncionario.AUTONOMO_BANCO_HORAS) {
+      // Autônomo + banco: diária × dias úteis com ponto; jornada/Extra/A-B-P-D como CLT
+      const valorDiaria = Number(funcionario.valorDiaria ?? 0);
+      const qtdDiarias = diasUteisComRegistro.size;
+      const subtotalDiarias = qtdDiarias * valorDiaria;
+      const vh =
+        Number(funcionario.valorHoraNormalAutonomo ?? 0) > 0
+          ? Number(funcionario.valorHoraNormalAutonomo)
+          : valorDiaria > 0
+            ? valorDiaria / 8
+            : Number(funcionario.valorHora ?? 0);
+
+      valorHoraBase = vh;
+      valorHorasNormais = subtotalDiarias;
+      valorHorasExtras50 = 0;
+      valorHorasExtras100 = 0;
+      valorHorasAutonomo = subtotalDiarias;
+      // totalAPagar provisório — P/D aplicados após conferência
+      totalAPagar = subtotalDiarias + totalBeneficios + acrescimosLanc - subtracoesLanc;
+
+      const horasExcedentesParaBanco = Math.max(0, horasTotais - cargaHorariaMensal);
+      const decComp = decomporExcessoBancoHoras({
+        sumNormais: horasNormais,
+        sumExtras50: horasExtras50,
+        sumExtras100: horasExtras100,
+        cargaMensal: cargaHorariaMensal,
+      });
+
+      autonomoDetail = {
+        modo: 'diaria_banco',
+        diasUteisComRegistro: qtdDiarias,
+        valorDiaria,
+        valorHoraFimDeSemana: vh,
+        subtotalDiarias,
+        subtotalFimDeSemana: 0,
+        valorHoraParaPd: vh,
+        valorHePagas: 0,
+        valorDescontosD: 0,
+      };
+
+      registradoDetail = {
+        cargaHorariaMensal,
+        horasTrabalhadasNoMes: horasTotais,
+        horasExcedentesParaBanco,
+        horasExcedentesNormaisCompetencia: decComp.excessoNormais,
+        horasExcedentesExtras100Competencia: decComp.excessoExtras100,
+        saldoBancoHorasAtual: saldoBancoAtual,
+        saldoBancoHorasNormaisAtual: saldoNAtual,
+        saldoBancoHorasExtras100Atual: saldo100Atual,
+        saldoBancoHorasProjetado: saldoBancoAtual,
+        horasNegativas: (minutosAtrasoMes + minutosDevidosMes) / 60,
+        horasDevidas: (minutosAtrasoMes + minutosDevidosMes) / 60,
+        modoQuitacaoHorasNegativas: funcionario.modoQuitacaoHorasNegativas ?? null,
+        periodoCompensacaoHoras: funcionario.periodoCompensacaoHoras ?? null,
+      };
     } else {
       // REGISTRADO: salário fixo + banco de horas (sem pagar hora extra imediata no total)
       valorHoraBase =
@@ -682,14 +797,15 @@ export const RhService = {
       return uteis;
     })();
     const minutosPrevistosDia = (() => {
+      // Prioridade: jornada real da workshift (evita minutos fantasma de carga/22).
+      if (workShift != null) {
+        return jornadaMinutosPorDia(workShift);
+      }
       const carga = Number(cargaHorariaMensal ?? 0);
       if (Number.isFinite(carga) && carga > 0 && diasUteisNoMes > 0) {
-        return Math.round(((carga * 60) / diasUteisNoMes));
+        return Math.round((carga * 60) / diasUteisNoMes);
       }
-      // Fallback legado
-      return workShift != null
-        ? Math.round((calculateMonthlyTotal(workShift, ano, mes) / Math.max(1, totalDias)) * 60)
-        : Math.round((220 / 22) * 60);
+      return Math.round((220 / 22) * 60);
     })();
     for (let dia = 1; dia <= totalDias; dia++) {
       const chave = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
@@ -851,13 +967,25 @@ export const RhService = {
         !reg && !ehFds && !ehFer && !faltaJustificada
           ? Math.max(0, minutosPrevistosDia)
           : 0;
+      const minutosExtraTotal = (() => {
+        let m =
+          (diaRef.minutosExtra20 ?? 0) +
+          (reg ? Number((reg as any).minutosExtra50 ?? 0) : 0) +
+          (reg ? Number((reg as any).minutosExtra100 ?? 0) : 0);
+        if (m <= 0 && reg) {
+          m = Math.round(
+            (Math.max(0, Number((reg as any).horasExtras50 ?? 0)) +
+              Math.max(0, Number((reg as any).horasExtras100 ?? 0))) *
+              60,
+          );
+        }
+        return m;
+      })();
+      diaRef.minutosExtraTotal = minutosExtraTotal;
       const aval = aplicarAvaliacaoRhDia({
         minutosAtraso: diaRef.minutosAtraso,
         minutosHorasDevidas: diaRef.minutosHorasDevidas,
-        minutosExtra:
-          (diaRef.minutosExtra20 ?? 0) +
-          (reg ? Number((reg as any).minutosExtra50 ?? 0) : 0) +
-          (reg ? Number((reg as any).minutosExtra100 ?? 0) : 0),
+        minutosExtra: minutosExtraTotal,
         minutosFaltaIntegral: faltaIntegralMin,
         tratamentoDebito: comentarioDia?.tratamentoDebito ?? null,
         tratamentoCredito: comentarioDia?.tratamentoCredito ?? null,
@@ -865,6 +993,8 @@ export const RhService = {
       diaRef.avaliacaoRh = {
         minutosAbonados: aval.minutosAbonados,
         minutosBancoDelta: aval.minutosBancoDelta,
+        minutosBancoCredito: aval.minutosBancoCredito,
+        minutosBancoDebito: aval.minutosBancoDebito,
         minutosPagarFolha: aval.minutosPagarFolha,
         minutosDescontarFolha: aval.minutosDescontarFolha,
       };
@@ -891,6 +1021,32 @@ export const RhService = {
       const horasNegComFalta = (minutosAtrasoMesEf + minutosDevidosMesEf + minutosFaltaSemRegistro) / 60;
       registradoDetail.horasNegativas = horasNegComFalta;
       registradoDetail.horasDevidas = horasNegComFalta;
+    }
+
+    if (
+      funcionario.tipoContrato === TipoContratoFuncionario.AUTONOMO_BANCO_HORAS &&
+      autonomoDetail?.modo === 'diaria_banco'
+    ) {
+      const vh = Number(autonomoDetail.valorHoraParaPd ?? valorHoraBase ?? 0);
+      let minP = 0;
+      let minD = 0;
+      for (const d of conferenciaPonto) {
+        minP += Math.max(0, Number(d.avaliacaoRh?.minutosPagarFolha ?? 0));
+        minD += Math.max(0, Number(d.avaliacaoRh?.minutosDescontarFolha ?? 0));
+      }
+      const valorHePagas = (minP / 60) * vh;
+      const valorDescontosD = (minD / 60) * vh;
+      autonomoDetail.valorHePagas = valorHePagas;
+      autonomoDetail.valorDescontosD = valorDescontosD;
+      valorHorasExtras50 = valorHePagas;
+      valorHorasAutonomo = Number(autonomoDetail.subtotalDiarias ?? 0) + valorHePagas - valorDescontosD;
+      totalAPagar =
+        Number(autonomoDetail.subtotalDiarias ?? 0) +
+        valorHePagas -
+        valorDescontosD +
+        totalBeneficios +
+        acrescimosLanc -
+        subtracoesLanc;
     }
 
     const diasFaltadosDetalhe = conferenciaPonto
@@ -964,6 +1120,11 @@ export const RhService = {
         horasCompensacaoPendente: horasCompPendentes,
         horasCompensacaoAprovadas: horasCompAprovadas,
       },
+      bancoHorasResumo: usaJornadaEBanco(funcionario.tipoContrato)
+        ? montarBancoHorasResumo(funcionario)
+        : funcionario.tipoContrato === TipoContratoFuncionario.AUTONOMO
+          ? montarBancoHorasResumo(funcionario)
+          : undefined,
       lancamentos,
       totaisLancamentos: {
         subtracoes: subtracoesLanc,
@@ -988,6 +1149,141 @@ export const RhService = {
       totalDescontosRef: demonstrativo.totalDescontosRef,
       lancamentosManuais: demonstrativo.lancamentosManuais,
       totalAPagar: demonstrativo.totalAPagar,
+    };
+  },
+
+  /**
+   * Simula folha do mês como CLT vs Autônomo+banco (mesmas batidas), sem persistir.
+   */
+  async compararContratosFolha(params: {
+    funcionarioId: string;
+    dataReferencia: Date | string;
+  }): Promise<{
+    clt: {
+      totalAPagar: number;
+      base: number;
+      hePagas: number;
+      descontos: number;
+      bancoResumo: FolhaMesResumo['bancoHorasResumo'];
+    };
+    autonomoBanco: {
+      totalAPagar: number;
+      base: number;
+      hePagas: number;
+      descontos: number;
+      bancoResumo: FolhaMesResumo['bancoHorasResumo'];
+    };
+    avisos: string[];
+    delta: number;
+  }> {
+    const dataRef =
+      params.dataReferencia instanceof Date
+        ? params.dataReferencia
+        : new Date(params.dataReferencia);
+    const { ano, mes } = getMesReferenciaRange(dataRef);
+    const feriadoOverrides = await listarOverridesFeriadoMes(ano, mes);
+
+    const funcionario = await prisma.funcionario.findUnique({
+      where: { id: params.funcionarioId },
+      select: {
+        salarioBase: true,
+        salario: true,
+        valorDiaria: true,
+        valorHoraNormalAutonomo: true,
+        valorHora: true,
+        cargaHorariaMensal: true,
+      },
+    });
+    if (!funcionario) {
+      throw new Error('Funcionário não encontrado');
+    }
+
+    const totalDias = diasNoMes(ano, mes);
+    let diasUteisMes = 0;
+    for (let dia = 1; dia <= totalDias; dia++) {
+      const dow = diaSemanaCivil(ano, mes, dia);
+      if (dow >= 1 && dow <= 5 && !ehFeriadoEfetivo(ano, mes, dia, feriadoOverrides)) {
+        diasUteisMes += 1;
+      }
+    }
+    const diasBase = Math.max(1, diasUteisMes);
+
+    const avisos: string[] = [];
+    let salarioClt =
+      funcionario.salarioBase != null
+        ? Number(funcionario.salarioBase)
+        : Number(funcionario.salario ?? 0);
+    let diariaAuto = Number(funcionario.valorDiaria ?? 0);
+
+    if (salarioClt <= 0 && diariaAuto > 0) {
+      salarioClt = diariaAuto * diasBase;
+      avisos.push(
+        `CLT: salário estimado como diária × ${diasBase} dias úteis do mês (cadastro sem salário base).`,
+      );
+    }
+    if (diariaAuto <= 0 && salarioClt > 0) {
+      diariaAuto = salarioClt / diasBase;
+      avisos.push(
+        `Autônomo+banco: diária estimada como salário ÷ ${diasBase} dias úteis do mês (cadastro sem diária).`,
+      );
+    }
+
+    const vhAuto =
+      Number(funcionario.valorHoraNormalAutonomo ?? 0) > 0
+        ? Number(funcionario.valorHoraNormalAutonomo)
+        : diariaAuto > 0
+          ? diariaAuto / 8
+          : Number(funcionario.valorHora ?? 0);
+
+    const cltFolha = await this.calcularFolhaMes({
+      funcionarioId: params.funcionarioId,
+      dataReferencia: dataRef,
+      override: {
+        tipoContrato: TipoContratoFuncionario.REGISTRADO,
+        salarioBase: salarioClt,
+        skipSyncExcesso: true,
+      },
+    });
+
+    const autoFolha = await this.calcularFolhaMes({
+      funcionarioId: params.funcionarioId,
+      dataReferencia: dataRef,
+      override: {
+        tipoContrato: TipoContratoFuncionario.AUTONOMO_BANCO_HORAS,
+        valorDiaria: diariaAuto,
+        valorHoraNormalAutonomo: vhAuto,
+        skipSyncExcesso: true,
+      },
+    });
+
+    const snap = (f: FolhaMesResumo, modo: 'clt' | 'auto') => {
+      if (modo === 'clt') {
+        return {
+          totalAPagar: Number(f.totalAPagar ?? 0),
+          base: Number(f.valores?.salarioBase ?? 0),
+          hePagas: 0,
+          descontos: Number(f.totaisLancamentos?.subtracoes ?? 0),
+          bancoResumo: f.bancoHorasResumo,
+        };
+      }
+      return {
+        totalAPagar: Number(f.totalAPagar ?? 0),
+        base: Number(f.autonomo?.subtotalDiarias ?? 0),
+        hePagas: Number(f.autonomo?.valorHePagas ?? 0),
+        descontos:
+          Number(f.autonomo?.valorDescontosD ?? 0) +
+          Number(f.totaisLancamentos?.subtracoes ?? 0),
+        bancoResumo: f.bancoHorasResumo,
+      };
+    };
+
+    const clt = snap(cltFolha, 'clt');
+    const autonomoBanco = snap(autoFolha, 'auto');
+    return {
+      clt,
+      autonomoBanco,
+      avisos,
+      delta: autonomoBanco.totalAPagar - clt.totalAPagar,
     };
   },
 };

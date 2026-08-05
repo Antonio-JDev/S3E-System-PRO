@@ -1034,10 +1034,11 @@ enum FuncaoPessoa {
   AUXILIAR
 }
 
-// Tipo de contrato do funcionário (CLT registrado ou autônomo)
+// Tipo de contrato do funcionário (CLT, autônomo clássico ou autônomo + banco)
 enum TipoContratoFuncionario {
   REGISTRADO
   AUTONOMO
+  AUTONOMO_BANCO_HORAS
 }
 
 // Consistência das batidas importadas do relógio de ponto
@@ -2161,6 +2162,10 @@ model ComentarioConferenciaPontoRh {
   tratamentoDebito  String?
   /// Avaliação rápida B|P para hora extra além da workshift.
   tratamentoCredito String?
+  /// Minutos de crédito já lançados no banco via avaliação (evita duplicar em recalc).
+  minutosBancoCreditoAplicados Int @default(0)
+  /// Minutos de débito já lançados no banco via avaliação (evita duplicar em recalc).
+  minutosBancoDebitoAplicados  Int @default(0)
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 

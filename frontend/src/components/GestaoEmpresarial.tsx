@@ -656,6 +656,22 @@ const RHView: React.FC = () => {
     const [horasParcialBancoInput, setHorasParcialBancoInput] = useState('');
     const [valorSimuladoBanco, setValorSimuladoBanco] = useState<number | null>(null);
     const [busyBancoAcao, setBusyBancoAcao] = useState(false);
+    const [faturandoBancoFolha, setFaturandoBancoFolha] = useState(false);
+    const [showZerarBancoDialog, setShowZerarBancoDialog] = useState(false);
+    const [zerandoBanco, setZerandoBanco] = useState(false);
+    const [recalculandoPontoMes, setRecalculandoPontoMes] = useState(false);
+    const [comparandoContratos, setComparandoContratos] = useState(false);
+    const [comparativoContratos, setComparativoContratos] = useState<{
+        clt: { totalAPagar: number; base: number; hePagas: number; descontos: number };
+        autonomoBanco: { totalAPagar: number; base: number; hePagas: number; descontos: number };
+        avisos: string[];
+        delta: number;
+    } | null>(null);
+    const [bancoResumoVerDados, setBancoResumoVerDados] = useState<{
+        horasPositivas: number;
+        horasNegativas: number;
+        horasTotalLiquido: number;
+    } | null>(null);
     const [origemConverterFolga, setOrigemConverterFolga] = useState<'automatico' | 'normais' | 'extras100'>(
         'normais',
     );
@@ -734,6 +750,7 @@ const RHView: React.FC = () => {
         try {
             setFuncionarioFolha(funcionario);
             setFolhaDetalhada(null);
+            setComparativoContratos(null);
             setLancamentoNovo({ categoria: 'ADIANTAMENTO', valor: '', descricao: '' });
             const mes = rhCompetencia;
             setFolhaMesRef(mes);
@@ -1040,6 +1057,47 @@ const RHView: React.FC = () => {
             };
             toast.success(`Avaliação: ${labels[botao]}`);
             await recarregarFolhaAberta();
+            if (funcionarioVerDados?.id === funcionarioFolha.id) {
+                await carregarDados();
+                try {
+                    const resp = await axiosApiService.get(
+                        `/api/rh/folha/${funcionarioFolha.id}/${folhaMesRef || rhCompetencia}`,
+                    );
+                    const folha =
+                        resp && typeof resp === 'object' && 'data' in resp && (resp as any).data != null
+                            ? (resp as any).data
+                            : null;
+                    const resumo = folha?.bancoHorasResumo;
+                    if (resumo) {
+                        setBancoResumoVerDados({
+                            horasPositivas: Number(resumo.horasPositivas ?? 0),
+                            horasNegativas: Number(resumo.horasNegativas ?? 0),
+                            horasTotalLiquido: Number(resumo.horasTotalLiquido ?? 0),
+                        });
+                        setFuncionarioVerDados((prev: any) =>
+                            prev
+                                ? {
+                                      ...prev,
+                                      saldoHorasNegativas: Number(resumo.horasNegativas ?? 0),
+                                      saldoBancoHoras: Number(
+                                          folha?.registrado?.saldoBancoHorasAtual ?? resumo.horasPositivas ?? 0,
+                                      ),
+                                      saldoBancoHorasNormaisExcedente: Number(
+                                          folha?.registrado?.saldoBancoHorasNormaisAtual ??
+                                              resumo.horasPositivas ??
+                                              0,
+                                      ),
+                                      saldoBancoHorasExtras100: Number(
+                                          folha?.registrado?.saldoBancoHorasExtras100Atual ?? 0,
+                                      ),
+                                  }
+                                : prev,
+                        );
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
         } catch (e) {
             console.error(e);
             toast.error('Erro ao salvar avaliação RH');
@@ -1471,9 +1529,21 @@ const RHView: React.FC = () => {
 
     const handleCalcularValorPagamentoBanco = () => {
         if (!funcionarioVerDados || funcionarioVerDados.tipoContrato === 'AUTONOMO') return;
+        const diaria = Number(funcionarioVerDados.valorDiaria ?? 0);
+        const vhAutonomoBanco =
+            Number(funcionarioVerDados.valorHoraNormalAutonomo ?? 0) > 0
+                ? Number(funcionarioVerDados.valorHoraNormalAutonomo)
+                : diaria > 0
+                  ? diaria / 8
+                  : Number(funcionarioVerDados.valorHora ?? 0);
         const base = Number(funcionarioVerDados.salarioBase ?? funcionarioVerDados.salario ?? 0);
         const carga = Number(funcionarioVerDados.cargaHorariaMensal ?? 220);
-        const vh = base > 0 && carga > 0 ? base / carga : Number(funcionarioVerDados.valorHora ?? 0);
+        const vh =
+            funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                ? vhAutonomoBanco
+                : base > 0 && carga > 0
+                  ? base / carga
+                  : Number(funcionarioVerDados.valorHora ?? 0);
         let saldoN = Number(funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0);
         let saldo100 = Number(funcionarioVerDados.saldoBancoHorasExtras100 ?? 0);
         const legado = Number(funcionarioVerDados.saldoBancoHoras ?? saldoN + saldo100);
@@ -1548,6 +1618,167 @@ const RHView: React.FC = () => {
             await carregarDados();
         } finally {
             setBusyBancoAcao(false);
+        }
+    };
+
+    const handleFaturarBancoFolha = async () => {
+        if (!funcionarioFolha?.id) return;
+        setFaturandoBancoFolha(true);
+        try {
+            const r = await rhService.faturarBancoHoras({ funcionarioId: funcionarioFolha.id });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao faturar banco',
+                );
+                return;
+            }
+            const data = (r as { data?: {
+                horasPositivas?: number;
+                horasNegativas?: number;
+                horasTotalLiquido?: number;
+            } }).data;
+            const liq = Number(data?.horasTotalLiquido ?? 0);
+            if (liq >= 0) {
+                toast.success(
+                    `Banco faturado: restam ${decimalHoursToHHmm(liq)} (${liq.toFixed(2)} h) positivas`,
+                );
+            } else {
+                toast.success(
+                    `Banco faturado: restam ${decimalHoursToHHmm(Math.abs(liq))} (${Math.abs(liq).toFixed(2)} h) negativas`,
+                );
+            }
+            await recarregarFolhaAberta();
+            await carregarDados();
+            if (funcionarioVerDados?.id === funcionarioFolha.id && data) {
+                setBancoResumoVerDados({
+                    horasPositivas: Number(data.horasPositivas ?? 0),
+                    horasNegativas: Number(data.horasNegativas ?? 0),
+                    horasTotalLiquido: liq,
+                });
+                setFuncionarioVerDados((prev: any) =>
+                    prev
+                        ? {
+                              ...prev,
+                              saldoBancoHoras: Number(data.horasPositivas ?? 0),
+                              saldoBancoHorasNormaisExcedente: Number(data.horasPositivas ?? 0),
+                              saldoBancoHorasExtras100: 0,
+                              saldoHorasNegativas: Number(data.horasNegativas ?? 0),
+                          }
+                        : prev,
+                );
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao faturar banco de horas');
+        } finally {
+            setFaturandoBancoFolha(false);
+        }
+    };
+
+    const handleConfirmarZerarBanco = async () => {
+        if (!funcionarioVerDados?.id) return;
+        setZerandoBanco(true);
+        try {
+            const r = await rhService.zerarBancoHoras({ funcionarioId: funcionarioVerDados.id });
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao zerar banco',
+                );
+                return;
+            }
+            toast.success('Banco de horas zerado');
+            setShowZerarBancoDialog(false);
+            setBancoResumoVerDados({
+                horasPositivas: 0,
+                horasNegativas: 0,
+                horasTotalLiquido: 0,
+            });
+            setFuncionarioVerDados((prev: any) =>
+                prev
+                    ? {
+                          ...prev,
+                          saldoBancoHoras: 0,
+                          saldoBancoHorasNormaisExcedente: 0,
+                          saldoBancoHorasExtras100: 0,
+                          saldoHorasNegativas: 0,
+                      }
+                    : prev,
+            );
+            await carregarDados();
+            if (funcionarioFolha?.id === funcionarioVerDados.id) {
+                await recarregarFolhaAberta();
+            }
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao zerar banco de horas');
+        } finally {
+            setZerandoBanco(false);
+        }
+    };
+
+    const handleRecalcularPontoMes = async () => {
+        if (!funcionarioFolha?.id || !folhaMesRef) return;
+        if (
+            !window.confirm(
+                'Recalcular métricas de ponto deste mês (atraso, saída antecipada e HE) com o contrato/jornada atuais? As batidas não serão apagadas.',
+            )
+        ) {
+            return;
+        }
+        setRecalculandoPontoMes(true);
+        try {
+            const r = await rhService.recalcularPontoMes(funcionarioFolha.id, folhaMesRef);
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao recalcular ponto',
+                );
+                return;
+            }
+            const n = Number((r as { data?: { registrosAtualizados?: number } }).data?.registrosAtualizados ?? 0);
+            toast.success(
+                n > 0
+                    ? `Ponto recalculado: ${n} dia(s) atualizados.`
+                    : 'Recálculo concluído (nenhum dia com batidas no mês).',
+            );
+            await recarregarFolhaAberta();
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao recalcular ponto do mês');
+        } finally {
+            setRecalculandoPontoMes(false);
+        }
+    };
+
+    const handleCompararContratos = async () => {
+        if (!funcionarioFolha?.id || !folhaMesRef) return;
+        setComparandoContratos(true);
+        try {
+            const r = await rhService.compararContratosFolha(funcionarioFolha.id, folhaMesRef);
+            if (!r.success) {
+                toast.error(
+                    typeof (r as { message?: string }).message === 'string'
+                        ? (r as { message: string }).message
+                        : 'Erro ao comparar contratos',
+                );
+                return;
+            }
+            const data = (r as { data?: typeof comparativoContratos }).data;
+            if (!data) {
+                toast.error('Resposta vazia ao comparar');
+                return;
+            }
+            setComparativoContratos(data);
+        } catch (e) {
+            console.error(e);
+            toast.error('Erro ao comparar CLT vs Autônomo+banco');
+        } finally {
+            setComparandoContratos(false);
         }
     };
 
@@ -1803,14 +2034,64 @@ const RHView: React.FC = () => {
         setShowDeleteDialog(true);
     };
 
-    const handleVerDadosColaborador = (func: any) => {
+    const handleVerDadosColaborador = async (func: any) => {
         setFuncionarioVerDados(func);
+        setBancoResumoVerDados(null);
         setModoQuitacaoDivida(
             func?.modoQuitacaoHorasNegativas === 'COMPENSAR_BANCO' ? 'COMPENSAR_BANCO' : 'DESCONTAR_SALARIO',
         );
         setPeriodoCompensacaoDivida(
             func?.periodoCompensacaoHoras === 'FINAL_DE_SEMANA' ? 'FINAL_DE_SEMANA' : 'DIAS_SEMANA',
         );
+        if (
+            func?.tipoContrato !== 'REGISTRADO' &&
+            func?.tipoContrato !== 'AUTONOMO' &&
+            func?.tipoContrato !== 'AUTONOMO_BANCO_HORAS'
+        )
+            return;
+        if (!func?.id) return;
+        try {
+            const resp = await axiosApiService.get(`/api/rh/folha/${func.id}/${rhCompetencia}`);
+            const folha =
+                resp && typeof resp === 'object' && 'data' in resp && (resp as any).data != null
+                    ? (resp as any).data
+                    : null;
+            const resumo = folha?.bancoHorasResumo;
+            if (resumo) {
+                setBancoResumoVerDados({
+                    horasPositivas: Number(resumo.horasPositivas ?? 0),
+                    horasNegativas: Number(resumo.horasNegativas ?? 0),
+                    horasTotalLiquido: Number(resumo.horasTotalLiquido ?? 0),
+                });
+                setFuncionarioVerDados((prev: any) =>
+                    prev?.id === func.id
+                        ? {
+                              ...prev,
+                              saldoBancoHorasNormaisExcedente: Number(
+                                  folha?.registrado?.saldoBancoHorasNormaisAtual ??
+                                      resumo.horasPositivas ??
+                                      prev.saldoBancoHorasNormaisExcedente ??
+                                      0,
+                              ),
+                              saldoBancoHorasExtras100: Number(
+                                  folha?.registrado?.saldoBancoHorasExtras100Atual ??
+                                      prev.saldoBancoHorasExtras100 ??
+                                      0,
+                              ),
+                              saldoBancoHoras: Number(
+                                  folha?.registrado?.saldoBancoHorasAtual ??
+                                      resumo.horasPositivas ??
+                                      prev.saldoBancoHoras ??
+                                      0,
+                              ),
+                              saldoHorasNegativas: Number(resumo.horasNegativas ?? 0),
+                          }
+                        : prev,
+                );
+            }
+        } catch (e) {
+            console.error('Erro ao carregar resumo de banco do colaborador:', e);
+        }
     };
 
     const handleAbrirHistoricoPagamentos = async (func: any) => {
@@ -2010,7 +2291,8 @@ const RHView: React.FC = () => {
 
     useEscapeKey(handleFecharModal, isModalOpen);
     useEscapeKey(() => setIsValeModalOpen(false), isValeModalOpen);
-    useEscapeKey(() => setFuncionarioVerDados(null), !!funcionarioVerDados);
+    useEscapeKey(() => setFuncionarioVerDados(null), !!funcionarioVerDados && !showZerarBancoDialog);
+    useEscapeKey(() => setShowZerarBancoDialog(false), showZerarBancoDialog);
     useEscapeKey(() => { setFuncionarioHistorico(null); setHistoricoPagamentosLista([]); }, !!funcionarioHistorico);
     useEscapeKey(cancelarDelecao, showDeleteDialog);
 
@@ -2025,7 +2307,8 @@ const RHView: React.FC = () => {
                 .trim()
                 .replace(',', '.');
             const salarioUnificado =
-                funcionarioForm.tipoContrato === 'AUTONOMO'
+                funcionarioForm.tipoContrato === 'AUTONOMO' ||
+                funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS'
                     ? 0
                     : salarioStrNorm === ''
                       ? NaN
@@ -2050,9 +2333,13 @@ const RHView: React.FC = () => {
                 uniformeCalca: funcionarioForm.uniformeCalca,
                 uniformeBermuda: funcionarioForm.uniformeBermuda,
                 uniformeSapato: funcionarioForm.uniformeSapato,
-                tipoContrato: funcionarioForm.tipoContrato as 'REGISTRADO' | 'AUTONOMO',
+                tipoContrato: funcionarioForm.tipoContrato as
+                    | 'REGISTRADO'
+                    | 'AUTONOMO'
+                    | 'AUTONOMO_BANCO_HORAS',
                 salarioBase:
-                    funcionarioForm.tipoContrato === 'AUTONOMO'
+                    funcionarioForm.tipoContrato === 'AUTONOMO' ||
+                    funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS'
                         ? undefined
                         : Number.isFinite(salarioUnificado)
                           ? salarioUnificado
@@ -2394,19 +2681,28 @@ const RHView: React.FC = () => {
                             <tbody>
                                 {funcionarios.map((func) => {
                                     const resumoLinha = metricas.porFuncionario?.find((p) => p.funcionarioId === func.id);
-                                    const tipo = func.tipoContrato === 'AUTONOMO' ? 'AUTONOMO' : 'REGISTRADO';
+                                    const tipo =
+                                        func.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                                            ? 'AUTONOMO_BANCO_HORAS'
+                                            : func.tipoContrato === 'AUTONOMO'
+                                              ? 'AUTONOMO'
+                                              : 'REGISTRADO';
                                     const rhMasked = !!metricas.masked;
                                     return (
                                     <tr key={func.id} className="border-b border-gray-100 hover:bg-gray-50">
                                         <td className="px-6 py-4 text-gray-900 font-medium">{func.nome}</td>
                                         <td className="px-6 py-4 text-gray-600">{func.cargo}</td>
                                         <td className="px-6 py-4 text-gray-800 text-sm">
-                                            {tipo === 'AUTONOMO' ? 'Autônomo' : 'Registrado'}
+                                            {tipo === 'AUTONOMO_BANCO_HORAS'
+                                                ? 'Autônomo + banco'
+                                                : tipo === 'AUTONOMO'
+                                                  ? 'Autônomo'
+                                                  : 'Registrado'}
                                         </td>
                                         <td className="px-6 py-4 text-right font-semibold text-gray-900 text-sm">
                                             {rhMasked ? (
                                                 <span className="text-gray-400">—</span>
-                                            ) : tipo === 'AUTONOMO' ? (
+                                            ) : tipo === 'AUTONOMO' || tipo === 'AUTONOMO_BANCO_HORAS' ? (
                                                 <>
                                                     R${' '}
                                                     {Number(func.valorDiaria ?? 0).toLocaleString('pt-BR', {
@@ -2683,18 +2979,26 @@ const RHView: React.FC = () => {
                         type="number"
                         step="0.01"
                         required={funcionarioForm.tipoContrato === 'REGISTRADO'}
-                        value={funcionarioForm.tipoContrato === 'AUTONOMO' ? '0' : funcionarioForm.salario}
+                        value={
+                          funcionarioForm.tipoContrato === 'AUTONOMO' ||
+                          funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                            ? '0'
+                            : funcionarioForm.salario
+                        }
                         onChange={(e) => {
                           const v = e.target.value;
                           setFuncionarioForm({ ...funcionarioForm, salario: v, salarioBase: v });
                         }}
-                        disabled={funcionarioForm.tipoContrato === 'AUTONOMO'}
+                        disabled={
+                          funcionarioForm.tipoContrato === 'AUTONOMO' ||
+                          funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                        }
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 dark:disabled:bg-dark-hover disabled:text-gray-500"
                       />
                       <p className="text-xs text-gray-500 mt-1">
                         {funcionarioForm.tipoContrato === 'REGISTRADO'
                           ? 'O mesmo valor é usado em Salário base (folha), abaixo.'
-                          : 'Autônomo: remuneração vem das diárias e dos valores de hora (seção abaixo). Mantido 0 aqui.'}
+                          : 'Autônomo: remuneração vem das diárias (e P/D no modo + banco). Mantido 0 aqui.'}
                       </p>
                     </div>
                     <div>
@@ -2787,11 +3091,14 @@ const RHView: React.FC = () => {
                                 const next = {
                                   ...prev,
                                   tipoContrato: v,
-                                  ...(v === 'AUTONOMO'
+                                  ...(v === 'AUTONOMO' || v === 'AUTONOMO_BANCO_HORAS'
                                     ? { salario: '0', salarioBase: '0' }
                                     : {}),
                                 };
-                                if (v === 'AUTONOMO' && String(next.valorDiaria ?? '').trim() !== '') {
+                                if (
+                                  (v === 'AUTONOMO' || v === 'AUTONOMO_BANCO_HORAS') &&
+                                  String(next.valorDiaria ?? '').trim() !== ''
+                                ) {
                                   return aplicarCalculoHorasAutonomoPorDiaria(next, next.valorDiaria);
                                 }
                                 return next;
@@ -2801,6 +3108,7 @@ const RHView: React.FC = () => {
                           >
                             <option value="REGISTRADO">Registrado (CLT)</option>
                             <option value="AUTONOMO">Autônomo</option>
+                            <option value="AUTONOMO_BANCO_HORAS">Autônomo + banco horas</option>
                           </select>
                         </div>
                         {funcionarioForm.tipoContrato === 'REGISTRADO' && (
@@ -2975,10 +3283,67 @@ const RHView: React.FC = () => {
                             </div>
                           </div>
                         )}
-                        {funcionarioForm.tipoContrato === 'REGISTRADO' && (
+                        {funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS' && (
+                          <div className="md:col-span-3 space-y-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-900/15 p-4">
+                            <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">
+                              Autônomo + banco horas — diária + jornada CLT
+                            </p>
+                            <p className="text-xs text-indigo-800 dark:text-indigo-300/90">
+                              Pagamento: <strong>diária × dias úteis com ponto</strong>. Atraso, saída antecipada e HE
+                              usam a <strong>workshift</strong> (como CLT). Botões A/B/P/D: P paga HE na folha, B vai ao
+                              banco, D desconta. Configure a jornada abaixo.
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Valor da diária (dias úteis com ponto)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={funcionarioForm.valorDiaria}
+                                  onChange={(e) =>
+                                    setFuncionarioForm((prev) =>
+                                      aplicarCalculoHorasAutonomoPorDiaria(
+                                        { ...prev, valorDiaria: e.target.value },
+                                        e.target.value,
+                                      ),
+                                    )
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card"
+                                  placeholder="Ex.: 100"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Valor hora (P/D — opcional)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={funcionarioForm.valorHoraNormalAutonomo}
+                                  onChange={(e) =>
+                                    setFuncionarioForm({
+                                      ...funcionarioForm,
+                                      valorHoraNormalAutonomo: e.target.value,
+                                    })
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card"
+                                  placeholder="Padrão: diária ÷ 8"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {(funcionarioForm.tipoContrato === 'REGISTRADO' ||
+                          funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS') && (
                           <>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Carga horária mensal (CLT)</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">
+                            {funcionarioForm.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                              ? 'Carga horária mensal (banco)'
+                              : 'Carga horária mensal (CLT)'}
+                          </label>
                           <input
                             type="number"
                             min={1}
@@ -3638,6 +4003,7 @@ const RHView: React.FC = () => {
                                     setFuncionarioFolha(null);
                                     setFolhaDetalhada(null);
                                     setFolhaMesRef(null);
+                                    setComparativoContratos(null);
                                 }}
                                 className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
                             >
@@ -3648,7 +4014,7 @@ const RHView: React.FC = () => {
                         </div>
                         <div className="p-6 overflow-y-auto flex-1 space-y-4">
                             {/* Seletor de competência no modal */}
-                            <div className="flex items-center gap-4 pb-4 border-b border-gray-200 dark:border-dark-border">
+                            <div className="flex flex-wrap items-center gap-3 pb-4 border-b border-gray-200 dark:border-dark-border">
                                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Competência:</label>
                                 <input
                                     type="month"
@@ -3658,6 +4024,7 @@ const RHView: React.FC = () => {
                                         const novoMes = e.target.value;
                                         setFolhaMesRef(novoMes);
                                         setFolhaDetalhada(null);
+                                        setComparativoContratos(null);
                                         try {
                                             const resp = await axiosApiService.get(`/api/rh/folha/${funcionarioFolha.id}/${novoMes}`);
                                             const folha =
@@ -3671,11 +4038,119 @@ const RHView: React.FC = () => {
                                         }
                                     }}
                                 />
+                                <button
+                                    type="button"
+                                    onClick={() => void handleRecalcularPontoMes()}
+                                    disabled={recalculandoPontoMes || !folhaMesRef}
+                                    className="ml-auto px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 bg-white dark:bg-dark-card hover:bg-slate-50 dark:hover:bg-dark-hover disabled:opacity-60"
+                                >
+                                    {recalculandoPontoMes ? 'Recalculando…' : 'Recalcular ponto do mês'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void handleCompararContratos()}
+                                    disabled={comparandoContratos || !folhaMesRef}
+                                    className="px-3 py-2 rounded-lg text-xs font-bold tracking-wide border border-indigo-400 dark:border-indigo-600 text-indigo-800 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-60"
+                                >
+                                    {comparandoContratos ? 'Comparando…' : 'COMPARAR'}
+                                </button>
                             </div>
+                            {comparativoContratos && (
+                                <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-950/25 p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div>
+                                            <p className="font-semibold text-indigo-950 dark:text-indigo-100">
+                                                Comparativo: CLT vs Autônomo + banco horas
+                                            </p>
+                                            <p className="text-xs text-indigo-800/90 dark:text-indigo-300/90 mt-0.5">
+                                                Simulação sobre as batidas do mês (não altera cadastro nem a folha atual).
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setComparativoContratos(null)}
+                                            className="text-xs text-indigo-700 dark:text-indigo-300 hover:underline shrink-0"
+                                        >
+                                            Fechar
+                                        </button>
+                                        </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                        {(
+                                            [
+                                                {
+                                                    titulo: 'Registrado (CLT)',
+                                                    s: comparativoContratos.clt,
+                                                },
+                                                {
+                                                    titulo: 'Autônomo + banco horas',
+                                                    s: comparativoContratos.autonomoBanco,
+                                                },
+                                            ] as const
+                                        ).map((col) => (
+                                            <div
+                                                key={col.titulo}
+                                                className="rounded-lg border border-indigo-200/80 dark:border-indigo-800/60 bg-white/80 dark:bg-dark-card/80 p-3 space-y-1"
+                                            >
+                                                <p className="font-semibold text-gray-800 dark:text-gray-100">{col.titulo}</p>
+                                                <p>
+                                                    Base:{' '}
+                                                    {Number(col.s.base).toLocaleString('pt-BR', {
+                                                    style: 'currency',
+                                                    currency: 'BRL',
+                                                })}
+                                            </p>
+                                                <p>
+                                                    HE pagas (P):{' '}
+                                                    {Number(col.s.hePagas).toLocaleString('pt-BR', {
+                                                    style: 'currency',
+                                                    currency: 'BRL',
+                                                })}
+                                            </p>
+                                                <p>
+                                                    Descontos:{' '}
+                                                    {Number(col.s.descontos).toLocaleString('pt-BR', {
+                                                            style: 'currency',
+                                                            currency: 'BRL',
+                                                        })}
+                                                </p>
+                                                <p className="font-bold text-emerald-700 dark:text-emerald-400 pt-1">
+                                                    Total a pagar:{' '}
+                                                    {Number(col.s.totalAPagar).toLocaleString('pt-BR', {
+                                                                style: 'currency',
+                                                                currency: 'BRL',
+                                                            })}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                                        Diferença (Autônomo+banco − CLT):{' '}
+                                        <span
+                                            className={
+                                                comparativoContratos.delta >= 0
+                                                    ? 'text-emerald-700 dark:text-emerald-400'
+                                                    : 'text-rose-700 dark:text-rose-400'
+                                            }
+                                        >
+                                            {Number(comparativoContratos.delta).toLocaleString('pt-BR', {
+                                                            style: 'currency',
+                                                            currency: 'BRL',
+                                                        })}
+                                                    </span>
+                                                </p>
+                                    {comparativoContratos.avisos?.length > 0 && (
+                                        <ul className="text-xs text-amber-900 dark:text-amber-200 list-disc pl-4 space-y-0.5">
+                                            {comparativoContratos.avisos.map((a) => (
+                                                <li key={a}>{a}</li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                </div>
+                            )}
                             {!folhaDetalhada ? (
                                 <p className="text-sm text-gray-500 dark:text-gray-400">Carregando detalhes da folha...</p>
-                            ) : (
-                                <>
+                                        ) : (
+                                            <>
                                     <div className="space-y-3 text-sm">
                                         <div className="rounded-lg border border-gray-200 dark:border-dark-border p-3 space-y-2">
                                             <p className="font-semibold text-gray-700 dark:text-gray-300">Demonstrativo de Horas e Valores</p>
@@ -3735,18 +4210,98 @@ const RHView: React.FC = () => {
                                                             }`}
                                                         >
                                                             {item.label}
-                                                        </span>
+                                                            </span>
                                                         <span
                                                             className={`shrink-0 font-mono text-gray-900 dark:text-gray-100 ${
                                                                 item.destaque ? 'font-semibold' : ''
                                                             }`}
                                                         >
                                                             {item.valor}
-                                                        </span>
-                                                    </div>
+                                                    </span>
+                                            </div>
                                                 ))}
                                             </div>
                                         </div>
+                                        {(folhaDetalhada.tipoContrato === 'REGISTRADO' ||
+                                            folhaDetalhada.tipoContrato === 'AUTONOMO' ||
+                                            folhaDetalhada.tipoContrato === 'AUTONOMO_BANCO_HORAS') && (
+                                            <div className="rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50/70 dark:bg-amber-950/25 p-3 space-y-3">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <p className="font-semibold text-amber-950 dark:text-amber-100">
+                                                        Banco de horas
+                                                    </p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleFaturarBancoFolha()}
+                                                        disabled={faturandoBancoFolha}
+                                                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+                                                    >
+                                                        {faturandoBancoFolha ? 'Faturando…' : 'Faturar banco'}
+                                                    </button>
+                                            </div>
+                                                <p className="text-[11px] text-amber-900/80 dark:text-amber-200/80">
+                                                    Resumo do cadastro (padrão B: extras e atrasos vão ao banco). Só
+                                                    entram em pagamento/desconto com P ou D. Faturar abate positivas ×
+                                                    negativas e grava o líquido.
+                                                </p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    {(
+                                                        [
+                                                            {
+                                                                label: 'HR Positivas',
+                                                                horas: Number(
+                                                                    folhaDetalhada.bancoHorasResumo?.horasPositivas ??
+                                                                        folhaDetalhada.registrado?.saldoBancoHorasAtual ??
+                                                                        0,
+                                                                ),
+                                                            },
+                                                            {
+                                                                label: 'HR Negativas',
+                                                                horas: Number(
+                                                                    folhaDetalhada.bancoHorasResumo?.horasNegativas ??
+                                                                        0,
+                                                                ),
+                                                            },
+                                                            {
+                                                                label: 'HR Total hora banco',
+                                                                horas: Number(
+                                                                    folhaDetalhada.bancoHorasResumo
+                                                                        ?.horasTotalLiquido ??
+                                                                        Number(
+                                                                            folhaDetalhada.bancoHorasResumo
+                                                                                ?.horasPositivas ?? 0,
+                                                                        ) -
+                                                                            Number(
+                                                                                folhaDetalhada.bancoHorasResumo
+                                                                                    ?.horasNegativas ?? 0,
+                                                                            ),
+                                                                ),
+                                                                destaque: true,
+                                                            },
+                                                        ] as const
+                                                    ).map((item) => (
+                                                        <div
+                                                            key={item.label}
+                                                            className={`rounded-md border px-3 py-2 ${
+                                                                'destaque' in item && item.destaque
+                                                                    ? 'border-amber-400 bg-amber-100/80 dark:border-amber-600 dark:bg-amber-900/40'
+                                                                    : 'border-amber-200 bg-white/70 dark:border-amber-800/50 dark:bg-dark-card/40'
+                                                            }`}
+                                                        >
+                                                            <span className="block text-[11px] font-semibold text-amber-900/80 dark:text-amber-200/80">
+                                                                {item.label}
+                                                        </span>
+                                                            <p className="font-mono font-bold text-amber-950 dark:text-amber-50">
+                                                                {decimalHoursToHHmm(item.horas)}{' '}
+                                                                <span className="text-[10px] font-normal">
+                                                                    ({item.horas.toFixed(2)} h)
+                                                            </span>
+                                                        </p>
+                                                    </div>
+                                                    ))}
+                                                    </div>
+                                            </div>
+                                        )}
                                         <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3 space-y-2">
                                             <p className="font-semibold text-gray-700 dark:text-gray-300">Descontos Automáticos (referência - ponto)</p>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -3790,7 +4345,7 @@ const RHView: React.FC = () => {
                                                             }`}
                                                         >
                                                             {item.label}
-                                                        </span>
+                                                            </span>
                                                         <span
                                                             className={`shrink-0 font-mono text-red-700 dark:text-red-300 ${
                                                                 item.destaque ? 'font-semibold' : ''
@@ -3800,8 +4355,8 @@ const RHView: React.FC = () => {
                                                         </span>
                                                     </div>
                                                 ))}
+                                                </div>
                                             </div>
-                                        </div>
                                     </div>
                                     <div className="border-t border-gray-200 dark:border-dark-border pt-4 space-y-2 text-sm">
                                         {folhaDetalhada.totaisLancamentos &&
@@ -4179,6 +4734,8 @@ const RHView: React.FC = () => {
                                                             avaliacaoRh?: {
                                                                 minutosAbonados: number;
                                                                 minutosBancoDelta: number;
+                                                                minutosBancoCredito?: number;
+                                                                minutosBancoDebito?: number;
                                                                 minutosPagarFolha: number;
                                                                 minutosDescontarFolha: number;
                                                             } | null;
@@ -4196,14 +4753,13 @@ const RHView: React.FC = () => {
                                                                 d.tratamentoDebito === 'B' ||
                                                                 d.tratamentoDebito === 'D';
                                                             const temCreditoAvaliacao =
+                                                                (d.minutosExtraTotal ?? 0) > 0 ||
                                                                 (d.minutosExtra20 ?? 0) > 0 ||
+                                                                (d.ehFimDeSemana &&
+                                                                    d.temRegistro &&
+                                                                    Number(d.horasLiquidas ?? 0) > 0) ||
                                                                 d.tratamentoCredito === 'P' ||
-                                                                (d.tratamentoCredito === 'B' && (d.minutosExtra20 ?? 0) > 0);
-                                                            const mostrarBotoesAvaliacao =
-                                                                temDebitoAvaliacao ||
-                                                                temCreditoAvaliacao ||
-                                                                !!d.tratamentoDebito ||
-                                                                !!d.tratamentoCredito;
+                                                                d.tratamentoCredito === 'B';
                                                             const botaoAtivo: 'A' | 'B' | 'P' | 'D' | null =
                                                                 d.tratamentoDebito === 'A'
                                                                     ? 'A'
@@ -4211,7 +4767,8 @@ const RHView: React.FC = () => {
                                                                       ? 'D'
                                                                       : d.tratamentoCredito === 'P'
                                                                         ? 'P'
-                                                                        : d.tratamentoDebito === 'B' || d.tratamentoCredito === 'B'
+                                                                        : d.tratamentoDebito === 'B' ||
+                                                                            d.tratamentoCredito === 'B'
                                                                           ? 'B'
                                                                           : null;
                                                             const bgRow = ehFaltaDia
@@ -4223,21 +4780,13 @@ const RHView: React.FC = () => {
                                                                     : d.ehFimDeSemana
                                                                       ? 'bg-yellow-50/90 dark:bg-yellow-900/20'
                                                                       : '';
-                                                            let situacaoLabel = d.situacao;
-                                                            if (d.situacao === 'OK_PARCIAL') {
-                                                                situacaoLabel = 'OK (abaixo da meta)';
-                                                            }
                                                             const justificativaParcialLabel = d.justificativaParcial?.tipo === 'ENTRADA_ATRASADA'
                                                                 ? 'Entrada atrasada justificada'
                                                                 : d.justificativaParcial?.tipo === 'SAIDA_ANTECIPADA'
                                                                   ? 'Saída antecipada justificada'
                                                                   : null;
                                                             let situacaoClass = 'text-gray-500 dark:text-gray-400';
-                                                            if (d.situacao === 'OK') {
-                                                                situacaoClass = 'text-emerald-600 dark:text-emerald-400 font-semibold';
-                                                            } else if (d.situacao === 'OK_PARCIAL') {
-                                                                situacaoClass = 'text-amber-600 dark:text-amber-400 font-semibold';
-                                                            } else if (d.situacao === 'Inconsistente') {
+                                                            if (d.situacao === 'Inconsistente') {
                                                                 situacaoClass = 'text-red-600 dark:text-red-400 font-semibold';
                                                             } else if (
                                                                 d.situacao === 'Sem registro' &&
@@ -4517,7 +5066,16 @@ const RHView: React.FC = () => {
                                                                         className={`px-2 py-1 border border-gray-200 dark:border-dark-border text-center align-top ${situacaoClass}`}
                                                                     >
                                                                         <div className="flex flex-col items-center gap-0.5">
-                                                                            <span>{situacaoLabel}</span>
+                                                                            {d.situacao === 'Inconsistente' && (
+                                                                                <span className="text-[11px] font-semibold">Inconsistente</span>
+                                                                            )}
+                                                                            {d.situacao === 'Sem registro' &&
+                                                                                !d.ehFimDeSemana &&
+                                                                                !d.ehFeriado &&
+                                                                                !d.faltaJustificada &&
+                                                                                !d.justificativaParcial && (
+                                                                                <span className="text-[11px]">Sem registro</span>
+                                                                            )}
                                                                             {d.faltaJustificada && (
                                                                                 <span className="text-[10px] text-sky-600 dark:text-sky-300 font-medium">
                                                                                     Falta justificada
@@ -4612,9 +5170,8 @@ const RHView: React.FC = () => {
                                                                                     Compensação pendente RH
                                                                                 </span>
                                                                             )}
-                                                                            {(mostrarBotoesAvaliacao) && (
                                                                                 <div
-                                                                                    className="mt-1 flex flex-wrap items-center justify-center gap-0.5"
+                                                                                    className="mt-1 flex flex-wrap items-center justify-center gap-1"
                                                                                     title="A=Abonar · B=Banco · P=Pagar HE · D=Descontar"
                                                                                 >
                                                                                     {(
@@ -4627,7 +5184,9 @@ const RHView: React.FC = () => {
                                                                                             {
                                                                                                 key: 'B' as const,
                                                                                                 title: 'Banco de horas (+ HE / − atraso)',
-                                                                                                enabled: temDebitoAvaliacao || temCreditoAvaliacao,
+                                                                                                enabled:
+                                                                                                    temDebitoAvaliacao ||
+                                                                                                    temCreditoAvaliacao,
                                                                                             },
                                                                                             {
                                                                                                 key: 'P' as const,
@@ -4648,18 +5207,23 @@ const RHView: React.FC = () => {
                                                                                                 type="button"
                                                                                                 title={btn.title}
                                                                                                 disabled={
-                                                                                                    !btn.enabled ||
                                                                                                     salvandoAvaliacaoRhDia === d.dia
                                                                                                 }
-                                                                                                onClick={() =>
+                                                                                                onClick={() => {
+                                                                                                    if (!btn.enabled) {
+                                                                                                        toast.info(
+                                                                                                            'Nada a lançar neste dia (sem débito/crédito calculado).',
+                                                                                                        );
+                                                                                                        return;
+                                                                                                    }
                                                                                                     void handleAvaliacaoRhDia(d.dia, btn.key, {
                                                                                                         temDebito: temDebitoAvaliacao,
                                                                                                         temCredito: temCreditoAvaliacao,
-                                                                                                    })
-                                                                                                }
-                                                                                                className={`min-w-[1.5rem] rounded px-1 py-0.5 text-[10px] font-bold border transition-colors ${
+                                                                                                    });
+                                                                                                }}
+                                                                                                className={`min-w-[calc(1.5rem+10px)] min-h-[calc(1.5rem+10px)] rounded px-1.5 py-1 text-[12px] font-bold border transition-colors ${
                                                                                                     !btn.enabled
-                                                                                                        ? 'opacity-30 cursor-not-allowed border-gray-200 text-gray-400'
+                                                                                                        ? 'opacity-40 border-gray-300 text-gray-500 dark:border-gray-600 dark:text-gray-400'
                                                                                                         : ativo
                                                                                                           ? btn.key === 'D'
                                                                                                             ? 'bg-red-600 text-white border-red-700'
@@ -4676,7 +5240,6 @@ const RHView: React.FC = () => {
                                                                                         );
                                                                                     })}
                                                                                 </div>
-                                                                            )}
                                                                         </div>
                                                                     </td>
                                                                     <td className="px-2 py-1 border border-gray-200 dark:border-dark-border align-top min-w-[200px]">
@@ -5228,12 +5791,19 @@ const RHView: React.FC = () => {
                                 </div>
                                 <div className="rounded-xl border border-gray-100 dark:border-dark-border bg-gray-50/70 dark:bg-dark-hover/25 px-3 py-2.5">
                                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Vínculo</span>
-                                    <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">{funcionarioVerDados.tipoContrato === 'AUTONOMO' ? 'Autônomo' : 'Registrado (CLT)'}</p>
+                                    <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">
+                                        {funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS'
+                                            ? 'Autônomo + banco horas'
+                                            : funcionarioVerDados.tipoContrato === 'AUTONOMO'
+                                              ? 'Autônomo'
+                                              : 'Registrado (CLT)'}
+                                    </p>
                                 </div>
                                 <div className="rounded-xl border border-gray-100 dark:border-dark-border bg-gray-50/70 dark:bg-dark-hover/25 px-3 py-2.5">
                                     <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Remuneração</span>
                                     <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-100">
-                                        {funcionarioVerDados.tipoContrato === 'AUTONOMO' ? (
+                                        {funcionarioVerDados.tipoContrato === 'AUTONOMO' ||
+                                        funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS' ? (
                                             <>
                                                 {Number(funcionarioVerDados.valorDiaria ?? 0).toLocaleString('pt-BR', {
                                                     style: 'currency',
@@ -5350,6 +5920,36 @@ const RHView: React.FC = () => {
                                         <p className="lg:col-span-3 text-xs text-gray-600 dark:text-gray-400">
                                             Modo diária + hora de fim de semana: use a <strong>remuneração (diária)</strong> e o valor hora geral do cadastro / configuração de ponto para sábado e domingo na folha.
                                         </p>
+                                    ) : funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS' ? (
+                                        <>
+                                            <div className="lg:col-span-3">
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    Valor hora (P/D — Autônomo + banco)
+                                                </span>
+                                                <p className="text-gray-900 dark:text-gray-100">
+                                                    {(() => {
+                                                        const diaria = Number(funcionarioVerDados.valorDiaria ?? 0);
+                                                        const vh =
+                                                            Number(funcionarioVerDados.valorHoraNormalAutonomo ?? 0) > 0
+                                                                ? Number(funcionarioVerDados.valorHoraNormalAutonomo)
+                                                                : diaria > 0
+                                                                  ? diaria / 8
+                                                                  : Number(funcionarioVerDados.valorHora ?? 0);
+                                                        return vh.toLocaleString('pt-BR', {
+                                                            style: 'currency',
+                                                            currency: 'BRL',
+                                                        });
+                                                    })()}
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+                                                        (valor hora normal ou diária ÷ 8)
+                                                    </span>
+                                                </p>
+                                            </div>
+                                            <p className="lg:col-span-3 text-xs text-gray-600 dark:text-gray-400">
+                                                Pagamento: diária × dias úteis com ponto + P − D. Extra sem P alimenta o banco
+                                                (como CLT).
+                                            </p>
+                                        </>
                                     ) : (
                                         <>
                                             <div className="lg:col-span-3">
@@ -5376,18 +5976,49 @@ const RHView: React.FC = () => {
                                     )}
                                 </div>
                             </div>
-                            {funcionarioVerDados.tipoContrato !== 'AUTONOMO' && (
+                            {(funcionarioVerDados.tipoContrato === 'REGISTRADO' ||
+                                funcionarioVerDados.tipoContrato === 'AUTONOMO' ||
+                                funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS') && (
                                 <div className="rounded-xl border border-amber-200/90 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-4">
                                     <div>
+                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                            <div className="min-w-0 flex-1">
                                         <p className="font-semibold text-gray-800 dark:text-gray-200">Banco de horas e folgas (RH)</p>
                                         <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                             Competência da grade RH: <span className="font-mono font-semibold">{rhCompetencia}</span>.
+                                            {funcionarioVerDados.tipoContrato === 'AUTONOMO' ? (
+                                                <>
+                                                    {' '}
+                                                    No autônomo o pagamento do mês segue diárias/tarifas; o banco acumula
+                                                    lançamentos via botão <strong>B</strong> (e ações de folga/pagamento abaixo).
+                                                </>
+                                            ) : funcionarioVerDados.tipoContrato === 'AUTONOMO_BANCO_HORAS' ? (
+                                                <>
+                                                    {' '}
+                                                    Pagamento: <strong>diária × dias</strong> + P − D. Extra sem P e
+                                                    excedente mensal alimentam o banco (como CLT).
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {' '}
                                             O banco só aumenta com o ponto importado ou ajustado;{' '}
                                             <strong className="font-medium text-gray-700 dark:text-gray-300">
                                                 nada vira folga nem pagamento sozinho
                                             </strong>
                                             . Se a RH não fizer nada, as horas permanecem no banco somando mês a mês.
-                                        </p>
+                                                </>
+                                            )}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowZerarBancoDialog(true)}
+                                                disabled={busyBancoAcao || zerandoBanco}
+                                                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-300 dark:border-red-800 text-red-800 dark:text-red-200 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 disabled:opacity-50"
+                                            >
+                                                Zerar banco
+                                            </button>
+                                        </div>
                                         <p className="mt-2 text-[11px] leading-relaxed rounded-lg border border-amber-200/80 dark:border-amber-800/50 bg-amber-100/35 dark:bg-amber-950/35 px-3 py-2 text-amber-950 dark:text-amber-100">
                                             <strong>Folgas acumuladas</strong> só sobem quando alguém usa &quot;Converter em folga&quot;.
                                             O lançamento de pagamento na folha só entra quando usar &quot;Incluir na folha&quot;; a baixa do saldo
@@ -5397,32 +6028,72 @@ const RHView: React.FC = () => {
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                                         <div className="rounded-lg bg-white/60 dark:bg-dark-card/40 px-3 py-2 border border-amber-100 dark:border-amber-900/40">
                                             <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                                                Excedente jornada (não HE 100%)
+                                                HR Positivas
                                             </span>
                                             <p className="text-lg font-bold text-gray-900 dark:text-gray-100 font-mono">
-                                                {Number(funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0).toFixed(2)} h
+                                                {Number(
+                                                    bancoResumoVerDados?.horasPositivas ??
+                                                        (() => {
+                                                            let n = Number(
+                                                                funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0,
+                                                            );
+                                                            let e = Number(
+                                                                funcionarioVerDados.saldoBancoHorasExtras100 ?? 0,
+                                                            );
+                                                            const leg = Number(
+                                                                funcionarioVerDados.saldoBancoHoras ?? n + e,
+                                                            );
+                                                            if (n + e <= 0 && leg > 0) n = leg;
+                                                            return n + e;
+                                                        })(),
+                                                ).toFixed(2)}{' '}
+                                                h
+                                            </p>
+                                            <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                                Excedente:{' '}
+                                                {Number(funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0).toFixed(2)}{' '}
+                                                · HE 100%:{' '}
+                                                {Number(funcionarioVerDados.saldoBancoHorasExtras100 ?? 0).toFixed(2)}
                                             </p>
                                         </div>
-                                        <div className="rounded-lg bg-white/60 dark:bg-dark-card/40 px-3 py-2 border border-amber-100 dark:border-amber-900/40">
-                                            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-                                                Horas extras 100% no banco
+                                        <div className="rounded-lg bg-white/60 dark:bg-dark-card/40 px-3 py-2 border border-red-200/80 dark:border-red-900/40">
+                                            <span className="text-[11px] font-semibold text-red-700/80 dark:text-red-300">
+                                                HR Negativas
                                             </span>
-                                            <p className="text-lg font-bold text-gray-900 dark:text-gray-100 font-mono">
-                                                {Number(funcionarioVerDados.saldoBancoHorasExtras100 ?? 0).toFixed(2)} h
+                                            <p className="text-lg font-bold text-red-800 dark:text-red-200 font-mono">
+                                                {Number(
+                                                    bancoResumoVerDados?.horasNegativas ??
+                                                        funcionarioVerDados.saldoHorasNegativas ??
+                                                        0,
+                                                ).toFixed(2)}{' '}
+                                                h
                                             </p>
                                         </div>
                                         <div className="rounded-lg bg-amber-100/50 dark:bg-amber-900/25 px-3 py-2 border border-amber-300/70 dark:border-amber-700/50">
                                             <span className="text-[11px] font-semibold text-amber-900 dark:text-amber-200">
-                                                Total banco (informação)
+                                                HR Total hora banco
                                             </span>
                                             <p className="text-lg font-bold text-amber-950 dark:text-amber-100 font-mono">
-                                                {(() => {
-                                                    let n = Number(funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0);
-                                                    let e = Number(funcionarioVerDados.saldoBancoHorasExtras100 ?? 0);
-                                                    const leg = Number(funcionarioVerDados.saldoBancoHoras ?? n + e);
+                                                {Number(
+                                                    bancoResumoVerDados?.horasTotalLiquido ??
+                                                        (() => {
+                                                            let n = Number(
+                                                                funcionarioVerDados.saldoBancoHorasNormaisExcedente ?? 0,
+                                                            );
+                                                            let e = Number(
+                                                                funcionarioVerDados.saldoBancoHorasExtras100 ?? 0,
+                                                            );
+                                                            const leg = Number(
+                                                                funcionarioVerDados.saldoBancoHoras ?? n + e,
+                                                            );
                                                     if (n + e <= 0 && leg > 0) n = leg;
-                                                    return (n + e).toFixed(2);
-                                                })()}{' '}
+                                                            return (
+                                                                n +
+                                                                e -
+                                                                Number(funcionarioVerDados.saldoHorasNegativas ?? 0)
+                                                            );
+                                                        })(),
+                                                ).toFixed(2)}{' '}
                                                 h
                                             </p>
                                         </div>
@@ -5443,7 +6114,12 @@ const RHView: React.FC = () => {
                                             Horas negativas atuais:{' '}
                                             <strong className="font-mono">
                                                 {(() => {
-                                                    const h = Number(folhaDetalhada?.dividaHoras?.horasNegativas ?? funcionarioVerDados.saldoHorasNegativas ?? 0);
+                                                    const h = Number(
+                                                        bancoResumoVerDados?.horasNegativas ??
+                                                            funcionarioVerDados.saldoHorasNegativas ??
+                                                            folhaDetalhada?.dividaHoras?.horasNegativas ??
+                                                            0,
+                                                    );
                                                     return `${decimalHoursToHHmm(h)} (${Number(h).toFixed(2)} h)`;
                                                 })()}
                                             </strong>
@@ -5779,6 +6455,48 @@ const RHView: React.FC = () => {
                     </div>
                 </div>
             )}
+
+            {/* Confirmação: zerar banco de horas */}
+            <AlertDialog open={showZerarBancoDialog} onOpenChange={setShowZerarBancoDialog}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Zerar banco de horas</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            <div className="space-y-3">
+                                <p className="text-gray-700 dark:text-gray-300">
+                                    Tem certeza que deseja zerar o banco de horas de{' '}
+                                    <span className="font-bold text-gray-900 dark:text-gray-100">
+                                        {funcionarioVerDados?.nome}
+                                    </span>
+                                    ?
+                                </p>
+                                <div className="bg-red-50 dark:bg-red-950/40 border-l-4 border-red-500 p-4 rounded">
+                                    <p className="text-sm text-red-800 dark:text-red-200 font-medium">
+                                        Esta ação zera horas positivas e negativas do banco.
+                                    </p>
+                                    <p className="text-sm text-red-700 dark:text-red-300 mt-2">
+                                        Folgas acumuladas não são alteradas. A operação não pode ser desfeita
+                                        automaticamente.
+                                    </p>
+                                </div>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={zerandoBanco}>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                            disabled={zerandoBanco}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                void handleConfirmarZerarBanco();
+                            }}
+                            className="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                        >
+                            {zerandoBanco ? 'Zerando…' : 'Sim, zerar banco'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
 
             {/* Dialog de Confirmação de Exclusão */}
             <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

@@ -20,6 +20,9 @@ jest.mock('../lib/prisma', () => ({
       delete: jest.fn(),
       deleteMany: jest.fn(),
     },
+    feriadoCalendarioOverride: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   },
 }));
 
@@ -122,6 +125,17 @@ describe('workshift-rh-evaluation — A/B/P/D', () => {
     expect(r.minutosBancoDelta).toBe(0);
   });
 
+  it('padrão sem tratamento: atraso e HE vão ao banco (B)', () => {
+    const r = aplicarAvaliacaoRhDia({
+      minutosAtraso: 30,
+      minutosExtra: 45,
+    });
+    expect(r.minutosBancoDebito).toBe(30);
+    expect(r.minutosBancoCredito).toBe(45);
+    expect(r.minutosPagarFolha).toBe(0);
+    expect(r.minutosDescontarFolha).toBe(0);
+  });
+
   /** [Teste 5] Botão D (Descontar): falta/atraso → folha de descontos. */
   it('[Teste 5] Botão D — atraso marcado como D contabilizado na folha de descontos', () => {
     const r = aplicarAvaliacaoRhDia({
@@ -142,14 +156,65 @@ describe('workshift-rh-evaluation — A/B/P/D', () => {
     expect(r.minutosDescontarFolha).toBe(480);
   });
 
-  it('B no mesmo dia com atraso e HE aplica nos dois sentidos', () => {
+  it('B no mesmo dia com atraso e HE aplica nos dois sentidos (pistas separadas)', () => {
+    const r = aplicarAvaliacaoRhDia({
+      minutosAtraso: 120,
+      minutosExtra: 60,
+      tratamentoDebito: 'B',
+      tratamentoCredito: 'B',
+    });
+    expect(r.minutosBancoDebito).toBe(120);
+    expect(r.minutosBancoCredito).toBe(60);
+    expect(r.minutosBancoDelta).toBe(-60);
+    expect(r.minutosPagarFolha).toBe(0);
+  });
+
+  it('B com atraso 15 + HE 60 (líquido +45)', () => {
     const r = aplicarAvaliacaoRhDia({
       minutosAtraso: 15,
       minutosExtra: 60,
       tratamentoDebito: 'B',
       tratamentoCredito: 'B',
     });
-    expect(r.minutosBancoDelta).toBe(45); // -15 + 60
+    expect(r.minutosBancoDebito).toBe(15);
+    expect(r.minutosBancoCredito).toBe(60);
+    expect(r.minutosBancoDelta).toBe(45);
+  });
+
+  it('D com atraso 2h e HE 1h: compensa e resto 1h negativo no banco', () => {
+    const r = aplicarAvaliacaoRhDia({
+      minutosAtraso: 120,
+      minutosExtra: 60,
+      tratamentoDebito: 'D',
+      tratamentoCredito: null,
+    });
+    expect(r.minutosDescontarFolha).toBe(0);
+    expect(r.minutosPagarFolha).toBe(0);
+    expect(r.minutosBancoDebito).toBe(60);
+    expect(r.minutosBancoCredito).toBe(0);
+  });
+
+  it('D com atraso 1h e HE 2h: resto 1h positivo no banco', () => {
+    const r = aplicarAvaliacaoRhDia({
+      minutosAtraso: 60,
+      minutosExtra: 120,
+      tratamentoDebito: 'D',
+    });
+    expect(r.minutosDescontarFolha).toBe(0);
+    expect(r.minutosBancoCredito).toBe(60);
+    expect(r.minutosBancoDebito).toBe(0);
+  });
+
+  it('P com débito B: HE paga e atraso permanece no banco', () => {
+    const r = aplicarAvaliacaoRhDia({
+      minutosAtraso: 120,
+      minutosExtra: 60,
+      tratamentoDebito: 'B',
+      tratamentoCredito: 'P',
+    });
+    expect(r.minutosBancoDebito).toBe(120);
+    expect(r.minutosBancoCredito).toBe(0);
+    expect(r.minutosPagarFolha).toBe(60);
   });
 
   it('resolverTratamentosDoBotao mapeia clique único', () => {
@@ -161,8 +226,8 @@ describe('workshift-rh-evaluation — A/B/P/D', () => {
       tratamentoDebito: 'B',
       tratamentoCredito: 'B',
     });
-    expect(resolverTratamentosDoBotao('P', { temDebito: false, temCredito: true })).toEqual({
-      tratamentoDebito: null,
+    expect(resolverTratamentosDoBotao('P', { temDebito: true, temCredito: true })).toEqual({
+      tratamentoDebito: undefined,
       tratamentoCredito: 'P',
     });
     expect(resolverTratamentosDoBotao('D', { temDebito: true, temCredito: true })).toEqual({

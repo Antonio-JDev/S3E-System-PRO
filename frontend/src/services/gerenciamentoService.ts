@@ -24,7 +24,7 @@ export const funcionariosService = {
         uniformeCalca?: string;
         uniformeBermuda?: string;
         uniformeSapato?: string;
-        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO' | 'AUTONOMO_BANCO_HORAS';
         salarioBase?: number;
         valorHora?: number;
         valorDiaria?: number;
@@ -49,7 +49,7 @@ export const funcionariosService = {
         uniformeCalca?: string;
         uniformeBermuda?: string;
         uniformeSapato?: string;
-        tipoContrato?: 'REGISTRADO' | 'AUTONOMO';
+        tipoContrato?: 'REGISTRADO' | 'AUTONOMO' | 'AUTONOMO_BANCO_HORAS';
         salarioBase?: number;
         valorHora?: number;
         valorDiaria?: number;
@@ -178,6 +178,26 @@ export const rhService = {
             | { tipo: 'misto'; horasNormais: number; horasExtras100: number };
     }) {
         return await axiosApiService.post('/api/rh/banco-horas/incluir-folha', data);
+    },
+
+    /** Abate horas positivas × negativas e persiste o líquido no cadastro. */
+    async faturarBancoHoras(data: { funcionarioId: string }) {
+        return await axiosApiService.post('/api/rh/banco-horas/faturar', data);
+    },
+
+    /** Zera completamente positivas e negativas do banco de horas. */
+    async zerarBancoHoras(data: { funcionarioId: string }) {
+        return await axiosApiService.post('/api/rh/banco-horas/zerar', data);
+    },
+
+    /** Recalcula métricas de ponto (atraso/extra) só do mês — sem apagar batidas. */
+    async recalcularPontoMes(funcionarioId: string, mes: string) {
+        return await axiosApiService.post(`/api/rh/folha/${funcionarioId}/${mes}/recalcular-ponto`);
+    },
+
+    /** Simula CLT vs Autônomo+banco nas mesmas batidas do mês. */
+    async compararContratosFolha(funcionarioId: string, mes: string) {
+        return await axiosApiService.get(`/api/rh/folha/${funcionarioId}/${mes}/comparar-contratos`);
     },
 
     /** Importação no servidor: SheetJS (`parsePresencaXlsBuffer`) + gravação em `RegistroPonto`. */

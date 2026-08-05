@@ -465,6 +465,46 @@ export function gerarBufferPdfConferenciaPonto(
       doc.strokeColor('black');
       y += 6;
 
+      // ----- Banco de horas (resumo cadastro / após avaliações B) -----
+      if (folha.tipoContrato === 'REGISTRADO' || folha.tipoContrato === 'AUTONOMO') {
+        const banco =
+          (folha as { bancoHorasResumo?: {
+            horasPositivas: number;
+            horasNegativas: number;
+            horasTotalLiquido: number;
+          } }).bancoHorasResumo ??
+          (() => {
+            const pos = Number(folha.registrado?.saldoBancoHorasAtual ?? 0);
+            const neg = Number(
+              (folha as { dividaHoras?: { horasNegativas?: number } }).dividaHoras?.horasNegativas ?? 0,
+            );
+            return { horasPositivas: pos, horasNegativas: neg, horasTotalLiquido: pos - neg };
+          })();
+        linhaResumo('Banco de horas', '', '', { bold: true });
+        linhaResumo(
+          'HR Positivas',
+          decimalHoursToHHmm(Number(banco.horasPositivas ?? 0)),
+          null,
+        );
+        linhaResumo(
+          'HR Negativas',
+          decimalHoursToHHmm(Number(banco.horasNegativas ?? 0)),
+          null,
+          { color: COLOR_RED },
+        );
+        linhaResumo(
+          'HR Total hora banco (líquido)',
+          decimalHoursToHHmm(Number(banco.horasTotalLiquido ?? 0)),
+          null,
+          { bold: true },
+        );
+        y += 4;
+        doc.strokeColor('#e5e7eb').lineWidth(0.5)
+          .moveTo(tableLeft, y).lineTo(tableLeft + widthAvailable, y).stroke();
+        doc.strokeColor('black');
+        y += 6;
+      }
+
       // ----- Descontos / Bônus AUTOMÁTICOS (informativos, derivados do ponto) -----
       linhaResumo('Descontos automáticos (referência – ponto)', '', '', { bold: true, color: COLOR_MUTED });
 
