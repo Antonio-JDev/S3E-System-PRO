@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import FullCalendar from '@fullcalendar/react';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import dayGridPlugin from '@fullcalendar/daygrid';
-import interactionPlugin from '@fullcalendar/interaction';
+import interactionPlugin, { Draggable, type EventReceiveArg } from '@fullcalendar/interaction';
 import type { DateSelectArg, EventClickArg, EventContentArg, DatesSetArg } from '@fullcalendar/core';
 import ptBrLocale from '@fullcalendar/core/locales/pt-br';
 import { toast } from 'sonner';
@@ -14,6 +14,8 @@ import {
   type OrcamentoPreenchido,
   type CapacidadeDia,
 } from '../services/eventosCalendarioService';
+import { ordemServicosService, type Projeto } from '../services/ordemServicosService';
+import { projetoMatchesBusca } from '../utils/buscaOs.util';
 import { orcamentosService } from '../services/orcamentosService';
 import { axiosApiService } from '../services/axiosApi';
 import {
@@ -61,18 +63,35 @@ interface OrcamentoBusca {
   venda?: { id: string } | null;
 }
 
-function getEventStyle(tipo: string, status: string) {
+/** Cores saturadas estilo schedule (opcao-3) — fundo escuro + texto claro */
+function getEventStyle(tipo: string, status: string, temOs: boolean) {
+  if (!temOs) {
+    return {
+      backgroundColor: '#1e293b',
+      borderColor: status === 'PREVISAO' ? '#f59e0b' : '#94a3b8',
+      textColor: '#f8fafc',
+      classNames: [
+        'fc-event-schedule-card',
+        'fc-event-sem-os',
+        status === 'PREVISAO' ? 'fc-event-previsao' : 'fc-event-valido',
+      ],
+    };
+  }
   const map: Record<string, { bg: string; border: string }> = {
-    OBRA: { bg: '#e0f2fe', border: '#0284c7' },
-    REUNIAO: { bg: '#ede9fe', border: '#7c3aed' },
-    VISITA: { bg: '#ffe4e6', border: '#e11d48' },
+    OBRA: { bg: '#0c4a6e', border: '#38bdf8' },
+    REUNIAO: { bg: '#4c1d95', border: '#a78bfa' },
+    VISITA: { bg: '#9f1239', border: '#fb7185' },
   };
-  const c = map[tipo] || map.REUNIAO;
+  const c = map[tipo] || map.OBRA;
+  const isPrev = status === 'PREVISAO';
   return {
     backgroundColor: c.bg,
-    borderColor: status === 'VALIDO' ? '#059669' : c.border,
-    textColor: '#1e293b',
-    classNames: status === 'PREVISAO' ? ['border-dashed', 'fc-event-previsao'] : ['fc-event-valido'],
+    borderColor: isPrev ? '#fbbf24' : status === 'VALIDO' ? '#34d399' : c.border,
+    textColor: '#f8fafc',
+    classNames: [
+      'fc-event-schedule-card',
+      isPrev ? 'fc-event-previsao' : 'fc-event-valido',
+    ],
   };
 }
 
@@ -80,23 +99,131 @@ function formatPeriodo(date: Date): string {
   return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 }
 
+function iniciais(nome: string): string {
+  return nome
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+function labelOs(evento?: EventoCalendario): string | null {
+  if (!evento?.projeto) return null;
+  const n = evento.projeto.orcamento?.numeroSequencial;
+  return n ? `OS-${n}` : evento.projeto.titulo;
+}
+
+function tituloCardEvento(evento?: EventoCalendario): string {
+  const os = labelOs(evento);
+  if (os && evento?.projeto?.titulo && !String(evento.projeto.titulo).startsWith('OS-')) {
+    const curto = evento.projeto.titulo.length > 28
+      ? `${evento.projeto.titulo.slice(0, 28)}…`
+      : evento.projeto.titulo;
+    return `${os} · ${curto}`;
+  }
+  if (os) return os;
+  return 'Vincular OS';
+}
+
 function renderEventContent(arg: EventContentArg) {
   if (arg.event.extendedProps.tipo === 'ALOCACAO_OS') {
     return (
-      <div className="px-1 py-0.5 overflow-hidden h-full">
-        <div className="text-[9px] uppercase tracking-wide text-emerald-800 font-bold">Alocação OS</div>
-        <div className="text-xs font-medium leading-tight truncate">{arg.event.title}</div>
+      <div className="px-2 py-1 overflow-hidden h-full" style={{ color: '#ecfdf5' }}>
+        <div className="text-[9px] uppercase tracking-wide font-bold opacity-90">Alocação OS</div>
+        <div className="text-[11px] font-semibold leading-tight truncate">{arg.event.title}</div>
       </div>
     );
   }
   const evento = arg.event.extendedProps.evento as EventoCalendario | undefined;
   const timeText = arg.timeText;
+  const titulo = tituloCardEvento(evento);
+  const semOs = !evento?.projeto;
+  const equipe = evento?.equipe ?? [];
+  const isPrev = evento?.status === 'PREVISAO';
+  const bg = arg.event.backgroundColor || '#0f172a';
+  const fg = '#f8fafc';
+
   return (
-    <div className="px-1 py-0.5 overflow-hidden h-full flex flex-col">
-      {timeText && <div className="text-[10px] font-semibold opacity-80 leading-tight">{timeText}</div>}
-      <div className="text-xs font-medium leading-tight truncate">{arg.event.title}</div>
-      {evento?.status === 'PREVISAO' && (
-        <div className="text-[9px] uppercase tracking-wide text-amber-700 font-semibold">Previsão</div>
+    <div
+      className="px-2 py-1.5 overflow-hidden h-full flex flex-col gap-0.5 min-h-0 rounded-[10px]"
+      style={{ backgroundColor: bg, color: fg }}
+    >
+      <div className="flex items-start justify-between gap-1">
+        <div
+          className="text-[12px] font-bold leading-snug line-clamp-2"
+          style={{ color: semOs ? '#fde68a' : '#ffffff' }}
+          title={titulo}
+        >
+          {titulo}
+        </div>
+        {isPrev && (
+          <span
+            className="shrink-0 text-[8px] uppercase tracking-wide font-bold px-1 py-0.5 rounded"
+            style={{
+              backgroundColor: 'rgba(251, 191, 36, 0.25)',
+              color: '#fef3c7',
+              border: '1px solid rgba(251, 191, 36, 0.7)',
+            }}
+          >
+            Prev.
+          </span>
+        )}
+      </div>
+      {timeText && (
+        <div className="text-[10px] font-semibold leading-tight" style={{ color: '#cbd5e1' }}>
+          {timeText}
+        </div>
+      )}
+      {equipe.length > 0 ? (
+        <div className="flex items-center gap-1.5 mt-auto pt-1 min-w-0">
+          <div className="flex -space-x-1.5 shrink-0">
+            {equipe.slice(0, 4).map((p) => (
+              <span
+                key={p.id}
+                title={p.nome}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold"
+                style={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                  color: '#fff',
+                  boxShadow: '0 0 0 2px rgba(255,255,255,0.35)',
+                }}
+              >
+                {iniciais(p.nome)}
+              </span>
+            ))}
+            {equipe.length > 4 && (
+              <span
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-bold"
+                style={{
+                  backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                  color: '#fff',
+                  boxShadow: '0 0 0 2px rgba(255,255,255,0.35)',
+                }}
+              >
+                +{equipe.length - 4}
+              </span>
+            )}
+          </div>
+          <span
+            className="text-[10px] truncate font-semibold"
+            style={{ color: '#e2e8f0' }}
+            title={equipe.map((p) => p.nome).join(', ')}
+          >
+            {equipe.length === 1
+              ? equipe[0].nome.split(/\s+/)[0]
+              : `${equipe.length} pessoas`}
+          </span>
+        </div>
+      ) : (
+        <div className="text-[9px] mt-auto italic" style={{ color: '#94a3b8' }}>
+          Sem equipe
+        </div>
+      )}
+      {(evento?.veiculos?.length ?? 0) > 0 && (
+        <div className="text-[9px] truncate font-semibold" style={{ color: '#bae6fd' }} title={evento!.veiculos!.map((v) => `${v.modelo} (${v.placa})`).join(', ')}>
+          🚗 {evento!.veiculos!.map((v) => v.placa).join(', ')}
+        </div>
       )}
     </div>
   );
@@ -120,9 +247,36 @@ function mesesNoIntervalo(inicio: Date, fim: Date): Array<{ mes: number; ano: nu
   return Array.from(set.values());
 }
 
+function osSidebarCardClasses(status: string): {
+  card: string;
+  badge: string;
+  subtitle: string;
+} {
+  if (status === 'APROVADO') {
+    return {
+      card: 'fc-external-event flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-emerald-300/80 dark:border-emerald-800 bg-emerald-950 text-white cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-emerald-400/60 shadow-sm',
+      badge: 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-bold text-white ring-2 ring-white/20',
+      subtitle: 'text-[10px] text-emerald-200 truncate',
+    };
+  }
+  if (status === 'EXECUCAO') {
+    return {
+      card: 'fc-external-event flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-amber-300/80 dark:border-amber-800 bg-amber-950 text-white cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-amber-400/60 shadow-sm',
+      badge: 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white ring-2 ring-white/20',
+      subtitle: 'text-[10px] text-amber-200 truncate',
+    };
+  }
+  return {
+    card: 'fc-external-event flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-sky-200/80 dark:border-dark-border bg-sky-950 text-white cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-sky-400/60 shadow-sm',
+    badge: 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-500 text-[9px] font-bold text-white ring-2 ring-white/20',
+    subtitle: 'text-[10px] text-sky-200 truncate',
+  };
+}
+
 const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   const calendarRef = useRef<FullCalendar>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('mes');
+  const osListaRef = useRef<HTMLDivElement>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('semana');
   const [periodoLabel, setPeriodoLabel] = useState('');
   const [eventos, setEventos] = useState<EventoCalendario[]>([]);
   const [loading, setLoading] = useState(false);
@@ -139,7 +293,15 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   const [eventoEditando, setEventoEditando] = useState<EventoCalendario | null>(null);
   const [orcamentoPreenchido, setOrcamentoPreenchido] = useState<OrcamentoPreenchido | null>(null);
   const [datasIniciais, setDatasIniciais] = useState<{ dataInicio?: string; dataFim?: string }>();
-  const [usuarios, setUsuarios] = useState<UsuarioResumo[]>([]);
+  const [osDrop, setOsDrop] = useState<{
+    projetoId: string;
+    titulo: string;
+    numeroOs: string;
+    dataInicio: string;
+    dataFim: string;
+  } | null>(null);
+  const [ordensServico, setOrdensServico] = useState<Projeto[]>([]);
+  const [buscaOsSidebar, setBuscaOsSidebar] = useState('');
   const [filtroGerenteId, setFiltroGerenteId] = useState('');
   const [statusOsAtivos, setStatusOsAtivos] = useState<Set<string>>(
     new Set(STATUS_OS_FILTRO.map((s) => s.id))
@@ -149,8 +311,10 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
   const [relatorioOcupacao, setRelatorioOcupacao] = useState<RelatorioOcupacaoDTO | null>(null);
   const [loadingRelatorio, setLoadingRelatorio] = useState(false);
   const [alocacoesOs, setAlocacoesOs] = useState<AlocacaoCalendarioDTO[]>([]);
-  const [mostrarAlocacoesOs, setMostrarAlocacoesOs] = useState(true);
+  const [mostrarAlocacoesOs, setMostrarAlocacoesOs] = useState(false);
+  const [usuarios, setUsuarios] = useState<UsuarioResumo[]>([]);
   const [alocacaoDetalhe, setAlocacaoDetalhe] = useState<AlocacaoCalendarioDTO | null>(null);
+  const [painelOcupacaoAberto, setPainelOcupacaoAberto] = useState(false);
 
   useEffect(() => {
     orcamentosService.listar().then((res) => {
@@ -163,6 +327,15 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
       if (res.success && res.data) {
         const lista = Array.isArray(res.data) ? res.data : [];
         setUsuarios(lista.map((u: any) => ({ id: u.id, nome: u.name || u.nome || u.email })));
+      }
+    });
+    ordemServicosService.listar().then((res) => {
+      if (res.success && Array.isArray(res.data)) {
+        setOrdensServico(
+          res.data.filter(
+            (p) => p.status !== 'CANCELADO' && p.status !== 'CONCLUIDO' && !p.semObra,
+          ),
+        );
       }
     });
   }, []);
@@ -288,9 +461,9 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         end: fimExclusive,
         allDay: true,
         extendedProps: { tipo: 'ALOCACAO_OS', alocacao: a },
-        backgroundColor: '#d1fae5',
-        borderColor: '#059669',
-        textColor: '#064e3b',
+        backgroundColor: '#064e3b',
+        borderColor: '#34d399',
+        textColor: '#ecfdf5',
         classNames: ['fc-event-alocacao-os'],
       };
     });
@@ -304,7 +477,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
         start: e.dataInicio,
         end: e.dataFim,
         extendedProps: { evento: e },
-        ...getEventStyle(e.tipo, e.status),
+        ...getEventStyle(e.tipo, e.status, Boolean(e.projeto)),
       })),
       ...eventosAlocacaoOs,
     ],
@@ -347,6 +520,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     setEventoEditando(null);
     setOrcamentoPreenchido(null);
     setDatasIniciais(undefined);
+    setOsDrop(null);
     setModalAberto(true);
   };
 
@@ -385,6 +559,7 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     setEventoEditando(null);
     setOrcamentoPreenchido(null);
     setDatasIniciais({ dataInicio: info.startStr, dataFim: info.endStr });
+    setOsDrop(null);
     setModalAberto(true);
   };
 
@@ -407,15 +582,169 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
     if (rangeAtual) carregarEventos(rangeAtual.inicio, rangeAtual.fim);
   };
 
+  const labelOsProjeto = (p: Projeto): string => {
+    const n = p.orcamento?.numeroSequencial;
+    return n ? `OS-${n}` : p.titulo;
+  };
+
+  const ordensServicoFiltradas = useMemo(() => {
+    const termo = buscaOsSidebar.trim();
+    if (!termo) return ordensServico;
+    return ordensServico.filter((p) => projetoMatchesBusca(p, termo));
+  }, [ordensServico, buscaOsSidebar]);
+
+  useEffect(() => {
+    const el = osListaRef.current;
+    if (!el) return;
+    const draggable = new Draggable(el, {
+      itemSelector: '[data-projeto-id]',
+      eventData: (itemEl) => ({
+        title: itemEl.getAttribute('data-titulo') || 'OS',
+        duration: { days: 1 },
+        create: true,
+        extendedProps: {
+          projetoId: itemEl.getAttribute('data-projeto-id'),
+          numeroOs: itemEl.getAttribute('data-numero-os'),
+        },
+      }),
+    });
+    return () => draggable.destroy();
+  }, [ordensServicoFiltradas]);
+
+  const handleEventReceive = (info: EventReceiveArg) => {
+    const projetoId = String(info.event.extendedProps.projetoId || '');
+    const titulo = info.event.title || 'OS';
+    const numeroOs = String(info.event.extendedProps.numeroOs || '');
+    const start = info.event.start;
+    const end = info.event.end;
+    info.event.remove();
+    if (!projetoId || !start) {
+      toast.error('Não foi possível planejar a ordem de serviço');
+      return;
+    }
+    const dataFim = end ?? new Date(start.getTime() + 8 * 3600_000);
+    setEventoEditando(null);
+    setOrcamentoPreenchido(null);
+    setDatasIniciais({ dataInicio: start.toISOString(), dataFim: dataFim.toISOString() });
+    setOsDrop({
+      projetoId,
+      titulo,
+      numeroOs,
+      dataInicio: start.toISOString(),
+      dataFim: dataFim.toISOString(),
+    });
+    setModalAberto(true);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-dark-bg flex flex-col">
       <style>{`
-        .fc-event-previsao { border-style: dashed !important; border-width: 2px !important; }
-        .fc-event-valido { border-width: 2px !important; border-left-width: 4px !important; }
-        .calendario-hub .fc { --fc-border-color: #e5e7eb; }
-        .dark .calendario-hub .fc { --fc-border-color: #1B2028; --fc-page-bg-color: #0F0F0F; --fc-neutral-bg-color: #151922; }
-        .fc-day-gargalo { background-color: rgba(239, 68, 68, 0.12) !important; }
-        .fc-event-alocacao-os { border-left-width: 4px !important; border-style: solid !important; }
+        .calendario-hub {
+          --fc-border-color: #cbd5e1;
+          --fc-page-bg-color: transparent;
+          --fc-neutral-bg-color: #f1f5f9;
+          --fc-today-bg-color: rgba(14, 165, 233, 0.12);
+          --fc-now-indicator-color: #ef4444;
+          --fc-event-text-color: #f8fafc;
+        }
+        .dark .calendario-hub {
+          --fc-border-color: #1e293b;
+          --fc-neutral-bg-color: #0f172a;
+          --fc-today-bg-color: rgba(56, 189, 248, 0.1);
+          --fc-page-bg-color: transparent;
+        }
+        .calendario-hub .fc { font-family: inherit; }
+        .calendario-hub .fc-theme-standard td,
+        .calendario-hub .fc-theme-standard th { border-color: var(--fc-border-color); }
+        .calendario-hub .fc-col-header-cell {
+          padding: 12px 4px;
+          background: #0f172a;
+        }
+        .calendario-hub .fc-col-header-cell-cushion {
+          color: #e2e8f0 !important;
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          text-decoration: none !important;
+        }
+        .dark .calendario-hub .fc-col-header-cell { background: #020617; }
+        .calendario-hub .fc-daygrid-day-number {
+          color: #0f172a !important;
+          font-weight: 700;
+          font-size: 13px;
+          padding: 6px 8px !important;
+        }
+        .dark .calendario-hub .fc-daygrid-day-number {
+          color: #e2e8f0 !important;
+        }
+        .calendario-hub .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
+          color: #94a3b8 !important;
+        }
+        .calendario-hub .fc-timegrid-slot { height: 2.85rem; }
+        .calendario-hub .fc-timegrid-slot-label-cushion {
+          font-size: 11px;
+          font-weight: 600;
+          color: #475569;
+        }
+        .dark .calendario-hub .fc-timegrid-slot-label-cushion { color: #94a3b8; }
+        .calendario-hub .fc-event {
+          border: none !important;
+          border-left: 3px solid var(--fc-event-border-color, #38bdf8) !important;
+          border-radius: 10px !important;
+          box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+          overflow: hidden;
+          color: #f8fafc !important;
+        }
+        .calendario-hub .fc-timegrid-event {
+          margin: 1px 4px !important;
+          box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
+        }
+        .calendario-hub .fc-daygrid-event {
+          margin: 1px 3px !important;
+          padding: 0 !important;
+          min-height: 2.25rem;
+        }
+        .calendario-hub .fc-daygrid-block-event .fc-event-main {
+          padding: 0 !important;
+          color: inherit !important;
+        }
+        .calendario-hub .fc-h-event {
+          background-color: var(--fc-event-bg-color) !important;
+          border-color: var(--fc-event-border-color) !important;
+        }
+        .calendario-hub .fc-event-schedule-card {
+          background-color: var(--fc-event-bg-color, #0f172a) !important;
+        }
+        .calendario-hub .fc-event-previsao {
+          border-style: dashed !important;
+          border-left-width: 3px !important;
+          border-left-color: #f59e0b !important;
+        }
+        .calendario-hub .fc-event-valido {
+          border-style: solid !important;
+        }
+        .calendario-hub .fc-event-main { padding: 0 !important; color: inherit !important; }
+        .calendario-hub .fc-day-gargalo { background: rgba(254, 202, 202, 0.55) !important; }
+        .dark .calendario-hub .fc-day-gargalo { background: rgba(127, 29, 29, 0.28) !important; }
+        .calendario-hub .fc-scrollgrid {
+          border-radius: 16px;
+          overflow: hidden;
+          border: 1px solid var(--fc-border-color) !important;
+          background: #fff;
+        }
+        .dark .calendario-hub .fc-scrollgrid { background: #0b1220; }
+        .calendario-hub .fc-timegrid-col.fc-day-today,
+        .calendario-hub .fc-daygrid-day.fc-day-today {
+          background: var(--fc-today-bg-color) !important;
+        }
+        .calendario-hub .fc-timegrid-now-indicator-line { border-width: 2px 0 0; }
+        .calendario-hub .fc-event-alocacao-os {
+          background: #064e3b !important;
+          border-left-color: #34d399 !important;
+          color: #ecfdf5 !important;
+        }
+        .calendario-hub .fc-daygrid-event-dot { display: none !important; }
       `}</style>
 
       <div className="flex flex-1 min-h-0">
@@ -424,8 +753,46 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           <div>
             <h1 className="text-lg font-bold text-gray-900 dark:text-dark-text">Calendário</h1>
             <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-1">
-              Previsão de alocação
+              Arraste a ordem de serviço para definir quando será executada. Sempre cria em Previsão.
             </p>
+          </div>
+
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Ordens de serviço</h2>
+            <input
+              type="search"
+              value={buscaOsSidebar}
+              onChange={(e) => setBuscaOsSidebar(e.target.value)}
+              placeholder="Buscar OS, cliente..."
+              className="w-full mb-2 px-3 py-1.5 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm"
+            />
+            <div ref={osListaRef} className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+              {ordensServicoFiltradas.map((p) => {
+                const estilo = osSidebarCardClasses(p.status);
+                return (
+                <div
+                  key={p.id}
+                  data-projeto-id={p.id}
+                  data-titulo={p.titulo}
+                  data-numero-os={labelOsProjeto(p)}
+                  className={estilo.card}
+                >
+                  <span className={estilo.badge}>
+                    {labelOsProjeto(p).replace('OS-', '').slice(0, 4)}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate">{labelOsProjeto(p)}</div>
+                    <div className={estilo.subtitle}>
+                      {p.cliente?.nome || p.titulo}
+                    </div>
+                  </div>
+                </div>
+              );
+              })}
+              {ordensServicoFiltradas.length === 0 && (
+                <p className="text-xs text-gray-500 py-2">Nenhuma OS disponível</p>
+              )}
+            </div>
           </div>
 
           <button
@@ -564,12 +931,12 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           </div>
 
           {/* Topbar */}
-          <div className="flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5 p-4 bg-white dark:bg-dark-card border-b border-gray-200 dark:border-dark-border">
+            <div className="flex items-center gap-1 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-nav p-0.5">
               <button
                 type="button"
                 onClick={() => navegar(-1)}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-bg text-gray-600 dark:text-dark-text"
+                className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-dark-elevated text-gray-600 dark:text-dark-text"
                 aria-label="Período anterior"
               >
                 ‹
@@ -577,27 +944,27 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               <button
                 type="button"
                 onClick={irHoje}
-                className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-bg capitalize"
+                className="px-3 py-1.5 text-sm rounded-full font-semibold text-gray-800 dark:text-dark-text hover:bg-white dark:hover:bg-dark-elevated capitalize"
               >
                 {periodoLabel || 'Hoje'}
               </button>
               <button
                 type="button"
                 onClick={() => navegar(1)}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-bg text-gray-600 dark:text-dark-text"
+                className="w-8 h-8 rounded-full hover:bg-white dark:hover:bg-dark-elevated text-gray-600 dark:text-dark-text"
                 aria-label="Próximo período"
               >
                 ›
               </button>
             </div>
 
-            <div className="flex rounded-xl border border-gray-200 dark:border-dark-border overflow-hidden text-sm bg-gray-50 dark:bg-dark-nav">
+            <div className="flex rounded-full border border-gray-200 dark:border-dark-border overflow-hidden text-sm bg-gray-50 dark:bg-dark-nav">
               <button
                 type="button"
                 onClick={() => mudarView('semana')}
-                className={`px-4 py-2 font-medium transition-colors ${
+                className={`px-4 py-1.5 font-semibold transition-colors ${
                   viewMode === 'semana'
-                    ? 'bg-white dark:bg-dark-accent-soft text-blue-600 dark:text-dark-accent-light shadow-sm'
+                    ? 'bg-slate-900 text-white dark:bg-sky-600'
                     : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-elevated'
                 }`}
               >
@@ -606,9 +973,9 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               <button
                 type="button"
                 onClick={() => mudarView('mes')}
-                className={`px-4 py-2 font-medium transition-colors border-l border-gray-200 dark:border-dark-border ${
+                className={`px-4 py-1.5 font-semibold transition-colors ${
                   viewMode === 'mes'
-                    ? 'bg-white dark:bg-dark-accent-soft text-blue-600 dark:text-dark-accent-light shadow-sm'
+                    ? 'bg-slate-900 text-white dark:bg-sky-600'
                     : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-elevated'
                 }`}
               >
@@ -616,13 +983,13 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               </button>
             </div>
 
-            <div className="flex-1 min-w-[200px] max-w-md relative">
+            <div className="flex-1 min-w-[180px] max-w-sm relative">
               <input
                 type="search"
                 value={buscaOrcamento}
                 onChange={(e) => setBuscaOrcamento(e.target.value)}
-                placeholder="Buscar orçamento aberto para vincular..."
-                className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm text-gray-900 dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted focus:ring-2 focus:ring-dark-accent/30 focus:border-dark-accent outline-none"
+                placeholder="Buscar orçamento para vincular..."
+                className="w-full pl-9 pr-3 py-2 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm text-gray-900 dark:text-dark-text placeholder:text-gray-400 focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500 outline-none"
               />
               <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -651,25 +1018,89 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
               value={buscaEvento}
               onChange={(e) => setBuscaEvento(e.target.value)}
               placeholder="Buscar eventos..."
-              className="w-40 sm:w-48 px-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm text-gray-900 dark:text-dark-text focus:ring-2 focus:ring-dark-accent/30 focus:border-dark-accent outline-none"
+              className="w-36 sm:w-44 px-4 py-2 rounded-full border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-input text-sm outline-none focus:ring-2 focus:ring-sky-500/30"
             />
 
             <button
               type="button"
+              onClick={() => setPainelOcupacaoAberto((v) => !v)}
+              className="px-3 py-2 rounded-full border border-gray-200 dark:border-dark-border text-xs font-semibold text-gray-600 dark:text-dark-text-secondary hover:bg-gray-50 dark:hover:bg-dark-elevated"
+            >
+              {painelOcupacaoAberto ? 'Ocultar ocupação' : 'Ocupação'}
+            </button>
+
+            <button
+              type="button"
               onClick={abrirCriar}
-              className="hidden lg:inline-flex px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors"
+              className="hidden lg:inline-flex px-5 py-2 rounded-full bg-sky-600 hover:bg-sky-500 text-white font-semibold text-sm transition-colors shadow-sm"
             >
               + Criar Evento
             </button>
           </div>
 
-          <CalendarioOcupacaoCards
-            resumo={relatorioOcupacao?.resumo ?? null}
-            loading={loadingRelatorio}
-            onAtualizar={() => void carregarRelatorioOcupacao()}
-          />
+          {painelOcupacaoAberto && (
+            <>
+              <CalendarioOcupacaoCards
+                resumo={relatorioOcupacao?.resumo ?? null}
+                loading={loadingRelatorio}
+                onAtualizar={() => void carregarRelatorioOcupacao()}
+              />
+              <RelatorioOcupacaoRecursos relatorio={relatorioOcupacao} loading={loadingRelatorio} />
+            </>
+          )}
 
-          <RelatorioOcupacaoRecursos relatorio={relatorioOcupacao} loading={loadingRelatorio} />
+          {eventosFiltrados.length > 0 && (
+            <div className="px-4 pt-3 pb-1">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Na semana</div>
+              <div className="flex gap-2.5 overflow-x-auto pb-1">
+                {eventosFiltrados.slice(0, 8).map((e) => {
+                  const estilo = getEventStyle(e.tipo, e.status, Boolean(e.projeto));
+                  const equipe = e.equipe ?? [];
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => {
+                        setEventoEditando(e);
+                        setOrcamentoPreenchido(null);
+                        setModalAberto(true);
+                      }}
+                      className={`shrink-0 w-[200px] text-left rounded-xl px-3 py-2.5 border-l-[3px] shadow-md ${
+                        e.status === 'PREVISAO' ? 'border-dashed' : 'border-solid'
+                      }`}
+                      style={{
+                        backgroundColor: estilo.backgroundColor,
+                        borderColor: estilo.borderColor,
+                        color: estilo.textColor,
+                      }}
+                    >
+                      <div className="text-[12px] font-bold leading-snug line-clamp-2">
+                        {tituloCardEvento(e)}
+                      </div>
+                      <div className="text-[10px] text-slate-300 mt-0.5">
+                        {new Date(e.dataInicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        {' – '}
+                        {new Date(e.dataFim).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      {equipe.length > 0 && (
+                        <div className="flex -space-x-1.5 mt-2">
+                          {equipe.slice(0, 4).map((p) => (
+                            <span
+                              key={p.id}
+                              title={p.nome}
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-[8px] font-bold text-white ring-2 ring-white/20"
+                            >
+                              {iniciais(p.nome)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Calendar grid */}
           <div className="flex-1 p-4 calendario-hub relative min-h-[500px]">
@@ -681,20 +1112,23 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
             <FullCalendar
               ref={calendarRef}
               plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-              initialView="dayGridMonth"
+              initialView="timeGridWeek"
               headerToolbar={false}
               locale={ptBrLocale}
               firstDay={1}
               slotMinTime="07:00:00"
               slotMaxTime="20:00:00"
-              allDaySlot
+              allDaySlot={mostrarAlocacoesOs}
               height="auto"
               expandRows
               selectable
               selectMirror
+              droppable
+              eventDisplay="block"
               events={calendarEvents}
               eventContent={renderEventContent}
               eventClick={handleEventClick}
+              eventReceive={handleEventReceive}
               select={handleDateSelect}
               datesSet={handleDatesSet}
               nowIndicator
@@ -716,11 +1150,13 @@ const CalendarioHub: React.FC<CalendarioHubProps> = ({ toggleSidebar }) => {
           setModalAberto(false);
           setEventoEditando(null);
           setOrcamentoPreenchido(null);
+          setOsDrop(null);
         }}
         onSuccess={handleModalSuccess}
         eventoInicial={eventoEditando}
         orcamentoPreenchido={orcamentoPreenchido}
         datasIniciais={datasIniciais}
+        osDrop={osDrop}
       />
 
       {alocacaoDetalhe && (
