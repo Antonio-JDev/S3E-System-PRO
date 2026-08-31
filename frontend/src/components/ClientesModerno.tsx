@@ -5,6 +5,9 @@ import { AuthContext } from '../contexts/AuthContext';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
+import ScrollableRow from './ui/ScrollableRow';
+import { ModalDetailHeader } from './ui/ModalDetailHeader';
+import { scrollableNavItemClasses, compactActionBtnClasses, cardActionBtnClasses, compactPagePaddingClasses, modalOverlayPaddingClasses } from '../utils/responsiveNav';
 import ViewToggle from './ui/ViewToggle';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { useEscapeKey } from '../hooks/useEscapeKey';
@@ -552,10 +555,10 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8 bg-white dark:bg-dark-bg">
+        <div className={`min-h-screen ${compactPagePaddingClasses} bg-white dark:bg-dark-bg min-w-0`}>
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
-                <div className="flex items-center gap-4">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in min-w-0">
+                <div className="flex items-center gap-4 min-w-0">
                     <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-gray-100 dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
@@ -564,7 +567,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie seus clientes e parceiros</p>
                     </div>
                 </div>
-                <div className="flex gap-3 flex-wrap">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     {/* Input oculto para importação */}
                     <input
                         ref={fileInputRef}
@@ -574,6 +577,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                         className="hidden"
                     />
                     
+                    <div className={scrollableNavItemClasses}>
                     {/* Dropdown de Ações */}
                     <ActionsDropdown
                         actions={[
@@ -617,15 +621,16 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                         ]}
                         label="Ações"
                     />
+                    </div>
                     
                     <button
                         onClick={() => handleOpenModal()}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} ${compactActionBtnClasses} flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Novo Cliente
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Error Message */}
@@ -684,27 +689,29 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                     </div>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between">
-                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
+                    <p className={`${scrollableNavItemClasses} text-sm text-gray-600 dark:text-dark-text-secondary`}>
                         Exibindo <span className="font-bold text-gray-900 dark:text-dark-text">{filteredClientes.length}</span> de <span className="font-bold text-gray-900 dark:text-dark-text">{clientes.length}</span> clientes
                     </p>
-                    <div className="flex items-center gap-4">
-                        <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Ativo: {clientes.filter(c => c.ativo).length}</span>
+                    <ScrollableRow className="gap-4 justify-start sm:justify-end">
+                        <div className={scrollableNavItemClasses}>
+                            <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary">Inativo: {clientes.filter(c => !c.ativo).length}</span>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="w-3 h-3 bg-green-500 rounded-full shrink-0"></div>
+                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary whitespace-nowrap">Ativo: {clientes.filter(c => c.ativo).length}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded-full ${error ? 'bg-red-500' : clientes.length > 0 ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary">
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="w-3 h-3 bg-red-500 rounded-full shrink-0"></div>
+                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary whitespace-nowrap">Inativo: {clientes.filter(c => !c.ativo).length}</span>
+                        </div>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className={`w-3 h-3 rounded-full shrink-0 ${error ? 'bg-red-500' : clientes.length > 0 ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                            <span className="text-xs text-gray-600 dark:text-dark-text-secondary whitespace-nowrap">
                                 {error ? 'API Error' : clientes.length > 0 ? 'API Online' : 'Carregando...'}
                             </span>
                         </div>
-                    </div>
+                    </ScrollableRow>
                 </div>
             </div>
 
@@ -734,7 +741,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                 /* Visualização em Grid (Cards) */
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredClientes.map((cliente) => (
-                        <div key={cliente.id} className={`card-primary border-2 transition-all duration-200 ${
+                        <div key={cliente.id} className={`card-primary border-2 overflow-hidden transition-all duration-200 ${
                             cliente.ativo ? 'border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-600' : 'border-red-200 dark:border-red-800 opacity-75'
                         }`}>
                             {/* Header do Card */}
@@ -772,12 +779,12 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                             </div>
 
                             {/* Botões de Ação */}
-                            <div className="flex gap-2 pt-4 border-t border-gray-100 dark:border-dark-border">
+                            <ScrollableRow className="gap-2 pt-4 border-t border-gray-100 dark:border-dark-border lg:gap-2">
                                 {cliente.ativo ? (
                                     <>
                                         <button
                                             onClick={() => openViewModal(cliente)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors text-sm font-semibold"
+                                            className={`${cardActionBtnClasses} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors`}
                                             title="Ver dados do cliente"
                                         >
                                             <EyeIcon className="w-4 h-4" />
@@ -785,13 +792,12 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         </button>
                                         <button
                                             onClick={() => handleOpenModal(cliente)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors text-sm font-semibold"
+                                            className={`${cardActionBtnClasses} bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors`}
                                         >
                                             <PencilIcon className="w-4 h-4" />
                                             Editar
                                         </button>
                                         {canDelete(user) ? (
-                                            // Desenvolvedor/Admin: dois botões
                                             <>
                                                 <button
                                                     onClick={() => {
@@ -799,7 +805,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                         setDeletePermanent(false);
                                                         setShowDeleteDialog(true);
                                                     }}
-                                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors text-sm font-semibold"
+                                                    className={`${cardActionBtnClasses} bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors`}
                                                     title="Desativar cliente (pode ser reativado)"
                                                 >
                                                     <ArrowPathIcon className="w-4 h-4" />
@@ -811,7 +817,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                         setDeletePermanent(true);
                                                         setShowDeleteDialog(true);
                                                     }}
-                                                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors text-sm font-semibold"
+                                                    className={`${cardActionBtnClasses} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-800/50 transition-colors`}
                                                     title="Excluir permanentemente do banco de dados"
                                                 >
                                                     <TrashIcon className="w-4 h-4" />
@@ -819,14 +825,13 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                 </button>
                                             </>
                                         ) : (
-                                            // Outros usuários: apenas desativar
                                             <button
                                                 onClick={() => {
                                                     setClienteToDelete(cliente);
                                                     setDeletePermanent(false);
                                                     setShowDeleteDialog(true);
                                                 }}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors text-sm font-semibold"
+                                                className={`${cardActionBtnClasses} bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-800/50 transition-colors`}
                                                 title="Desativar cliente"
                                             >
                                                 <ArrowPathIcon className="w-4 h-4" />
@@ -835,10 +840,10 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         )}
                                     </>
                                 ) : (
-                                    <div className="flex gap-2">
+                                    <>
                                         <button
                                             onClick={() => openViewModal(cliente)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors text-sm font-semibold"
+                                            className={`${cardActionBtnClasses} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-colors`}
                                             title="Ver dados do cliente"
                                         >
                                             <EyeIcon className="w-4 h-4" />
@@ -846,14 +851,14 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         </button>
                                         <button
                                             onClick={() => handleReativar(cliente)}
-                                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                                            className={`${cardActionBtnClasses} bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all shadow-medium`}
                                         >
                                             <ArrowPathIcon className="w-5 h-5" />
                                             Reativar
                                         </button>
-                                    </div>
+                                    </>
                                 )}
-                            </div>
+                            </ScrollableRow>
                         </div>
                     ))}
                 </div>
@@ -901,17 +906,17 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="flex items-center justify-center gap-2">
+                                        <ScrollableRow className="gap-2 justify-center">
                                             <button
                                                 onClick={() => openViewModal(cliente)}
-                                                className="btn-action-edit p-2 rounded-lg"
+                                                className={`${scrollableNavItemClasses} btn-action-edit p-2 rounded-lg`}
                                                 title="Visualizar"
                                             >
                                                 <EyeIcon className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleOpenModal(cliente)}
-                                                className="p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors"
+                                                className={`${scrollableNavItemClasses} p-2 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-lg hover:bg-yellow-200 dark:hover:bg-yellow-900/50 transition-colors`}
                                                 title="Editar"
                                             >
                                                 <PencilIcon className="w-4 h-4" />
@@ -923,7 +928,7 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                                     setDeletePermanent(false);
                                                     setShowDeleteDialog(true);
                                                 }}
-                                                className="btn-action-delete p-2 rounded-lg"
+                                                className={`${scrollableNavItemClasses} btn-action-delete p-2 rounded-lg`}
                                                 title="Desativar"
                                             >
                                                 <TrashIcon className="w-4 h-4" />
@@ -931,13 +936,13 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                                             ) : (
                                                 <button
                                                     onClick={() => handleReativar(cliente)}
-                                                    className="p-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+                                                    className={`${scrollableNavItemClasses} p-2 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors`}
                                                     title="Reativar"
                                                 >
                                                     <ArrowPathIcon className="w-4 h-4" />
                                                 </button>
                                             )}
-                                        </div>
+                                        </ScrollableRow>
                                     </td>
                                 </tr>
                             ))}
@@ -963,50 +968,52 @@ const ClientesModerno: React.FC<ClientesProps> = ({ toggleSidebar, initialClient
                 const limitReached = inLastMinute.length >= CNPJ_VIEW_LIMIT;
                 const canFetchCnpj = isPjWithCnpj && !viewCnpjLoading && !limitReached;
                 return (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses} animate-fade-in`}>
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col animate-slide-in-up">
-                        {/* Header compacto */}
-                        <div className="relative flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-blue-700 shrink-0">
-                            <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                                <EyeIcon className="w-5 h-5 text-white" />
-                            </div>
-                            <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-1">
-                                <h2 className="text-lg font-bold text-white">Ver dados do cliente</h2>
-                                <span className="text-sm text-white/90 truncate">
-                                    {(viewCnpjData && (viewCnpjData.razao_social || viewCnpjData.estabelecimento?.nome_fantasia)) || clienteToView.nome}
-                                </span>
-                                <span className="text-xs text-white/80">
-                                    <span className="font-bold">{clienteToView.cpfCnpj}</span>
-                                    {viewCnpjData?.estabelecimento?.tipo ? ` · ${viewCnpjData.estabelecimento.tipo}` : ''}
-                                    {viewCnpjData?.estabelecimento?.situacao_cadastral ? (
-                                        <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/20">
-                                            {viewCnpjData.estabelecimento.situacao_cadastral === 'Ativa' ? (
-                                                <><span className="w-1 h-1 rounded-full bg-green-300" /> Ativa</>
-                                            ) : viewCnpjData.estabelecimento.situacao_cadastral}
-                                        </span>
-                                    ) : null}
-                                </span>
-                            </div>
-                            {isPjWithCnpj && (
-                                <button
-                                    type="button"
-                                    onClick={handleAtualizarDadosView}
-                                    disabled={!canFetchCnpj}
-                                    className="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-white/20 text-white hover:bg-white/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    title={limitReached ? 'Limite de 3 buscas por minuto. Aguarde 1 minuto.' : 'Buscar dados e IE na CNPJ.ws'}
-                                >
-                                    <ArrowPathIcon className={`w-4 h-4 ${viewCnpjLoading ? 'animate-spin' : ''}`} />
-                                    Atualizar Dados/IE
-                                </button>
-                            )}
-                            <button
-                                onClick={closeViewModal}
-                                className="shrink-0 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-lg transition-colors"
-                                aria-label="Fechar"
-                            >
-                                <XMarkIcon className="w-5 h-5" />
-                            </button>
-                        </div>
+                        <ModalDetailHeader
+                            tone="dark"
+                            className="bg-gradient-to-r from-blue-600 to-blue-700 border-white/10"
+                            onClose={closeViewModal}
+                            icon={
+                                <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
+                                    <EyeIcon className="w-5 h-5 text-white" />
+                                </div>
+                            }
+                            title="Ver dados do cliente"
+                            subtitle={
+                                <>
+                                    <span className="block truncate">
+                                        {(viewCnpjData && (viewCnpjData.razao_social || viewCnpjData.estabelecimento?.nome_fantasia)) || clienteToView.nome}
+                                    </span>
+                                    <span className="block text-white/80 text-xs mt-0.5">
+                                        <span className="font-bold">{clienteToView.cpfCnpj}</span>
+                                        {viewCnpjData?.estabelecimento?.tipo ? ` · ${viewCnpjData.estabelecimento.tipo}` : ''}
+                                        {viewCnpjData?.estabelecimento?.situacao_cadastral ? (
+                                            <span className="ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/20">
+                                                {viewCnpjData.estabelecimento.situacao_cadastral === 'Ativa' ? (
+                                                    <><span className="w-1 h-1 rounded-full bg-green-300" /> Ativa</>
+                                                ) : viewCnpjData.estabelecimento.situacao_cadastral}
+                                            </span>
+                                        ) : null}
+                                    </span>
+                                </>
+                            }
+                            actions={
+                                isPjWithCnpj ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleAtualizarDadosView}
+                                        disabled={!canFetchCnpj}
+                                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium bg-white/20 text-white hover:bg-white/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        title={limitReached ? 'Limite de 3 buscas por minuto. Aguarde 1 minuto.' : 'Buscar dados e IE na CNPJ.ws'}
+                                    >
+                                        <ArrowPathIcon className={`w-4 h-4 ${viewCnpjLoading ? 'animate-spin' : ''}`} />
+                                        <span className="hidden sm:inline">Atualizar Dados/IE</span>
+                                        <span className="sm:hidden">Atualizar</span>
+                                    </button>
+                                ) : undefined
+                            }
+                        />
                         <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
                             {viewCnpjLoading && (
                                 <div className="flex items-center justify-center py-8">
