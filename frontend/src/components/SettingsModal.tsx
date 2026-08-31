@@ -4,6 +4,8 @@ import { type User, UserRole } from '../types';
 import { useContext } from 'react';
 import { AuthContext } from '../contexts/AuthContext';
 import { useTheme } from '../hooks/useTheme';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -280,32 +282,32 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 
                 {/* Tabs */}
                 <div className="border-b border-brand-gray-200 bg-brand-gray-50">
-                    <nav className="flex px-6 -mb-px space-x-4">
+                    <ScrollableRow as="nav" ariaLabel="Configurações" className="px-6 -mb-px gap-4">
                         <button 
                             onClick={() => setActiveTab('profile')} 
-                            className={`py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'profile' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
+                            className={`${scrollableNavItemClasses} py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'profile' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
                         >
                             👤 Meu Perfil
                         </button>
                         <button 
                             onClick={() => setActiveTab('appearance')} 
-                            className={`py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'appearance' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
+                            className={`${scrollableNavItemClasses} py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'appearance' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
                         >
                             🎨 Aparência
                         </button>
                         <button 
                             onClick={() => setActiveTab('security')} 
-                            className={`py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'security' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
+                            className={`${scrollableNavItemClasses} py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'security' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
                         >
                             🔒 Segurança
                         </button>
                         <button 
                             onClick={() => setActiveTab('users')} 
-                            className={`py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'users' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
+                            className={`${scrollableNavItemClasses} py-3 px-4 border-b-2 font-semibold text-sm transition-colors ${activeTab === 'users' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}
                         >
                             👥 Usuários
                         </button>
-                    </nav>
+                    </ScrollableRow>
                 </div>
 
                 {/* Profile Tab */}
