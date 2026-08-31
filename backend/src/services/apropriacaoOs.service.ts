@@ -1,5 +1,6 @@
 import { ProjetoStatus, TipoRecursoApontamento } from '@prisma/client';
 import { prisma } from '../lib/prisma';
+import { calcularMaoDeObraCalendarioOs } from './horasCustoContabil.service';
 import {
   calcularResultadoOs,
   calcularTotaisApropriacao,
@@ -106,6 +107,12 @@ async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
 
   const itens = await buscarItensApropriacao(projetoId);
   const totais = calcularTotaisApropriacao(itens);
+  const calendarioValido = await calcularMaoDeObraCalendarioOs(projetoId, {
+    apenasStatus: 'VALIDO',
+  });
+  const calendarioPrevisto = await calcularMaoDeObraCalendarioOs(projetoId, {
+    apenasStatus: 'PREVISAO',
+  });
 
   return calcularResultadoOs(
     {
@@ -116,7 +123,14 @@ async function montarResumo(projetoId: string): Promise<ResultadoOsCalculado> {
       valorTotal: projeto.valorTotal,
       precoVendaOrcamento: projeto.orcamento?.precoVenda,
     },
-    totais
+    totais,
+    {
+      custoCalendario: calendarioValido.custoTotal,
+      custoCalendarioPrevisto: calendarioPrevisto.custoTotal,
+      horasEngenharia: calendarioValido.horasEngenharia,
+      diariasEquipe: calendarioValido.diariasEquipe,
+      linhas: [...calendarioPrevisto.linhas, ...calendarioValido.linhas],
+    },
   );
 }
 
@@ -165,6 +179,60 @@ export const apropriacaoOsService = {
         include: includeApontamento,
       });
       return created;
+    });
+
+    const resumoAtualizado = await montarResumo(projetoId);
+    return { apontamento, resumoAtualizado };
+  },
+
+  async atualizarApontamento(
+    projetoId: string,
+    apontamentoId: string,
+    input: CriarApontamentoInput
+  ) {
+    const projeto = await prisma.projeto.findUnique({ where: { id: projetoId } });
+    if (!projeto) throw new Error('Ordem de serviço não encontrada');
+
+    if (!STATUS_APONTAMENTO_PERMITIDOS.includes(projeto.status)) {
+      throw new Error(
+        'Apontamento permitido apenas para OS em execução ou concluída'
+      );
+    }
+
+    const existente = await prisma.apontamentoOs.findFirst({
+      where: { id: apontamentoId, projetoId },
+    });
+    if (!existente) throw new Error('Apontamento não encontrado');
+
+    validarItens(input.itens);
+    const dataApontamento = parseDataApontamento(input.dataApontamento);
+
+    const hoje = new Date();
+    hoje.setHours(23, 59, 59, 999);
+    if (dataApontamento > hoje) {
+      throw new Error('Data de apontamento não pode ser futura');
+    }
+
+    const apontamento = await prisma.$transaction(async (tx) => {
+      await tx.apontamentoOsItem.deleteMany({ where: { apontamentoId } });
+      return tx.apontamentoOs.update({
+        where: { id: apontamentoId },
+        data: {
+          dataApontamento,
+          observacoes: input.observacoes?.trim() || null,
+          itens: {
+            create: input.itens.map((item) => ({
+              tipoRecurso: item.tipoRecurso,
+              quantidade: Number(item.quantidade),
+              userId:
+                item.tipoRecurso === 'HORA_ENGENHARIA' ? item.userId! : null,
+              funcionarioId:
+                item.tipoRecurso === 'DIARIA_EQUIPE' ? item.funcionarioId! : null,
+            })),
+          },
+        },
+        include: includeApontamento,
+      });
     });
 
     const resumoAtualizado = await montarResumo(projetoId);
@@ -229,12 +297,21 @@ export const apropriacaoOsService = {
       itensPorProjeto.set(pid, list);
     }
 
+    const calendarios = await Promise.all(
+      ids.map(async (id) => {
+        const cal = await calcularMaoDeObraCalendarioOs(id, { apenasStatus: 'VALIDO' });
+        return [id, cal] as const;
+      }),
+    );
+    const calendarioPorProjeto = new Map(calendarios);
+
     for (const projeto of projetos) {
       const itens = (itensPorProjeto.get(projeto.id) ?? []).map((r) => ({
         tipoRecurso: r.tipoRecurso,
         quantidade: r.quantidade,
       }));
       const totais = calcularTotaisApropriacao(itens);
+      const calendario = calendarioPorProjeto.get(projeto.id);
       const resumo = calcularResultadoOs(
         {
           horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas,
@@ -244,7 +321,15 @@ export const apropriacaoOsService = {
           valorTotal: projeto.valorTotal,
           precoVendaOrcamento: projeto.orcamento?.precoVenda,
         },
-        totais
+        totais,
+        calendario
+          ? {
+              custoCalendario: calendario.custoTotal,
+              horasEngenharia: calendario.horasEngenharia,
+              diariasEquipe: calendario.diariasEquipe,
+              linhas: calendario.linhas,
+            }
+          : undefined,
       );
       const diasCorridos = calcularDiasCorridos(projeto.dataInicio);
       const diariasOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
