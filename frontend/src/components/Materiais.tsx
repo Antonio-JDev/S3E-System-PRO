@@ -39,6 +39,8 @@ import {
   AlertDialogTitle,
 } from './ui/alert-dialog';
 import { CabosPrecoBitolaModal } from './modals/CabosPrecoBitolaModal';
+import { ModalDetailHeader } from './ui/ModalDetailHeader';
+import { modalOverlayPaddingClasses } from '../utils/responsiveNav';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -1942,30 +1944,19 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses} animate-fade-in`}>
                     <div className="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
-                        {/* Header */}
-                        <div className="modal-header bg-gradient-to-r from-teal-50 to-blue-50 dark:from-slate-800 dark:to-slate-900">
-                            <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100 dark:ring-teal-900/50">
-                                    {itemToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
+                        <ModalDetailHeader
+                            onClose={handleCloseModal}
+                            icon={
+                                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-teal-600 to-teal-700 flex items-center justify-center shadow-medium ring-2 ring-teal-100 dark:ring-teal-900/50">
+                                    {itemToEdit ? <PencilIcon className="w-6 h-6 sm:w-7 sm:h-7 text-white" /> : <PlusIcon className="w-6 h-6 sm:w-7 sm:h-7 text-white" />}
                                 </div>
-                                <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">
-                                        {itemToEdit ? 'Editar Material' : 'Novo Material'}
-                                    </h2>
-                                    <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
-                                        {itemToEdit ? 'Atualize as informações do material' : 'Adicione um novo material ao estoque'}
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleCloseModal}
-                                className="absolute top-4 right-4 p-2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700/80 rounded-xl transition-colors"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
+                            }
+                            title={itemToEdit ? 'Editar Material' : 'Novo Material'}
+                            subtitle={itemToEdit ? 'Atualize as informações do material' : 'Adicione um novo material ao estoque'}
+                            className="bg-gradient-to-r from-teal-50 to-blue-50 dark:from-slate-800 dark:to-slate-900"
+                        />
 
                         <form onSubmit={handleSubmit} className="modal-body space-y-6">
                             {/* Informações Básicas */}
@@ -2623,35 +2614,25 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* MODAL DE HISTÓRICO DE COMPRAS */}
             {historicoModalOpen && materialSelecionado && (
-                <div className="fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-dark-border">
-                        {/* Header */}
-                        <div className="p-6 border-b border-gray-200 dark:border-dark-border bg-gradient-to-r from-blue-600 to-indigo-600">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
-                                        <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <h3 className="text-2xl font-bold text-white">Histórico de Compras</h3>
-                                        <p className="text-sm text-blue-100 mt-1">{materialSelecionado.name}</p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={handleFecharHistorico}
-                                    className="text-white/80 hover:text-white hover:bg-white/20 rounded-lg p-2 transition-all"
-                                >
-                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <div className={`fixed inset-0 bg-black/60 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses} animate-fade-in`}>
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col border border-gray-200 dark:border-dark-border">
+                        <ModalDetailHeader
+                            tone="dark"
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 border-white/10"
+                            onClose={handleFecharHistorico}
+                            icon={
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/20 flex items-center justify-center">
+                                    <svg className="w-6 h-6 sm:w-7 sm:h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                                     </svg>
-                                </button>
-                            </div>
-                        </div>
+                                </div>
+                            }
+                            title="Histórico de Compras"
+                            subtitle={materialSelecionado.name}
+                        />
 
                         {/* Conteúdo */}
-                        <div className="p-6 space-y-6">
+                        <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
                             {/* Informações Resumidas */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
@@ -2852,25 +2833,19 @@ const Materiais: React.FC<MateriaisProps> = ({ toggleSidebar }) => {
 
             {/* MODAL DE VISUALIZAÇÃO */}
             {viewModalOpen && materialParaVisualizar && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100 dark:border-dark-border bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30">
-                            <div>
-                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Detalhes do Material</h2>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Informações completas do item</p>
-                            </div>
-                            <button 
-                                onClick={() => {
-                                    setViewModalOpen(false);
-                                    setMaterialParaVisualizar(null);
-                                }} 
-                                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/80 dark:hover:bg-gray-700 rounded-xl"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
+                <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses}`}>
+                    <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        <ModalDetailHeader
+                            onClose={() => {
+                                setViewModalOpen(false);
+                                setMaterialParaVisualizar(null);
+                            }}
+                            title="Detalhes do Material"
+                            subtitle="Informações completas do item"
+                            className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30"
+                        />
 
-                        <div className="p-6 space-y-6">
+                        <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1 min-h-0">
                             {/* Foto do Material */}
                             {materialParaVisualizar.imagemUrl && (
                                 <div className="flex items-center gap-4 mb-4">
