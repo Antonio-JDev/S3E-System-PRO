@@ -19,6 +19,18 @@ export function calcValorARegistrar(
   return Math.round((base + juros - desconto) * 100) / 100;
 }
 
+/** Converte valor líquido (parcela) em valor base, dados juros e desconto já gravados. */
+export function calcValorBaseFromEfetivo(
+  valorEfetivo: unknown,
+  valorJuros: unknown = 0,
+  valorDesconto: unknown = 0
+): number {
+  const efetivo = parseMoney(valorEfetivo);
+  const juros = parseMoney(valorJuros);
+  const desconto = parseMoney(valorDesconto);
+  return Math.round((efetivo + desconto - juros) * 100) / 100;
+}
+
 export function validarValoresFinanceiros(
   valorBase: unknown,
   valorJuros?: unknown,
