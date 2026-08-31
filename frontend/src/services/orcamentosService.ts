@@ -33,6 +33,8 @@ export interface Orcamento {
   previsaoTermino?: string;
   orcamentistaNome?: string;
   aprovedAt?: string;
+  aprovadoPorId?: string | null;
+  aprovadoPor?: { id: string; nome: string } | null;
   pedidoFaturado?: boolean;
   venda?: {
     id: string;
