@@ -1,5 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import FinanceiroDashboard from './FinanceiroDashboard';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 const ContasAReceber = lazy(() => import('./ContasAReceber'));
 const ContasAPagar = lazy(() => import('./ContasAPagar'));
@@ -74,10 +76,10 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
                 </header>
 
                 {/* Tabs de Navegação */}
-                <div className="flex flex-wrap gap-2 mb-6">
+                <ScrollableRow as="nav" ariaLabel="Abas financeiras" className="mb-6 gap-2">
                     <button
                         onClick={() => setAbaAtiva('dashboard')}
-                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${abaAtiva === 'dashboard'
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all ${abaAtiva === 'dashboard'
                                 ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-medium'
                                 : 'bg-white text-gray-700 border-2 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50'
                             }`}
@@ -86,47 +88,47 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
                     </button>
                     <button
                         onClick={() => setAbaAtiva('dre')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50`}
                     >
                         📈 DRE
                     </button>
                     <button
                         onClick={() => setAbaAtiva('fluxo-caixa')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50`}
                     >
                         💰 Fluxo de Caixa
                     </button>
                     <button
                         onClick={() => setAbaAtiva('movimentacoes')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 dark:bg-dark-card dark:text-dark-text dark:border-dark-border hover:border-[#0a1a2f]/40 hover:bg-[#0a1a2f]/5 dark:hover:bg-[#0a1a2f]/10"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 dark:bg-dark-card dark:text-dark-text dark:border-dark-border hover:border-[#0a1a2f]/40 hover:bg-[#0a1a2f]/5 dark:hover:bg-[#0a1a2f]/10`}
                     >
                         📋 Movimentações de Caixa
                     </button>
                     <button
                         onClick={() => setAbaAtiva('receber')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50`}
                     >
                         💰 Contas a Receber
                     </button>
                     <button
                         onClick={() => setAbaAtiva('pagar')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50`}
                     >
                         💸 Contas a Pagar
                     </button>
                     <button
                         onClick={() => setAbaAtiva('cartao-credito')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50`}
                     >
                         💳 Cartão de Crédito
                     </button>
                     <button
                         onClick={() => setAbaAtiva('ajuda')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50`}
                     >
                         ❓ Como Funcionam as Métricas
                     </button>
-                </div>
+                </ScrollableRow>
 
                 {/* Dashboard Content */}
                 <div className="animate-fade-in">
@@ -264,56 +266,56 @@ const Financeiro: React.FC<FinanceiroProps> = ({ toggleSidebar, initialAba, init
                 </header>
 
                 {/* Tabs de Navegação */}
-                <div className="flex flex-wrap gap-2 mb-6">
+                <ScrollableRow as="nav" ariaLabel="Abas financeiras" className="mb-6 gap-2">
                     <button
                         onClick={() => setAbaAtiva('dashboard')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50`}
                     >
                         📊 Dashboard
                     </button>
                     <button
                         onClick={() => setAbaAtiva('dre')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-purple-300 hover:bg-purple-50`}
                     >
                         📈 DRE
                     </button>
                     <button
                         onClick={() => setAbaAtiva('fluxo-caixa')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50`}
                     >
                         💰 Fluxo de Caixa
                     </button>
                     <button
                         onClick={() => setAbaAtiva('movimentacoes')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-amber-300 hover:bg-amber-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-amber-300 hover:bg-amber-50`}
                     >
                         📋 Movimentações de Caixa
                     </button>
                     <button
                         onClick={() => setAbaAtiva('receber')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-green-300 hover:bg-green-50`}
                     >
                         💰 Contas a Receber
                     </button>
                     <button
                         onClick={() => setAbaAtiva('pagar')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-red-300 hover:bg-red-50`}
                     >
                         💸 Contas a Pagar
                     </button>
                     <button
                         onClick={() => setAbaAtiva('cartao-credito')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-white text-gray-700 border-2 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50`}
                     >
                         💳 Cartão de Crédito
                     </button>
                     <button
                         onClick={() => setAbaAtiva('ajuda')}
-                        className="px-6 py-3 rounded-xl font-semibold transition-all bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium"
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-medium`}
                     >
                         ❓ Como Funcionam as Métricas
                     </button>
-                </div>
+                </ScrollableRow>
 
                 {/* Conteúdo de Ajuda */}
                 <div className="space-y-6 animate-fade-in">
