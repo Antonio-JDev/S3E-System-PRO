@@ -5,6 +5,7 @@
 ### **Novos Gráficos Adicionados**
 
 #### **1. Distribuição de Gastos por Fornecedor (Pizza)**
+
 - **Localização**: Seção 6 do BI Dashboard
 - **Tipo**: Gráfico de Pizza (Donut)
 - **Dados**: Top 8 fornecedores por volume de compras
@@ -15,6 +16,7 @@
   - Card de resumo com total gasto (Top 8)
 
 #### **2. Gastos por Fornecedor (Barras Horizontais)**
+
 - **Localização**: Seção 6 do BI Dashboard (ao lado do gráfico de pizza)
 - **Tipo**: Gráfico de Barras Horizontal
 - **Dados**: Top 10 fornecedores com maior volume de compras
@@ -25,6 +27,7 @@
   - Cards de resumo: Total Gasto e Média por Fornecedor
 
 #### **3. Serviços Mais Rentáveis**
+
 - **Localização**: Seção 7 do BI Dashboard
 - **Tipo**: Cards Top 3 + Tabela Completa
 - **Dados**: Ranking de serviços por lucratividade
@@ -40,6 +43,7 @@
 ### **Novos Endpoints**
 
 #### **1. GET /api/bi/gastos-fornecedor**
+
 ```typescript
 // Já existia - apenas ajustado o frontend para usar corretamente
 Query params: dataInicio, dataFim (formato: YYYY-MM-DD)
@@ -59,6 +63,7 @@ Response:
 ```
 
 #### **2. GET /api/bi/servicos-rentaveis**
+
 ```typescript
 // NOVO - criado nesta implementação
 Query params: dataInicio, dataFim (formato: YYYY-MM-DD)
@@ -117,14 +122,14 @@ Response:
 
 ```typescript
 const CHART_COLORS = [
-  '#6366F1', // indigo-500
-  '#8B5CF6', // purple-500
-  '#3B82F6', // blue-500
-  '#10B981', // green-500
-  '#F59E0B', // amber-500
-  '#EF4444', // red-500
-  '#EC4899', // pink-500
-  '#06B6D4', // cyan-500
+  "#6366F1", // indigo-500
+  "#8B5CF6", // purple-500
+  "#3B82F6", // blue-500
+  "#10B981", // green-500
+  "#F59E0B", // amber-500
+  "#EF4444", // red-500
+  "#EC4899", // pink-500
+  "#06B6D4", // cyan-500
 ];
 ```
 
@@ -160,7 +165,7 @@ curl "http://localhost:3001/api/bi/servicos-rentaveis?dataInicio=2024-01-01&data
 
 ```sql
 -- Verificar compras de fornecedores
-SELECT 
+SELECT
   f.nome as fornecedor,
   COUNT(c.id) as quantidade_compras,
   SUM(c.valorTotal) as total_gasto
@@ -174,7 +179,7 @@ ORDER BY total_gasto DESC
 LIMIT 10;
 
 -- Verificar vendas de serviços
-SELECT 
+SELECT
   s.nome as servico,
   s.tipoServico as classificacao,
   COUNT(*) as quantidade,
@@ -201,11 +206,13 @@ ORDER BY (SUM(oi.precoUnit) - SUM(s.custo)) DESC;
 **Possíveis causas:**
 
 1. **Sem dados no período selecionado**
-   - Solução: Selecione um período maior ou verifique se há compras/vendas registradas
+   - Solução: Selecione um período maior ou verifique se há compras/vendas
+     registradas
 
 2. **Erro no backend**
    - Verifique os logs do backend: `docker-compose logs backend`
-   - Procure por erros nas rotas `/api/bi/gastos-fornecedor` ou `/api/bi/servicos-rentaveis`
+   - Procure por erros nas rotas `/api/bi/gastos-fornecedor` ou
+     `/api/bi/servicos-rentaveis`
 
 3. **Erro no frontend**
    - Abra o DevTools (F12) e veja se há erros no Console
@@ -225,7 +232,8 @@ ORDER BY (SUM(oi.precoUnit) - SUM(s.custo)) DESC;
 
 1. Verifique se o período selecionado está correto
 2. Confirme se há compras e vendas no banco de dados
-3. Verifique se os status das compras/vendas não estão como "Cancelado/Cancelada"
+3. Verifique se os status das compras/vendas não estão como
+   "Cancelado/Cancelada"
 
 ---
 
