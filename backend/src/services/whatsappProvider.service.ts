@@ -402,6 +402,12 @@ async function ensureEvolutionInstanceReady(): Promise<void> {
 
   evolutionLastAutoRetryAt.set(inst, now);
   try {
+    // Evolution Go: sessão já existe no volume dbdata — reconnect reabre o WS
+    // sem POST /instance/create (create estoura Postgres quando close + pool cheio).
+    if (isEvolutionGoKind()) {
+      await requestEvoGoReconnect(`ensure-ready:${st || 'close'}`);
+      return;
+    }
     await createEvolutionInstance(inst);
   } catch {
     /* ignore: tentativa automatica com cooldown */
@@ -828,6 +834,33 @@ export async function resolveWhatsappProviderGroupForChat(
 const PROFILE_PICTURE_NULL_TTL_MS = 10 * 60 * 1000;
 const profilePictureNullCache = new Map<string, number>();
 
+/** Limite global de IQs `/user/avatar` em voo (proteção contra tempestade da sidebar). */
+function avatarMaxInFlight(): number {
+  const raw = Number(process.env.WHATSAPP_AVATAR_MAX_IN_FLIGHT || 3);
+  if (!Number.isFinite(raw) || raw < 1) return 3;
+  return Math.min(Math.trunc(raw), 10);
+}
+
+let avatarInFlight = 0;
+const avatarWaitQueue: Array<() => void> = [];
+
+async function withProfilePictureSlot<T>(fn: () => Promise<T>): Promise<T> {
+  const max = avatarMaxInFlight();
+  if (avatarInFlight >= max) {
+    await new Promise<void>((resolve) => {
+      avatarWaitQueue.push(resolve);
+    });
+  }
+  avatarInFlight += 1;
+  try {
+    return await fn();
+  } finally {
+    avatarInFlight -= 1;
+    const next = avatarWaitQueue.shift();
+    if (next) next();
+  }
+}
+
 function profilePictureNullCacheGet(chatId: string): boolean {
   const k = chatId.trim().toLowerCase();
   const exp = profilePictureNullCache.get(k);
@@ -887,7 +920,7 @@ export async function fetchWhatsappProviderProfilePictureUrlForChat(
     // rate-limit quando vários operadores abrem o mesmo grupo.
     const cachedGroup = await loadCachedProfilePictureUrlForChat(canon);
     if (cachedGroup) return cachedGroup;
-    return fetchWhatsappProviderGroupPictureUrl(canon);
+    return withProfilePictureSlot(() => fetchWhatsappProviderGroupPictureUrl(canon));
   }
 
   // Cache positivo persistente (banco) — protege contra o IQ travado da
@@ -915,7 +948,9 @@ export async function fetchWhatsappProviderProfilePictureUrlForChat(
     // Para DMs, usar o JID canonical (EvoGo normaliza internamente).
     preferredId = canon || chatId.trim();
   }
-  const found = preferredId ? await fetchWhatsappProviderProfilePictureUrl(preferredId) : null;
+  const found = preferredId
+    ? await withProfilePictureSlot(() => fetchWhatsappProviderProfilePictureUrl(preferredId))
+    : null;
 
   if (!found) {
     profilePictureNullCacheSet(canon);
