@@ -9,14 +9,12 @@ import ResetPassword from './pages/ResetPassword';
 // Editor WYSIWYG TipTap (CSS incluído nos componentes)
 import './styles/tiptap-global.css';
 import Sidebar from './components/Sidebar';
-import ObrasKanban from './pages/ObrasKanban';
 import NovaCompraPage from './pages/NovaCompraPage';
-import DetalhesObra from './pages/DetalhesObra';
 import EditarOrcamentoPage from './pages/EditarOrcamentoPage';
 // import SettingsModal from './components/SettingsModal'; // DESCONTINUADO - Substituído por página Configuracoes.tsx
-import TarefasObra from './components/TarefasObra';
 import Ferramentas from './components/Ferramentas';
 import GestaoEmpresarial from './components/GestaoEmpresarial';
+import GestaoFrotaPage from './pages/GestaoFrotaPage';
 import { type Project } from './types';
 import { type Notificacao } from './services/notificationsService';
 import { Toaster } from './components/ui/sonner';
@@ -45,7 +43,6 @@ const Projetos = lazy(() => import('./components/Projetos'));
 const ProjetosAPI = lazy(() => import('./components/ProjetosAPI'));
 const OrdemServicosHub = lazy(() => import('./components/OrdemServicosHub'));
 const CalendarioHub = lazy(() => import('./components/CalendarioHub'));
-const Obras = lazy(() => import('./components/Obras'));
 const Servicos = lazy(() => import('./components/Servicos'));
 const Financeiro = lazy(() => import('./components/Financeiro'));
 const EmissaoNFe = lazy(() => import('./components/EmissaoNFe'));
@@ -98,8 +95,7 @@ const MainApp: React.FC = () => {
   const [initialBudgetId, setInitialBudgetId] = useState<string | null>(null);
   const [initialClientId, setInitialClientId] = useState<string | null>(null);
   const [initialProjectId, setInitialProjectId] = useState<string | null>(null);
-  const [initialProjectTab, setInitialProjectTab] = useState<'geral' | 'materiais' | 'etapas' | 'qualidade'>('geral');
-  const [initialObraId, setInitialObraId] = useState<string | null>(null);
+  const [initialProjectTab, setInitialProjectTab] = useState<'geral' | 'materiais' | 'etapas' | 'cronograma'>('geral');
   const [initialTarefaInternaId, setInitialTarefaInternaId] = useState<string | null>(null);
   const [initialFinanceiroAba, setInitialFinanceiroAba] = useState<string | null>(null);
   const [initialFinanceiroContaId, setInitialFinanceiroContaId] = useState<string | null>(null);
@@ -107,6 +103,21 @@ const MainApp: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
 
   useWhatsappUnreadSync();
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('s3e_open_whatsapp');
+      if (!raw) return;
+      sessionStorage.removeItem('s3e_open_whatsapp');
+      const parsed = JSON.parse(raw) as { chatId?: string; title?: string };
+      if (parsed?.chatId) {
+        setInitialWhatsappChat({ chatId: parsed.chatId, title: parsed.title || 'Cliente' });
+        setActiveView('Chat WhatsApp');
+      }
+    } catch {
+      sessionStorage.removeItem('s3e_open_whatsapp');
+    }
+  }, []);
 
   const clearInitialWhatsappChat = useCallback(() => setInitialWhatsappChat(null), []);
 
@@ -176,9 +187,11 @@ const MainApp: React.FC = () => {
     } else if (pathname === '/fornecedores' || pathname.startsWith('/fornecedores/')) {
       setActiveView('Fornecedores');
     } else if (pathname === '/obras' || pathname.startsWith('/obras/')) {
-      setActiveView('Execução Obra');
+      setActiveView('Ordem De Serviços');
     } else if (pathname === '/calendario') {
       setActiveView('Calendário');
+    } else if (pathname === '/frota') {
+      setActiveView('Gestão de Frota');
     } else if (pathname === '/tarefas-internas') {
       setActiveView('Tarefas Internas');
       setInitialTarefaInternaId(null);
@@ -216,10 +229,6 @@ const MainApp: React.FC = () => {
     if (window.innerWidth < 1024) { // lg breakpoint
       setIsSidebarOpen(false);
     }
-    // Se for DetalhesObra e tiver argumentos, usar o primeiro como obraId
-    if (view === 'DetalhesObra' && args[0]) {
-      setInitialObraId(args[0]);
-    }
     // Se for DetalhesTarefaInterna e tiver argumentos, usar o primeiro como tarefaId
     if (view === 'DetalhesTarefaInterna' && args[0]) {
       setInitialTarefaInternaId(args[0]);
@@ -229,16 +238,6 @@ const MainApp: React.FC = () => {
   const handleViewBudget = (budgetId: string) => {
     setInitialBudgetId(budgetId);
     handleNavigate('Orçamentos');
-  };
-  
-  const handleViewProject = (projectId: string) => {
-    setInitialProjectId(projectId);
-    handleNavigate('Ordem De Serviços');
-  };
-
-  const handleViewObra = (obraId: string) => {
-    setInitialObraId(obraId);
-    handleNavigate('DetalhesObra');
   };
 
   const handleViewTarefaInterna = (tarefaId: string) => {
@@ -270,10 +269,12 @@ const MainApp: React.FC = () => {
         }
         break;
       case 'kanban_obras':
-        if (meta?.obraId) {
-          handleViewObra(meta.obraId);
+        if (meta?.projetoId) {
+          setInitialProjectId(meta.projetoId);
+          setInitialProjectTab('cronograma');
+          handleNavigate('Ordem De Serviços');
         } else {
-          handleNavigate('Execução Obra');
+          handleNavigate('Ordem De Serviços');
         }
         break;
       case 'tarefas_internas':
@@ -308,6 +309,7 @@ const MainApp: React.FC = () => {
             toggleSidebar={toggleSidebar}
             initialBudgetId={initialBudgetId}
             onClearInitialBudgetId={() => setInitialBudgetId(null)}
+            onNavigate={handleNavigate}
           />
         );
       case 'Catálogo':
@@ -362,26 +364,11 @@ const MainApp: React.FC = () => {
                  initialProjectId={initialProjectId}
                  initialProjectTab={initialProjectTab}
                  onClearInitialProject={() => { setInitialProjectId(null); setInitialProjectTab('geral'); }}
-                 onViewObra={handleViewObra}
                />;
       case 'Calendário':
         return <CalendarioHub toggleSidebar={toggleSidebar} />;
-      case 'Execução Obra':
-        return <ObrasKanban toggleSidebar={toggleSidebar} onNavigate={(view: string, ...args: any[]) => {
-          if (view === 'DetalhesObra' && args[0]) {
-            handleViewObra(args[0]);
-          } else {
-            handleNavigate(view);
-          }
-        }} />;
-      case 'DetalhesObra':
-        return initialObraId ? (
-          <DetalhesObra toggleSidebar={toggleSidebar} obraId={initialObraId} onNavigate={handleNavigate} />
-        ) : (
-          <ObrasKanban toggleSidebar={toggleSidebar} onNavigate={handleNavigate} />
-        );
-      case 'Tarefas da Obra':
-        return <TarefasObra toggleSidebar={toggleSidebar} />;
+      case 'Gestão de Frota':
+        return <GestaoFrotaPage toggleSidebar={toggleSidebar} />;
       case 'Financeiro':
         return (
           <Financeiro
@@ -492,8 +479,6 @@ const StandalonePageWrapper: React.FC<{ children: React.ReactNode; activeView?: 
       'Clientes': '/',
       'Tarefas Internas': '/',
       'Ordem De Serviços': '/',
-      'Execução Obra': '/',
-      'Tarefas da Obra': '/',
       'Ferramentas': '/',
       'Financeiro': '/',
       'Vendas': '/',
