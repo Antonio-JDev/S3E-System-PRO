@@ -1,5 +1,20 @@
 export const HORAS_COMERCIAIS_POR_DIA = 8;
 
+export interface LinhaCustoCalendarioResumo {
+  eventoId: string;
+  data: string;
+  funcionarioId: string;
+  funcionarioNome: string;
+  cargo: string;
+  horasJornada: number;
+  horasExtras: number;
+  totalHoras: number;
+  modoCusto: string;
+  valorUnitario: number;
+  custoDia: number;
+  status: string;
+}
+
 export interface ResultadoOsCalculado {
   horasEngenhariaOrcadas: number;
   diariasEquipeOrcadas: number;
@@ -8,11 +23,16 @@ export interface ResultadoOsCalculado {
   homemHoraOrcado: number;
   homemHoraRealizado: number;
   custoOrcado: number;
+  custoApontamento?: number;
+  custoCalendario?: number;
+  custoCalendarioPrevisto?: number;
+  custoProjetado?: number;
   custoRealizado: number;
   valorFechado: number;
   resultado: number;
   estouroHorasEngenharia: boolean;
   estouroDiariasEquipe: boolean;
+  calendarioLinhas?: LinhaCustoCalendarioResumo[];
 }
 
 export function calcularHomemHoraTotal(
