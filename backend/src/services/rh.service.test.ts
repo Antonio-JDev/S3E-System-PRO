@@ -8,6 +8,18 @@ jest.mock('./bancoHorasExcesso.service', () => ({
   sincronizarExcessoCompetencia: jest.fn().mockResolvedValue(undefined),
 }));
 
+jest.mock('./bancoHorasExtrato.service', () => ({
+  sincronizarExtratoBancoHorasCompetencia: jest.fn().mockResolvedValue(null),
+}));
+
+jest.mock('./rhComentarioConferencia.service', () => ({
+  sincronizarBancoAvaliacoesCompetencia: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('./feriadoOverride.service', () => ({
+  listarOverridesFeriadoMes: jest.fn().mockResolvedValue(new Map()),
+}));
+
 jest.mock('../lib/prisma', () => ({
   prisma: {
     funcionario: {
@@ -197,11 +209,12 @@ describe('RhService.calcularFolhaMes', () => {
     expect(r.registrado?.saldoBancoHorasProjetado).toBe(5);
   });
 
-  it('REGISTRADO 40h (carga 160): horas negativas do mês somam 160h quando sem registros', async () => {
+  it('REGISTRADO 40h: horas negativas do mês = jornada diária × úteis já ocorridos (sem futuro)', async () => {
     mockFindUnique.mockResolvedValue(
       baseFuncionario({
         tipoContrato: TipoContratoFuncionario.REGISTRADO,
         cargaHorariaMensal: 160,
+        dataAdmissao: new Date(Date.UTC(2026, 0, 1)),
         registrosPonto: [],
         configuracaoPonto: {
           toleranciaMinutos: 5,
@@ -212,12 +225,44 @@ describe('RhService.calcularFolhaMes', () => {
 
     const r = await RhService.calcularFolhaMes({
       funcionarioId: 'func-1',
-      dataReferencia: new Date(Date.UTC(2026, 3, 15)), // abril/2026
+      dataReferencia: new Date(Date.UTC(2026, 3, 15)), // abril/2026 (mês já encerrado)
     });
 
-    // Deve bater a meta mensal independentemente de feriados (distribuição por dias úteis).
+    // Abril/2026: 20 úteis efetivos (exclui feriados) × 8h = 160h. Carga 160 é divisor, não dump no dia 1.
     expect(r.registrado?.cargaHorariaMensal).toBe(160);
     expect(r.registrado?.horasNegativas).toBeCloseTo(160, 6);
+  });
+
+  it('REGISTRADO 44h 17:18: falta do mês usa 8h48/dia, não a carga 220', async () => {
+    mockFindUnique.mockResolvedValue(
+      baseFuncionario({
+        tipoContrato: TipoContratoFuncionario.REGISTRADO,
+        cargaHorariaMensal: 220,
+        salarioBase: 2077,
+        dataAdmissao: new Date(Date.UTC(2026, 4, 17)),
+        registrosPonto: [],
+        configuracaoPonto: {
+          toleranciaMinutos: 5,
+          workShift: {
+            id: 'ws44',
+            nome: '44h - 07:30/12:00/17:18',
+            entrada1: '07:30',
+            saida1: '12:00',
+            entrada2: '13:00',
+            saida2: '17:18',
+          },
+        },
+      }),
+    );
+
+    const r = await RhService.calcularFolhaMes({
+      funcionarioId: 'func-1',
+      dataReferencia: new Date(Date.UTC(2026, 6, 15)), // julho/2026
+    });
+
+    expect(r.jornada?.cargaHorariaMensalCalculada).toBe(202);
+    expect(r.registrado?.horasNegativas).toBeCloseTo(23 * (528 / 60), 6);
+    expect(r.valores.valorHoraBase).toBeCloseTo(2077 / 220, 6);
   });
 
   it('soma lançamentos de desconto e acréscimo no total', async () => {
