@@ -2,7 +2,15 @@ import { prisma } from '../lib/prisma';
 import { ContaStatus } from '../types/index';
 import { RhService } from './rh.service';
 import { LancamentoFolhaCategoria } from '@prisma/client';
-import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import { calcValorBaseFromEfetivo, parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import { randomUUID } from 'crypto';
+import {
+    calcularValoresParcelas,
+    montarDescricaoUnificada,
+    sugerirContasRelacionadas,
+    validarSelecaoUnificacao,
+    type ContaParaUnificacao,
+} from '../utils/contasPagarUnificacao.util';
 
 export interface ContaPagarPayload {
     fornecedorId?: string;
@@ -33,11 +41,18 @@ export interface AtualizarContaPagarPayload {
     fornecedorId?: string | null;
     credorNome?: string | null;
     descricao?: string;
+    valorParcela?: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     dataVencimento?: Date;
     observacoes?: string | null;
     classificacao?: string | null;
     meioPagamento?: string | null;
     cartaoCreditoId?: string | null;
+}
+
+function isContaPagarManual(conta: { compraId?: string | null; despesaFixaId?: string | null }): boolean {
+    return !conta.compraId && !conta.despesaFixaId;
 }
 
 type TipoContaPagar = 'FORNECEDOR' | 'RH' | 'DESPESA_FIXA' | 'FROTA';
@@ -135,7 +150,11 @@ export class ContasPagarService {
 
         const tipoFinal = ((tipo || 'FORNECEDOR') as TipoContaPagar);
 
-        const { valorARegistrar } = validarValoresFinanceiros(
+        const {
+            valorARegistrar,
+            valorJuros: jurosValidados,
+            valorDesconto: descontoValidado
+        } = validarValoresFinanceiros(
             valorParcela,
             valorJuros,
             valorDesconto
@@ -185,6 +204,8 @@ export class ContasPagarService {
                 descontoFolhaReferenciaMes: descontoFolhaReferenciaMes || undefined,
                 descricao,
                 valorParcela: valorARegistrar,
+                valorJuros: jurosValidados > 0 ? jurosValidados : null,
+                valorDesconto: descontoValidado > 0 ? descontoValidado : null,
                 dataVencimento,
                 numeroParcela,
                 totalParcelas,
@@ -578,18 +599,52 @@ export class ContasPagarService {
         let valorDescontoUpdate: number | undefined;
         let valorEfetivoPago = valorPago ?? conta.valorParcela;
 
+        const jurosExistentes = parseMoney(conta.valorJuros);
+        const descontoExistente = parseMoney(conta.valorDesconto);
+        const baseExistente = calcValorBaseFromEfetivo(
+            conta.valorParcela,
+            jurosExistentes,
+            descontoExistente
+        );
+
         if (valorJuros != null || valorDesconto != null) {
-            const base = valorPago != null ? parseMoney(valorPago) : conta.valorParcela;
-            const validado = validarValoresFinanceiros(base, valorJuros, valorDesconto);
+            const base = valorPago != null ? parseMoney(valorPago) : baseExistente;
+            const validado = validarValoresFinanceiros(
+                base,
+                valorJuros ?? jurosExistentes,
+                valorDesconto ?? descontoExistente
+            );
             valorEfetivoPago = validado.valorARegistrar;
             valorJurosUpdate = validado.valorJuros;
             valorDescontoUpdate = validado.valorDesconto;
         } else if (valorPago != null && typeof valorPago === 'number') {
-            if (valorPago < conta.valorParcela) {
-                valorDescontoUpdate = conta.valorParcela - valorPago;
-            } else if (valorPago > conta.valorParcela) {
-                valorJurosUpdate = valorPago - conta.valorParcela;
+            valorEfetivoPago = parseMoney(valorPago);
+            const diff = Math.round((valorEfetivoPago - conta.valorParcela) * 100) / 100;
+            if (Math.abs(diff) > 0.01) {
+                if (diff < 0 && descontoExistente <= 0 && conta.tipo === 'RH') {
+                    valorDescontoUpdate = Math.abs(diff);
+                } else if (diff > 0 && jurosExistentes <= 0) {
+                    valorJurosUpdate = diff;
+                } else if (Math.abs(diff) > 0.01) {
+                    throw new Error(
+                        `Valor pago (R$ ${valorEfetivoPago.toFixed(2)}) deve quitar o saldo da parcela (R$ ${conta.valorParcela.toFixed(2)}). Informe juros e descontos separadamente.`
+                    );
+                }
             }
+        } else {
+            valorEfetivoPago = conta.valorParcela;
+        }
+
+        if (conta.tipo !== 'RH') {
+            if (Math.abs(valorEfetivoPago - conta.valorParcela) > 0.01) {
+                throw new Error(
+                    `Valor a registrar (R$ ${valorEfetivoPago.toFixed(2)}) deve quitar o saldo da parcela (R$ ${conta.valorParcela.toFixed(2)}). Verifique juros e descontos.`
+                );
+            }
+        } else if (valorEfetivoPago > conta.valorParcela + 0.01) {
+            throw new Error(
+                `Valor a registrar (R$ ${valorEfetivoPago.toFixed(2)}) não pode ser maior que o saldo da parcela (R$ ${conta.valorParcela.toFixed(2)}).`
+            );
         }
 
         const contaAtualizada = await prisma.contaPagar.update({
@@ -915,6 +970,9 @@ export class ContasPagarService {
             fornecedorId,
             credorNome,
             descricao,
+            valorParcela,
+            valorJuros,
+            valorDesconto,
             dataVencimento,
             observacoes,
             classificacao,
@@ -926,6 +984,17 @@ export class ContasPagarService {
             throw new Error('Informe apenas fornecedorId ou credorNome (não ambos).');
         }
 
+        const alteraValores =
+            valorParcela !== undefined ||
+            valorJuros !== undefined ||
+            valorDesconto !== undefined;
+
+        if (alteraValores && !isContaPagarManual(conta)) {
+            throw new Error(
+                'Não é permitido alterar valor, juros ou desconto de conta gerada por compra/XML ou despesa fixa'
+            );
+        }
+
         const dataUpdate: any = {
             updatedAt: new Date()
         };
@@ -934,6 +1003,26 @@ export class ContasPagarService {
         if (dataVencimento !== undefined) dataUpdate.dataVencimento = dataVencimento;
         if (observacoes !== undefined) dataUpdate.observacoes = observacoes;
         if (classificacao !== undefined) dataUpdate.classificacao = classificacao;
+
+        if (alteraValores) {
+            const juros = valorJuros !== undefined
+                ? parseMoney(valorJuros)
+                : parseMoney((conta as any).valorJuros);
+            const desconto = valorDesconto !== undefined
+                ? parseMoney(valorDesconto)
+                : parseMoney((conta as any).valorDesconto);
+            const base = valorParcela !== undefined
+                ? valorParcela
+                : calcValorBaseFromEfetivo(conta.valorParcela, (conta as any).valorJuros, (conta as any).valorDesconto);
+            const {
+                valorARegistrar,
+                valorJuros: j,
+                valorDesconto: d
+            } = validarValoresFinanceiros(base, juros, desconto);
+            dataUpdate.valorParcela = valorARegistrar;
+            dataUpdate.valorJuros = j > 0 ? j : null;
+            dataUpdate.valorDesconto = d > 0 ? d : null;
+        }
 
         if (fornecedorId !== undefined) {
             dataUpdate.fornecedorId = fornecedorId;
@@ -1306,6 +1395,258 @@ export class ContasPagarService {
         });
 
         return { message: 'Parcela excluída com sucesso' };
+    }
+
+    /**
+     * Sugere contas relacionadas para unificação (mesma NF, mesmo fornecedor, vencimento próximo).
+     */
+    static async sugerirContasParaUnificacao(contaIds: string[], janelaDiasVencimento: number = 15) {
+        if (!contaIds?.length) {
+            throw new Error('Informe ao menos uma conta selecionada');
+        }
+
+        const selecionadas = await prisma.contaPagar.findMany({
+            where: { id: { in: contaIds } },
+            include: {
+                fornecedor: { select: { id: true, nome: true } },
+                compra: { select: { id: true, numeroNF: true, numeroSequencial: true } },
+            },
+        });
+
+        if (selecionadas.length !== contaIds.length) {
+            throw new Error('Uma ou mais contas selecionadas não foram encontradas');
+        }
+
+        const fornecedorIds = Array.from(
+            new Set(selecionadas.map((c) => c.fornecedorId).filter(Boolean) as string[])
+        );
+        const compraIds = Array.from(
+            new Set(selecionadas.map((c) => c.compraId).filter(Boolean) as string[])
+        );
+
+        const orFiltros: any[] = [];
+        if (fornecedorIds.length) orFiltros.push({ fornecedorId: { in: fornecedorIds } });
+        if (compraIds.length) orFiltros.push({ compraId: { in: compraIds } });
+
+        const candidatas = await prisma.contaPagar.findMany({
+            where: {
+                id: { notIn: contaIds },
+                status: { in: [ContaStatus.Pendente, ContaStatus.Atrasado] },
+                tipo: 'FORNECEDOR',
+                faturaCartaoId: null,
+                ...(orFiltros.length ? { OR: orFiltros } : {}),
+            },
+            include: {
+                fornecedor: { select: { id: true, nome: true } },
+                compra: { select: { id: true, numeroNF: true, numeroSequencial: true } },
+            },
+            take: 200,
+            orderBy: { dataVencimento: 'asc' },
+        });
+
+        // Amplia candidatas por número de NF quando houver (compras diferentes, mesmo número)
+        const nfs = Array.from(
+            new Set(selecionadas.map((c) => c.compra?.numeroNF).filter(Boolean) as string[])
+        );
+        let extrasPorNf: typeof candidatas = [];
+        if (nfs.length) {
+            extrasPorNf = await prisma.contaPagar.findMany({
+                where: {
+                    id: { notIn: [...contaIds, ...candidatas.map((c) => c.id)] },
+                    status: { in: [ContaStatus.Pendente, ContaStatus.Atrasado] },
+                    tipo: 'FORNECEDOR',
+                    faturaCartaoId: null,
+                    compra: { numeroNF: { in: nfs } },
+                },
+                include: {
+                    fornecedor: { select: { id: true, nome: true } },
+                    compra: { select: { id: true, numeroNF: true, numeroSequencial: true } },
+                },
+                take: 100,
+            });
+        }
+
+        const mapaCandidatas = new Map<string, ContaParaUnificacao>();
+        for (const c of [...candidatas, ...extrasPorNf]) {
+            mapaCandidatas.set(c.id, c as ContaParaUnificacao);
+        }
+
+        const sugestoes = sugerirContasRelacionadas(
+            selecionadas as ContaParaUnificacao[],
+            Array.from(mapaCandidatas.values()),
+            janelaDiasVencimento
+        );
+
+        const contasPorId = new Map(Array.from(mapaCandidatas.entries()));
+        return sugestoes.map((s) => {
+            const conta = contasPorId.get(s.contaId)!;
+            return {
+                ...s,
+                conta: {
+                    id: conta.id,
+                    descricao: conta.descricao,
+                    valorParcela: conta.valorParcela,
+                    dataVencimento: conta.dataVencimento,
+                    status: conta.status,
+                    fornecedorId: conta.fornecedorId,
+                    fornecedorNome: conta.fornecedor?.nome || conta.credorNome || null,
+                    compraId: conta.compraId,
+                    numeroNF: conta.compra?.numeroNF || null,
+                },
+            };
+        });
+    }
+
+    /**
+     * Unifica contas a pagar selecionadas em 1 conta ou N parcelas novas.
+     * Cancela as origens e vincula pelo unificacaoGrupoId.
+     */
+    static async unificarContasPagar(data: {
+        contaIds: string[];
+        parcelas?: number;
+        dataPrimeiroVencimento?: string | Date;
+        intervaloDias?: number;
+        descricao?: string;
+        observacoes?: string;
+        meioPagamento?: string;
+        cartaoCreditoId?: string | null;
+    }) {
+        const {
+            contaIds,
+            parcelas = 1,
+            dataPrimeiroVencimento,
+            intervaloDias = 30,
+            descricao,
+            observacoes,
+            meioPagamento,
+            cartaoCreditoId,
+        } = data;
+
+        if (!contaIds?.length) {
+            throw new Error('Informe as contas a unificar');
+        }
+        if (parcelas < 1) {
+            throw new Error('Número de parcelas deve ser pelo menos 1');
+        }
+        if (intervaloDias < 1) {
+            throw new Error('Intervalo entre parcelas deve ser pelo menos 1 dia');
+        }
+
+        const contas = await prisma.contaPagar.findMany({
+            where: { id: { in: contaIds } },
+            include: {
+                fornecedor: { select: { id: true, nome: true } },
+                compra: { select: { id: true, numeroNF: true, numeroSequencial: true } },
+            },
+        });
+
+        if (contas.length !== contaIds.length) {
+            throw new Error('Uma ou mais contas selecionadas não foram encontradas');
+        }
+
+        const validacao = validarSelecaoUnificacao(contas as ContaParaUnificacao[]);
+        if (!validacao.ok) {
+            throw new Error(validacao.motivo || 'Seleção inválida para unificação');
+        }
+
+        const pagamentoValidado = await validarMeioPagamentoCartao(meioPagamento, cartaoCreditoId);
+        const valores = calcularValoresParcelas(validacao.valorTotal, parcelas);
+        const grupoId = randomUUID();
+
+        let dataBase: Date;
+        if (dataPrimeiroVencimento) {
+            dataBase =
+                typeof dataPrimeiroVencimento === 'string'
+                    ? this.parseDataLocal(
+                          dataPrimeiroVencimento.includes('T')
+                              ? dataPrimeiroVencimento.slice(0, 10)
+                              : dataPrimeiroVencimento
+                      )
+                    : new Date(dataPrimeiroVencimento);
+        } else {
+            const datas = contas.map((c) => new Date(c.dataVencimento).getTime());
+            dataBase = new Date(Math.min(...datas));
+            dataBase.setHours(12, 0, 0, 0);
+        }
+
+        const descBase = montarDescricaoUnificada(validacao.numerosNF, contas.length, descricao);
+        const nfsLabel = validacao.numerosNF.length
+            ? `NFs: ${validacao.numerosNF.join(', ')}. `
+            : '';
+        const obsBase = [
+            observacoes?.trim(),
+            `Unificação grupo ${grupoId}. ${nfsLabel}Origens: ${contaIds.join(', ')}.`,
+        ]
+            .filter(Boolean)
+            .join(' ');
+
+        const resultado = await prisma.$transaction(async (tx) => {
+            for (const origem of contas) {
+                const obsOrigem = [
+                    origem.observacoes,
+                    `Unificada no grupo ${grupoId} em ${new Date().toISOString().slice(0, 10)}.`,
+                ]
+                    .filter(Boolean)
+                    .join(' ');
+
+                await tx.contaPagar.update({
+                    where: { id: origem.id },
+                    data: {
+                        status: ContaStatus.Cancelado,
+                        unificacaoGrupoId: grupoId,
+                        dataAgendamento: null,
+                        observacoes: obsOrigem,
+                        updatedAt: new Date(),
+                    } as any,
+                });
+            }
+
+            const novas: any[] = [];
+            for (let i = 0; i < parcelas; i++) {
+                const dataVencimento = new Date(dataBase);
+                dataVencimento.setDate(dataVencimento.getDate() + i * intervaloDias);
+
+                const contaNova = await tx.contaPagar.create({
+                    data: {
+                        tipo: 'FORNECEDOR',
+                        origemCadastro: validacao.fornecedorId
+                            ? 'FORNECEDOR_CADASTRADO'
+                            : 'FORNECEDOR_NOVO',
+                        fornecedorId: validacao.fornecedorId || undefined,
+                        credorNome: validacao.fornecedorId
+                            ? undefined
+                            : validacao.credorNome || undefined,
+                        compraId: validacao.compraId || undefined,
+                        descricao:
+                            parcelas > 1
+                                ? `${descBase} - Parcela ${i + 1}/${parcelas}`
+                                : descBase,
+                        valorParcela: valores[i],
+                        dataVencimento,
+                        numeroParcela: i + 1,
+                        totalParcelas: parcelas,
+                        observacoes: obsBase,
+                        meioPagamento: pagamentoValidado.meioPagamento,
+                        cartaoCreditoId: pagamentoValidado.cartaoCreditoId ?? undefined,
+                        status: ContaStatus.Pendente,
+                        unificacaoGrupoId: grupoId,
+                        unificacaoContasOrigemIds: contaIds,
+                        classificacao: contas.find((c) => c.classificacao)?.classificacao || undefined,
+                    } as any,
+                });
+                novas.push(contaNova);
+            }
+
+            return novas;
+        });
+
+        return {
+            unificacaoGrupoId: grupoId,
+            valorTotal: validacao.valorTotal,
+            contasOrigemIds: contaIds,
+            contasCanceladas: contaIds.length,
+            contasCriadas: resultado,
+        };
     }
 }
 
