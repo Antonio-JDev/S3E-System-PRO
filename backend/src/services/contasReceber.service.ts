@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus } from '../types/index';
-import { parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
+import { calcValorBaseFromEfetivo, parseMoney, validarValoresFinanceiros } from '../utils/financeiroValor.util';
 
 export interface CriarContaReceberManualPayload {
   tipo: 'ENTRADA' | 'OUTRAS_RECEITAS';
@@ -121,6 +121,10 @@ export class ContasReceberService {
       throw new Error('Não é permitido editar conta vinculada a venda');
     }
 
+    if (conta.status === ContaStatus.Pago || conta.status === ContaStatus.RecebidoParcial) {
+      throw new Error('Não é possível alterar uma conta já recebida');
+    }
+
     const dataUpdate: any = {
       updatedAt: new Date()
     };
@@ -130,11 +134,20 @@ export class ContasReceberService {
     if (payload.descricao !== undefined) dataUpdate.descricao = payload.descricao;
     if (payload.observacoes !== undefined) dataUpdate.observacoes = payload.observacoes || null;
     if (payload.dataVencimento !== undefined) dataUpdate.dataVencimento = payload.dataVencimento;
-    if (payload.valorParcela !== undefined) {
+
+    const alteraValores =
+      payload.valorParcela !== undefined ||
+      payload.valorJuros !== undefined ||
+      payload.valorDesconto !== undefined;
+
+    if (alteraValores) {
       const juros = payload.valorJuros !== undefined ? parseMoney(payload.valorJuros) : parseMoney((conta as any).valorJuros);
       const desconto = payload.valorDesconto !== undefined ? parseMoney(payload.valorDesconto) : parseMoney((conta as any).valorDesconto);
+      const base = payload.valorParcela !== undefined
+        ? payload.valorParcela
+        : calcValorBaseFromEfetivo(conta.valorParcela, (conta as any).valorJuros, (conta as any).valorDesconto);
       const { valorARegistrar, valorJuros: j, valorDesconto: d } = validarValoresFinanceiros(
-        payload.valorParcela,
+        base,
         juros,
         desconto
       );
