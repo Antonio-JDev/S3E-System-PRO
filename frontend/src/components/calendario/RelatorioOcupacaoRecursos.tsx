@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { RelatorioOcupacaoDTO } from '../../services/AlocacaoObraService';
+import { ordemServicosService } from '../../services/ordemServicosService';
+import { toast } from 'sonner';
 
 function fmtData(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR');
@@ -158,13 +160,29 @@ const RelatorioOcupacaoRecursos: React.FC<RelatorioOcupacaoRecursosProps> = ({
           )}
           {!loading && relatorio && (
             <>
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => exportarCsv(relatorio)}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800"
                 >
-                  Exportar CSV
+                  Exportar ocupação
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const agora = new Date();
+                    const competencia = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+                    try {
+                      await ordemServicosService.baixarCsvHorasCustoContabil(competencia);
+                      toast.success(`CSV contábil de ${competencia} baixado`);
+                    } catch {
+                      toast.error('Erro ao exportar CSV contábil');
+                    }
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-800"
+                >
+                  CSV contábil (mês)
                 </button>
               </div>
               <div>
