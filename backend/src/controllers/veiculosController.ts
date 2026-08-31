@@ -101,6 +101,45 @@ export const VeiculosController = {
                 error: error.message 
             });
         }
+    },
+
+    // GET /api/veiculos/alertas-ipva
+    async obterAlertasIpva(req: Request, res: Response) {
+        try {
+            const mes = req.query.mes ? Number(req.query.mes) : undefined;
+            const ano = req.query.ano ? Number(req.query.ano) : undefined;
+            const alertas = await VeiculosService.obterAlertasIpva(mes, ano);
+            return res.json({ success: true, data: alertas });
+        } catch (error: any) {
+            console.error('❌ Erro ao obter alertas IPVA:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Erro ao obter alertas IPVA',
+                error: error.message,
+            });
+        }
+    },
+
+    // GET /api/veiculos/:id/consumo
+    async obterConsumo(req: Request, res: Response) {
+        try {
+            const { id } = req.params;
+            const consumo = await VeiculosService.obterConsumoPorVeiculo(id);
+            if (!consumo) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Veículo não encontrado',
+                });
+            }
+            return res.json({ success: true, data: consumo });
+        } catch (error: any) {
+            console.error('❌ Erro ao obter consumo do veículo:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Erro ao obter consumo',
+                error: error.message,
+            });
+        }
     }
 };
 
