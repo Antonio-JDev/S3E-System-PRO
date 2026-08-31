@@ -7,6 +7,8 @@ import { equipeService, type EquipeDTO } from '../services/EquipeService';
 import { alocacaoService, type AlocacaoEquipeDTO } from '../services/alocacaoService';
 import ModalEquipesDeObra from './Obras/ModalEquipesDeObra';
 import UserSearchMultiSelect from './ui/UserSearchMultiSelect';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // Types
 interface Obra {
@@ -60,7 +62,8 @@ interface Usuario {
 
 interface HubTarefasObraProps {
   obraId: string;
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }
 
 // Icons
@@ -119,7 +122,7 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
+const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose, embedded }) => {
   const authContext = useContext(AuthContext);
   const user = authContext?.user;
 
@@ -499,7 +502,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className={embedded ? 'flex items-center justify-center py-12' : 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50'}>
         <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl p-8">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
           <p className="text-gray-600 dark:text-dark-text-secondary">Carregando dados da obra...</p>
@@ -510,12 +513,14 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
   if (!obra) {
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className={embedded ? 'flex items-center justify-center py-12' : 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50'}>
         <div className="bg-white dark:bg-dark-card rounded-2xl shadow-2xl p-8 text-center">
           <p className="text-red-600 font-semibold mb-4">Obra não encontrada</p>
-          <button onClick={onClose} className="btn-secondary">
-            Fechar
-          </button>
+          {onClose && (
+            <button onClick={onClose} className="btn-secondary">
+              Fechar
+            </button>
+          )}
         </div>
       </div>
     );
@@ -524,8 +529,8 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
   return (
     <>
       {/* Modal Principal - Hub de Tarefas */}
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-        <div className="bg-white dark:bg-dark-bg rounded-2xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-hidden my-4">
+      <div className={embedded ? 'relative' : 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto'}>
+        <div className={embedded ? 'bg-white dark:bg-dark-bg w-full overflow-hidden' : 'bg-white dark:bg-dark-bg rounded-2xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-hidden my-4'}>
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-500 px-8 py-6">
             <div className="flex justify-between items-start">
@@ -547,12 +552,14 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
                   )}
                 </div>
               </div>
+              {!embedded && onClose && (
               <button
                 onClick={onClose}
                 className="ml-4 p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
               >
                 <XMarkIcon className="w-6 h-6 text-white" />
               </button>
+              )}
             </div>
 
             {/* Progresso Geral */}
@@ -572,10 +579,10 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
 
           {/* Sistema de Abas */}
           <div className="border-b border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg">
-            <nav className="flex px-8">
+            <ScrollableRow as="nav" ariaLabel="Abas da obra" className="px-8">
               <button
                 onClick={() => setAbaAtiva('visaoGeral')}
-                className={`px-6 py-4 font-semibold text-sm transition-all border-b-2 ${
+                className={`${scrollableNavItemClasses} px-6 py-4 font-semibold text-sm transition-all border-b-2 ${
                   abaAtiva === 'visaoGeral'
                     ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-white dark:bg-dark-card'
                     : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400'
@@ -585,7 +592,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
               </button>
               <button
                 onClick={() => setAbaAtiva('materiais')}
-                className={`px-6 py-4 font-semibold text-sm transition-all border-b-2 ${
+                className={`${scrollableNavItemClasses} px-6 py-4 font-semibold text-sm transition-all border-b-2 ${
                   abaAtiva === 'materiais'
                     ? 'border-orange-500 text-orange-600 dark:text-orange-400 bg-white dark:bg-dark-card'
                     : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400'
@@ -593,7 +600,7 @@ const HubTarefasObra: React.FC<HubTarefasObraProps> = ({ obraId, onClose }) => {
               >
                 📦 Materiais
               </button>
-            </nav>
+            </ScrollableRow>
           </div>
 
           {/* Conteúdo */}
