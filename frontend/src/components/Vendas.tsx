@@ -18,6 +18,8 @@ import { configuracoesService, type MetaVendasSistema } from '../services/config
 import ContractPDFViewer from './PDFCustomization/ContractPDFViewer';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 import { calcularValorAReceberDoOrcamento, calcularValorVendaDiretaDoOrcamento } from '../utils/orcamentoValorAReceber';
 import ParcelasVendaAuditoriaTable from './financeiro/ParcelasVendaAuditoriaTable';
 import { canDelete } from '../utils/permissions';
@@ -3919,7 +3921,8 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie suas vendas e faturamento</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
+                    <div className={scrollableNavItemClasses}>
                     <ActionsDropdown
                         actions={[
                             {
@@ -3956,6 +3959,7 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                         ]}
                         label="Ações"
                     />
+                    </div>
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -3965,12 +3969,12 @@ ${logoUrl ? `<img src="${logoUrl}" alt="S3E" onerror="this.style.display='none'"
                     />
                     <button
                         onClick={() => setActiveTab('nova')}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Nova Venda
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Error Message */}
