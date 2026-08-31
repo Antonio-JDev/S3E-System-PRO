@@ -71,6 +71,7 @@ describe('ContasReceberService', () => {
       (prisma.contaReceber.findUnique as jest.Mock).mockResolvedValue({
         id: 'cr-1',
         vendaId: null,
+        status: ContaStatus.Pendente,
         valorJuros: 0,
         valorDesconto: 0,
       });
@@ -101,6 +102,18 @@ describe('ContasReceberService', () => {
       await expect(
         ContasReceberService.atualizarContaReceber('cr-v', { descricao: 'X' })
       ).rejects.toThrow('Não é permitido editar conta vinculada a venda');
+    });
+
+    it('não permite editar conta já recebida', async () => {
+      (prisma.contaReceber.findUnique as jest.Mock).mockResolvedValue({
+        id: 'cr-paga',
+        vendaId: null,
+        status: ContaStatus.Pago,
+      });
+
+      await expect(
+        ContasReceberService.atualizarContaReceber('cr-paga', { valorParcela: 10 })
+      ).rejects.toThrow('Não é possível alterar uma conta já recebida');
     });
   });
 
