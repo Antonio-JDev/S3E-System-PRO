@@ -480,6 +480,11 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
             </span>
           </div>
         )}
+        {(task.criadoPorName || task.criadoPor?.name) && (
+          <p className="text-[11px] text-gray-500 dark:text-dark-text-secondary mb-2 truncate">
+            Criada por {task.criadoPorName || task.criadoPor?.name}
+          </p>
+        )}
         {canSeeOverdue && prazoRaw && Boolean((task as any)?.prazoDefinido) && (
           <div className="mt-2 text-xs text-gray-500 dark:text-dark-text-secondary">
             Prazo: {formatDateDisplay(prazoRaw)}
@@ -820,9 +825,10 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
       )}
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-sm p-3 sm:p-4">
+          <div className="flex min-h-full items-center justify-center">
           <div
-            className="modal-content max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col relative"
+            className="modal-content w-full max-w-lg sm:max-w-xl md:max-w-2xl lg:max-w-4xl max-h-[min(90dvh,calc(100dvh-1.5rem))] overflow-hidden flex flex-col relative my-auto"
             aria-busy={savingTask}
           >
             {savingTask && (
@@ -831,8 +837,8 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                 aria-hidden
               />
             )}
-            <div className="modal-header flex items-center justify-between bg-blue-600 dark:bg-blue-700 text-white rounded-t-2xl">
-              <h3 className="text-xl font-bold">{editingTask ? 'Editar tarefa' : 'Nova tarefa'}</h3>
+            <div className="flex items-center justify-between bg-blue-600 dark:bg-blue-700 text-white rounded-t-2xl py-4 px-4 sm:px-6 shrink-0 border-b border-blue-500/30">
+              <h3 className="text-lg sm:text-xl font-bold">{editingTask ? 'Editar tarefa' : 'Nova tarefa'}</h3>
               <button
                 type="button"
                 onClick={handleCloseModal}
@@ -843,10 +849,26 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                 <XMarkIcon className="w-6 h-6" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-              <fieldset disabled={savingTask} className="flex flex-col flex-1 min-h-0 border-0 p-0 m-0">
-              <div className="modal-body overflow-y-auto space-y-4">
-                <div>
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <fieldset disabled={savingTask} className="flex flex-col flex-1 min-h-0 overflow-hidden border-0 p-0 m-0 min-w-0">
+              <div className="modal-body flex-1 min-h-0 overflow-y-auto scrollbar-none scroll-touch space-y-4 !p-4 sm:!p-6">
+                <div className="rounded-lg border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg/50 px-3 py-2.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-text-secondary mb-1">
+                    Criado por
+                  </p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-dark-text">
+                    {editingTask
+                      ? (editingTask.criadoPorName || editingTask.criadoPor?.name || 'Não registrado')
+                      : (currentUser?.name || 'Usuário atual')}
+                  </p>
+                  {(editingTask?.criadoPorId || (!editingTask && currentUser?.id)) && (
+                    <p className="text-xs text-gray-500 dark:text-dark-text-secondary mt-0.5 font-mono truncate">
+                      ID: {editingTask?.criadoPorId || editingTask?.criadoPor?.id || currentUser?.id}
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Título *</label>
                   <input
                     type="text"
@@ -868,16 +890,6 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Descrição</label>
-                  <textarea
-                    value={form.descricao}
-                    onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
-                    className="textarea-field"
-                    rows={3}
-                    placeholder="Descrição"
-                  />
-                </div>
-                <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Prioridade</label>
                   <select
                     value={form.prioridade ?? 'MEDIA'}
@@ -888,6 +900,16 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                     <option value="MEDIA">Média</option>
                     <option value="ALTA">Alta</option>
                   </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Descrição</label>
+                  <textarea
+                    value={form.descricao}
+                    onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+                    className="textarea-field"
+                    rows={3}
+                    placeholder="Descrição"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-1">Coluna</label>
@@ -915,7 +937,7 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                     Se você não definir um prazo, o sistema salva automaticamente para <strong>1 dia após a criação</strong>.
                   </p>
                 </div>
-                <div>
+                <div className="md:col-span-2">
                   <UserSearchMultiSelect
                     label="Atribuir a (um ou mais usuários)"
                     users={users.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
@@ -924,8 +946,9 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
                     placeholder="Buscar por nome e selecionar..."
                   />
                 </div>
+                </div>
               </div>
-              <div className="modal-footer flex flex-wrap items-center gap-2">
+              <div className="modal-footer flex flex-wrap items-center gap-2 shrink-0 !p-4 sm:!p-6">
                 <button
                   type="button"
                   onClick={handleCloseModal}
@@ -950,6 +973,7 @@ const TarefasInternasKanban: React.FC<TarefasInternasKanbanProps> = ({ toggleSid
               </div>
               </fieldset>
             </form>
+          </div>
           </div>
         </div>
       )}
