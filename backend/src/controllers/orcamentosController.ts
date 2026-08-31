@@ -201,10 +201,13 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
       where,
       include: {
         cliente: {
-          select: { id: true, nome: true, cpfCnpj: true }
+          select: { id: true, nome: true, cpfCnpj: true, telefone: true }
         },
         empresaFiscal: {
           select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true }
+        },
+        aprovadoPor: {
+          select: { id: true, name: true }
         },
         items: {
           include: {
@@ -226,7 +229,14 @@ export const getOrcamentos = async (req: Request, res: Response): Promise<void> 
       orderBy: { createdAt: 'desc' } // Ordenar por data de criação (mais recente primeiro)
     });
 
-    res.json(orcamentos);
+    res.json(
+      orcamentos.map((o) => ({
+        ...o,
+        aprovadoPor: o.aprovadoPor
+          ? { id: o.aprovadoPor.id, nome: o.aprovadoPor.name }
+          : null,
+      }))
+    );
   } catch (error) {
     console.error('Erro ao buscar orçamentos:', error);
     res.status(500).json({ error: 'Erro ao buscar orçamentos' });
@@ -243,6 +253,7 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
       include: {
         cliente: true,
         empresaFiscal: { select: { id: true, razaoSocial: true, nomeFantasia: true, cnpj: true } },
+        aprovadoPor: { select: { id: true, name: true } },
         items: {
           include: {
             material: true,
@@ -274,7 +285,12 @@ export const getOrcamentoById = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    res.json(orcamento);
+    res.json({
+      ...orcamento,
+      aprovadoPor: orcamento.aprovadoPor
+        ? { id: orcamento.aprovadoPor.id, nome: orcamento.aprovadoPor.name }
+        : null,
+    });
   } catch (error) {
     console.error('Erro ao buscar orçamento:', error);
     res.status(500).json({ error: 'Erro ao buscar orçamento' });
@@ -881,18 +897,28 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
         data: {
           status,
           aprovedAt: status === 'Aprovado' ? orcamento.aprovedAt ?? new Date() : null,
+          aprovadoPorId:
+            status === 'Aprovado'
+              ? (orcamento as any).aprovadoPorId ?? authReq.user?.userId ?? null
+              : null,
           recusadoAt: null
         },
         include: {
           cliente: true,
           items: true,
-          projeto: true
+          projeto: true,
+          aprovadoPor: { select: { id: true, name: true } }
         }
       });
 
       res.json({
         success: true,
-        data: orcamentoRegredido,
+        data: {
+          ...orcamentoRegredido,
+          aprovadoPor: orcamentoRegredido.aprovadoPor
+            ? { id: orcamentoRegredido.aprovadoPor.id, nome: orcamentoRegredido.aprovadoPor.name }
+            : null,
+        },
         message: `Status regredido para ${status} com sucesso`
       });
       return;
@@ -953,24 +979,49 @@ export const updateOrcamentoStatus = async (req: Request, res: Response): Promis
       }
     }
 
+    const tornandoAprovado = status === 'Aprovado' && orcamento.status !== 'Aprovado';
+    const saindoDeAprovado =
+      orcamento.status === 'Aprovado' &&
+      status !== 'Aprovado' &&
+      status !== 'Concretizado';
+
     const orcamentoAtualizado = await prisma.orcamento.update({
       where: { id },
       data: {
         status,
-        aprovedAt: status === 'Aprovado' ? new Date() : orcamento.aprovedAt,
+        aprovedAt: tornandoAprovado
+          ? new Date()
+          : status === 'Aprovado' || status === 'Concretizado'
+            ? orcamento.aprovedAt
+            : saindoDeAprovado
+              ? null
+              : orcamento.aprovedAt,
+        aprovadoPorId: tornandoAprovado
+          ? authReq.user?.userId ?? null
+          : status === 'Aprovado' || status === 'Concretizado'
+            ? (orcamento as any).aprovadoPorId ?? null
+            : saindoDeAprovado
+              ? null
+              : (orcamento as any).aprovadoPorId ?? null,
         recusadoAt: status === 'Declinado' || status === 'Recusado' ? new Date() : orcamento.recusadoAt
       },
       include: {
         cliente: true,
         items: true,
-        projeto: true
+        projeto: true,
+        aprovadoPor: { select: { id: true, name: true } }
       }
     });
 
     // Retornar no formato esperado pelo frontend
     res.json({
       success: true,
-      data: orcamentoAtualizado,
+      data: {
+        ...orcamentoAtualizado,
+        aprovadoPor: orcamentoAtualizado.aprovadoPor
+          ? { id: orcamentoAtualizado.aprovadoPor.id, nome: orcamentoAtualizado.aprovadoPor.name }
+          : null,
+      },
       projeto: projeto,
       message: `Status alterado para ${status} com sucesso`
     });
@@ -988,6 +1039,7 @@ export const aprovarOrcamento = async (req: Request, res: Response): Promise<voi
   try {
     console.log('✅ Função aprovarOrcamento chamada!', { id: req.params.id, method: req.method });
     const { id } = req.params;
+    const userId = (req as AuthRequest).user?.userId;
 
     const orcamento = await prisma.orcamento.findUnique({
       where: { id },
@@ -1095,12 +1147,14 @@ export const aprovarOrcamento = async (req: Request, res: Response): Promise<voi
       where: { id },
       data: {
         status: 'Aprovado',
-        aprovedAt: new Date()
+        aprovedAt: new Date(),
+        aprovadoPorId: userId || undefined,
       },
       include: {
         cliente: {
           select: { id: true, nome: true }
         },
+        aprovadoPor: { select: { id: true, name: true } },
         items: {
           include: {
             material: true
@@ -1112,7 +1166,12 @@ export const aprovarOrcamento = async (req: Request, res: Response): Promise<voi
 
     res.json({
       success: true,
-      data: orcamentoAtualizado,
+      data: {
+        ...orcamentoAtualizado,
+        aprovadoPor: orcamentoAtualizado.aprovadoPor
+          ? { id: orcamentoAtualizado.aprovadoPor.id, nome: orcamentoAtualizado.aprovadoPor.name }
+          : null,
+      },
       projeto: projeto,
       itemsFrios: itemsFrios,
       itemsDisponiveis: itemsDisponiveis,
