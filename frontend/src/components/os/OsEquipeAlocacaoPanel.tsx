@@ -68,36 +68,41 @@ const OsEquipeAlocacaoPanel: React.FC<OsEquipeAlocacaoPanelProps> = ({
 
   return (
     <>
-      <div className="rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-white dark:bg-dark-card p-6 shadow-soft space-y-5">
+      <div className="rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-card p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Equipe e alocação</h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Equipe e alocação</h3>
           {canAlocar && !semObra && (
             <button
               type="button"
               onClick={() => setModalAlocacaoOpen(true)}
-              className="px-4 py-2 text-sm font-semibold rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
             >
               Alocar equipe
             </button>
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
-            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Responsável da OS</p>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Alocação principal de campo: use o Calendário (arraste a OS, defina datas, equipe e veículos).
+          Registros abaixo são do módulo legado de equipes.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-dark-bg/50 border border-gray-100 dark:border-dark-border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Responsável da OS</p>
+            <p className="text-sm font-medium text-gray-900 dark:text-white">
               {responsavelOs?.nome || 'Não atribuído'}
             </p>
           </div>
-          <div className="p-4 rounded-xl bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-100 dark:border-cyan-800">
-            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Projetista (engenharia)</p>
+          <div className="p-3 rounded-lg bg-gray-50 dark:bg-dark-bg/50 border border-gray-100 dark:border-dark-border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Projetista (engenharia)</p>
             {engenhariaAtribuicao?.atribuido ? (
               <>
-                <p className="text-sm font-bold text-gray-900 dark:text-white">
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
                   {engenhariaAtribuicao.responsavelNome || 'Atribuído'}
                 </p>
                 <span
-                  className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-bold ${getStatusEngenhariaStyle(
+                  className={`inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium ${getStatusEngenhariaStyle(
                     engenhariaAtribuicao.statusEngenharia || 'A fazer'
                   )}`}
                 >
@@ -105,15 +110,15 @@ const OsEquipeAlocacaoPanel: React.FC<OsEquipeAlocacaoPanelProps> = ({
                 </span>
               </>
             ) : (
-              <p className="text-sm text-gray-600 dark:text-gray-400">Não atribuído à engenharia</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Não atribuído à engenharia</p>
             )}
           </div>
         </div>
 
         {!semObra && obraStatus && (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-600 dark:text-gray-400">Status da obra:</span>
-            <span className="font-bold text-blue-700 dark:text-blue-400">
+            <span className="text-gray-500 dark:text-gray-400">Status da obra:</span>
+            <span className="font-medium text-gray-900 dark:text-white">
               {OBRA_STATUS_LABEL[obraStatus] ?? obraStatus}
             </span>
           </div>
@@ -145,7 +150,7 @@ const OsEquipeAlocacaoPanel: React.FC<OsEquipeAlocacaoPanelProps> = ({
                     {new Date(a.dataFimPrevisto).toLocaleDateString('pt-BR')}
                   </p>
                 </div>
-                <span className="text-xs font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-800">
+                <span className="text-xs font-medium px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                   {a.status}
                 </span>
               </li>
