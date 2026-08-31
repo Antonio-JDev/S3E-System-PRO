@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import tarefasInternasService from '../services/tarefasInternas.service';
 import { StatusTarefaInterna } from '@prisma/client';
+import { AuthRequest } from '../middlewares/auth';
 
 export class TarefasInternasController {
   static async getKanban(req: Request, res: Response): Promise<void> {
@@ -49,8 +50,13 @@ export class TarefasInternasController {
   static async create(req: Request, res: Response): Promise<void> {
     try {
       const { titulo, motivo, descricao, prioridade, progresso, coluna, userId, userIds, prazo } = req.body;
+      const criadoPorId = (req as AuthRequest).user?.userId;
       if (!titulo || typeof titulo !== 'string' || !titulo.trim()) {
         res.status(400).json({ success: false, message: 'Título é obrigatório' });
+        return;
+      }
+      if (!criadoPorId) {
+        res.status(401).json({ success: false, message: 'Usuário não autenticado' });
         return;
       }
       const task = await tarefasInternasService.create({
@@ -62,7 +68,8 @@ export class TarefasInternasController {
         coluna,
         userId: userId || undefined,
         userIds: Array.isArray(userIds) ? userIds : undefined,
-        prazo: prazo ? new Date(prazo) : undefined
+        prazo: prazo ? new Date(prazo) : undefined,
+        criadoPorId
       });
       res.status(201).json(task);
     } catch (error: any) {
