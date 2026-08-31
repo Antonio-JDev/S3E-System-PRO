@@ -7,35 +7,35 @@ const router = express.Router();
 router.post(
   '/',
   authenticate,
-  authorize('admin', 'financeiro', 'gerente'),
+  authorize('admin', 'financeiro', 'financeiro_faturamento', 'gerente'),
   ContasReceberController.criar
 );
 
 router.get(
   '/',
   authenticate,
-  authorize('admin', 'financeiro', 'gerente'),
+  authorize('admin', 'financeiro', 'financeiro_faturamento', 'gerente'),
   ContasReceberController.listar
 );
 
 router.get(
   '/:id/historico',
   authenticate,
-  authorize('admin', 'financeiro', 'gerente'),
+  authorize('admin', 'financeiro', 'financeiro_faturamento', 'gerente'),
   ContasReceberController.historico
 );
 
 router.put(
   '/:id',
   authenticate,
-  authorize('admin', 'desenvolvedor'),
+  authorize('admin', 'financeiro', 'financeiro_faturamento', 'desenvolvedor'),
   ContasReceberController.atualizar
 );
 
 router.delete(
   '/:id',
   authenticate,
-  authorize('admin', 'desenvolvedor'),
+  authorize('admin', 'financeiro', 'financeiro_faturamento', 'desenvolvedor'),
   ContasReceberController.excluir
 );
 
