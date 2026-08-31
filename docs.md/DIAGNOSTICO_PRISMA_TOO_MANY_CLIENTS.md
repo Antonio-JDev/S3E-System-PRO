@@ -2,7 +2,10 @@
 
 ## Causa
 
-O erro ocorria porque **cada controller, service, worker e rota** instanciava seu próprio `new PrismaClient()`. Cada instância abre um pool de conexões com o PostgreSQL; com dezenas de arquivos, o limite de conexões do servidor era estourado.
+O erro ocorria porque **cada controller, service, worker e rota** instanciava
+seu próprio `new PrismaClient()`. Cada instância abre um pool de conexões com o
+PostgreSQL; com dezenas de arquivos, o limite de conexões do servidor era
+estourado.
 
 ## Solução implementada
 
@@ -11,12 +14,16 @@ O erro ocorria porque **cada controller, service, worker e rota** instanciava se
 Foi criado um único ponto de instanciação do PrismaClient:
 
 - **Arquivo:** `backend/src/lib/prisma.ts`
-- **Padrão:** Singleton com `globalThis` para evitar múltiplas instâncias em dev (hot reload).
-- **Uso:** Em todo o backend, importar `prisma` desse módulo em vez de criar `new PrismaClient()`.
+- **Padrão:** Singleton com `globalThis` para evitar múltiplas instâncias em dev
+  (hot reload).
+- **Uso:** Em todo o backend, importar `prisma` desse módulo em vez de criar
+  `new PrismaClient()`.
 
 ### 2. Arquivos alterados (conexão centralizada)
 
-Todos os arquivos abaixo passaram a usar `import { prisma } from '../lib/prisma'` (ou `./lib/prisma` quando em `src/`) e **não** instanciam mais PrismaClient.
+Todos os arquivos abaixo passaram a usar
+`import { prisma } from '../lib/prisma'` (ou `./lib/prisma` quando em `src/`) e
+**não** instanciam mais PrismaClient.
 
 #### App
 
@@ -112,7 +119,9 @@ Todos os arquivos abaixo passaram a usar `import { prisma } from '../lib/prisma'
 
 #### Routes
 
-- `backend/src/routes/orcamentos.ts` (rotas inline que usavam `new PrismaClient()` e `$disconnect()` passaram a usar o singleton; não chamar `$disconnect()` no singleton.)
+- `backend/src/routes/orcamentos.ts` (rotas inline que usavam
+  `new PrismaClient()` e `$disconnect()` passaram a usar o singleton; não chamar
+  `$disconnect()` no singleton.)
 
 #### Utils
 
@@ -120,40 +129,51 @@ Todos os arquivos abaixo passaram a usar `import { prisma } from '../lib/prisma'
 
 ### 3. Arquivos que não foram alterados (opcional)
 
-- **Testes** (`*.test.ts`): continuam podendo mockar `PrismaClient` ou usar instância própria conforme a estratégia de teste.
-- **Scripts** em `backend/scripts/` e `backend/src/scripts/`: são executados de forma pontual (ex.: migrações, seeds, one-off). Podem continuar com `new PrismaClient()` ou, se preferir, importar o singleton (ex.: `import { prisma } from '../lib/prisma'` em scripts dentro de `src/scripts/`).
-- **Seed** `backend/prisma/seed.ts`: pode manter instância própria ou importar do singleton, conforme padrão do projeto.
+- **Testes** (`*.test.ts`): continuam podendo mockar `PrismaClient` ou usar
+  instância própria conforme a estratégia de teste.
+- **Scripts** em `backend/scripts/` e `backend/src/scripts/`: são executados de
+  forma pontual (ex.: migrações, seeds, one-off). Podem continuar com
+  `new PrismaClient()` ou, se preferir, importar o singleton (ex.:
+  `import { prisma } from '../lib/prisma'` em scripts dentro de `src/scripts/`).
+- **Seed** `backend/prisma/seed.ts`: pode manter instância própria ou importar
+  do singleton, conforme padrão do projeto.
 
 ### 4. Onde está o DATABASE_URL e onde mudar
 
 O `DATABASE_URL` **não** fica guardado em um único lugar; ele é montado assim:
 
-| Onde | Arquivo | O que fazer |
-|------|---------|-------------|
-| **Produção (Docker / TrueNAS Scale)** | `docker-compose.prod.yml` | A URL é montada na linha do serviço `backend` em `environment.DATABASE_URL`, usando `DB_USER`, `DB_PASSWORD` e `DB_NAME` do seu `.env`. Já foi adicionado `?connection_limit=10` nessa URL. Para mudar o limite, edite essa linha (ex.: `connection_limit=15`). |
-| **Desenvolvimento** | `docker-compose.yml` | Mesma ideia: `DATABASE_URL` no serviço `backend`; já inclui `connection_limit=10`. |
-| **Arquivo de ambiente** | `.env` ou `.env.production` | Você **não** define `DATABASE_URL` aqui no fluxo normal: o Compose monta a URL a partir de `DB_USER`, `DB_PASSWORD` e `DB_NAME`. Se quiser URL fixa (ex.: banco externo), defina `DATABASE_URL=postgresql://...?connection_limit=10` no `.env` e no `docker-compose.prod.yml` troque para `DATABASE_URL: ${DATABASE_URL}`. |
-| **Exemplo / referência** | `.env.example` | Só documentação; mostra formato com `connection_limit=10`. |
+| Onde                                  | Arquivo                     | O que fazer                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Produção (Docker / TrueNAS Scale)** | `docker-compose.prod.yml`   | A URL é montada na linha do serviço `backend` em `environment.DATABASE_URL`, usando `DB_USER`, `DB_PASSWORD` e `DB_NAME` do seu `.env`. Já foi adicionado `?connection_limit=10` nessa URL. Para mudar o limite, edite essa linha (ex.: `connection_limit=15`).                                                            |
+| **Desenvolvimento**                   | `docker-compose.yml`        | Mesma ideia: `DATABASE_URL` no serviço `backend`; já inclui `connection_limit=10`.                                                                                                                                                                                                                                         |
+| **Arquivo de ambiente**               | `.env` ou `.env.production` | Você **não** define `DATABASE_URL` aqui no fluxo normal: o Compose monta a URL a partir de `DB_USER`, `DB_PASSWORD` e `DB_NAME`. Se quiser URL fixa (ex.: banco externo), defina `DATABASE_URL=postgresql://...?connection_limit=10` no `.env` e no `docker-compose.prod.yml` troque para `DATABASE_URL: ${DATABASE_URL}`. |
+| **Exemplo / referência**              | `.env.example`              | Só documentação; mostra formato com `connection_limit=10`.                                                                                                                                                                                                                                                                 |
 
-Resumo: para **produção no TrueNAS Scale** você só precisa manter o `.env` (ou o arquivo que o Compose usa) com `DB_USER`, `DB_PASSWORD` e `DB_NAME` corretos. O `connection_limit=10` já está na URL dentro do `docker-compose.prod.yml`.
+Resumo: para **produção no TrueNAS Scale** você só precisa manter o `.env` (ou o
+arquivo que o Compose usa) com `DB_USER`, `DB_PASSWORD` e `DB_NAME` corretos. O
+`connection_limit=10` já está na URL dentro do `docker-compose.prod.yml`.
 
 ### 5. Múltiplas instâncias e limite de conexões
 
-- **Múltiplas réplicas do backend:** divida o limite total do PostgreSQL entre as instâncias. Ex.: limite 20 no servidor e 2 réplicas → use `connection_limit=10` por instância (já é o padrão no compose).
-- O **schema do Prisma** não define `connection_limit`; ele é passado apenas na URL.
+- **Múltiplas réplicas do backend:** divida o limite total do PostgreSQL entre
+  as instâncias. Ex.: limite 20 no servidor e 2 réplicas → use
+  `connection_limit=10` por instância (já é o padrão no compose).
+- O **schema do Prisma** não define `connection_limit`; ele é passado apenas na
+  URL.
 
 ## Resumo
 
-| Antes | Depois |
-|-------|--------|
-| Dezenas de `new PrismaClient()` em controllers, services, routes e workers | Uma única instância em `src/lib/prisma.ts` |
-| Várias rotas/controllers criando cliente e chamando `$disconnect()` | Uso do singleton; não chamar `$disconnect()` no cliente compartilhado |
-| Fácil estourar `max_connections` do PostgreSQL | Um pool por processo; controle via `connection_limit` na URL |
+| Antes                                                                      | Depois                                                                |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Dezenas de `new PrismaClient()` em controllers, services, routes e workers | Uma única instância em `src/lib/prisma.ts`                            |
+| Várias rotas/controllers criando cliente e chamando `$disconnect()`        | Uso do singleton; não chamar `$disconnect()` no cliente compartilhado |
+| Fácil estourar `max_connections` do PostgreSQL                             | Um pool por processo; controle via `connection_limit` na URL          |
 
-Sempre que precisar de acesso ao banco no backend (controllers, services, workers, routes), importe:
+Sempre que precisar de acesso ao banco no backend (controllers, services,
+workers, routes), importe:
 
 ```ts
-import { prisma } from '../lib/prisma';  // ou path relativo adequado
+import { prisma } from "../lib/prisma"; // ou path relativo adequado
 ```
 
 e use `prisma` normalmente. Não instancie `new PrismaClient()` nesses módulos.
@@ -164,10 +184,22 @@ e use `prisma` normalmente. Não instancie `new PrismaClient()` nesses módulos.
 
 **Essas mudanças não quebram nada ao subir os containers no TrueNAS Scale.**
 
-- O backend continua sendo um **único processo** por container (Node/Express). Só mudou o fato de existir **uma instância de PrismaClient** por processo (singleton) em vez de dezenas.
-- O TrueNAS Scale usa Docker/Kubernetes; o que sobe é o mesmo tipo de stack (postgres + backend + frontend, conforme seu compose). Nenhuma variável nova é obrigatória: o `connection_limit=10` já está na URL dentro do `docker-compose.prod.yml`.
+- O backend continua sendo um **único processo** por container (Node/Express).
+  Só mudou o fato de existir **uma instância de PrismaClient** por processo
+  (singleton) em vez de dezenas.
+- O TrueNAS Scale usa Docker/Kubernetes; o que sobe é o mesmo tipo de stack
+  (postgres + backend + frontend, conforme seu compose). Nenhuma variável nova é
+  obrigatória: o `connection_limit=10` já está na URL dentro do
+  `docker-compose.prod.yml`.
 - O que você precisa no TrueNAS:
-  1. **Arquivo de ambiente** (ex.: `.env` ou o que o seu app do Compose usa) com `DB_USER`, `DB_PASSWORD`, `DB_NAME` (e demais variáveis que você já usava).
-  2. Subir com o mesmo comando/compose que você usa hoje (ex.: `docker-compose -f docker-compose.prod.yml --env-file .env up -d`).
+  1. **Arquivo de ambiente** (ex.: `.env` ou o que o seu app do Compose usa) com
+     `DB_USER`, `DB_PASSWORD`, `DB_NAME` (e demais variáveis que você já usava).
+  2. Subir com o mesmo comando/compose que você usa hoje (ex.:
+     `docker-compose -f docker-compose.prod.yml --env-file .env up -d`).
 
-**Possível “problema” só em um caso:** se você tiver **várias réplicas do backend** (mais de um container backend ao mesmo tempo), cada uma terá seu próprio pool de conexões. Aí vale manter `connection_limit=10` (ou menor) por instância para não estourar o `max_connections` do PostgreSQL. Com uma única instância do backend, o comportamento é só melhor (menos conexões, sem “too many clients”).
+**Possível “problema” só em um caso:** se você tiver **várias réplicas do
+backend** (mais de um container backend ao mesmo tempo), cada uma terá seu
+próprio pool de conexões. Aí vale manter `connection_limit=10` (ou menor) por
+instância para não estourar o `max_connections` do PostgreSQL. Com uma única
+instância do backend, o comportamento é só melhor (menos conexões, sem “too many
+clients”).
