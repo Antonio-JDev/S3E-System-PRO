@@ -216,12 +216,22 @@ export async function notificarAtribuicaoKanbanObras(
   descricao: string,
   enviarEmail = true
 ) {
+  const obra = await prisma.obra.findUnique({
+    where: { id: obraId },
+    select: { projetoId: true },
+  });
   return criarNotificacao({
     userId: userIdDestino,
     tipo: 'kanban_obras',
     titulo: 'Nova tarefa atribuída (Kanban de Obras)',
     mensagem: `Você foi atribuído à tarefa: ${descricao.substring(0, 80)}${descricao.length > 80 ? '...' : ''}`,
-    metadata: { entityId: tarefaId, entityType: 'TarefaObra', obraId, link: `/obras-kanban` },
+    metadata: {
+      entityId: tarefaId,
+      entityType: 'TarefaObra',
+      obraId,
+      projetoId: obra?.projetoId || undefined,
+      link: '/projetos',
+    },
     enviarEmail,
   });
 }
@@ -244,6 +254,57 @@ export async function notificarFinanceiro(
     metadata,
     enviarEmail,
   });
+}
+
+/**
+ * Notifica financeiro (in-app + WhatsApp) quando uma OS é aprovada.
+ */
+export async function notificarOsAprovadaFinanceiro(
+  projetoId: string,
+  numeroOs: string
+): Promise<void> {
+  const emailFinanceiro =
+    process.env.OS_APROVACAO_EMAIL_FINANCEIRO || 'financeiro@s3eengenharia.com.br';
+  const whatsappDigits =
+    (process.env.OS_APROVACAO_WHATSAPP_FINANCEIRO || '554791377385').replace(/\D/g, '');
+
+  const usuario = await prisma.user.findFirst({
+    where: { email: { equals: emailFinanceiro, mode: 'insensitive' }, active: true },
+    select: { id: true },
+  });
+
+  const tituloNotif = 'OS aprovada — tratativas financeiras';
+  const mensagemNotif = `A ordem de serviço ${numeroOs} foi aprovada. Você já pode dar prosseguimento nas tratativas financeiras.`;
+
+  if (usuario) {
+    await criarNotificacao({
+      userId: usuario.id,
+      tipo: 'financeiro',
+      titulo: tituloNotif,
+      mensagem: mensagemNotif,
+      metadata: {
+        entityId: projetoId,
+        entityType: 'Projeto',
+        numeroOrdemServico: numeroOs,
+        link: `/ordem-servicos?projeto=${projetoId}`,
+      },
+      enviarEmail: true,
+    });
+  }
+
+  const textoWhatsapp = `*Olá, sou a Luh, a Assistente do Sistema S3E System:*
+
+A Ordem de serviço ${numeroOs} foi aprovada. Você já pode dar prosseguimento nas tratativas financeiras!`;
+
+  try {
+    const { sendWhatsappProviderText } = await import('./whatsappProvider.service');
+    const chatId = whatsappDigits.includes('@')
+      ? whatsappDigits
+      : `${whatsappDigits}@s.whatsapp.net`;
+    await sendWhatsappProviderText(chatId, textoWhatsapp);
+  } catch (err) {
+    console.error('[notificarOsAprovadaFinanceiro] Falha ao enviar WhatsApp:', err);
+  }
 }
 
 /**
