@@ -357,12 +357,25 @@ export class ContasPagarController {
 
     /**
      * Atualiza dados de uma conta a pagar (admin/desenvolvedor)
-     * Permite editar fornecedor/credor (contas manuais), descrição, vencimento, observações e classificação.
+     * Permite editar fornecedor/credor, descrição, vencimento, observações e classificação.
+     * Valor, juros e desconto só em contas manuais (sem compra/XML nem despesa fixa).
      */
     static async atualizarConta(req: Request, res: Response) {
         try {
             const { id } = req.params;
-            const { fornecedorId, credorNome, descricao, dataVencimento, observacoes, classificacao, meioPagamento, cartaoCreditoId } = req.body || {};
+            const {
+                fornecedorId,
+                credorNome,
+                descricao,
+                valorParcela,
+                valorJuros,
+                valorDesconto,
+                dataVencimento,
+                observacoes,
+                classificacao,
+                meioPagamento,
+                cartaoCreditoId
+            } = req.body || {};
 
             if (!id) {
                 return res.status(400).json({ error: 'ID da conta a pagar é obrigatório' });
@@ -379,10 +392,19 @@ export class ContasPagarController {
                 }
             }
 
+            const parseOpcionalNumero = (v: unknown): number | undefined => {
+                if (v === undefined || v === null || v === '') return undefined;
+                const n = typeof v === 'number' ? v : parseFloat(String(v));
+                return Number.isFinite(n) ? n : undefined;
+            };
+
             const conta = await ContasPagarService.atualizarConta(id, {
                 fornecedorId: fornecedorId === '' ? null : fornecedorId,
                 credorNome,
                 descricao,
+                valorParcela: parseOpcionalNumero(valorParcela),
+                valorJuros: parseOpcionalNumero(valorJuros),
+                valorDesconto: parseOpcionalNumero(valorDesconto),
                 dataVencimento: dataVencimentoParsed,
                 observacoes,
                 classificacao,
@@ -560,6 +582,89 @@ export class ContasPagarController {
             console.error('Erro ao excluir parcela:', error);
             res.status(400).json({
                 error: 'Erro ao excluir parcela',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
+     * Sugere contas relacionadas para unificação
+     */
+    static async sugerirUnificacao(req: Request, res: Response) {
+        try {
+            const contaIds: string[] = Array.isArray(req.body?.contaIds)
+                ? req.body.contaIds
+                : [];
+            const janelaDias = req.body?.janelaDiasVencimento != null
+                ? Number(req.body.janelaDiasVencimento)
+                : 15;
+
+            if (!contaIds.length) {
+                return res.status(400).json({
+                    error: 'Informe contaIds (array com ao menos 1 id)'
+                });
+            }
+
+            const sugestoes = await ContasPagarService.sugerirContasParaUnificacao(
+                contaIds,
+                Number.isFinite(janelaDias) ? janelaDias : 15
+            );
+
+            res.json({
+                success: true,
+                data: sugestoes
+            });
+        } catch (error) {
+            console.error('Erro ao sugerir unificação:', error);
+            res.status(400).json({
+                error: 'Erro ao sugerir unificação',
+                message: error instanceof Error ? error.message : 'Erro desconhecido'
+            });
+        }
+    }
+
+    /**
+     * Unifica contas a pagar em uma conta ou parcelamento
+     */
+    static async unificarContas(req: Request, res: Response) {
+        try {
+            const {
+                contaIds,
+                parcelas,
+                dataPrimeiroVencimento,
+                intervaloDias,
+                descricao,
+                observacoes,
+                meioPagamento,
+                cartaoCreditoId,
+            } = req.body || {};
+
+            if (!Array.isArray(contaIds) || contaIds.length < 2) {
+                return res.status(400).json({
+                    error: 'Informe contaIds com ao menos 2 contas'
+                });
+            }
+
+            const resultado = await ContasPagarService.unificarContasPagar({
+                contaIds,
+                parcelas: parcelas != null ? Number(parcelas) : 1,
+                dataPrimeiroVencimento,
+                intervaloDias: intervaloDias != null ? Number(intervaloDias) : 30,
+                descricao,
+                observacoes,
+                meioPagamento,
+                cartaoCreditoId,
+            });
+
+            res.status(201).json({
+                success: true,
+                message: `${resultado.contasCanceladas} conta(s) unificada(s) em ${resultado.contasCriadas.length} parcela(s)`,
+                data: resultado
+            });
+        } catch (error) {
+            console.error('Erro ao unificar contas a pagar:', error);
+            res.status(400).json({
+                error: 'Erro ao unificar contas',
                 message: error instanceof Error ? error.message : 'Erro desconhecido'
             });
         }
