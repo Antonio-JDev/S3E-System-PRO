@@ -11,6 +11,9 @@ import { ENDPOINTS } from '../config/api';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import AlertDialog from './ui/AlertDialog';
 import ActionsDropdown from './ui/ActionsDropdown';
+import ScrollableRow from './ui/ScrollableRow';
+import { ModalDetailHeader } from './ui/ModalDetailHeader';
+import { scrollableNavItemClasses, compactNavTabClasses, compactActionBtnClasses, compactPagePaddingClasses, denseCardBtnClasses, denseCardStatusBtnClasses, pageTabBarContainerClasses, mobileTabBarStripClasses, modalOverlayPaddingClasses } from '../utils/responsiveNav';
 import { AuthContext } from '../contexts/AuthContext';
 import { canDelete, canRegredirOrcamentoStatus } from '../utils/permissions';
 import {
@@ -33,6 +36,8 @@ import {
 import TechnicalEditor from './TechnicalEditor';
 import { generateOrcamentoPDF, type OrcamentoPDFData as OrcamentoPDFDataOld } from '../utils/pdfGenerator';
 import NovoOrcamentoPage from '../pages/NovoOrcamentoPage';
+import BotaoWhatsAppCliente from './BotaoWhatsAppCliente';
+import { abrirChatWhatsappDoOrcamento } from '../utils/abrirChatWhatsappCliente';
 import PDFCustomizationModal from './PDFCustomization/PDFCustomizationModalWrapper';
 import { OrcamentoPDFData } from '../types/pdfCustomization';
 import { identificarTipoMaterial, TipoMaterial, podeVenderEmMetroOuCm, formatarUnidadeOrcamento } from '../utils/unitConverter';
@@ -82,6 +87,11 @@ const EyeIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.432 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+);
+const WhatsAppIcon = (props: React.SVGProps<SVGSVGElement>) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
     </svg>
 );
 const ArrowsUpDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -229,13 +239,14 @@ interface OrcamentosProps {
     toggleSidebar: () => void;
     initialBudgetId?: string | null;
     onClearInitialBudgetId?: () => void;
+    onNavigate?: (view: string, ...args: unknown[]) => void;
 }
 
 interface OrcamentosPropsExtended extends OrcamentosProps {
     suppressSuspenseSpinner?: boolean;
 }
 
-const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialBudgetId, onClearInitialBudgetId, suppressSuspenseSpinner }) => {
+const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialBudgetId, onClearInitialBudgetId, suppressSuspenseSpinner, onNavigate }) => {
     const { user } = useContext(AuthContext)!;
     const navigate = useNavigate();
     const location = useLocation();
@@ -2316,15 +2327,16 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                 onOrcamentoCriado={loadData}
                 initialDataFromLead={initialDataFromLead ?? undefined}
                 onConsumedInitialData={() => setInitialDataFromLead(null)}
+                onNavigate={onNavigate}
             />
         );
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
+        <div className={`min-h-screen ${compactPagePaddingClasses} bg-gray-50 dark:bg-dark-bg min-w-0`}>
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
-                <div className="flex items-center gap-4">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in min-w-0">
+                <div className="flex items-center gap-4 min-w-0">
                     <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
@@ -2333,8 +2345,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie seus orçamentos e propostas comerciais</p>
                     </div>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                    <div className="flex gap-2">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end gap-3">
+                    <div className={`${scrollableNavItemClasses} flex gap-2`}>
                         <ActionsDropdown
                             label="Ações"
                             className="flex-shrink-0"
@@ -2380,16 +2392,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                             style={{ display: 'none' }}
                         />
                     </div>
-                    <div className="flex gap-2">
-                        <button
-                            onClick={() => setAbaAtiva('novo')}
-                            className="btn-primary flex items-center gap-2"
-                        >
-                            <PlusIcon className="w-5 h-5" />
-                            Novo Orçamento
-                        </button>
-                    </div>
-                </div>
+                    <button
+                        onClick={() => setAbaAtiva('novo')}
+                        className={`${scrollableNavItemClasses} ${compactActionBtnClasses} btn-primary flex items-center gap-2`}
+                    >
+                        <PlusIcon className="w-5 h-5" />
+                        Novo Orçamento
+                    </button>
+                </ScrollableRow>
             </header>
 
             {/* Error Message */}
@@ -2466,11 +2476,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
             )}
 
             {/* Abas de Navegação: Listagem | Expirados | Declinados */}
-            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
-                <div className="flex border-b border-gray-200 dark:border-dark-border">
+            <div className={pageTabBarContainerClasses}>
+                <div className={mobileTabBarStripClasses}>
+                <ScrollableRow
+                    as="nav"
+                    ariaLabel="Abas de orçamentos"
+                    edgeToEdge
+                    className="lg:gap-0 lg:w-full"
+                >
                     <button
                         onClick={() => setAbaAtiva('listagem')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'listagem'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'listagem'
                                 ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 bg-blue-50 dark:bg-dark-elevated'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
@@ -2487,7 +2503,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     </button>
                     <button
                         onClick={() => setAbaAtiva('expirados')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all relative ${abaAtiva === 'expirados'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all relative ${abaAtiva === 'expirados'
                                 ? 'text-amber-600 dark:text-amber-400 border-b-2 border-amber-600 dark:border-amber-400 bg-amber-50 dark:bg-dark-elevated'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-amber-600 dark:hover:text-amber-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
@@ -2512,7 +2528,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     </button>
                     <button
                         onClick={() => setAbaAtiva('declinados')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'declinados'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'declinados'
                                 ? 'text-red-600 dark:text-red-400 border-b-2 border-red-600 dark:border-red-400 bg-red-50 dark:bg-dark-elevated'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-50 dark:hover:bg-dark-hover'
                             }`}
@@ -2527,6 +2543,7 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                             )}
                         </div>
                     </button>
+                </ScrollableRow>
                 </div>
             </div>
 
@@ -2610,8 +2627,8 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     )}
                 </div>
 
-                <div className="mt-4 flex items-center justify-between">
-                    <p className="text-sm text-gray-600">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
+                    <p className={`${scrollableNavItemClasses} text-xs sm:text-sm text-gray-600`}>
                         {abaAtiva === 'expirados' ? (
                             <>
                                 Exibindo <span className="font-bold text-gray-900">{filteredOrcamentos.length}</span> orçamento(s) expirado(s)
@@ -2626,31 +2643,33 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                             </>
                         )}
                     </p>
-                    <div className="flex items-center gap-4">
-                        <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Pendente: {orcamentos.filter(o => o.status === 'Pendente').length}</span>
+                    <ScrollableRow className="gap-3 sm:gap-4 justify-start sm:justify-end">
+                        <div className={scrollableNavItemClasses}>
+                            <ViewToggle view={viewMode} onViewChange={handleViewModeChange} />
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Aprovado: {orcamentos.filter(o => o.status === 'Aprovado' && !o.venda?.id).length}</span>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="max-lg:w-2.5 max-lg:h-2.5 w-3 h-3 bg-yellow-500 rounded-full shrink-0"></div>
+                            <span className="max-lg:text-[10px] text-xs text-gray-600 whitespace-nowrap">Pendente: {orcamentos.filter(o => o.status === 'Pendente').length}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-violet-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Concretizado: {orcamentos.filter(o => isOrcamentoConcretizado(o)).length}</span>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="max-lg:w-2.5 max-lg:h-2.5 w-3 h-3 bg-green-500 rounded-full shrink-0"></div>
+                            <span className="max-lg:text-[10px] text-xs text-gray-600 whitespace-nowrap">Aprovado: {orcamentos.filter(o => o.status === 'Aprovado' && !o.venda?.id).length}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                            <span className="text-xs text-gray-600">Recusado: {orcamentos.filter(o => o.status === 'Recusado').length}</span>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="max-lg:w-2.5 max-lg:h-2.5 w-3 h-3 bg-violet-500 rounded-full shrink-0"></div>
+                            <span className="max-lg:text-[10px] text-xs text-gray-600 whitespace-nowrap">Concretizado: {orcamentos.filter(o => isOrcamentoConcretizado(o)).length}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded-full ${error ? 'bg-red-500' : orcamentos.length > 0 ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-                            <span className="text-xs text-gray-600">
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className="max-lg:w-2.5 max-lg:h-2.5 w-3 h-3 bg-red-500 rounded-full shrink-0"></div>
+                            <span className="max-lg:text-[10px] text-xs text-gray-600 whitespace-nowrap">Recusado: {orcamentos.filter(o => o.status === 'Recusado').length}</span>
+                        </div>
+                        <div className={`${scrollableNavItemClasses} flex items-center gap-2`}>
+                            <div className={`max-lg:w-2.5 max-lg:h-2.5 w-3 h-3 rounded-full shrink-0 ${error ? 'bg-red-500' : orcamentos.length > 0 ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                            <span className="max-lg:text-[10px] text-xs text-gray-600 whitespace-nowrap">
                                 {error ? 'API Error' : orcamentos.length > 0 ? 'API Online' : 'Carregando...'}
                             </span>
                         </div>
-                    </div>
+                    </ScrollableRow>
                 </div>
             </div>
 
@@ -2687,14 +2706,14 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                     )}
                 </div>
             ) : viewMode === 'grid' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 sm:gap-4">
                     {filteredOrcamentos.map((orcamento) => {
                         const statusVisual = isOrcamentoConcretizado(orcamento) ? 'Concretizado' : orcamento.status;
                         const stripeClass = getOrcamentoCardStripeClass(statusVisual, abaAtiva);
                         return (
                         <div
                             key={orcamento.id}
-                            className="flex rounded-2xl overflow-hidden border-2 border-gray-200 dark:border-dark-border shadow-soft hover:shadow-medium hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-200"
+                            className="flex rounded-xl overflow-hidden border border-gray-200 dark:border-dark-border shadow-soft hover:shadow-medium hover:border-blue-300 dark:hover:border-blue-600 transition-all duration-200"
                         >
                             {stripeClass ? (
                                 <div
@@ -2703,264 +2722,253 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     aria-hidden
                                 />
                             ) : null}
-                            <div className="flex-1 p-6 bg-white dark:bg-dark-card min-w-0">
-                            {/* Header do Card */}
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="px-2 py-0.5 text-xs font-mono font-bold bg-gray-100 text-gray-700 rounded">
+                            <div className="flex-1 p-3 sm:p-3.5 bg-white dark:bg-dark-card min-w-0">
+                            {/* Header compacto */}
+                            <div className="flex items-start justify-between gap-2 mb-2 min-w-0">
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                                        <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-gray-100 dark:bg-dark-elevated text-gray-700 dark:text-dark-text-secondary rounded shrink-0">
                                             #{orcamento.numeroSequencial || '---'}
                                         </span>
-                                        <h3 className="font-bold text-lg text-gray-900">{orcamento.titulo}</h3>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="px-3 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-800 ring-1 ring-purple-200">
-                                            📋 Orçamento
+                                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300">
+                                            Orçamento
                                         </span>
                                     </div>
+                                    <h3 className="font-bold text-sm text-gray-900 dark:text-dark-text line-clamp-2 leading-snug">{orcamento.titulo}</h3>
                                 </div>
-                                <div className="flex flex-col items-end gap-1">
-                                    <span className={`px-3 py-1.5 text-xs font-bold rounded-lg shadow-sm ${getStatusClass(statusVisual)}`}>
+                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${getStatusClass(statusVisual)}`}>
                                         {statusVisual === 'Pendente' && '⏳ '}
+                                        {statusVisual === 'Enviado ao Cliente' && '📤 '}
                                         {statusVisual === 'Aprovado' && '✅ '}
                                         {statusVisual === 'Concretizado' && '📦 '}
                                         {statusVisual}
                                     </span>
                                     {isOrcamentoConcretizado(orcamento) && orcamento.venda?.numeroSequencial && (
-                                        <span className="px-2 py-1 text-xs font-bold rounded-lg bg-violet-50 text-violet-800 ring-1 ring-violet-200">
+                                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-violet-50 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">
                                             PV #{orcamento.venda.numeroSequencial}
                                         </span>
                                     )}
                                     {isOrcamentoExpirado(orcamento) && (
-                                        <span className="px-2 py-1 text-xs font-bold rounded-lg bg-orange-100 text-orange-800 ring-1 ring-orange-200">
+                                        <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300">
                                             ⏰ Expirado
                                         </span>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Informações */}
-                            <div className="space-y-2 mb-4">
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                    <span>👤</span>
-                                    <span className="truncate">{orcamento.cliente?.nome || 'Cliente não informado'}</span>
+                            {/* Informações em grid */}
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-2.5 text-xs text-gray-600 dark:text-dark-text-secondary">
+                                <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                                    <span className="shrink-0">👤</span>
+                                    <span className="truncate font-medium text-gray-800 dark:text-dark-text">{orcamento.cliente?.nome || 'Cliente não informado'}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                    <span>💰</span>
+                                <div className="flex items-start gap-1.5 min-w-0">
+                                    <span className="shrink-0">💰</span>
                                     {(() => {
                                         const valorAReceber = calcularValorAReceberDoOrcamento(orcamento as any);
                                         const valorVendaDireta = calcularValorVendaDiretaDoOrcamento(orcamento as any);
                                         const totalCliente = roundMoney(Number((orcamento as any).precoVenda) || 0);
                                         const temVendaDireta = valorVendaDireta > 0.009 && totalCliente > valorAReceber + 0.009;
                                         return (
-                                            <div className="flex flex-col leading-tight">
-                                                <span className="font-bold text-purple-700">
+                                            <div className="min-w-0 leading-tight">
+                                                <span className="font-bold text-purple-700 dark:text-purple-400 block truncate">
                                                     R$ {valorAReceber.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                 </span>
                                                 {temVendaDireta && (
-                                                    <span className="text-xs text-gray-500">
-                                                        Total cliente: R$ {totalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • Venda direta: R$ {valorVendaDireta.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    <span className="text-[10px] text-gray-500 dark:text-dark-text-secondary line-clamp-1">
+                                                        Total: R$ {totalCliente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                                     </span>
                                                 )}
                                             </div>
                                         );
                                     })()}
                                 </div>
-                                {/* Validade - apenas para orçamentos não aprovados */}
+                                <div className="flex items-center gap-1.5 justify-end text-right">
+                                    <span className="shrink-0">📝</span>
+                                    <span>{orcamento.items?.length || 0} item(s)</span>
+                                </div>
                                 {statusVisual !== 'Aprovado' && statusVisual !== 'Concretizado' && (
-                                    <div className={`flex items-center gap-2 text-sm ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 font-semibold' : 'text-gray-600'}`}>
-                                        <span>📅</span>
-                                        <span>
+                                    <div className={`col-span-2 flex items-center gap-1.5 ${isOrcamentoExpirado(orcamento) ? 'text-orange-600 dark:text-orange-400 font-semibold' : ''}`}>
+                                        <span className="shrink-0">📅</span>
+                                        <span className="truncate">
                                             {isOrcamentoExpirado(orcamento) ? '⏰ ' : ''}
-                                            Válido até: {new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}
-                                            {isOrcamentoExpirado(orcamento) && ' (Expirado)'}
+                                            Válido até {new Date(orcamento.validade || orcamento.createdAt).toLocaleDateString('pt-BR')}
                                         </span>
                                     </div>
                                 )}
-                                {/* Quando aprovado, mostrar data de aprovação ao invés de validade */}
                                 {statusVisual === 'Aprovado' && orcamento.aprovedAt && (
-                                    <div className="flex items-center gap-2 text-sm text-green-600">
-                                        <span>✅</span>
-                                        <span>Aprovado em: {new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR')}</span>
+                                    <div className="col-span-2 flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                                        <span className="shrink-0">✅</span>
+                                        <span className="truncate">
+                                            Aprovado {new Date(orcamento.aprovedAt).toLocaleDateString('pt-BR')}
+                                            {orcamento.aprovadoPor?.nome ? ` · ${orcamento.aprovadoPor.nome}` : ''}
+                                        </span>
                                     </div>
                                 )}
                                 {statusVisual === 'Concretizado' && orcamento.venda && (
-                                    <div className="flex items-center gap-2 text-sm text-violet-700">
-                                        <span>📦</span>
-                                        <span>
-                                            PV #{orcamento.venda.numeroSequencial ?? '—'} em{' '}
-                                            {new Date(orcamento.venda.createdAt || orcamento.venda.dataVenda || orcamento.updatedAt).toLocaleDateString('pt-BR')}
+                                    <div className="col-span-2 flex items-center gap-1.5 text-violet-700 dark:text-violet-400">
+                                        <span className="shrink-0">📦</span>
+                                        <span className="truncate">
+                                            PV #{orcamento.venda.numeroSequencial ?? '—'} · {new Date(orcamento.venda.createdAt || orcamento.venda.dataVenda || orcamento.updatedAt).toLocaleDateString('pt-BR')}
                                         </span>
                                     </div>
                                 )}
-                                <div className="flex items-center gap-2 text-sm text-gray-600">
-                                    <span>📝</span>
-                                    <span>{orcamento.items?.length || 0} item(s)</span>
-                                </div>
                             </div>
 
-                            {/* Botões de Ação */}
-                            <div className="flex flex-col gap-2 pt-4 border-t border-gray-100">
-                                <div className="flex gap-2">
+                            {/* Ações agrupadas */}
+                            <div className="pt-2 border-t border-gray-100 dark:border-dark-border space-y-1.5 min-w-0">
+                                <div className="grid grid-cols-4 gap-1">
                                     <button
+                                        type="button"
                                         onClick={async () => {
-                                            // Buscar orçamento completo do backend para garantir relações carregadas
                                             const response = await orcamentosService.buscar(orcamento.id);
                                             if (response.success && response.data) {
-                                                // Debug: verificar se itensDoKit está presente
-                                                console.log('📦 Orçamento carregado:', response.data);
-                                                if (response.data.items) {
-                                                    response.data.items.forEach((item: any, idx: number) => {
-                                                        if (item.tipo === 'KIT') {
-                                                            console.log(`🔍 Item KIT ${idx}:`, {
-                                                                nome: item.nome || item.descricao,
-                                                                itensDoKit: item.itensDoKit,
-                                                                temItensDoKit: !!item.itensDoKit,
-                                                                tipoItensDoKit: typeof item.itensDoKit,
-                                                                isArray: Array.isArray(item.itensDoKit)
-                                                            });
-                                                        }
-                                                    });
-                                                }
                                                 setOrcamentoToView(response.data);
                                             } else {
-                                                // Fallback: usar o orçamento da lista
                                                 setOrcamentoToView(orcamento);
                                             }
                                         }}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm font-semibold"
+                                        className={`${denseCardBtnClasses} bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-800/50`}
                                     >
-                                        <EyeIcon className="w-4 h-4" />
-                                        Ver
+                                        <EyeIcon className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="truncate">Ver</span>
                                     </button>
                                     <button
+                                        type="button"
+                                        onClick={() => void abrirChatWhatsappDoOrcamento({
+                                            orcamentoId: orcamento.id,
+                                            telefone: orcamento.cliente?.telefone,
+                                            nome: orcamento.cliente?.nome,
+                                            onNavigate,
+                                        })}
+                                        className={`${denseCardBtnClasses} bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-800/50`}
+                                        title="Chamar cliente no WhatsApp"
+                                    >
+                                        <WhatsAppIcon className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="truncate hidden min-[400px]:inline">WhatsApp</span>
+                                        <span className="truncate min-[400px]:hidden">Zap</span>
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => handlePersonalizarPDF(orcamento)}
                                         disabled={pdfLoadingId === orcamento.id}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-purple-100 to-indigo-100 text-purple-700 rounded-lg hover:from-purple-200 hover:to-indigo-200 transition-all text-sm font-semibold shadow-sm disabled:opacity-70 disabled:cursor-wait"
+                                        className={`${denseCardBtnClasses} bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-70 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-800/50`}
                                         title="Personalizar e gerar PDF"
                                     >
                                         {pdfLoadingId === orcamento.id ? (
-                                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                            <svg className="w-3.5 h-3.5 animate-spin shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                                             </svg>
                                         ) : (
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
                                             </svg>
                                         )}
-                                        {pdfLoadingId === orcamento.id ? 'Abrindo…' : 'PDF'}
+                                        <span className="truncate">{pdfLoadingId === orcamento.id ? '…' : 'PDF'}</span>
                                     </button>
                                     <button
+                                        type="button"
                                         onClick={() => handleOpenModal(orcamento)}
-                                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm font-semibold"
+                                        className={`${denseCardBtnClasses} bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-800/50`}
                                     >
-                                        <PencilIcon className="w-4 h-4" />
-                                        Editar
+                                        <PencilIcon className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="truncate">Editar</span>
                                     </button>
-                                    {canDelete(user) ? (
-                                        // Desenvolvedor/Admin: dois botões
-                                        <>
-                                            <button
-                                                onClick={() => {
-                                                    setOrcamentoToDelete(orcamento);
-                                                    setDeletePermanent(false);
-                                                    setShowDeleteDialog(true);
-                                                }}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
-                                                title="Cancelar orçamento (pode ser reativado)"
-                                            >
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                                Cancelar
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setOrcamentoToDelete(orcamento);
-                                                    setDeletePermanent(true);
-                                                    setShowDeleteDialog(true);
-                                                }}
-                                                className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm font-semibold"
-                                                title="Excluir permanentemente do banco de dados"
-                                            >
-                                                <TrashIcon className="w-4 h-4" />
-                                                Excluir
-                                            </button>
-                                        </>
-                                    ) : (
-                                        // Outros usuários: apenas cancelar
+                                </div>
+                                <div className={`grid gap-1 ${canDelete(user) ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setOrcamentoToDelete(orcamento);
+                                            setDeletePermanent(false);
+                                            setShowDeleteDialog(true);
+                                        }}
+                                        className={`${denseCardBtnClasses} bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:hover:bg-yellow-800/50`}
+                                        title="Cancelar orçamento"
+                                    >
+                                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                        <span className="truncate">Cancelar</span>
+                                    </button>
+                                    {canDelete(user) && (
                                         <button
+                                            type="button"
                                             onClick={() => {
                                                 setOrcamentoToDelete(orcamento);
-                                                setDeletePermanent(false);
+                                                setDeletePermanent(true);
                                                 setShowDeleteDialog(true);
                                             }}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 transition-colors text-sm font-semibold"
-                                            title="Cancelar orçamento"
+                                            className={`${denseCardBtnClasses} bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-800/50`}
+                                            title="Excluir permanentemente"
                                         >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                            Cancelar
+                                            <TrashIcon className="w-3.5 h-3.5 shrink-0" />
+                                            <span className="truncate">Excluir</span>
                                         </button>
                                     )}
                                 </div>
 
-                                {/* Botões de Status */}
+                                {/* Workflow */}
                                 {orcamento.status === 'Pendente' && (
-                                    <div className="flex flex-col gap-2">
+                                    <div className="flex gap-1">
                                         <button
+                                            type="button"
                                             onClick={() => handleChangeStatus(orcamento.id, 'Enviado ao Cliente')}
-                                            className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all font-semibold shadow-md text-sm"
+                                            className={`${denseCardStatusBtnClasses} bg-blue-600 text-white hover:bg-blue-700`}
                                         >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                             </svg>
-                                            Enviado ao Cliente
+                                            <span className="truncate">Enviado</span>
                                         </button>
                                         <button
+                                            type="button"
                                             onClick={() => handleAprovarOrcamento(orcamento.id)}
-                                            className="flex items-center justify-center gap-1 w-full px-3 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
+                                            className={`${denseCardStatusBtnClasses} bg-green-600 text-white hover:bg-green-700`}
                                         >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                             </svg>
-                                            Aprovar
+                                            <span className="truncate">Aprovar</span>
                                         </button>
                                     </div>
                                 )}
                                 {orcamento.status === 'Enviado ao Cliente' && (
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-1">
                                         <button
+                                            type="button"
                                             onClick={() => handleAprovarOrcamento(orcamento.id)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold shadow-md"
+                                            className={`${denseCardStatusBtnClasses} bg-green-600 text-white hover:bg-green-700`}
                                         >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                             </svg>
-                                            Aprovar
+                                            <span className="truncate">Aprovar</span>
                                         </button>
                                         <button
+                                            type="button"
                                             onClick={() => handleDeclinarOrcamento(orcamento)}
-                                            className="flex-1 flex items-center justify-center gap-1 px-3 py-2.5 bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-lg hover:from-gray-800 hover:to-gray-700 transition-all font-semibold shadow-md"
+                                            className={`${denseCardStatusBtnClasses} bg-gray-800 text-white hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600`}
                                         >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                             </svg>
-                                            Declinar
+                                            <span className="truncate">Declinar</span>
                                         </button>
                                     </div>
                                 )}
                                 {orcamento.status === 'Aprovado' && !isOrcamentoConcretizado(orcamento) && (
                                     <button
+                                        type="button"
                                         onClick={() => handleDeclinarOrcamento(orcamento)}
-                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-lg hover:from-orange-700 hover:to-orange-600 transition-all font-semibold shadow-md text-sm"
+                                        className={`${denseCardStatusBtnClasses} w-full bg-orange-600 text-white hover:bg-orange-700`}
                                     >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                         </svg>
-                                        Declinar
+                                        <span className="truncate">Declinar</span>
                                     </button>
                                 )}
                             </div>
@@ -3107,6 +3115,17 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                                             variant: 'default'
                                                         },
                                                         {
+                                                            label: 'Chamar no WhatsApp',
+                                                            icon: <WhatsAppIcon className="w-4 h-4" />,
+                                                            onClick: () => void abrirChatWhatsappDoOrcamento({
+                                                                orcamentoId: orcamento.id,
+                                                                telefone: orcamento.cliente?.telefone,
+                                                                nome: orcamento.cliente?.nome,
+                                                                onNavigate,
+                                                            }),
+                                                            variant: 'success'
+                                                        },
+                                                        {
                                                             label: 'Copiar',
                                                             icon: (
                                                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3230,30 +3249,19 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
             {/* MODAL DE CRIAÇÃO/EDIÇÃO */}
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 ${modalOverlayPaddingClasses} animate-fade-in`}>
                     <div className="bg-white dark:bg-dark-card rounded-2xl shadow-strong max-w-6xl w-full max-h-[90vh] overflow-y-auto animate-slide-in-up">
-                        {/* Header */}
-                        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border bg-[#0a1a2f]">
-                            <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
-                                    {orcamentoToEdit ? <PencilIcon className="w-7 h-7 text-white" /> : <PlusIcon className="w-7 h-7 text-white" />}
+                        <ModalDetailHeader
+                            tone="dark"
+                            onClose={handleCloseModal}
+                            icon={
+                                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
+                                    {orcamentoToEdit ? <PencilIcon className="w-6 h-6 sm:w-7 sm:h-7 text-white" /> : <PlusIcon className="w-6 h-6 sm:w-7 sm:h-7 text-white" />}
                                 </div>
-                                <div className="flex-1">
-                                    <h2 className="text-2xl font-bold text-white">
-                                        {orcamentoToEdit ? 'Editar Orçamento' : 'Novo Orçamento'}
-                                    </h2>
-                                    <p className="text-sm text-white/80 mt-1">
-                                        {orcamentoToEdit ? 'Atualize as informações do orçamento' : 'Crie uma nova proposta comercial'}
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleCloseModal}
-                                className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
+                            }
+                            title={orcamentoToEdit ? 'Editar Orçamento' : 'Novo Orçamento'}
+                            subtitle={orcamentoToEdit ? 'Atualize as informações do orçamento' : 'Crie uma nova proposta comercial'}
+                        />
 
                         <form onSubmit={handleSubmit} className="p-6 space-y-6">
                             {/* SEÇÃO 1: Informações Básicas */}
@@ -3735,121 +3743,79 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
 
             {/* MODAL DE SELEÇÃO DE ITENS - COM COMPARAÇÃO */}
             {showItemModal && (
-                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+                <div className={`fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] ${modalOverlayPaddingClasses}`}>
                     <div className={`bg-white dark:bg-dark-card rounded-2xl shadow-2xl ${modalExpandido ? 'max-w-[95vw] w-full' : 'max-w-4xl w-full'} max-h-[95vh] overflow-hidden flex flex-col transition-all duration-300`}>
                         {/* Header com Abas */}
-                        <div className="p-6 border-b border-gray-200 dark:border-dark-border" style={{ backgroundColor: '#0a1a2f' }}>
-                            <div className="flex justify-between items-center mb-4">
-                                <div className="flex-1">
-                                    <h3 className="text-xl font-bold text-white">Adicionar Item ao Orçamento</h3>
-                                    <p className="text-sm text-white/80 mt-1">Escolha como deseja adicionar o item</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowItemModal(false);
-                                        setItemSearchTerm('');
-                                        setModoAdicao('materiais');
-                                        setModalExpandido(false);
-                                        setMaterialSelecionadoComparacao(null);
-                                        setCotacaoSelecionadaComparacao(null);
-                                        setMateriaisSelecionadosComparacao(new Set());
-                                        setCotacoesSelecionadasComparacao(new Set());
-                                        setSearchEstoque('');
-                                        setSearchCotacoes('');
-                                        setSearchGlobalComparacao('');
-                                        setBuscaGlobal('');
-                                        // Limpar todas as quantidades
-                                        setQuantidadesMateriais(new Map());
-                                        setQuantidadesServicos(new Map());
-                                        setQuantidadesKits(new Map());
-                                        setQuantidadesQuadros(new Map());
-                                        setQuantidadesCotacoes(new Map());
-                                    }}
-                                    className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-colors"
-                                >
-                                    <XMarkIcon className="w-6 h-6" />
-                                </button>
+                        <div className="relative shrink-0 border-b border-white/10 px-4 pt-4 pb-3 sm:p-6 sm:pb-4 pr-12 sm:pr-6" style={{ backgroundColor: '#0a1a2f' }}>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowItemModal(false);
+                                    setItemSearchTerm('');
+                                    setModoAdicao('materiais');
+                                    setModalExpandido(false);
+                                    setMaterialSelecionadoComparacao(null);
+                                    setCotacaoSelecionadaComparacao(null);
+                                    setMateriaisSelecionadosComparacao(new Set());
+                                    setCotacoesSelecionadasComparacao(new Set());
+                                    setSearchEstoque('');
+                                    setSearchCotacoes('');
+                                    setSearchGlobalComparacao('');
+                                    setBuscaGlobal('');
+                                    setQuantidadesMateriais(new Map());
+                                    setQuantidadesServicos(new Map());
+                                    setQuantidadesKits(new Map());
+                                    setQuantidadesQuadros(new Map());
+                                    setQuantidadesCotacoes(new Map());
+                                }}
+                                aria-label="Fechar"
+                                className="absolute top-3 right-3 z-20 p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+
+                            <div className="mb-3 sm:mb-4">
+                                <h3 className="text-base sm:text-xl font-bold text-white leading-tight">Adicionar Item ao Orçamento</h3>
+                                <p className="text-xs sm:text-sm text-white/80 mt-0.5">Escolha como deseja adicionar o item</p>
                             </div>
 
-                            {/* Campo de Busca Universal no Header */}
-                            {/* Campo de Busca Universal no Header */}
-                            <div className="mb-4">
+                            <div className="mb-3 sm:mb-4">
                                 <div className="relative">
                                     <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/70" />
                                     <input
                                         type="text"
                                         value={buscaGlobal}
                                         onChange={(e) => setBuscaGlobal(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all"
-                                        placeholder="🔍 Buscar em todos os itens (Materiais, Serviços, Kits, Quadros, Cotações)..."
-                                        style={{ color: 'white' }}
+                                        className="w-full pl-10 pr-4 py-2.5 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all text-sm"
+                                        placeholder="Buscar em todos os itens..."
                                     />
                                 </div>
                             </div>
 
-                            {/* Abas */}
-                            <div className="flex gap-2 flex-wrap items-center">
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('materiais')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'materiais' && !buscaGlobal.trim()
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
+                            <div className={`${mobileTabBarStripClasses} mobile-tab-bar-strip--on-dark border-white/10 -mx-1 sm:mx-0`}>
+                                <ScrollableRow as="nav" ariaLabel="Tipo de item" edgeToEdge className="gap-2 pb-0.5">
+                                {([
+                                    { id: 'materiais' as const, label: '📦 Materiais', active: modoAdicao === 'materiais' && !buscaGlobal.trim() },
+                                    { id: 'servicos' as const, label: '🔧 Serviços', active: modoAdicao === 'servicos' },
+                                    { id: 'kits' as const, label: '📦 Kits', active: modoAdicao === 'kits' },
+                                    { id: 'quadros' as const, label: '⚡ Quadros', active: modoAdicao === 'quadros' },
+                                    { id: 'cotacoes' as const, label: '🏷️ Cotações', active: modoAdicao === 'cotacoes' },
+                                    { id: 'manual' as const, label: '✏️ Manual', active: modoAdicao === 'manual' },
+                                ]).map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => setModoAdicao(tab.id)}
+                                        className={`${scrollableNavItemClasses} shrink-0 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+                                            tab.active
+                                                ? 'bg-white text-indigo-700'
+                                                : 'bg-white/20 text-white hover:bg-white/30'
                                         }`}
-                                >
-                                    📦 Materiais
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('servicos')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'servicos'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                >
-                                    🔧 Serviços
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('kits')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'kits'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                >
-                                    📦 Kits
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('quadros')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'quadros'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                >
-                                    ⚡ Quadros
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('cotacoes')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'cotacoes'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                >
-                                    🏷️ Cotações
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setModoAdicao('manual')}
-                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${modoAdicao === 'manual'
-                                            ? 'bg-white text-indigo-700'
-                                            : 'bg-white/20 text-white hover:bg-white/30'
-                                        }`}
-                                >
-                                    ✏️ Manual
-                                </button>
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                                </ScrollableRow>
                             </div>
                         </div>
 
@@ -4689,6 +4655,13 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                     <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-dark-border">
                                         <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Cliente</h4>
                                         <p className="text-gray-900 dark:text-dark-text font-medium">{orcamentoToView.cliente?.nome || 'N/A'}</p>
+                                        <div className="mt-3">
+                                            <BotaoWhatsAppCliente
+                                                telefone={orcamentoToView.cliente?.telefone}
+                                                nome={orcamentoToView.cliente?.nome}
+                                                onNavigate={onNavigate}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-dark-border">
                                         <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">Status</h4>
@@ -5241,6 +5214,9 @@ const Orcamentos: React.FC<OrcamentosPropsExtended> = ({ toggleSidebar, initialB
                                         {orcamentoToView.aprovedAt && (
                                             <p className="text-gray-900 dark:text-white font-medium mb-2">
                                                 Data de Aprovação: {new Date(orcamentoToView.aprovedAt).toLocaleDateString('pt-BR')}
+                                                {orcamentoToView.aprovadoPor?.nome
+                                                    ? ` · por ${orcamentoToView.aprovadoPor.nome}`
+                                                    : ''}
                                             </p>
                                         )}
                                         <div className="mt-2 pt-2 border-t border-green-200 dark:border-green-800">
