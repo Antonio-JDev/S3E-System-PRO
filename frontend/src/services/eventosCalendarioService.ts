@@ -22,6 +22,37 @@ export interface OrcamentoEventoResumo {
   status: string;
 }
 
+export interface ProjetoEventoResumo {
+  id: string;
+  titulo: string;
+  status: string;
+  orcamentoId?: string;
+  cliente?: { id: string; nome: string } | null;
+  orcamento?: { numeroSequencial: number } | null;
+}
+
+export interface WorkShiftResumo {
+  id?: string | null;
+  nome: string;
+  entrada1: string;
+  saida1: string;
+  entrada2: string;
+  saida2: string;
+}
+
+export interface FuncionarioAlocacao extends FuncionarioEquipeResumo {
+  email?: string | null;
+  workShift: WorkShiftResumo;
+}
+
+export interface VeiculoEventoResumo {
+  id: string;
+  modelo: string;
+  placa: string;
+  tipo?: string;
+  status?: string;
+}
+
 export interface EventoCalendario {
   id: string;
   titulo: string;
@@ -31,11 +62,14 @@ export interface EventoCalendario {
   status: EventoStatus;
   tipo: string;
   orcamentoId?: string | null;
+  projetoId?: string | null;
   custoVeiculo?: number | string | null;
   createdAt: string;
   updatedAt: string;
   equipe: FuncionarioEquipeResumo[];
+  veiculos?: VeiculoEventoResumo[];
   orcamento?: OrcamentoEventoResumo | null;
+  projeto?: ProjetoEventoResumo | null;
   diasCalendario?: number;
   horasComerciais?: number;
   custoEquipe?: number;
@@ -50,8 +84,12 @@ export interface CriarEventoDTO {
   status?: EventoStatus;
   tipo?: string;
   orcamentoId?: string | null;
+  projetoId?: string | null;
   custoVeiculo?: number | null;
   equipeIds?: string[];
+  veiculoIds?: string[];
+  snapWorkshift?: boolean;
+  alocarPeriodoOs?: boolean;
 }
 
 export interface ListarEventosParams {
@@ -158,6 +196,16 @@ class EventosCalendarioService {
       `${ENDPOINTS.EVENTOS_CALENDARIO}/capacidade`,
       params
     );
+  }
+
+  async listarFuncionariosAlocacao() {
+    return axiosApiService.get<FuncionarioAlocacao[]>(
+      `${ENDPOINTS.EVENTOS_CALENDARIO}/funcionarios-alocacao`
+    );
+  }
+
+  async confirmar(id: string) {
+    return axiosApiService.patch<EventoCalendario>(`${ENDPOINTS.EVENTOS_CALENDARIO}/${id}/confirmar`, {});
   }
 }
 
