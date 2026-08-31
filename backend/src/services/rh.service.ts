@@ -20,11 +20,14 @@ import {
   ehDomingoOuFeriado,
   ehFeriadoEfetivo,
   nomeFeriadoEfetivo,
+  diaElegivelParaFalta,
 } from '../utils/datetime-sp.util';
 import { minutosMeiaNoiteBrasilia, splitMinutosJornadaSegSex } from '../utils/autonomo-folha.util';
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
 import { montarBancoHorasResumo } from './bancoHorasRh.service';
+import { sincronizarExtratoBancoHorasCompetencia } from './bancoHorasExtrato.service';
 import { sincronizarBancoAvaliacoesCompetencia } from './rhComentarioConferencia.service';
+import type { BancoHorasExtratoResumo } from '../utils/bancoHorasExtrato.util';
 import { decomporExcessoBancoHoras } from '../utils/banco-horas-excesso.util';
 import { calculateMonthlyTotal, jornadaMinutosPorDia } from '../utils/workshift.util';
 import { listarOverridesFeriadoMes } from './feriadoOverride.service';
@@ -240,6 +243,8 @@ export interface FolhaMesResumo {
     horasPositivasCadastro: number;
     horasNegativasCadastro: number;
   };
+  /** Extrato mensal ERP: saldo inicial → movimentos → saldo final */
+  bancoHorasExtrato?: BancoHorasExtratoResumo;
   lancamentos: Array<{
     id: string;
     categoria: LancamentoFolhaCategoria;
@@ -784,8 +789,8 @@ export const RhService = {
     const totalDias = diasNoMes(ano, mes);
     const conferenciaPonto: ConferenciaPontoDia[] = [];
     let minutosFaltaSemRegistro = 0;
-    // Para RH, a "meta" do mês precisa seguir a cargaHorariaMensal do colaborador (ex.: 160h em jornada 40h),
-    // independentemente da quantidade de dias úteis no calendário. Distribuímos a carga pelos dias úteis do mês.
+    const dataAdmissao = (funcionario as { dataAdmissao?: Date | null }).dataAdmissao ?? null;
+    // Meta do dia = jornada da workshift (S3E: 07:30–17:18 = 8h48). Carga 220h é só divisor salarial.
     const diasUteisNoMes = (() => {
       let uteis = 0;
       for (let dia = 1; dia <= totalDias; dia++) {
@@ -797,7 +802,6 @@ export const RhService = {
       return uteis;
     })();
     const minutosPrevistosDia = (() => {
-      // Prioridade: jornada real da workshift (evita minutos fantasma de carga/22).
       if (workShift != null) {
         return jornadaMinutosPorDia(workShift);
       }
@@ -863,7 +867,10 @@ export const RhService = {
           ? decisaoOcorrencia
           : null);
       if (!reg && !ehFds && !ehFer && !faltaJustificada) {
-        if (justParcial?.classificacao === 'ABONAR' && minutosAbonoHoras >= minutosPrevistosDia) {
+        const faltaElegivel = diaElegivelParaFalta(ano, mes, dia, { dataAdmissao });
+        if (!faltaElegivel) {
+          /* dia futuro ou anterior à admissão — não entra na dívida do mês */
+        } else if (justParcial?.classificacao === 'ABONAR' && minutosAbonoHoras >= minutosPrevistosDia) {
           /* falta do dia abonada integralmente */
         } else if (justParcial?.classificacao === 'ABONAR' && minutosAbonoHoras > 0) {
           minutosFaltaSemRegistro += Math.max(0, minutosPrevistosDia - minutosAbonoHoras);
@@ -964,7 +971,11 @@ export const RhService = {
       // Engine A/B/P/D: prioridade sobre impacto financeiro/banco quando preenchida.
       const diaRef = conferenciaPonto[conferenciaPonto.length - 1];
       const faltaIntegralMin =
-        !reg && !ehFds && !ehFer && !faltaJustificada
+        !reg &&
+        !ehFds &&
+        !ehFer &&
+        !faltaJustificada &&
+        diaElegivelParaFalta(ano, mes, dia, { dataAdmissao })
           ? Math.max(0, minutosPrevistosDia)
           : 0;
       const minutosExtraTotal = (() => {
@@ -1125,6 +1136,7 @@ export const RhService = {
         : funcionario.tipoContrato === TipoContratoFuncionario.AUTONOMO
           ? montarBancoHorasResumo(funcionario)
           : undefined,
+      bancoHorasExtrato: undefined as BancoHorasExtratoResumo | undefined,
       lancamentos,
       totaisLancamentos: {
         subtracoes: subtracoesLanc,
@@ -1135,8 +1147,31 @@ export const RhService = {
 
     const demonstrativo = calcularDemonstrativoFolha(folhaBase);
 
+    let bancoHorasExtrato: BancoHorasExtratoResumo | undefined;
+    if (
+      !params.override?.skipSyncExcesso &&
+      (usaJornadaEBanco(funcionario.tipoContrato) ||
+        funcionario.tipoContrato === TipoContratoFuncionario.AUTONOMO)
+    ) {
+      try {
+        const extrato = await sincronizarExtratoBancoHorasCompetencia({
+          funcionarioId,
+          referenciaAno: ano,
+          referenciaMes: mes,
+          origem: 'FOLHA',
+        });
+        if (extrato) bancoHorasExtrato = extrato;
+      } catch (e) {
+        console.error(
+          `[RhService] Falha ao sincronizar extrato banco ${funcionarioId} ${ano}-${mes}:`,
+          e,
+        );
+      }
+    }
+
     return {
       ...folhaBase,
+      bancoHorasExtrato,
       demonstrativo,
       horasNormais: demonstrativo.horasNormais,
       horasExtrasSegSex50: demonstrativo.horasExtrasSegSex50,
