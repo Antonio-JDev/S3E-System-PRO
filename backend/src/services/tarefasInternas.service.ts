@@ -26,6 +26,8 @@ export interface TarefaInternaKanbanItem {
   prazo: Date;
   /** Indica se existe prazo explícito nos itens. */
   prazoDefinido: boolean;
+  criadoPorId?: string | null;
+  criadoPorName?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,6 +93,7 @@ export interface CreateTarefaInternaData {
   userIds?: string[];
   /** Legado: aceito no payload, mas hoje é derivado dos itens. */
   prazo?: Date;
+  criadoPorId?: string;
 }
 
 export interface UpdateTarefaInternaData {
@@ -143,6 +146,7 @@ export class TarefasInternasService {
     const tasks = await prisma.tarefaInterna.findMany({
       include: {
         user: { select: { id: true, name: true } },
+        criadoPor: { select: { id: true, name: true } },
         itens: { select: { id: true, concluido: true, dataPrevisaoFim: true } }
       },
       orderBy: { createdAt: 'desc' }
@@ -187,6 +191,8 @@ export class TarefasInternasService {
         itensConcluidos,
         prazo: prazoCalculado,
         prazoDefinido,
+        criadoPorId: task.criadoPorId,
+        criadoPorName: task.criadoPor?.name ?? null,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt
       };
@@ -425,9 +431,13 @@ export class TarefasInternasService {
         userId: primeiro,
         userIds: toJsonUserIds(ids),
         prazo,
-        prazoDefinido
+        prazoDefinido,
+        criadoPorId: data.criadoPorId || null
       },
-      include: { user: { select: { id: true, name: true } } }
+      include: {
+        user: { select: { id: true, name: true } },
+        criadoPor: { select: { id: true, name: true } }
+      }
     });
     for (const uid of ids) {
       try {
@@ -504,6 +514,7 @@ export class TarefasInternasService {
       where: { id },
       include: {
         user: { select: { id: true, name: true, email: true } },
+        criadoPor: { select: { id: true, name: true, email: true } },
         itens: { orderBy: { createdAt: 'asc' } }
       }
     });
