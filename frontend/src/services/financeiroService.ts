@@ -213,7 +213,7 @@ class FinanceiroService {
       if (response.success) {
         return { success: true, data: response.data };
       }
-      return { success: false, error: response.error || 'Erro ao atualizar conta a receber' };
+      return { success: false, error: (response as any).message || response.error || 'Erro ao atualizar conta a receber' };
     } catch (error) {
       console.error('❌ Erro ao atualizar conta a receber:', error);
       return { success: false, error: 'Erro de conexão com o backend' };
@@ -610,6 +610,82 @@ class FinanceiroService {
       return {
         success: false,
         error: error?.response?.data?.message || error?.message || 'Erro ao liquidar fatura',
+      };
+    }
+  }
+
+  /**
+   * Sugere contas relacionadas para unificação (mesma NF, fornecedor, vencimento próximo)
+   */
+  async sugerirUnificacaoContasPagar(
+    contaIds: string[],
+    janelaDiasVencimento: number = 15
+  ): Promise<{
+    success: boolean;
+    data?: Array<{
+      contaId: string;
+      motivos: Array<'MESMA_NOTA' | 'MESMO_FORNECEDOR' | 'VENCIMENTO_PROXIMO'>;
+      score: number;
+      detalhe: string;
+      conta: {
+        id: string;
+        descricao?: string;
+        valorParcela: number;
+        dataVencimento: string;
+        status: string;
+        fornecedorNome?: string | null;
+        numeroNF?: string | null;
+        compraId?: string | null;
+      };
+    }>;
+    error?: string;
+  }> {
+    try {
+      const response = await axiosApiService.post<any>('/api/contas-pagar/sugerir-unificacao', {
+        contaIds,
+        janelaDiasVencimento,
+      });
+      if (response.success) {
+        return { success: true, data: response.data || [] };
+      }
+      return { success: false, error: response.error || 'Erro ao buscar sugestões' };
+    } catch (error) {
+      console.error('❌ Erro ao sugerir unificação:', error);
+      return { success: false, error: 'Erro de conexão com o backend' };
+    }
+  }
+
+  /**
+   * Unifica contas a pagar em uma conta ou parcelamento
+   */
+  async unificarContasPagar(data: {
+    contaIds: string[];
+    parcelas?: number;
+    dataPrimeiroVencimento?: string;
+    intervaloDias?: number;
+    descricao?: string;
+    observacoes?: string;
+    meioPagamento?: string;
+    cartaoCreditoId?: string;
+  }): Promise<{ success: boolean; data?: any; error?: string; message?: string }> {
+    try {
+      const response = await axiosApiService.post<any>('/api/contas-pagar/unificar', data);
+      if (response.success) {
+        return {
+          success: true,
+          data: response.data,
+          message: (response as any).message,
+        };
+      }
+      return {
+        success: false,
+        error: response.error || (response as any).message || 'Erro ao unificar contas',
+      };
+    } catch (error: any) {
+      console.error('❌ Erro ao unificar contas:', error);
+      return {
+        success: false,
+        error: error?.response?.data?.message || error?.message || 'Erro de conexão com o backend',
       };
     }
   }
