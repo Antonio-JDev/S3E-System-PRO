@@ -14,7 +14,6 @@ import {
   SidebarHeader,
   SidebarContent,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -29,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { cn } from '../lib/utils';
-import { Bell, Settings, LogOut, ChevronsUpDown, Sun, Moon } from 'lucide-react';
+import { Bell, Settings, LogOut, ChevronsUpDown, Sun, Moon, ChevronDown } from 'lucide-react';
 import { ThemeContext } from '../contexts/ThemeContext';
 import { NotificationBell } from './NotificationBell';
 import { APP_SIDEBAR_TAGLINE, DEFAULT_SIDEBAR_APP_NAME } from '../config/branding';
@@ -73,60 +72,127 @@ const NavSection: React.FC<{
   onNavigate: (view: string) => void;
   onPrefetch: (view: string) => void;
   collapsed: boolean;
+  open: boolean;
+  onToggle: () => void;
   isDevSection?: boolean;
-}> = ({ title, links, activeView, onNavigate, onPrefetch, collapsed, isDevSection }) => {
+}> = ({ title, links, activeView, onNavigate, onPrefetch, collapsed, open, onToggle }) => {
   if (links.length === 0) return null;
   const totalUnread = useWhatsappUnreadStore((s) => s.totalUnread);
-  return (
-    <SidebarGroup className={cn(collapsed ? 'px-1.5' : 'px-3', 'py-2')}>
-      {!collapsed && <SidebarGroupLabel>{title}</SidebarGroupLabel>}
-      <SidebarMenu>
-        {links.map((link) => {
-          const isDevPage = link.name === 'Logs';
-          const isWhatsappChat = link.name === 'Chat WhatsApp';
-          const isActive = activeView === link.name;
-          const activeClass =
-            isDevPage && isActive
-              ? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700'
-              : isActive
-                ? 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700'
-                : '';
-          return (
-            <SidebarMenuItem key={link.name}>
-              <SidebarMenuButton
-                isActive={!!activeClass}
-                onClick={() => onNavigate(link.name)}
-                onMouseEnter={() => onPrefetch(link.name)}
-                title={collapsed ? link.name : undefined}
-                className={cn(activeClass, isActive && '[&_svg]:text-current')}
-              >
-                <span className="relative inline-flex">
-                  <link.icon className="h-5 w-5 shrink-0" />
-                  {isWhatsappChat && totalUnread > 0 && (
-                    <span
-                      className={cn(
-                        'absolute -right-2 -top-2 min-w-[18px] h-[18px] px-1',
-                        'rounded-full bg-red-600 text-white text-[11px] font-bold',
-                        'flex items-center justify-center leading-none',
-                        collapsed ? 'translate-x-0' : ''
-                      )}
-                      aria-label={`Mensagens não lidas: ${totalUnread}`}
-                    >
-                      {totalUnread > 99 ? '99+' : totalUnread}
-                    </span>
-                  )}
-                </span>
-                {!collapsed && (
-                  <span className="flex items-center gap-2 truncate">
-                    {link.name}
-                    {isDevPage && <span className="rounded bg-red-600/80 px-1.5 py-0.5 text-[10px] font-bold">DEV</span>}
+  const hasActive = links.some((l) => l.name === activeView);
+
+  if (collapsed) {
+    return (
+      <SidebarGroup className="px-1.5 py-1">
+        <SidebarMenu>
+          {links.map((link) => {
+            const isDevPage = link.name === 'Logs';
+            const isWhatsappChat = link.name === 'Chat WhatsApp';
+            const isActive = activeView === link.name;
+            const activeClass =
+              isDevPage && isActive
+                ? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700'
+                : isActive
+                  ? 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700'
+                  : '';
+            return (
+              <SidebarMenuItem key={link.name}>
+                <SidebarMenuButton
+                  isActive={!!activeClass}
+                  onClick={() => onNavigate(link.name)}
+                  onMouseEnter={() => onPrefetch(link.name)}
+                  title={link.name}
+                  className={cn(activeClass, isActive && '[&_svg]:text-current')}
+                >
+                  <span className="relative inline-flex">
+                    <link.icon className="h-5 w-5 shrink-0" />
+                    {isWhatsappChat && totalUnread > 0 && (
+                      <span
+                        className="absolute -right-2 -top-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[11px] font-bold flex items-center justify-center leading-none"
+                        aria-label={`Mensagens não lidas: ${totalUnread}`}
+                      >
+                        {totalUnread > 99 ? '99+' : totalUnread}
+                      </span>
+                    )}
                   </span>
-                )}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          );
-        })}
-      </SidebarMenu>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </SidebarGroup>
+    );
+  }
+
+  return (
+    <SidebarGroup className="px-3 py-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          'mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors',
+          'hover:bg-gray-100 dark:hover:bg-gray-800/60',
+          hasActive && 'text-gray-900 dark:text-white'
+        )}
+        aria-expanded={open}
+      >
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-text-secondary">
+          {title}
+        </span>
+        <ChevronDown
+          className={cn(
+            'h-3.5 w-3.5 text-gray-400 transition-transform duration-200',
+            open && 'rotate-180'
+          )}
+        />
+      </button>
+      <div
+        className={cn(
+          'grid transition-[grid-template-rows] duration-200 ease-out',
+          open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        )}
+      >
+        <div className="overflow-hidden">
+          <SidebarMenu>
+            {links.map((link) => {
+              const isDevPage = link.name === 'Logs';
+              const isWhatsappChat = link.name === 'Chat WhatsApp';
+              const isActive = activeView === link.name;
+              const activeClass =
+                isDevPage && isActive
+                  ? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:text-white dark:hover:bg-red-700'
+                  : isActive
+                    ? 'bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-700'
+                    : '';
+              return (
+                <SidebarMenuItem key={link.name}>
+                  <SidebarMenuButton
+                    isActive={!!activeClass}
+                    onClick={() => onNavigate(link.name)}
+                    onMouseEnter={() => onPrefetch(link.name)}
+                    className={cn(activeClass, isActive && '[&_svg]:text-current')}
+                  >
+                    <span className="relative inline-flex">
+                      <link.icon className="h-5 w-5 shrink-0" />
+                      {isWhatsappChat && totalUnread > 0 && (
+                        <span
+                          className="absolute -right-2 -top-2 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[11px] font-bold flex items-center justify-center leading-none"
+                          aria-label={`Mensagens não lidas: ${totalUnread}`}
+                        >
+                          {totalUnread > 99 ? '99+' : totalUnread}
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex items-center gap-2 truncate">
+                      {link.name}
+                      {isDevPage && <span className="rounded bg-red-600/80 px-1.5 py-0.5 text-[10px] font-bold">DEV</span>}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </div>
+      </div>
     </SidebarGroup>
   );
 };
@@ -243,12 +309,58 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
   const geral = useMemo(() => filteredNavLinks.filter((l) => l.name === 'Dashboard'), [filteredNavLinks]);
   const comercial = useMemo(() => filteredNavLinks.filter((l) => ['Funil de Atendimento', 'Chat WhatsApp', 'Contatos S3E', 'Clientes', 'Orçamentos', 'Vendas', 'Serviços'].includes(l.name)), [filteredNavLinks]);
   const suprimentos = useMemo(() => filteredNavLinks.filter((l) => ['Fornecedores', 'Estoque', 'Movimentações', 'Catálogo'].includes(l.name)), [filteredNavLinks]);
-  const operacional = useMemo(() => filteredNavLinks.filter((l) => ['Tarefas Internas', 'Ordem De Serviços', 'Calendário', 'Execução Obra', 'Tarefas da Obra', 'Ferramentas'].includes(l.name)), [filteredNavLinks]);
+  const operacional = useMemo(() => filteredNavLinks.filter((l) => ['Tarefas Internas', 'Ordem De Serviços', 'Calendário', 'Gestão de Frota', 'Ferramentas'].includes(l.name)), [filteredNavLinks]);
   const financeiro = useMemo(() => filteredNavLinks.filter((l) => ['Financeiro', 'Compras', 'Emissão NF-e', 'Logs'].includes(l.name)), [filteredNavLinks]);
   const gestaoEmpresarial = useMemo(
     () => filteredNavLinks.filter((l) => ['Gestão empresarial', 'Documentação API'].includes(l.name)),
     [filteredNavLinks]
   );
+
+  const sections = useMemo(
+    () =>
+      [
+        { id: 'geral', title: 'Geral', links: geral },
+        { id: 'comercial', title: 'Comercial', links: comercial },
+        { id: 'suprimentos', title: 'Suprimentos', links: suprimentos },
+        { id: 'operacional', title: 'Operacional', links: operacional },
+        { id: 'financeiro', title: 'Financeiro', links: financeiro, isDevSection: true },
+        { id: 'gestao', title: 'Gestão empresarial', links: gestaoEmpresarial },
+      ] as const,
+    [geral, comercial, suprimentos, operacional, financeiro, gestaoEmpresarial]
+  );
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('sidebarAccordionOpen');
+      if (raw) return JSON.parse(raw) as Record<string, boolean>;
+    } catch {
+      /* ignore */
+    }
+    return {
+      geral: true,
+      comercial: true,
+      suprimentos: false,
+      operacional: true,
+      financeiro: false,
+      gestao: false,
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sidebarAccordionOpen', JSON.stringify(openSections));
+  }, [openSections]);
+
+  useEffect(() => {
+    const activeSection = sections.find((s) => s.links.some((l) => l.name === activeView));
+    if (activeSection && !openSections[activeSection.id]) {
+      setOpenSections((prev) => ({ ...prev, [activeSection.id]: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage à view ativa
+  }, [activeView]);
+
+  const toggleSection = useCallback((id: string) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
 
   return (
     <Sidebar open={isOpen} collapsible="icon">
@@ -291,12 +403,20 @@ const SidebarInner: React.FC<SidebarProps> = ({ isOpen, toggleSidebar, activeVie
       </SidebarHeader>
 
       <SidebarContent>
-        <NavSection title="Geral" links={geral} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} />
-        <NavSection title="Comercial" links={comercial} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} />
-        <NavSection title="Suprimentos" links={suprimentos} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} />
-        <NavSection title="Operacional" links={operacional} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} />
-        <NavSection title="Financeiro" links={financeiro} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} isDevSection />
-        <NavSection title="Gestão empresarial" links={gestaoEmpresarial} activeView={activeView} onNavigate={onNavigate} onPrefetch={handlePrefetch} collapsed={collapsed} />
+        {sections.map((section) => (
+          <NavSection
+            key={section.id}
+            title={section.title}
+            links={section.links}
+            activeView={activeView}
+            onNavigate={onNavigate}
+            onPrefetch={handlePrefetch}
+            collapsed={collapsed}
+            open={!!openSections[section.id]}
+            onToggle={() => toggleSection(section.id)}
+            isDevSection={'isDevSection' in section ? section.isDevSection : false}
+          />
+        ))}
       </SidebarContent>
 
       <SidebarFooter className={cn(collapsed && 'px-2 py-2')}>
