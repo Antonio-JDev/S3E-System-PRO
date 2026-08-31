@@ -7,6 +7,8 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     projeto: { findMany: jest.fn() },
     apontamentoOsItem: { findMany: jest.fn() },
+    eventoCalendario: { findMany: jest.fn() },
+    registroPonto: { findMany: jest.fn() },
   },
 }));
 
@@ -16,6 +18,8 @@ import { gerarRelatorioCumprimentoEstimativa } from './relatorioCumprimentoEstim
 describe('gerarRelatorioCumprimentoEstimativa', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.eventoCalendario.findMany as jest.Mock).mockResolvedValue([]);
+    (prisma.registroPonto.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   it('retorna lista vazia quando não há projetos', async () => {
