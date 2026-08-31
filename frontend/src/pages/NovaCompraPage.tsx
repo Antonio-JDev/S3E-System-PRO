@@ -15,6 +15,12 @@ import EditarFracionamentoModal from '../components/EditarFracionamentoModal';
 import ConverterUnidadeModal from '../components/ConverterUnidadeModal';
 import MaterialDetailsModal from '../components/modals/MaterialDetailsModal';
 import { itemParaDraft, aplicarDraftNoItem, atualizarCampoNumericoItem } from '../utils/compraItemList.util';
+import {
+    classificacaoVaiParaEstoque,
+    itemPrecisaVinculoEstoque,
+    rotuloVinculoItem,
+    classesTomVinculo,
+} from '../utils/compraMaterialMatch';
 
 // ==================== ICONS ====================
 const ArrowLeftIcon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -58,9 +64,13 @@ type ExtendedItem = PurchaseOrderItem & {
     ncm?: string; 
     sku?: string; 
     unidadeMedida?: string;
-    materialId?: string; // ID do material do estoque vinculado
-    materialVinculado?: any; // Dados completos do material vinculado (para exibição)
-    matchAutomatico?: boolean; // Indica se foi feito match automático pelo sistema
+    materialId?: string;
+    materialVinculado?: any;
+    matchAutomatico?: boolean;
+    matchTipo?: string | null;
+    codigoFornecedor?: string;
+    ean?: string;
+    criarNovoMaterial?: boolean;
     // Campos de fracionamento
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
@@ -372,7 +382,9 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     ...item,
                     materialId: material.id,
                     materialVinculado: material,
-                    matchAutomatico: false
+                    matchAutomatico: false,
+                    matchTipo: 'MANUAL',
+                    criarNovoMaterial: false,
                 };
             }
             return item;
@@ -388,11 +400,34 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     ...item,
                     materialId: undefined,
                     materialVinculado: undefined,
-                    matchAutomatico: false
+                    matchAutomatico: false,
+                    matchTipo: null,
+                    criarNovoMaterial: false,
                 };
             }
             return item;
         }));
+    };
+
+    const marcarItemComoNovo = (itemIndex: number) => {
+        setPurchaseItems(prev => prev.map((item, idx) => {
+            if (idx === itemIndex) {
+                return {
+                    ...item,
+                    materialId: undefined,
+                    materialVinculado: undefined,
+                    matchAutomatico: false,
+                    matchTipo: null,
+                    criarNovoMaterial: true,
+                };
+            }
+            return item;
+        }));
+        setBuscaMaterialPorItem(prev => {
+            const novo = { ...prev };
+            delete novo[itemIndex];
+            return novo;
+        });
     };
 
     // Função para detectar fracionamento automaticamente pela descrição
@@ -663,16 +698,22 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     ncm: item.ncm || '',
                     sku: item.sku || '',
                     unidadeMedida: item.unidadeMedida || item.unidade || 'un',
-                    materialId: item.materialId, // ✅ Preservar materialId se vier do backend (match automático)
-                    materialVinculado: item.materialVinculado, // ✅ Dados completos do material vinculado
-                    matchAutomatico: !!item.matchAutomatico // ✅ Flag indicando match automático
+                    materialId: item.materialId,
+                    materialVinculado: item.materialVinculado,
+                    matchAutomatico: !!item.matchAutomatico,
+                    matchTipo: item.matchTipo || null,
+                    codigoFornecedor: item.codigoFornecedor || item.sku || '',
+                    ean: item.ean || '',
+                    criarNovoMaterial: false,
                 }));
                 setPurchaseItems(xmlItems);
                 console.log(`✅ ${xmlItems.length} itens adicionados ao formulário`);
-                // Log dos matches automáticos
                 const matchesAutomaticos = xmlItems.filter(it => it.matchAutomatico).length;
-                if (matchesAutomaticos > 0) {
-                    console.log(`🔍 ${matchesAutomaticos} item(ns) com match automático encontrado(s)`);
+                const pendentes = xmlItems.filter(it => !it.materialId).length;
+                if (matchesAutomaticos > 0 || pendentes > 0) {
+                    toast.info(
+                        `${matchesAutomaticos} item(ns) vinculados automaticamente. ${pendentes} precisam de vínculo com o estoque.`
+                    );
                 }
             }
 
@@ -732,6 +773,17 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
             return;
         }
 
+        if (classificacaoVaiParaEstoque(classificacao)) {
+            const pendentes = purchaseItems.filter((it) => itemPrecisaVinculoEstoque(it));
+            if (pendentes.length > 0) {
+                toast.error('Há itens sem vínculo com o estoque', {
+                    description: `${pendentes.length} item(ns) precisam ser vinculados a um material cadastrado ou marcados como item novo. O vínculo fica salvo para as próximas compras deste fornecedor.`,
+                    duration: 7000,
+                });
+                return;
+            }
+        }
+
         try {
             const payload: any = {
                 fornecedorNome: supplierName,
@@ -752,7 +804,10 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: it.unidadeMedida || 'un',
-                    materialId: (it as ExtendedItem).materialId, // ✅ Incluir materialId quando houver vinculação
+                    materialId: (it as ExtendedItem).materialId,
+                    codigoFornecedor: (it as ExtendedItem).codigoFornecedor,
+                    ean: (it as ExtendedItem).ean,
+                    criarNovoMaterial: (it as ExtendedItem).criarNovoMaterial,
                     // Campos de fracionamento
                     quantidadeFracionada: it.quantidadeFracionada,
                     tipoEmbalagem: it.tipoEmbalagem,
@@ -1629,6 +1684,12 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                     </div>
 
                     {/* Lista de Itens */}
+                    {purchaseItems.length > 0 && classificacaoVaiParaEstoque(classificacao) && purchaseItems.some((it) => itemPrecisaVinculoEstoque(it)) && (
+                        <div className="mb-3 px-4 py-3 rounded-xl bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 text-sm text-orange-800 dark:text-orange-200">
+                            {purchaseItems.filter((it) => itemPrecisaVinculoEstoque(it)).length} item(ns) precisam ser vinculados ao estoque.
+                            O vínculo fica salvo: na próxima compra deste fornecedor o sistema casa sozinho, mesmo com nome diferente.
+                        </div>
+                    )}
                     {purchaseItems.length === 0 ? (
                         <div className="text-center py-8 bg-gray-50 dark:bg-dark-bg rounded-xl border-2 border-dashed border-gray-300 dark:border-dark-border">
                             <div className="w-16 h-16 bg-gray-100 dark:bg-dark-hover rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1720,21 +1781,22 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                     
                                                     {/* Indicadores de vinculação */}
                                                     <div className="flex flex-col items-end gap-2">
-                                                        {item.materialId && item.materialVinculado && !item.matchAutomatico ? (
-                                                            // Vinculação manual pelo usuário
-                                                            <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-semibold">
-                                                                ✅ Vinculado: {item.materialVinculado.nome}
-                                                            </span>
-                                                        ) : item.matchAutomatico && item.materialVinculado ? (
-                                                            // Match automático encontrado pelo sistema
-                                                            <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded text-xs font-semibold">
-                                                                ⚠️ Match automático: {item.materialVinculado.nome}
-                                                            </span>
-                                                        ) : (
-                                                            // Nenhum match - será criado novo material
-                                                            <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                🆕 Será criado novo material
-                                                            </span>
+                                                        {(() => {
+                                                            const vinculo = rotuloVinculoItem(item);
+                                                            return (
+                                                                <span className={`px-2 py-1 rounded text-xs font-semibold ${classesTomVinculo(vinculo.tom)}`}>
+                                                                    {vinculo.texto}
+                                                                </span>
+                                                            );
+                                                        })()}
+                                                        {itemPrecisaVinculoEstoque(item) && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => marcarItemComoNovo(index)}
+                                                                className="text-xs text-blue-700 hover:text-blue-900 underline"
+                                                            >
+                                                                Criar como item novo
+                                                            </button>
                                                         )}
                                                         
                                                         {/* Botões de ação */}
@@ -1881,6 +1943,15 @@ const NovaCompraPage: React.FC<NovaCompraPageProps> = ({ toggleSidebar }) => {
                                                                 className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
                                                             >
                                                                 Remover vinculação
+                                                            </button>
+                                                        )}
+                                                        {!item.materialId && !item.criarNovoMaterial && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => marcarItemComoNovo(index)}
+                                                                className="mt-2 ml-3 text-xs text-blue-700 hover:text-blue-900 underline"
+                                                            >
+                                                                Este item ainda não existe no estoque (criar novo)
                                                             </button>
                                                         )}
                                                     </div>
