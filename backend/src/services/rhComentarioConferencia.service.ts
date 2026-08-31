@@ -15,6 +15,7 @@ import {
   type TratamentoDebitoRh,
 } from '../utils/avaliacaoPontoRh.util';
 import { jornadaMinutosPorDia } from '../utils/workshift.util';
+import { minutosFaltaParaBanco } from '../utils/rhBancoFalta.util';
 import { aplicarDeltasAvaliacaoBancoHoras } from './bancoHorasRh.service';
 import { listarOverridesFeriadoMes } from './feriadoOverride.service';
 
@@ -250,7 +251,8 @@ async function funcionarioTemSaldoBanco(funcionarioId: string): Promise<boolean>
 /**
  * Reaplica o impacto no banco quando as métricas do dia mudam (edit/import/recalc),
  * usando minutos já aplicados no comentário como fonte da verdade (evita duplicar).
- * Padrão B: grava tratamento B quando ainda null e há movimento.
+ * Padrão B vale para batidas (atraso/HE) mesmo com Situação pendente.
+ * Falta sem registro só entra no banco com A/B/D explícito, dia já ocorrido e após admissão.
  * Legado (saldo no cadastro + tracking zerado): assume crédito já no banco; aplica só débito faltante.
  * Em sync de competência, passe `legacyBootstrap` calculado uma vez antes do loop.
  */
@@ -263,6 +265,7 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
   metricasDepois: MetricasAvaliacaoDia;
   /** Se definido, não recalcula a cada dia (evita virar “normal” no meio do mês). */
   legacyBootstrap?: boolean;
+  dataAdmissao?: Date | null;
 }): Promise<void> {
   const dataReferencia = dataReferenciaDiaCivilUtc(
     params.referenciaAno,
@@ -270,11 +273,21 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
     params.dia,
   );
   const existente = await comentarioAvaliacaoDoDia(params.funcionarioId, dataReferencia);
-  let tratamentoDebito = parseTratamentoDebito(existente?.tratamentoDebito ?? null);
-  let tratamentoCredito = parseTratamentoCredito(existente?.tratamentoCredito ?? null);
+  const tratamentoDebito = parseTratamentoDebito(existente?.tratamentoDebito ?? null);
+  const tratamentoCredito = parseTratamentoCredito(existente?.tratamentoCredito ?? null);
+
+  const minutosFaltaIntegral = minutosFaltaParaBanco({
+    minutosFaltaIntegral: params.metricasDepois.minutosFaltaIntegral,
+    tratamentoDebito,
+    ano: params.referenciaAno,
+    mes: params.referenciaMes,
+    dia: params.dia,
+    dataAdmissao: params.dataAdmissao,
+  });
 
   const newAval = aplicarAvaliacaoRhDia({
     ...params.metricasDepois,
+    minutosFaltaIntegral,
     tratamentoDebito,
     tratamentoCredito,
   });
@@ -346,17 +359,25 @@ export async function reaplicarBancoAvaliacaoAposMudancaMetricas(params: {
 }
 
 /**
- * Sincroniza banco A/B/P/D de todos os dias da competência (inclui faltas sem registro).
+ * Sincroniza banco A/B/P/D de todos os dias da competência.
  * Idempotente via minutosBanco*Aplicados.
+ * Falta sem batida e sem clique RH é estornada se tinha sido lançada no dump antigo.
  */
 export async function sincronizarBancoAvaliacoesCompetencia(
   funcionarioId: string,
   ano: number,
   mes: number,
 ): Promise<void> {
-  const legacyBootstrap =
-    (await funcionarioSemTrackingBancoAplicado(funcionarioId)) &&
-    (await funcionarioTemSaldoBanco(funcionarioId));
+  const [legacyBootstrap, funcionario] = await Promise.all([
+    (async () =>
+      (await funcionarioSemTrackingBancoAplicado(funcionarioId)) &&
+      (await funcionarioTemSaldoBanco(funcionarioId)))(),
+    prisma.funcionario.findUnique({
+      where: { id: funcionarioId },
+      select: { dataAdmissao: true },
+    }),
+  ]);
+  const dataAdmissao = funcionario?.dataAdmissao ?? null;
   const totalDias = diasNoMes(ano, mes);
   for (let dia = 1; dia <= totalDias; dia++) {
     const metricas = await metricasDiaParaAvaliacao({
@@ -373,6 +394,7 @@ export async function sincronizarBancoAvaliacoesCompetencia(
       metricasAntes: metricas,
       metricasDepois: metricas,
       legacyBootstrap,
+      dataAdmissao,
     });
   }
 }
@@ -438,15 +460,31 @@ export async function salvarAvaliacaoRhDia(params: {
   const newDebito = debitoParsed !== undefined ? debitoParsed : oldDebito;
   const newCredito = creditoParsed !== undefined ? creditoParsed : oldCredito;
 
-  const metricas = await metricasDiaParaAvaliacao({
-    funcionarioId: params.funcionarioId,
-    referenciaAno: params.referenciaAno,
-    referenciaMes: params.referenciaMes,
+  const [metricas, funcionario] = await Promise.all([
+    metricasDiaParaAvaliacao({
+      funcionarioId: params.funcionarioId,
+      referenciaAno: params.referenciaAno,
+      referenciaMes: params.referenciaMes,
+      dia: params.dia,
+    }),
+    prisma.funcionario.findUnique({
+      where: { id: params.funcionarioId },
+      select: { dataAdmissao: true },
+    }),
+  ]);
+
+  const minutosFaltaIntegral = minutosFaltaParaBanco({
+    minutosFaltaIntegral: metricas.minutosFaltaIntegral,
+    tratamentoDebito: newDebito,
+    ano: params.referenciaAno,
+    mes: params.referenciaMes,
     dia: params.dia,
+    dataAdmissao: funcionario?.dataAdmissao ?? null,
   });
 
   const newAval = aplicarAvaliacaoRhDia({
     ...metricas,
+    minutosFaltaIntegral,
     tratamentoDebito: newDebito,
     tratamentoCredito: newCredito,
   });
