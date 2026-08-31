@@ -4,6 +4,8 @@ import { toast } from 'sonner';
 import DREPrintable from './DREPrintable';
 import { axiosApiService } from '../services/axiosApi';
 import { useAuth } from '../hooks/useAuth';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -316,11 +318,11 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                         </p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     {setAbaAtiva && (
                         <button
                             onClick={() => setAbaAtiva('dashboard')}
-                            className="px-4 py-2.5 bg-white dark:bg-dark-card text-gray-700 dark:text-dark-text border-2 border-gray-200 dark:border-dark-border rounded-xl hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-dark-hover transition-all font-semibold flex items-center gap-2"
+                            className={`${scrollableNavItemClasses} px-4 py-2.5 bg-white dark:bg-dark-card text-gray-700 dark:text-dark-text border-2 border-gray-200 dark:border-dark-border rounded-xl hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-emerald-50 dark:hover:bg-dark-hover transition-all font-semibold flex items-center gap-2`}
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -331,22 +333,22 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     <button
                         onClick={exportarPDF}
                         disabled={loading || (!lucroReal && !dre)}
-                        className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`${scrollableNavItemClasses} px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-md font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Exportar PDF
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Tabs de Análise */}
             <div className="bg-white dark:bg-dark-card rounded-2xl p-6 shadow-soft mb-6 animate-fade-in border border-transparent dark:border-dark-border">
-                <div className="flex flex-wrap gap-3 mb-6">
+                <ScrollableRow className="mb-6 gap-3">
                     <button
                         onClick={() => setAbaAnalise('lucro-real')}
-                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'lucro-real'
                                 ? 'bg-gradient-to-r from-green-600 to-emerald-500 text-white shadow-md'
                                 : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
@@ -356,7 +358,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     </button>
                     <button
                         onClick={() => setAbaAnalise('lucro-real-servicos')}
-                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'lucro-real-servicos'
                                 ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-md'
                                 : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
@@ -366,7 +368,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     </button>
                     <button
                         onClick={() => setAbaAnalise('dre-consolidado')}
-                        className={`px-6 py-3 rounded-xl font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} px-6 py-3 rounded-xl font-semibold transition-all ${
                             abaAnalise === 'dre-consolidado'
                                 ? 'bg-gradient-to-r from-blue-600 to-indigo-500 text-white shadow-md'
                                 : 'bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-dark-text-secondary hover:bg-gray-200 dark:hover:bg-dark-elevated'
@@ -374,7 +376,7 @@ const DRE: React.FC<DREComponentProps> = ({ toggleSidebar, setAbaAtiva }) => {
                     >
                         📈 DRE Consolidado (Visão Macro)
                     </button>
-                </div>
+                </ScrollableRow>
 
                 {/* Filtros de Período */}
                 <div>
