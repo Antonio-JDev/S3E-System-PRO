@@ -9,11 +9,24 @@ const router = Router();
 
 router.use(authenticate);
 
+router.get('/folha/:mes/exportar-contabilidade', RhController.exportarFolhaContabilidade);
+router.get(
+  '/exportacao-contabilidade/config',
+  authorize('admin', 'desenvolvedor', 'financeiro'),
+  RhController.obterConfigExportacaoContabilidade,
+);
+router.put(
+  '/exportacao-contabilidade/config',
+  authorize('admin', 'desenvolvedor', 'financeiro'),
+  RhController.salvarConfigExportacaoContabilidade,
+);
+
 router.get('/folha/:funcionarioId/:mes', RhController.folhaMes);
 router.get('/folha/:funcionarioId/:mes/pdf', RhController.folhaPdf);
 router.post('/folha/:funcionarioId/:mes/recalcular-ponto', RhController.recalcularPontoMes);
 router.get('/folha/:funcionarioId/:mes/comparar-contratos', RhController.compararContratos);
 router.post('/sincronizar-parcela', RhController.sincronizarParcela);
+router.get('/registro-ponto', RhController.buscarRegistroPontoDia);
 router.post('/registro-ponto/manual', RhController.criarRegistroPontoManual);
 router.put('/registro-ponto/:id', RhController.atualizarRegistroPonto);
 router.put('/registro-ponto/:id/intervalo-almoco', RhController.atualizarIntervaloAlmoco);
