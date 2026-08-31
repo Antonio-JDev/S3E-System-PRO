@@ -17,6 +17,8 @@ import {
   buscarProjetos,
   getKitDisponibilidadeBomItem,
   getProjetosCockpitResumo,
+  getAlocacaoPontoOs,
+  getHorasCustoContabilCsv,
 } from '../controllers/projetosController';
 import {
   getTasksByProjeto,
@@ -31,11 +33,6 @@ import {
   visualizarDocumento,
   uploadDocumento
 } from '../controllers/projetoDocumentosController';
-import {
-  getQualidade,
-  putQualidade,
-  aprovarInspecao,
-} from '../controllers/qualidadeController';
 import {
   listarVistoriasCelesc,
   protocolarVistoria,
@@ -59,6 +56,7 @@ import {
 import {
   criarApontamentoOs,
   listarApontamentosOs,
+  atualizarApontamentoOs,
   obterResumoApropriacaoOs,
 } from '../controllers/apropriacaoOsController';
 import { getRelatorioCumprimentoEstimativa } from '../controllers/relatorioCumprimentoEstimativaController';
@@ -95,6 +93,7 @@ router.get('/relatorios/kanban-usuarios', getRelatorioKanbanUsuarios);
 router.get('/relatorios/kanban-usuarios/:userId/atrasadas', getRelatorioKanbanUsuarioAtrasadas);
 // Relatório global de cumprimento de estimativa de prazo (Admin/Dev)
 router.get('/relatorios/cumprimento-estimativa', getRelatorioCumprimentoEstimativa);
+router.get('/relatorios/horas-custo-contabil.csv', getHorasCustoContabilCsv);
 router.get('/busca', buscarProjetos);
 
 /**
@@ -131,6 +130,7 @@ router.patch('/:id/engenharia/atribuir', atribuirEngenharia);
  * @route GET /api/projetos/:projetoId/apropriacao/resumo
  * @desc Resumo orçado vs realizado e resultado financeiro da OS
  */
+router.get('/:id/alocacao-ponto', getAlocacaoPontoOs);
 router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
 
 /**
@@ -139,6 +139,7 @@ router.get('/:projetoId/apropriacao/resumo', obterResumoApropriacaoOs);
  */
 router.get('/:projetoId/apontamentos', listarApontamentosOs);
 router.post('/:projetoId/apontamentos', criarApontamentoOs);
+router.patch('/:projetoId/apontamentos/:apontamentoId', atualizarApontamentoOs);
 
 /**
  * @route GET /api/projetos/:id
@@ -257,27 +258,6 @@ router.get('/:projetoId/documentos/:documentoId/visualizar', visualizarDocumento
  * @access Private
  */
 router.delete('/:projetoId/documentos/:documentoId', deletarDocumento);
-
-/**
- * @route GET /api/projetos/:projetoId/qualidade
- * @desc Dados da aba Qualidade (visita técnica, checklist, inspeções, fotos)
- * @access Private
- */
-router.get('/:projetoId/qualidade', getQualidade);
-
-/**
- * @route PUT /api/projetos/:projetoId/qualidade
- * @desc Salvar visita técnica, checklist e observações
- * @access Private
- */
-router.put('/:projetoId/qualidade', putQualidade);
-
-/**
- * @route POST /api/projetos/:projetoId/qualidade/inspecoes/:tipo/aprovar
- * @desc Aprovar uma inspeção (Inspeção Inicial, Aprovação Cliente, etc.)
- * @access Private
- */
-router.post('/:projetoId/qualidade/inspecoes/:tipo/aprovar', aprovarInspecao);
 
 /**
  * @route POST /api/projetos/:projetoId/pdf-itens-faltantes
