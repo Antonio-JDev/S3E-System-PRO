@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { calcularMaoDeObraCalendarioOs } from './horasCustoContabil.service';
 import {
   calcularResultadoOs,
   calcularTotaisApropriacao,
@@ -86,45 +87,56 @@ export async function gerarRelatorioCumprimentoEstimativa(filtros?: {
     itensPorProjeto.set(pid, list);
   }
 
-  return projetos.map((projeto) => {
-    const itens = (itensPorProjeto.get(projeto.id) ?? []).map((r) => ({
-      tipoRecurso: r.tipoRecurso,
-      quantidade: r.quantidade,
-    }));
-    const totais = calcularTotaisApropriacao(itens);
-    const resumo = calcularResultadoOs(
-      {
-        horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas,
-        diariasEquipeOrcadas: projeto.diariasEquipeOrcadas,
+  return Promise.all(
+    projetos.map(async (projeto) => {
+      const itens = (itensPorProjeto.get(projeto.id) ?? []).map((r) => ({
+        tipoRecurso: r.tipoRecurso,
+        quantidade: r.quantidade,
+      }));
+      const totais = calcularTotaisApropriacao(itens);
+      const calendario = await calcularMaoDeObraCalendarioOs(projeto.id, {
+        apenasStatus: 'VALIDO',
+      });
+      const resumo = calcularResultadoOs(
+        {
+          horasEngenhariaOrcadas: projeto.horasEngenhariaOrcadas,
+          diariasEquipeOrcadas: projeto.diariasEquipeOrcadas,
+          valorHoraEngenharia: projeto.valorHoraEngenharia,
+          valorDiariaEquipe: projeto.valorDiariaEquipe,
+          valorTotal: projeto.valorTotal,
+          precoVendaOrcamento: projeto.orcamento?.precoVenda,
+        },
+        totais,
+        {
+          custoCalendario: calendario.custoTotal,
+          horasEngenharia: calendario.horasEngenharia,
+          diariasEquipe: calendario.diariasEquipe,
+          linhas: calendario.linhas,
+        },
+      );
+
+      const lucroPerdaPrazo = calcularLucroPerdaPrazoFromResumo(resumo, {
         valorHoraEngenharia: projeto.valorHoraEngenharia,
         valorDiariaEquipe: projeto.valorDiariaEquipe,
-        valorTotal: projeto.valorTotal,
-        precoVendaOrcamento: projeto.orcamento?.precoVenda,
-      },
-      totais
-    );
+      });
 
-    const lucroPerdaPrazo = calcularLucroPerdaPrazoFromResumo(resumo, {
-      valorHoraEngenharia: projeto.valorHoraEngenharia,
-      valorDiariaEquipe: projeto.valorDiariaEquipe,
-    });
-
-    return {
-      projetoId: projeto.id,
-      numeroOS: gerarNumeroOS(projeto.orcamento?.numeroSequencial),
-      titulo: projeto.titulo,
-      clienteNome: projeto.cliente?.nome ?? 'N/A',
-      engenheiroResponsavel: projeto.responsavel?.name ?? null,
-      status: projeto.status,
-      diasEstimados: resumo.diariasEquipeOrcadas,
-      diasReais: resumo.diariasEquipeRealizadas,
-      horasEstimadas: resumo.horasEngenhariaOrcadas,
-      horasReais: resumo.horasEngenhariaRealizadas,
-      custoOrcado: resumo.custoOrcado,
-      custoRealizado: resumo.custoRealizado,
-      lucroPerdaPrazo,
-      resultadoOs: resumo.resultado,
-      cumpriuEstimativa: !resumo.estouroDiariasEquipe && !resumo.estouroHorasEngenharia,
-    };
-  });
+      return {
+        projetoId: projeto.id,
+        numeroOS: gerarNumeroOS(projeto.orcamento?.numeroSequencial),
+        titulo: projeto.titulo,
+        clienteNome: projeto.cliente?.nome ?? 'N/A',
+        engenheiroResponsavel: projeto.responsavel?.name ?? null,
+        status: projeto.status,
+        diasEstimados: resumo.diariasEquipeOrcadas,
+        diasReais: resumo.diariasEquipeRealizadas,
+        horasEstimadas: resumo.horasEngenhariaOrcadas,
+        horasReais: resumo.horasEngenhariaRealizadas,
+        custoOrcado: resumo.custoOrcado,
+        custoRealizado: resumo.custoRealizado,
+        lucroPerdaPrazo,
+        resultadoOs: resumo.resultado,
+        cumpriuEstimativa: !resumo.estouroDiariasEquipe && !resumo.estouroHorasEngenharia,
+      };
+    }),
+  );
 }
