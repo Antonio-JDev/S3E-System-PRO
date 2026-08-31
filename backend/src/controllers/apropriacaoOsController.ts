@@ -53,6 +53,33 @@ export async function listarApontamentosOs(
   }
 }
 
+export async function atualizarApontamentoOs(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const { projetoId, apontamentoId } = req.params;
+    const { dataApontamento, observacoes, itens } = req.body;
+
+    const resultado = await apropriacaoOsService.atualizarApontamento(
+      projetoId,
+      apontamentoId,
+      { dataApontamento, observacoes, itens }
+    );
+
+    res.json({
+      success: true,
+      data: resultado.apontamento,
+      resumoAtualizado: resultado.resumoAtualizado,
+      message: 'Apontamento atualizado com sucesso',
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Erro ao atualizar apontamento';
+    res.status(400).json({ success: false, error: message });
+  }
+}
+
 export async function obterResumoApropriacaoOs(
   req: Request,
   res: Response
