@@ -31,6 +31,7 @@ import { configuracoesService, type OrcamentoInsercaoModo } from '../services/co
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ModalItensKit from '../components/ModalItensKit';
 import { AuthContext } from '../contexts/AuthContext';
+import BotaoWhatsAppCliente from '../components/BotaoWhatsAppCliente';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -182,9 +183,10 @@ interface NovoOrcamentoPageProps {
     initialDataFromLead?: InitialDataFromLead;
     /** Chamado após aplicar initialDataFromLead no formulário */
     onConsumedInitialData?: () => void;
+    onNavigate?: (view: string, ...args: unknown[]) => void;
 }
 
-const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOrcamentoCriado, initialDataFromLead, onConsumedInitialData }) => {
+const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOrcamentoCriado, initialDataFromLead, onConsumedInitialData, onNavigate }) => {
 
     const authContext = useContext(AuthContext);
     const userId = authContext?.user?.id || null;
@@ -2893,6 +2895,11 @@ const NovoOrcamentoPage: React.FC<NovoOrcamentoPageProps> = ({ setAbaAtiva, onOr
                             Crie uma nova proposta comercial
                         </p>
                     </div>
+                    <BotaoWhatsAppCliente
+                        telefone={clientes.find((c) => c.id === formState.clienteId)?.telefone}
+                        nome={clientes.find((c) => c.id === formState.clienteId)?.nome}
+                        onNavigate={onNavigate}
+                    />
                 </div>
 
                 {error && (
