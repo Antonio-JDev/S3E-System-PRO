@@ -121,18 +121,30 @@ describe('ProjetosService — workflow OS', () => {
       expect(prisma.projeto.update).not.toHaveBeenCalled();
     });
 
-    it('permite conclusão quando Organização Final está Done', async () => {
+    it('permite conclusão quando Organização Final está Done e grava auditoria', async () => {
       (prisma.projeto.findUnique as jest.Mock).mockResolvedValue(projetoBase);
       (prisma.task.findFirst as jest.Mock).mockResolvedValue({ status: 'Done' });
       (prisma.projeto.update as jest.Mock).mockResolvedValue({
         ...projetoBase,
         status: 'CONCLUIDO',
+        dataConclusao: new Date(),
+        concluidoPorId: 'user-1',
       });
 
-      const r = await service.atualizarStatus('p1', 'CONCLUIDO');
+      const r = await service.atualizarStatus('p1', 'CONCLUIDO', { userId: 'user-1' });
 
       expect(validarConclusaoOsEngenharia).toHaveBeenCalledWith('p1');
-      expect(prisma.projeto.update).toHaveBeenCalled();
+      expect(prisma.projeto.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'p1' },
+          data: expect.objectContaining({
+            status: 'CONCLUIDO',
+            dataFim: expect.any(Date),
+            dataConclusao: expect.any(Date),
+            concluidoPorId: 'user-1',
+          }),
+        }),
+      );
       expect(r.status).toBe('CONCLUIDO');
     });
   });
