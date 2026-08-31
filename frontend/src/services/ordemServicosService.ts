@@ -30,6 +30,8 @@ export interface Projeto {
   dataInicio: string;
   dataPrevisao: string;
   dataConclusao?: string;
+  concluidoPorId?: string | null;
+  concluidoPor?: { id: string; nome: string } | null;
   orcamentoId?: string;
   valorTotal?: number;
   horasEngenhariaOrcadas?: number;
@@ -106,6 +108,34 @@ export interface ReprovarVistoriaPayload {
   dataReprovacao: string;
   motivos: string;
   itensReprovados: string[] | string;
+}
+
+export interface AlocacaoPontoDia {
+  data: string;
+  horasJornada: number;
+  horasExtras: number;
+  horasExtras50: number;
+  horasExtras100: number;
+  temPonto: boolean;
+  workShift: { entrada1: string; saida2: string };
+}
+
+export interface AlocacaoPontoPessoa {
+  funcionarioId: string;
+  nome: string;
+  cargo: string;
+  dias: AlocacaoPontoDia[];
+}
+
+export interface AlocacaoPontoEvento {
+  eventoId: string;
+  titulo: string;
+  status: string;
+  tipo: string;
+  dataInicio: string;
+  dataFim: string;
+  veiculos?: Array<{ id: string; modelo: string; placa: string; tipo?: string }>;
+  pessoas: AlocacaoPontoPessoa[];
 }
 
 class OrdemServicosService {
@@ -204,6 +234,27 @@ class OrdemServicosService {
       `${ENDPOINTS.PROJETOS}/${id}/reprovar-vistoria`,
       payload,
     );
+  }
+
+  async getAlocacaoPonto(projetoId: string, data?: string) {
+    return axiosApiService.get<AlocacaoPontoEvento[]>(
+      `${ENDPOINTS.PROJETOS}/${projetoId}/alocacao-ponto`,
+      data ? { data } : undefined,
+    );
+  }
+
+  async baixarCsvHorasCustoContabil(competencia: string, projetoId?: string) {
+    const qs = new URLSearchParams({ competencia });
+    if (projetoId) qs.set('projetoId', projetoId);
+    const blob = await axiosApiService.getBlob(
+      `${ENDPOINTS.PROJETOS}/relatorios/horas-custo-contabil.csv?${qs.toString()}`,
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `horas-custo-contabil-${competencia}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async aprovarVistoria(id: string) {
