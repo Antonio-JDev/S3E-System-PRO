@@ -11,14 +11,15 @@ import { toast } from 'sonner';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS, getUploadUrl } from '../config/api';
 import { alocacaoMateriaisService } from '../services/alocacaoMateriaisService';
-import * as qualidadeService from '../services/qualidadeService';
 import { AuthContext } from '../contexts/AuthContext';
 import { isAdmin, isDeveloper } from '../utils/permissions';
-import { getStatusEngenhariaStyle } from '../constants/engenhariaProjeto';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useF1Key } from '../hooks/useF1Key';
 import ModalApontamentoOs from './ModalApontamentoOs';
+import ScrollableRow from './ui/ScrollableRow';
+import { ModalDetailHeader } from './ui/ModalDetailHeader';
+import { scrollableNavItemClasses, compactNavTabClasses, modalOverlayPaddingClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
 import { apropriacaoOsService } from '../services/apropriacaoOsService';
 import {
   formatMoeda,
@@ -26,9 +27,11 @@ import {
   type ResultadoOsCalculado,
 } from '../utils/apropriacaoOs';
 import { projetosService } from '../services/projetosService';
+import { ordemServicosService } from '../services/ordemServicosService';
 import type { Obra } from '../services/obrasService';
-import OsPrazoEstimadoCard from './os/OsPrazoEstimadoCard';
-import OsEquipeAlocacaoPanel from './os/OsEquipeAlocacaoPanel';
+import OsVisaoGeralTab from './os/OsVisaoGeralTab';
+import { statusBadgeClass, statusLabel } from '../utils/osStatus.util';
+import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util';
 import OsCronogramaAlocacaoTab from './os/OsCronogramaAlocacaoTab';
 import {
   AlertDialog,
@@ -92,7 +95,7 @@ interface OrcamentoItemRef {
   itensDoKit?: Array<{ nome?: string; codigo?: string; quantidade?: number; valorVenda?: number; materialId?: string; cotacaoId?: string; servicoId?: string; tipo?: string; kitId?: string; unidadeMedida?: string; subtotal?: number }>; // Kit unificado (pode ter material, cotação, serviço ou kit do catálogo)
   kit?: { id: string; nome?: string; items?: Array<{ materialId: string; quantidade: number; material?: MaterialRef }> }; // Kit do catálogo (quando item.kitId)
 }
-interface OrcamentoRef { id: string; status: string; precoVenda?: number; items?: OrcamentoItemRef[] }
+interface OrcamentoRef { id: string; status: string; precoVenda?: number; numeroSequencial?: number | null; items?: OrcamentoItemRef[] }
 
 export interface ProjetoDetalhe {
   id: string;
@@ -108,13 +111,18 @@ export interface ProjetoDetalhe {
   responsavel?: { id: string; nome: string };
   dataInicio?: string;
   dataPrevisao?: string;
+  dataConclusao?: string | null;
+  dataFim?: string | null;
+  concluidoPorId?: string | null;
+  concluidoPor?: { id: string; nome: string } | null;
   horasEngenhariaOrcadas?: number;
   diariasEquipeOrcadas?: number;
   valorHoraEngenharia?: number | null;
   valorDiariaEquipe?: number | null;
+  justificativaSemObra?: string | null;
 }
 
-type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Cronograma & Alocação' | 'Qualidade' | 'Resultado';
+type Aba = 'Visão Geral' | 'Materiais' | 'Kanban' | 'Cronograma & Alocação' | 'Resultado';
 
 const MSG_BLOQUEIO_CONCLUSAO_ENG =
   'Essa ordem de serviço não pode ser concluída pois o projeto ainda não está concluído. Pressione a equipe de projetos!';
@@ -154,9 +162,10 @@ interface ModalVizualizacaoProjetoProps {
     statusEngenharia?: string | null;
   };
   onAtribuirEngenharia?: () => void;
+  onEditOs?: () => void;
 }
 
-const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Cronograma & Alocação', 'Qualidade', 'Resultado'];
+const TABS: Aba[] = ['Visão Geral', 'Materiais', 'Kanban', 'Cronograma & Alocação', 'Resultado'];
 
 // Retorna os nomes dos responsáveis (suporta múltiplos)
 function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisIds?: string[] }, usuariosDisponiveis: any[]): string {
@@ -166,7 +175,7 @@ function getNomesResponsaveisTask(task: { responsavelId?: string; responsaveisId
   return nomes.length ? nomes.join(', ') : 'Não atribuído';
 }
 
-const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate, engenhariaAtribuicao, onAtribuirEngenharia }) => {
+const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ projeto, isOpen, onClose, initialTab = 'Visão Geral', onRefresh, onViewBudget, onViewClient, onViewSale, onViewObra, onNavigate, engenhariaAtribuicao, onAtribuirEngenharia, onEditOs }) => {
   const { user } = useContext(AuthContext) || {};
   const [activeTab, setActiveTab] = useState<Aba>(initialTab);
   const [loadingAcao, setLoadingAcao] = useState(false);
@@ -285,18 +294,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const [buscaMaterialVinculacao, setBuscaMaterialVinculacao] = useState(''); // Busca no modal de vinculação
   const [buscaMateriaisAba, setBuscaMateriaisAba] = useState(''); // Busca na aba Materiais (filtra ao digitar)
 
-  // Aba Qualidade: dados e formulário
-  const [qualidadeData, setQualidadeData] = useState<qualidadeService.QualidadeData | null>(null);
-  const [loadingQualidade, setLoadingQualidade] = useState(false);
-  const [qualidadeForm, setQualidadeForm] = useState({
-    statusVisita: 'pendente',
-    dataVisita: '',
-    responsavel: '',
-    checklist: Array(6).fill(false) as boolean[],
-    observacoes: ''
-  });
-  const [savingQualidade, setSavingQualidade] = useState(false);
-
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
@@ -319,15 +316,13 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
       carregarOrcamentoCompleto();
     }
     if (isOpen && activeTab === 'Visão Geral') {
+      carregarTasks();
       carregarObraVinculada();
       carregarDocumentos();
       void carregarResumoApropriacao();
     }
     if (isOpen && activeTab === 'Cronograma & Alocação') {
       carregarObraVinculada();
-    }
-    if (isOpen && activeTab === 'Qualidade' && projeto?.id) {
-      carregarQualidade();
     }
     if (isOpen && projeto?.id && (activeTab === 'Resultado' || projeto.status === 'EXECUCAO' || projeto.status === 'CONCLUIDO')) {
       void carregarResumoApropriacao();
@@ -349,73 +344,6 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     isOpen && projeto.status === 'EXECUCAO' && !apontamentoOpen,
     () => setApontamentoOpen(true)
   );
-
-  async function carregarQualidade() {
-    if (!projeto?.id) return;
-    setLoadingQualidade(true);
-    try {
-      const res = await qualidadeService.getQualidade(projeto.id);
-      if (res.success && res.data) {
-        setQualidadeData(res.data);
-        setQualidadeForm({
-          statusVisita: res.data.statusVisita || 'pendente',
-          dataVisita: res.data.dataVisita ? res.data.dataVisita.slice(0, 10) : '',
-          responsavel: res.data.responsavel || '',
-          checklist: Array.isArray(res.data.checklist) && res.data.checklist.length >= 6
-            ? res.data.checklist.slice(0, 6)
-            : Array(6).fill(false),
-          observacoes: res.data.observacoes || ''
-        });
-      } else {
-        setQualidadeData(null);
-        setQualidadeForm({ statusVisita: 'pendente', dataVisita: '', responsavel: '', checklist: Array(6).fill(false), observacoes: '' });
-      }
-    } catch (e) {
-      console.error('Erro ao carregar qualidade:', e);
-      setQualidadeData(null);
-    } finally {
-      setLoadingQualidade(false);
-    }
-  }
-
-  async function handleSalvarQualidade() {
-    if (!projeto?.id) return;
-    setSavingQualidade(true);
-    try {
-      const res = await qualidadeService.salvarQualidade(projeto.id, {
-        statusVisita: qualidadeForm.statusVisita,
-        dataVisita: qualidadeForm.dataVisita || null,
-        responsavel: qualidadeForm.responsavel || null,
-        checklist: qualidadeForm.checklist,
-        observacoes: qualidadeForm.observacoes || null
-      });
-      if (res.success && res.data) {
-        setQualidadeData(res.data);
-        toast.success('Visita técnica salva com sucesso');
-      } else {
-        toast.error(res.error || 'Erro ao salvar');
-      }
-    } catch (e: any) {
-      toast.error(e?.message || 'Erro ao salvar visita técnica');
-    } finally {
-      setSavingQualidade(false);
-    }
-  }
-
-  async function handleAprovarInspecao(tipo: string) {
-    if (!projeto?.id) return;
-    try {
-      const res = await qualidadeService.aprovarInspecao(projeto.id, tipo, user?.name || undefined);
-      if (res.success && res.data) {
-        setQualidadeData(res.data);
-        toast.success('Inspeção aprovada');
-      } else {
-        toast.error(res.error || 'Erro ao aprovar');
-      }
-    } catch (e: any) {
-      toast.error(e?.message || 'Erro ao aprovar inspeção');
-    }
-  }
 
   async function carregarUsuarios() {
     try {
@@ -1368,6 +1296,35 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
     () => projeto.status === 'PROPOSTA' || projeto.status === 'VALIDADO',
     [projeto.status]
   );
+  const podeVoltarParaAprovada = useMemo(
+    () => projeto.status === 'CONCLUIDO' && String(user?.role || '').toLowerCase() !== 'eletricista',
+    [projeto.status, user?.role]
+  );
+
+  async function handleVoltarParaAprovada() {
+    setAlertConfig({
+      title: 'Voltar para Aprovada',
+      description:
+        'A OS voltará ao status Aprovada. A obra vinculada será removida e o estoque alocado será estornado. Deseja continuar?',
+      onConfirm: async () => {
+        try {
+          setLoadingAcao(true);
+          const response = await ordemServicosService.reverterStatus(projeto.id, 'APROVADO');
+          if (response.success) {
+            toast.success('OS revertida para Aprovada');
+            if (onRefresh) onRefresh();
+          } else {
+            toast.error(response.error || 'Erro ao reverter status');
+          }
+        } catch (error: any) {
+          toast.error(error?.response?.data?.error || error?.message || 'Erro ao reverter status');
+        } finally {
+          setLoadingAcao(false);
+        }
+      },
+    });
+    setAlertOpen(true);
+  }
 
   async function handleAprovarProjeto() {
     setAlertConfig({
@@ -1846,679 +1803,139 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
   const enderecoPartEstado = (projeto as any).estado || orcamentoCompleto?.estado || projeto.orcamento?.estado || '';
   const enderecoPartCep = (projeto as any).cep || orcamentoCompleto?.cep || projeto.orcamento?.cep || '';
 
-  const enderecoCompleto = [enderecoPartEndereco, enderecoPartBairro, enderecoPartCidade ? `${enderecoPartCidade}${enderecoPartEstado ? `/${enderecoPartEstado}` : ''}` : '', enderecoPartCep]
+  const enderecoObraDisplay = [enderecoPartEndereco, enderecoPartBairro]
     .filter(p => p && String(p).trim().length > 0)
-    .join(' • ');
+    .join(', ') || '';
 
   const cidadeEstadoDisplay = enderecoPartCidade ? `${enderecoPartCidade}${enderecoPartEstado ? `/${enderecoPartEstado}` : ''}` : (enderecoPartEstado || 'Não informado');
 
   const responsavelObraDisplay = (projeto as any).responsavelObra || orcamentoCompleto?.responsavelObra || projeto.orcamento?.responsavelObra || projeto.responsavel?.nome || 'Não atribuído';
 
+  const numeroOs = projeto.orcamento?.numeroSequencial ?? (projeto as any).orcamento?.numeroSequencial;
+
+  const solicitarExclusaoDocumento = (docId: string) => {
+    docIdToDeleteRef.current = docId;
+    setAlertConfig({
+      title: 'Excluir documento',
+      description: 'Tem certeza que deseja excluir este documento? Você poderá enviar um novo arquivo em seguida.',
+      onConfirm: () => {
+        const id = docIdToDeleteRef.current;
+        docIdToDeleteRef.current = null;
+        if (id) void handleExcluirDocumento(id);
+      },
+    });
+    setAlertOpen(true);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-      <div className="w-full max-w-[90rem] bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden max-h-[95vh] flex flex-col">
-        {/* Header */}
-        <div className="relative p-6 border-b border-gray-200 dark:border-dark-border" style={{ backgroundColor: '#0a1a2f' }}>
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-medium">
-              <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm ${modalOverlayPaddingClasses} animate-fade-in`}>
+      <div className="w-full max-w-[90rem] bg-white dark:bg-dark-card rounded-2xl shadow-strong overflow-hidden max-h-[95dvh] sm:max-h-[95vh] flex flex-col">
+        <ModalDetailHeader
+          title={<>{numeroOs != null ? `OS #${numeroOs} — ` : ''}{projeto.titulo}</>}
+          subtitle={
+            <>
+              Cliente: {projeto.cliente?.nome}
+              {projeto.status === 'CONCLUIDO' && (
+                <span className="block text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  Concluída em{' '}
+                  {formatDateDisplay((projeto.dataConclusao || projeto.dataFim || '') as string) || '—'}
+                  {projeto.concluidoPor?.nome ? ` · por ${projeto.concluidoPor.nome}` : ''}
+                </span>
+              )}
+            </>
+          }
+          onClose={onClose}
+          icon={
+            <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+              <svg className="w-6 h-6 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-          </div>
-            <div className="flex-1">
-              <h2 className="text-2xl font-bold text-white">
-                {(projeto as any).orcamento?.numeroSequencial != null ? `OS #${(projeto as any).orcamento.numeroSequencial} — ` : ''}{projeto.titulo}
-              </h2>
-              <p className="text-sm text-white/80 mt-1">Cliente: {projeto.cliente?.nome}</p>
             </div>
-            <button
-              onClick={handleRefreshAll}
-              title="Atualizar"
-              className="absolute top-4 right-12 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-all"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 8a8 8 0 10-8 8" />
-              </svg>
-            </button>
-            <button 
-              onClick={onClose} 
-              className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-xl transition-all"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
+          }
+          actions={
+            <>
+              <span className={`inline-flex items-center px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wide ${statusBadgeClass(projeto.status)}`}>
+                {statusLabel(projeto.status)}
+              </span>
+              {onEditOs && (
+                <button
+                  type="button"
+                  onClick={onEditOs}
+                  className="inline-flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
+                >
+                  <span aria-hidden>✏️</span>
+                  <span className="hidden sm:inline">Editar OS</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleRefreshAll}
+                title="Atualizar"
+                className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-dark-hover rounded-lg transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v6h6M20 20v-6h-6" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 8a8 8 0 10-8 8" />
+                </svg>
+              </button>
+            </>
+          }
+        />
 
         {/* Abas */}
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg">
-          <div className="flex gap-2 overflow-x-auto">
+        <div className={`shrink-0 px-3 sm:px-6 bg-white dark:bg-dark-card ${mobileTabBarStripClasses}`}>
+          <ScrollableRow as="nav" ariaLabel="Abas da ordem de serviço" edgeToEdge className="gap-1">
             {TABS.map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-6 py-3 rounded-xl font-semibold transition-all whitespace-nowrap ${
-                  activeTab === tab 
-                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-medium' 
-                    : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-dark-border hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-dark-hover'
+                className={`${scrollableNavItemClasses} ${compactNavTabClasses} px-3 sm:px-4 py-2.5 sm:py-3 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                  activeTab === tab
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
                 }`}
               >
                 {tab}
               </button>
             ))}
-          </div>
+          </ScrollableRow>
         </div>
 
         {/* Conteúdo */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-6">
           {activeTab === 'Visão Geral' && (
-              <div className="space-y-6 animate-fade-in">
-                {/* Cards de Informações Principais */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Status */}
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6 shadow-soft">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </div>
-                      <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400">Status do Projeto</h3>
-                    </div>
-                    <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{projeto.status}</p>
-                  </div>
-
-                  {/* Data de Criação */}
-                  {projeto.createdAt && (
-                    <div className="bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 border-2 border-yellow-200 dark:border-yellow-800 rounded-2xl p-6 shadow-soft">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-10 h-10 rounded-lg bg-yellow-600 flex items-center justify-center">
-                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                </div>
-                        <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400">Data de Criação</h3>
-                      </div>
-                      <p className="text-lg font-bold text-yellow-700 dark:text-yellow-400">
-                        {new Date(projeto.createdAt).toLocaleDateString('pt-BR')}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Card de Progresso do Projeto */}
-                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                      <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                      Progresso do Projeto
-                    </h3>
-                    <span className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
-                      {progressoProjeto.percentual}%
-                    </span>
-                  </div>
-                  
-                  {/* Barra de Progresso */}
-                  <div className="mb-4">
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
-                      <div 
-                        className="h-full bg-gradient-to-r from-yellow-500 to-yellow-600 transition-all duration-500 rounded-full"
-                        style={{ width: `${progressoProjeto.percentual}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Detalhes do Progresso */}
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Tasks */}
-                    <div className="text-center p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800">
-                      <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Tasks Kanban</div>
-                      <div className="text-lg font-bold text-yellow-700 dark:text-yellow-400">
-                        {progressoProjeto.tasksConcluidas}/{progressoProjeto.tasksTotal}
-                      </div>
-                    </div>
-                    
-                    {/* Obras */}
-                    {!projeto.semObra && (
-                      <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
-                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">Obras</div>
-                        <div className="text-lg font-bold text-orange-700 dark:text-orange-400">
-                          {progressoProjeto.obrasConcluidas}/{progressoProjeto.obrasTotal}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Informação */}
-                  <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span>
-                        O progresso é calculado com base em: <strong>Tasks concluídas</strong> + <strong>Obras concluídas</strong>
-                      </span>
-                    </p>
-                  </div>
-                </div>
-
-                <OsPrazoEstimadoCard
-                  projetoId={projeto.id}
-                  projeto={{
-                    status: projeto.status,
-                    dataInicio: (projeto as ProjetoDetalhe).dataInicio ?? '',
-                    dataPrevisao: (projeto as ProjetoDetalhe).dataPrevisao ?? '',
-                    horasEngenhariaOrcadas: (projeto as ProjetoDetalhe).horasEngenhariaOrcadas ?? 0,
-                    diariasEquipeOrcadas: (projeto as ProjetoDetalhe).diariasEquipeOrcadas ?? 0,
-                    valorHoraEngenharia: (projeto as ProjetoDetalhe).valorHoraEngenharia,
-                    valorDiariaEquipe: (projeto as ProjetoDetalhe).valorDiariaEquipe,
-                  }}
-                  resumo={resumoApropriacao}
-                  canEdit={isAdmin(user) || isDeveloper(user)}
-                  onSaved={() => {
-                    void carregarResumoApropriacao();
-                    onRefresh?.();
-                  }}
-                />
-
-                <OsEquipeAlocacaoPanel
-                  projetoId={projeto.id}
-                  projetoTitulo={projeto.titulo}
-                  responsavelOs={
-                    (projeto as ProjetoDetalhe).responsavel
-                      ? {
-                          id: (projeto as ProjetoDetalhe).responsavel!.id,
-                          nome: (projeto as ProjetoDetalhe).responsavel!.nome,
-                        }
-                      : null
-                  }
-                  engenhariaAtribuicao={engenhariaAtribuicao}
-                  obraStatus={obraDetalhe?.status ?? null}
-                  semObra={Boolean((projeto as ProjetoDetalhe).semObra)}
-                  canAlocar={isAdmin(user) || isDeveloper(user)}
-                  onRefresh={() => {
-                    void carregarObraVinculada();
-                    onRefresh?.();
-                  }}
-                />
-
-                {engenhariaAtribuicao && (
-                  <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-2xl p-6">
-                    <div
-                      className={
-                        engenhariaAtribuicao.atribuido
-                          ? 'flex flex-col items-center text-center gap-3'
-                          : 'flex items-center justify-between gap-4 flex-wrap'
-                      }
-                    >
-                      <div className={engenhariaAtribuicao.atribuido ? 'w-full' : ''}>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                          📐 Setor de Engenharia
-                        </h3>
-                        {engenhariaAtribuicao.atribuido ? (
-                          <>
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                              Projetista responsável:{' '}
-                              <strong className="text-gray-900 dark:text-white">
-                                {engenhariaAtribuicao.responsavelNome || 'Atribuído'}
-                              </strong>
-                              . Para trocar o responsável, use o menu da OS (Alterar projetista).
-                            </p>
-                            <p className="mt-4 text-base font-semibold text-gray-800 dark:text-gray-100 tracking-wide">
-                              STATUS :{' '}
-                              <span
-                                className={`inline-block ml-1 px-3 py-1 rounded-lg text-sm font-bold ${getStatusEngenhariaStyle(
-                                  engenhariaAtribuicao.statusEngenharia || 'A fazer',
-                                )}`}
-                              >
-                                {engenhariaAtribuicao.statusEngenharia || 'A fazer'}
-                              </span>
-                            </p>
-                          </>
-                        ) : (
-                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Inclua esta OS na aba Projetos de Engenharia para acompanhamento do setor (metadados
-                            estilo Notion).
-                          </p>
-                        )}
-                      </div>
-                      {!engenhariaAtribuicao.atribuido && onAtribuirEngenharia && (
-                        <button
-                          type="button"
-                          onClick={onAtribuirEngenharia}
-                          className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold whitespace-nowrap"
-                        >
-                          Atribuir à Engenharia
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Botão Aprovar OS (Pendente → Aprovada) */}
-                {podeAprovar && (
-                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-200 dark:border-green-800 rounded-2xl p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">📋 OS Pendente</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          Ordem gerada a partir de orçamento aprovado. Aprove a OS para liberar o início da obra.
-                        </p>
-              </div>
-                      <button
-                        onClick={handleAprovarProjeto}
-                        disabled={loadingAcao}
-                        className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                      >
-                        {loadingAcao ? '⏳ Aprovando...' : '🎉 Aprovar OS'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Botão Iniciar Obra */}
-                {podeGerarObra && !projeto.semObra && (
-                  <div className="bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-2xl p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                          🏗️ Iniciar Execução
-                        </h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          OS aprovada. Clique para iniciar a obra (permite iniciar mesmo com materiais faltantes; baixa parcial do disponível).
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleIniciarObra}
-                          disabled={loadingAcao}
-                          className="px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                        >
-                          {loadingAcao ? '⏳ Iniciando...' : '🚀 INICIAR OBRA'}
-                        </button>
-
-                        {/* Botão: Essa ordem de serviço não contém obra? */}
-                        {!projeto.semObra && (
-                          <button
-                            onClick={() => setModalSemObraOpen(true)}
-                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all font-semibold"
-                          >
-                            ❓ Essa ordem não contém obra?
-                          </button>
-                        )}
-                        {projeto.semObra && (
-                          <div className="px-4 py-2 bg-green-50 text-green-800 rounded-xl border border-green-200 text-sm">
-                            ✅ Marcada como sem obra
-                            {projeto.justificativaSemObra && (
-                              <div className="mt-1 text-xs text-gray-600">Motivo: {projeto.justificativaSemObra}</div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Links Rápidos e Documentos */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Links Rápidos */}
-                  <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                      </svg>
-                      Links Rápidos
-                    </h3>
-                    <div className="space-y-3">
-                      {projeto.orcamento && (
-                        <button
-                          onClick={() => {
-                            if (onViewBudget) {
-                              onViewBudget(projeto.orcamento!.id);
-                              onClose(); // Fechar o modal atual
-                            } else if (onNavigate) {
-                              onNavigate('Orçamentos');
-                              onClose(); // Fechar modal
-                            } else {
-                              toast.info('📋 Navegando para orçamento...');
-                            }
-                          }}
-                          className="w-full flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-all text-left"
-                        >
-                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-900 dark:text-white text-sm">Orçamento Vinculado</p>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">Ver detalhes do orçamento</p>
-                          </div>
-                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                      )}
-                      {vendaVinculada && vendaVinculada.id && (
-                        <button
-                          onClick={() => {
-                            if (onViewSale && vendaVinculada.id) {
-                              onViewSale(vendaVinculada.id);
-                              onClose(); // Fechar modal
-                            } else if (onNavigate) {
-                              onNavigate('Vendas');
-                              onClose(); // Fechar modal
-                            } else {
-                              toast.info('📋 Navegando para página de vendas...');
-                            }
-                          }}
-                          className="w-full flex items-center gap-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-all text-left"
-                        >
-                          <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                          </svg>
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-900 dark:text-white text-sm">Venda Vinculada</p>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">Ver detalhes da venda</p>
-                          </div>
-                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                      )}
-                      {obraVinculada && obraVinculada.id && (
-                        <button
-                          onClick={() => {
-                            if (onViewObra && obraVinculada.id) {
-                              onViewObra(obraVinculada.id);
-                              onClose(); // Fechar modal
-                            } else if (onNavigate) {
-                              onNavigate('DetalhesObra', obraVinculada.id);
-                              onClose(); // Fechar modal
-                            } else {
-                              toast.info('🏗️ Navegando para obra...');
-                            }
-                          }}
-                          disabled={loadingObra}
-                          className="w-full flex items-center gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5-3H12M8.25 9h7.5" />
-                          </svg>
-                          <div className="flex-1">
-                            <p className="font-semibold text-gray-900 dark:text-white text-sm">Obra Vinculada</p>
-                            <p className="text-xs text-gray-600 dark:text-gray-400">{obraVinculada.nome || 'Ver detalhes da obra'}</p>
-                          </div>
-                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          if (onViewClient && projeto.cliente?.id) {
-                            onViewClient(projeto.cliente.id);
-                            onClose(); // Fechar modal
-                          } else if (onNavigate) {
-                            onNavigate('Clientes');
-                            onClose(); // Fechar modal
-                          } else {
-                            carregarCliente();
-                          }
-                        }}
-                        disabled={loadingCliente}
-                        className="w-full flex items-center gap-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl hover:bg-green-100 dark:hover:bg-green-900/30 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <div className="flex-1 text-left">
-                          <p className="font-semibold text-gray-900 dark:text-white text-sm">Perfil do Cliente</p>
-                          <p className="text-xs text-gray-600 dark:text-gray-400">{projeto.cliente.nome}</p>
-                        </div>
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Documentos Técnicos */}
-                  <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                        </svg>
-                        Documentos
-                      </h3>
-                      <button
-                        onClick={() => setUploadModalOpen(true)}
-                        className="px-4 py-2 bg-gradient-to-r from-yellow-600 to-yellow-500 text-white rounded-lg hover:from-yellow-700 hover:to-yellow-600 transition-all font-semibold text-sm"
-                      >
-                        + Upload
-                      </button>
-                    </div>
-                    {documentos.length === 0 ? (
-                      <div className="text-center py-6 border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl">
-                        <svg className="w-10 h-10 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                        </svg>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum documento</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">ART, TRT, etc.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {documentos.map(doc => (
-                          <div key={doc.id} className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-dark-bg rounded-lg hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors">
-                            <svg className="w-4 h-4 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-gray-900 dark:text-white font-medium truncate">{doc.nome}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-400">{doc.tipo}</p>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => {
-                                  window.open(doc.url, '_blank');
-                                }}
-                                className="p-2 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                                title="Visualizar documento"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                </svg>
-                              </button>
-                              <a
-                                href={doc.url}
-                                download={doc.nome}
-                                className="p-2 text-green-600 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-lg transition-colors"
-                                title="Baixar documento"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                              </a>
-                              <button
-                                onClick={() => {
-                                  docIdToDeleteRef.current = doc.id;
-                                  setAlertConfig({
-                                    title: 'Excluir documento',
-                                    description: 'Tem certeza que deseja excluir este documento? Você poderá enviar um novo arquivo em seguida.',
-                                    onConfirm: () => {
-                                      const id = docIdToDeleteRef.current;
-                                      docIdToDeleteRef.current = null;
-                                      if (id) handleExcluirDocumento(id);
-                                    }
-                                  });
-                                  setAlertOpen(true);
-                                }}
-                                disabled={deletingDocId === doc.id}
-                                className="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Excluir documento"
-                              >
-                                {deletingDocId === doc.id ? (
-                                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                  </svg>
-                                ) : (
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Informações do Cliente e Endereço */}
-                <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    Informações do Cliente e Local
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Cliente</p>
-                      <p className="text-base font-semibold text-gray-900 dark:text-white">{projeto.cliente?.nome}</p>
-                    </div>
-                    {!editLocalOpen ? (
-                      <>
-                        <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Endereço da Obra</p>
-                          <p className="text-base font-semibold text-gray-900 dark:text-white">
-                            {enderecoCompleto || 'Não informado'}
-                          </p>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Cidade/Estado</p>
-                          <p className="text-base font-semibold text-gray-900 dark:text-white">
-                            {cidadeEstadoDisplay || 'Não informado'}
-                          </p>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Responsável na Obra</p>
-                          <p className="text-base font-semibold text-gray-900 dark:text-white">
-                            {responsavelObraDisplay}
-                          </p>
-                        </div>
-                        <div className="md:col-span-2 flex items-center gap-2">
-                          <button onClick={() => setEditLocalOpen(true)} className="px-3 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-all">
-                            ✏️ Editar local / obra
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Endereço da Obra (Rua e Nº)</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.enderecoObra} onChange={(e) => setLocalForm(prev => ({ ...prev, enderecoObra: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Bairro</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.bairro} onChange={(e) => setLocalForm(prev => ({ ...prev, bairro: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Cidade</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.cidade} onChange={(e) => setLocalForm(prev => ({ ...prev, cidade: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Estado</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.estado} onChange={(e) => setLocalForm(prev => ({ ...prev, estado: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">CEP</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.cep} onChange={(e) => setLocalForm(prev => ({ ...prev, cep: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Responsável na Obra</p>
-                            <input className="w-full px-3 py-2 border rounded-lg" value={localForm.responsavelObra} onChange={(e) => setLocalForm(prev => ({ ...prev, responsavelObra: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Data Prevista Início</p>
-                            <input type="date" className="w-full px-3 py-2 border rounded-lg" value={localForm.dataPrevistaInicio} onChange={(e) => setLocalForm(prev => ({ ...prev, dataPrevistaInicio: e.target.value }))} />
-                          </div>
-                          <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Data Prevista Fim</p>
-                            <input type="date" className="w-full px-3 py-2 border rounded-lg" value={localForm.dataPrevistaFim} onChange={(e) => setLocalForm(prev => ({ ...prev, dataPrevistaFim: e.target.value }))} />
-                          </div>
-                        </div>
-                        <div className="md:col-span-2 flex items-center gap-2">
-                          <button onClick={handleSaveLocal} className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all">Salvar</button>
-                          <button onClick={() => setEditLocalOpen(false)} className="px-3 py-2 bg-gray-100 rounded-lg">Cancelar</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Descrição do Projeto */}
-              {projeto.descricao && (
-                  <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      Descrição do Projeto
-                    </h3>
-                    <div className="text-gray-700 dark:text-gray-300 whitespace-pre-line leading-relaxed">
-                      {projeto.descricao}
-                    </div>
-                  </div>
-                )}
-
-                {/* Informações do Orçamento */}
-                {projeto.orcamento && (
-                  <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                      <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                      </svg>
-                      Informações do Orçamento
-                    </h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Status do Orçamento</p>
-                        <p className="text-lg font-semibold text-gray-900 dark:text-white">{projeto.orcamento.status}</p>
-                      </div>
-                      {projeto.orcamento.precoVenda && (
-                        <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Preço de Venda</p>
-                          <p className="text-lg font-semibold text-gray-900 dark:text-white">
-                            R$ {projeto.orcamento.precoVenda.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </p>
-                        </div>
-                      )}
-                      {projeto.orcamento.pedidoFaturado && (
-                        <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 flex flex-col justify-center items-start">
-                          <p className="text-sm text-gray-600 dark:text-gray-300 mb-1">Pedido Faturado</p>
-                          <span className="text-sm font-semibold text-green-800 dark:text-green-300">✅ Sim</span>
-                        </div>
-                      )}
-                      {projeto.orcamento.items && (
-                        <div className="bg-gray-50 dark:bg-dark-bg rounded-xl p-4">
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total de Itens</p>
-                          <p className="text-lg font-semibold text-gray-900 dark:text-white">{projeto.orcamento.items.length} itens</p>
-                        </div>
-                      )}
-                    </div>
-                </div>
-              )}
-            </div>
+            <OsVisaoGeralTab
+              projeto={projeto}
+              progresso={progressoProjeto}
+              resumo={resumoApropriacao}
+              enderecoObra={enderecoObraDisplay}
+              cidadeEstado={cidadeEstadoDisplay}
+              responsavelObra={responsavelObraDisplay}
+              engenhariaAtribuicao={engenhariaAtribuicao}
+              documentos={documentos}
+              deletingDocId={deletingDocId}
+              vendaVinculada={vendaVinculada}
+              obraVinculada={obraVinculada}
+              loadingObra={loadingObra}
+              podeAprovar={podeAprovar}
+              podeGerarObra={podeGerarObra}
+              loadingAcao={loadingAcao}
+              onAprovar={handleAprovarProjeto}
+              podeVoltarParaAprovada={podeVoltarParaAprovada}
+              onVoltarParaAprovada={handleVoltarParaAprovada}
+              onIniciarObra={handleIniciarObra}
+              onSemObra={() => setModalSemObraOpen(true)}
+              onAtribuirEngenharia={onAtribuirEngenharia}
+              onUploadDocumento={() => setUploadModalOpen(true)}
+              onExcluirDocumento={solicitarExclusaoDocumento}
+              onViewBudget={onViewBudget}
+              onViewClient={onViewClient}
+              onViewSale={onViewSale}
+              onNavigate={onNavigate}
+              onClose={onClose}
+              onAbrirCronograma={() => setActiveTab('Cronograma & Alocação')}
+            />
           )}
 
           {/* Se projeto marcado como sem obra: permitir concluir quando não há tasks OU quando todas as tasks estão concluídas */}
@@ -3332,223 +2749,27 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
             />
           )}
 
-          {activeTab === 'Qualidade' && (
-              <div className="space-y-6 animate-fade-in">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  Controle de Qualidade
-                </h3>
-
-                {loadingQualidade ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-yellow-600" />
-                  </div>
-                ) : (
-                  <>
-                    {/* Visita Técnica */}
-                    <div className="bg-white dark:bg-dark-card border-2 border-yellow-200 dark:border-yellow-800 rounded-2xl p-6 shadow-soft">
-                      <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                        <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                        </svg>
-                        Visita Técnica
-                      </h4>
-                      
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Status da Visita</p>
-                            <select
-                              value={qualidadeForm.statusVisita}
-                              onChange={(e) => setQualidadeForm(f => ({ ...f, statusVisita: e.target.value }))}
-                              className="w-full mt-2 px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white font-semibold"
-                            >
-                              <option value="pendente">⏳ Pendente</option>
-                              <option value="agendada">📅 Agendada</option>
-                              <option value="realizada">✅ Realizada</option>
-                              <option value="cancelada">❌ Cancelada</option>
-                            </select>
-                          </div>
-                          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Data da Visita</p>
-                            <input
-                              type="date"
-                              value={qualidadeForm.dataVisita}
-                              onChange={(e) => setQualidadeForm(f => ({ ...f, dataVisita: e.target.value }))}
-                              className="w-full mt-2 px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white"
-                            />
-                          </div>
-                          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Responsável</p>
-                            <input
-                              type="text"
-                              placeholder="Nome do técnico"
-                              value={qualidadeForm.responsavel}
-                              onChange={(e) => setQualidadeForm(f => ({ ...f, responsavel: e.target.value }))}
-                              className="w-full mt-2 px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="bg-gray-50 dark:bg-dark-bg border-2 border-gray-200 dark:border-dark-border rounded-xl p-6">
-                          <h5 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                            </svg>
-                            Checklist de Verificação
-                          </h5>
-                          <div className="space-y-3">
-                            {qualidadeService.CHECKLIST_LABELS.map((item, idx) => (
-                              <label key={idx} className="flex items-center gap-3 p-3 bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-900/10 cursor-pointer transition-all">
-                                <input
-                                  type="checkbox"
-                                  checked={qualidadeForm.checklist[idx] ?? false}
-                                  onChange={(e) => setQualidadeForm(f => ({
-                                    ...f,
-                                    checklist: f.checklist.map((v, i) => i === idx ? e.target.checked : v)
-                                  }))}
-                                  className="w-5 h-5 text-yellow-600 border-gray-300 rounded focus:ring-yellow-500"
-                                />
-                                <span className="text-gray-700 dark:text-gray-300">{item}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Observações da Visita Técnica
-                          </label>
-                          <textarea
-                            rows={4}
-                            placeholder="Descreva detalhes importantes da visita técnica, condições encontradas, pontos de atenção..."
-                            value={qualidadeForm.observacoes}
-                            onChange={(e) => setQualidadeForm(f => ({ ...f, observacoes: e.target.value }))}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-dark-border rounded-xl focus:ring-2 focus:ring-yellow-500 dark:bg-dark-bg dark:text-white"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            📸 Fotos da Visita Técnica
-                          </label>
-                          <label className="block border-2 border-dashed border-gray-300 dark:border-dark-border rounded-xl p-8 text-center hover:border-yellow-400 dark:hover:border-yellow-600 transition-all cursor-pointer">
-                            <input
-                              type="file"
-                              accept="image/png,image/jpeg,image/jpg"
-                              className="hidden"
-                              multiple
-                              onChange={async (e) => {
-                                const files = e.target.files;
-                                if (!files?.length || !projeto?.id) return;
-                                for (let i = 0; i < files.length; i++) {
-                                  const form = new FormData();
-                                  form.append('arquivo', files[i]);
-                                  form.append('tipo', 'FOTO_VISITA_TECNICA');
-                                  try {
-                                    const res = await axiosApiService.upload(`/api/projetos/${projeto.id}/documentos`, form);
-                                    if (res?.success) { toast.success(`Foto ${i + 1} enviada`); await carregarQualidade(); }
-                                  } catch (err: any) { toast.error(err?.message || 'Erro ao enviar foto'); }
-                                }
-                                e.target.value = '';
-                              }}
-                            />
-                            <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <p className="text-gray-600 dark:text-gray-400 font-medium">Clique para fazer upload de fotos</p>
-                            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">PNG, JPG até 10MB</p>
-                          </label>
-                          {qualidadeData?.fotos?.length ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {qualidadeData.fotos.map((f) => (
-                                <div key={f.id} className="relative group">
-                                  <a href={getUploadUrl(f.url)} target="_blank" rel="noopener noreferrer" className="block w-20 h-20 rounded-lg border border-gray-200 dark:border-dark-border overflow-hidden bg-gray-100 dark:bg-dark-bg">
-                                    <img src={getUploadUrl(f.url)} alt={f.nome} className="w-full h-full object-cover" />
-                                  </a>
-                                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 truncate px-1">{f.nome}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="flex gap-3">
-                          <button
-                            type="button"
-                            onClick={handleSalvarQualidade}
-                            disabled={savingQualidade}
-                            className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-600 to-yellow-500 text-white rounded-xl hover:from-yellow-700 hover:to-yellow-600 transition-all shadow-medium font-semibold disabled:opacity-50"
-                          >
-                            {savingQualidade ? 'Salvando...' : '💾 Salvar Visita Técnica'}
-                          </button>
-                          <button type="button" className="px-6 py-3 bg-white dark:bg-dark-card border-2 border-gray-300 dark:border-dark-border text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-all font-semibold">
-                            🖨️ Gerar Relatório
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Inspeções e Aprovações */}
-                    <div className="bg-white dark:bg-dark-card border-2 border-gray-200 dark:border-dark-border rounded-2xl p-6 shadow-soft">
-                      <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                        <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Inspeções e Aprovações
-                      </h4>
-                      
-                      <div className="space-y-3">
-                        {(qualidadeData?.inspecoes ?? qualidadeService.TIPOS_INSPECAO.map((t, i) => ({
-                          tipo: t,
-                          nome: ['Inspeção Inicial', 'Aprovação do Cliente', 'Teste de Qualidade', 'Vistoria Final'][i],
-                          status: 'pendente' as const
-                        }))).map((inspecao, idx) => (
-                          <div key={inspecao.tipo} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-bg border border-gray-200 dark:border-dark-border rounded-xl hover:shadow-soft transition-all">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                inspecao.status === 'aprovado' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-yellow-100 dark:bg-yellow-900/30'
-                              }`}>
-                                {inspecao.status === 'aprovado' ? (
-                                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                ) : (
-                                  <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                )}
-                              </div>
-                              <div>
-                                <p className="font-semibold text-gray-900 dark:text-white">{inspecao.nome}</p>
-                                <p className="text-sm text-gray-600 dark:text-gray-400">
-                                  {inspecao.status === 'aprovado' ? `✅ Aprovado${inspecao.aprovadoPor ? ` por ${inspecao.aprovadoPor}` : ''}` : '⏳ Pendente'}
-                                </p>
-                              </div>
-                            </div>
-                            {inspecao.status === 'pendente' && (
-                              <button
-                                type="button"
-                                onClick={() => handleAprovarInspecao(inspecao.tipo)}
-                                className="px-4 py-2 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-lg hover:from-green-700 hover:to-green-600 transition-all font-semibold text-sm"
-                              >
-                                Aprovar
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
           {activeTab === 'Resultado' && (
             <div className="space-y-6 animate-fade-in">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Resultado — Orçado vs Realizado</h3>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Resultado — Orçado vs Realizado</h3>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const agora = new Date();
+                    const competencia = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+                    try {
+                      await projetosService.baixarCsvHorasCustoContabil(competencia, projeto.id);
+                      toast.success('CSV contábil exportado');
+                    } catch {
+                      toast.error('Erro ao exportar CSV contábil');
+                    }
+                  }}
+                  className="text-sm font-semibold px-4 py-2 rounded-xl bg-emerald-700 text-white hover:bg-emerald-800"
+                >
+                  Exportar CSV contábil
+                </button>
+              </div>
               {!resumoApropriacao ? (
                 <p className="text-sm text-gray-500">Carregando resumo...</p>
               ) : (
@@ -3580,7 +2801,7 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                     </div>
 
                     <div className={`rounded-2xl border-2 p-5 ${resumoApropriacao.estouroDiariasEquipe ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20'}`}>
-                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Diárias de Equipe</h4>
+                      <h4 className="font-bold text-gray-800 dark:text-white mb-3">Execução</h4>
                       <div className="flex justify-between text-sm mb-2">
                         <span>Orçado</span>
                         <span className="font-semibold">{formatQuantidade(resumoApropriacao.diariasEquipeOrcadas, 'd')}</span>
@@ -3624,10 +2845,79 @@ const ModalVizualizacaoProjeto: React.FC<ModalVizualizacaoProjetoProps> = ({ pro
                         {formatMoeda(resumoApropriacao.resultado)}
                       </div>
                       <div className="text-[10px] text-gray-500 mt-1">
-                        Custo orç: {formatMoeda(resumoApropriacao.custoOrcado)} · real: {formatMoeda(resumoApropriacao.custoRealizado)}
+                        Custo orç: {formatMoeda(resumoApropriacao.custoOrcado)} · real:{' '}
+                        {formatMoeda(resumoApropriacao.custoRealizado)}
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">
+                        F1: {formatMoeda(resumoApropriacao.custoApontamento ?? 0)} · confirmado:{' '}
+                        {formatMoeda(resumoApropriacao.custoCalendario ?? 0)} · previsto:{' '}
+                        {formatMoeda(resumoApropriacao.custoCalendarioPrevisto ?? 0)}
+                      </div>
+                      <div className="text-[10px] text-sky-700 dark:text-sky-300 mt-0.5">
+                        Projetado (real + previsão): {formatMoeda(resumoApropriacao.custoProjetado ?? resumoApropriacao.custoRealizado)}
                       </div>
                     </div>
                   </div>
+
+                  {(resumoApropriacao.calendarioLinhas?.length ?? 0) > 0 && (
+                    <div className="rounded-2xl border border-gray-200 dark:border-dark-border overflow-hidden">
+                      <div className="px-4 py-3 bg-gray-50 dark:bg-dark-bg border-b border-gray-200 dark:border-dark-border">
+                        <h4 className="font-bold text-sm text-gray-800 dark:text-white">
+                          Custo por pessoa (calendário — previsão e confirmado)
+                        </h4>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Taxas do cadastro RH. Previsão conta na ocupação/projetado; Confirmado entra no realizado.
+                        </p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100 dark:border-dark-border">
+                              <th className="px-4 py-2 font-semibold">Data</th>
+                              <th className="px-4 py-2 font-semibold">Funcionário</th>
+                              <th className="px-4 py-2 font-semibold">Status</th>
+                              <th className="px-4 py-2 font-semibold">Modo</th>
+                              <th className="px-4 py-2 font-semibold text-right">Horas</th>
+                              <th className="px-4 py-2 font-semibold text-right">Unitário</th>
+                              <th className="px-4 py-2 font-semibold text-right">Custo dia</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {resumoApropriacao.calendarioLinhas.map((linha) => (
+                              <tr
+                                key={`${linha.eventoId}-${linha.funcionarioId}-${linha.data}`}
+                                className="border-b border-gray-50 dark:border-dark-border/50"
+                              >
+                                <td className="px-4 py-2 whitespace-nowrap">{linha.data}</td>
+                                <td className="px-4 py-2">
+                                  <div className="font-medium">{linha.funcionarioNome}</div>
+                                  {linha.cargo ? (
+                                    <div className="text-xs text-gray-500">{linha.cargo}</div>
+                                  ) : null}
+                                </td>
+                                <td className="px-4 py-2">{linha.modoCusto}</td>
+                                <td className="px-4 py-2 text-right">{linha.totalHoras}</td>
+                                <td className="px-4 py-2 text-right">{formatMoeda(linha.valorUnitario)}</td>
+                                <td className="px-4 py-2 text-right font-semibold">
+                                  {formatMoeda(linha.custoDia)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-gray-50 dark:bg-dark-bg">
+                              <td colSpan={5} className="px-4 py-2 text-right text-xs font-semibold text-gray-600">
+                                Total calendário
+                              </td>
+                              <td className="px-4 py-2 text-right font-bold">
+                                {formatMoeda(resumoApropriacao.custoCalendario ?? 0)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
