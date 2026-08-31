@@ -12,6 +12,8 @@ import { roundMoney } from '../utils/currency';
 import { kitTemCotacaoBancoFrio } from '../utils/kitCatalogFlags';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -455,22 +457,22 @@ const Catalogo: React.FC<CatalogoProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">Gerencie produtos, kits e serviços</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={() => setShowQuadroModal(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold`}
                     >
                         <Squares2x2Icon className="w-5 h-5" />
                         Criar Quadro Elétrico
                     </button>
                     <button
                         onClick={() => setShowKitModal(true)}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-700 hover:to-teal-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-600 to-teal-500 text-white rounded-xl hover:from-teal-700 hover:to-teal-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Novo Item
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Error Message */}
