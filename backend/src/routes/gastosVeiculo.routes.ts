@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { GastosVeiculoController } from '../controllers/gastosVeiculoController';
-import { authenticate, authorize } from '../middlewares/auth';
+import { authenticate } from '../middlewares/auth';
+import { checkPermission } from '../middlewares/rbac';
 
 const router = Router();
 
-// Todas as rotas requerem autenticação
 router.use(authenticate);
+router.use(checkPermission('view_frota'));
 
 // CRUD de gastos de veículo
 router.get('/', GastosVeiculoController.listar);
