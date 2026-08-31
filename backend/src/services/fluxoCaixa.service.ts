@@ -617,6 +617,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
 
         const valorEfetivo = (c: any) =>
             Number(c.valorParcela) + (Number((c as any).valorJuros) || 0) - (Number((c as any).valorDesconto) || 0);
+        const valorSaidaPagar = (c: any) => Number(c.valorParcela);
 
         const saldoInicial = await this.calcularSaldoAteData(inicio);
 
@@ -627,7 +628,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
         const totalEntradasContas = contasReceberFull.reduce((s, c) => s + valorEfetivo(c), 0);
         const totalEntradasParciais = recebimentosParciais.reduce((s, rp) => s + Number(rp.valorPago), 0);
         const totalEntradas = totalEntradasContas + totalEntradasParciais;
-        const totalSaidas = contasPagar.reduce((s, c) => s + valorEfetivo(c), 0);
+        const totalSaidas = contasPagar.reduce((s, c) => s + valorSaidaPagar(c), 0);
         const saldoFinal = saldoInicial + totalEntradas - totalSaidas;
 
         const diasCriticos = fluxoPorDia.filter(d => d.saldoAcumulado < 0);
@@ -671,7 +672,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
             id: c.id,
             data: c.dataPagamento,
             descricao: c.descricao,
-            valor: valorEfetivo(c),
+            valor: valorSaidaPagar(c),
             status: c.status,
             fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome || (c as any).credorNome || 'N/A')),
             tipo: c.tipo || 'FORNECEDOR',
@@ -711,7 +712,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
                 entradasPendentes: 0,
                 saidasPendentes: 0,
                 maiorEntrada: Math.max(...todosValoresEntrada, 0),
-                maiorSaida: Math.max(...contasPagar.map(c => valorEfetivo(c)), 0),
+                maiorSaida: Math.max(...contasPagar.map(c => valorSaidaPagar(c)), 0),
                 diasComSaldoNegativo: diasCriticos.length,
                 contasAtrasadasReceber: 0,
                 contasAtrasadasPagar: 0
@@ -746,6 +747,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
         }> = [];
         const valorEfetivo = (c: any) =>
             Number(c.valorParcela) + (Number((c as any).valorJuros) || 0) - (Number((c as any).valorDesconto) || 0);
+        const valorSaidaPagar = (c: any) => Number(c.valorParcela);
 
         let saldoAcumulado = saldoInicial;
         const dataAtual = new Date(dataInicio);
@@ -766,7 +768,7 @@ fornecedor: (c.tipo === 'RH' ? 'Pagamento Funcionário' : (c.fornecedor?.nome ||
             const saidasDia = contasPagar.filter(c =>
                 c.dataPagamento && this.formatarDataParaChave(new Date(c.dataPagamento)) === dataKey
             );
-            const totalSaidasDia = saidasDia.reduce((sum, c) => sum + valorEfetivo(c), 0);
+            const totalSaidasDia = saidasDia.reduce((sum, c) => sum + valorSaidaPagar(c), 0);
 
             const saldoDia = totalEntradasDia - totalSaidasDia;
             saldoAcumulado += saldoDia;
