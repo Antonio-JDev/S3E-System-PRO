@@ -13,10 +13,13 @@ import {
 import { vincularFaltaJustificadaAoRegistro, vincularJustificativaParcialAoRegistro } from './rhJornada.service';
 import { parsePresencaXlsBuffer } from './ponto-import.parser';
 import { sincronizarExcessoCompetencia } from './bancoHorasExcesso.service';
+import { sincronizarExtratoBancoHorasCompetencia } from './bancoHorasExtrato.service';
+import { sincronizarExtratosAposImportXls } from './bancoHorasExtrato.service';
 import { sincronizarDescontosDiariaFaltaAposImportPonto } from './autonomoDiariaDesconto.service';
 import {
   metricasAvaliacaoDeRegistro,
   reaplicarBancoAvaliacaoAposMudancaMetricas,
+  sincronizarBancoAvaliacoesCompetencia,
   type MetricasAvaliacaoDia,
 } from './rhComentarioConferencia.service';
 import {
@@ -174,6 +177,8 @@ export type ImportarPresencaResultado = {
   mes: number;
   /** Autônomos com opção ativa: lançamentos FALTA recriados pela importação */
   descontosDiariaAutonomo?: { funcionariosProcessados: number; lancamentosCriados: number };
+  /** Extratos mensais de banco gerados/atualizados após o XLS */
+  extratosBancoGerados?: number;
 };
 
 export function calcularMetricasRegistro(params: {
@@ -437,6 +442,10 @@ export async function importarPresencaXls(
     await sincronizarExcessoCompetencia(fid, ano, mes);
   }
 
+  // Extrato mensal do banco (saldo inicial → movimentos → saldo final) após o XLS.
+  const idsExtrato = new Set([...funcionarioIdsAfetados, ...funcionariosPresentesNoArquivo]);
+  const extratosBancoGerados = await sincronizarExtratosAposImportXls(ano, mes, idsExtrato, 'IMPORT_XLS');
+
   const descontosDiariaAutonomo = await sincronizarDescontosDiariaFaltaAposImportPonto(
     ano,
     mes,
@@ -454,6 +463,7 @@ export async function importarPresencaXls(
     ano,
     mes,
     descontosDiariaAutonomo,
+    extratosBancoGerados,
   };
 }
 
@@ -831,6 +841,43 @@ export async function recalcularMetricasFuncionario(
   for (const key of competencias) {
     const [anoStr, mesStr] = key.split('-');
     await sincronizarExcessoCompetencia(funcionarioId, parseInt(anoStr, 10), parseInt(mesStr, 10));
+  }
+
+  const mesesBanco = new Set(competencias);
+  if (
+    opts?.ano != null &&
+    opts?.mes != null &&
+    Number.isFinite(opts.ano) &&
+    Number.isFinite(opts.mes)
+  ) {
+    mesesBanco.add(`${opts.ano}-${opts.mes}`);
+  } else {
+    const comentarios = await prisma.comentarioConferenciaPontoRh.findMany({
+      where: { funcionarioId },
+      select: { dataReferencia: true },
+    });
+    for (const c of comentarios) {
+      const dr = c.dataReferencia;
+      if (!(dr instanceof Date) || Number.isNaN(dr.getTime())) continue;
+      mesesBanco.add(`${dr.getUTCFullYear()}-${dr.getUTCMonth() + 1}`);
+    }
+  }
+  for (const key of mesesBanco) {
+    const [anoStr, mesStr] = key.split('-');
+    const a = parseInt(anoStr, 10);
+    const m = parseInt(mesStr, 10);
+    if (!Number.isFinite(a) || !Number.isFinite(m)) continue;
+    await sincronizarBancoAvaliacoesCompetencia(funcionarioId, a, m);
+    try {
+      await sincronizarExtratoBancoHorasCompetencia({
+        funcionarioId,
+        referenciaAno: a,
+        referenciaMes: m,
+        origem: 'RECALC',
+      });
+    } catch (e) {
+      console.error(`[ponto] Falha ao sincronizar extrato banco (${funcionarioId} ${a}-${m}):`, e);
+    }
   }
 
   return {
