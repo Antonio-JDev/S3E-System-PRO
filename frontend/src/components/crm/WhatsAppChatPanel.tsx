@@ -205,6 +205,28 @@ const WA_SEND_CONTACT_API_GAP_MS = 520;
 const WA_SEND_CONTACT_PICKER_RENDER_CAP = 450;
 /** Máximo de fotos buscadas na agenda lateral (Evolution). */
 const WA_AGENDA_AVATAR_FETCH_CAP = 72;
+/** Máximo de chats da sidebar sem cache que disparam fetch de avatar. */
+const WA_LIST_AVATAR_FETCH_CAP = 24;
+/** Concorrência de fetches de avatar no browser (lista + agenda). */
+const WA_AVATAR_CLIENT_CONCURRENCY = 3;
+
+let waAvatarClientInFlight = 0;
+const waAvatarClientWaiters: Array<() => void> = [];
+
+async function withWhatsappAvatarClientSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (waAvatarClientInFlight >= WA_AVATAR_CLIENT_CONCURRENCY) {
+    await new Promise<void>((resolve) => {
+      waAvatarClientWaiters.push(resolve);
+    });
+  }
+  waAvatarClientInFlight += 1;
+  try {
+    return await fn();
+  } finally {
+    waAvatarClientInFlight -= 1;
+    waAvatarClientWaiters.shift()?.();
+  }
+}
 
 function pickFirstNonEmptyString(obj: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -2977,26 +2999,37 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
     void queryClient.invalidateQueries({ queryKey: chatsQueryKey });
   }, [chatId, contactMetaUpdatedAt, queryClient]);
 
+  const chatsNeedingAvatarFetch = useMemo(
+    () =>
+      chatList
+        .filter((c) => !(c.cachedProfilePictureUrl || '').trim())
+        .slice(0, WA_LIST_AVATAR_FETCH_CAP),
+    [chatList]
+  );
+
   const profilePictures = useQueries({
-    queries: chatList.map((c) => ({
+    queries: chatsNeedingAvatarFetch.map((c) => ({
       queryKey: ['whatsapp-profile-picture', c.chatId] as const,
-      queryFn: async (): Promise<string | null> => {
-        const r = await fetchWhatsappProviderProfilePicture(c.chatId);
-        if (!r.success || !r.data) return null;
-        return r.data.url ?? null;
-      },
+      queryFn: async (): Promise<string | null> =>
+        withWhatsappAvatarClientSlot(async () => {
+          const r = await fetchWhatsappProviderProfilePicture(c.chatId);
+          if (!r.success || !r.data) return null;
+          return r.data.url ?? null;
+        }),
       staleTime: 30 * 60 * 1000,
       gcTime: 60 * 60 * 1000,
+      retry: false,
+      refetchOnWindowFocus: false,
     })),
   });
 
   const profileUrlByChatId = useMemo(() => {
     const m = new Map<string, string | null>();
-    chatList.forEach((c, i) => {
+    chatsNeedingAvatarFetch.forEach((c, i) => {
       m.set(c.chatId, profilePictures[i]?.data ?? null);
     });
     return m;
-  }, [chatList, profilePictures]);
+  }, [chatsNeedingAvatarFetch, profilePictures]);
 
   const agendaRowsForAvatarFetch = useMemo(
     () => agendaDisplayedRowsSorted.slice(0, WA_AGENDA_AVATAR_FETCH_CAP),
@@ -3006,18 +3039,21 @@ export const WhatsAppChatPanel: React.FC<WhatsAppChatPanelProps> = ({
   const contactAvatarQueries = useQueries({
     queries: agendaRowsForAvatarFetch.map((row) => ({
       queryKey: ['whatsapp-evolution-contact-avatar', row.id] as const,
-      queryFn: async (): Promise<string | null> => {
-        try {
-          const r = await postEvolutionFetchProfilePicture({ number: row.id.trim() });
-          if (!r.success) return null;
-          const u = r.data?.profilePictureUrl;
-          return typeof u === 'string' && u.length > 0 ? u : null;
-        } catch {
-          return null;
-        }
-      },
+      queryFn: async (): Promise<string | null> =>
+        withWhatsappAvatarClientSlot(async () => {
+          try {
+            const r = await postEvolutionFetchProfilePicture({ number: row.id.trim() });
+            if (!r.success) return null;
+            const u = r.data?.profilePictureUrl;
+            return typeof u === 'string' && u.length > 0 ? u : null;
+          } catch {
+            return null;
+          }
+        }),
       staleTime: 30 * 60 * 1000,
       gcTime: 60 * 60 * 1000,
+      retry: false,
+      refetchOnWindowFocus: false,
       enabled: contactsPanelOpen && agendaRowsForAvatarFetch.length > 0,
     })),
   });
