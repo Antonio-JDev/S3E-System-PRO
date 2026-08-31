@@ -14,6 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -983,10 +985,14 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
 
             {/* Navegação por Tabs */}
             <div className="bg-white dark:bg-dark-card rounded-2xl shadow-md border border-gray-200 dark:border-dark-border mb-6">
-                <div className="flex border-b border-gray-200 dark:border-dark-border">
+                <ScrollableRow
+                    as="nav"
+                    ariaLabel="Abas de configurações"
+                    className="border-b border-gray-200 dark:border-dark-border"
+                >
                     <button
                         onClick={() => setAbaAtiva('perfil')}
-                        className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 sm:px-6 py-4 font-semibold transition-all ${
                             abaAtiva === 'perfil'
                                 ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-bg'
@@ -999,7 +1005,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setAbaAtiva('usuarios')}
-                        className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 sm:px-6 py-4 font-semibold transition-all ${
                             abaAtiva === 'usuarios'
                                 ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-bg'
@@ -1010,7 +1016,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setAbaAtiva('empresa')}
-                        className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 sm:px-6 py-4 font-semibold transition-all ${
                             abaAtiva === 'empresa'
                                 ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-bg'
@@ -1021,7 +1027,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setAbaAtiva('balanco-aliquotas')}
-                        className={`flex items-center gap-2 px-6 py-4 font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 sm:px-6 py-4 font-semibold transition-all ${
                             abaAtiva === 'balanco-aliquotas'
                                 ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20'
                                 : 'text-gray-600 dark:text-dark-text-secondary hover:text-gray-900 dark:hover:text-dark-text hover:bg-gray-50 dark:hover:bg-dark-bg'
@@ -1032,7 +1038,7 @@ const Configuracoes: React.FC<ConfiguracoesProps> = ({ toggleSidebar }) => {
                         </svg>
                         Balanço de Alíquotas
                     </button>
-                </div>
+                </ScrollableRow>
 
                 {/* Conteúdo das Abas */}
                 <div className="p-8">
