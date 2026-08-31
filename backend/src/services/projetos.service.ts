@@ -444,7 +444,16 @@ export class ProjetosService {
 
     const updateData: any = { status: novoStatus };
     if (novoStatus === 'CONCLUIDO') {
-      updateData.dataFim = new Date();
+      const agora = new Date();
+      updateData.dataFim = agora;
+      updateData.dataConclusao = agora;
+      if (options?.userId) {
+        updateData.concluidoPorId = options.userId;
+      }
+    } else if (String(projeto.status) === 'CONCLUIDO') {
+      updateData.dataFim = null;
+      updateData.dataConclusao = null;
+      updateData.concluidoPorId = null;
     }
 
     // 🔍 SE MUDAR PARA APROVADO: APENAS VALIDAR ESTOQUE (sem dar baixa).
@@ -527,6 +536,9 @@ export class ProjetosService {
       updateData.iniciadoSemEstoquePorId = options.userId ?? null;
     }
 
+    const eraAprovacaoNova =
+      novoStatus === ProjetoStatus.APROVADO && projeto.status !== ProjetoStatus.APROVADO;
+
     const atualizado = await prisma.projeto.update({ where: { id: projetoId }, data: updateData });
 
     // Regra "Gerar Obra"
@@ -553,6 +565,21 @@ export class ProjetosService {
       novoStatus === ProjetoStatus.VALIDADO
     ) {
       await entrarNaFilaSeAplicavel(projetoId);
+    }
+
+    if (eraAprovacaoNova) {
+      try {
+        const orc = await prisma.orcamento.findUnique({
+          where: { id: projeto.orcamentoId },
+          select: { numeroSequencial: true },
+        });
+        const numeroOs =
+          orc?.numeroSequencial != null ? `OS-${orc.numeroSequencial}` : projeto.titulo;
+        const { notificarOsAprovadaFinanceiro } = await import('./notificacoes.service');
+        await notificarOsAprovadaFinanceiro(projetoId, numeroOs);
+      } catch (err) {
+        console.error('[atualizarStatus] Falha ao notificar aprovação da OS:', err);
+      }
     }
 
     return atualizado;
@@ -590,11 +617,18 @@ export class ProjetosService {
       await obraService.deletarObraParaRollback(obra.id);
     }
 
-    const updateData: { status: ProjetoStatus; dataFim?: null } = {
+    const updateData: {
+      status: ProjetoStatus;
+      dataFim?: null;
+      dataConclusao?: null;
+      concluidoPorId?: null;
+    } = {
       status: novoStatus as ProjetoStatus,
     };
     if (statusAtual === 'CONCLUIDO') {
       updateData.dataFim = null;
+      updateData.dataConclusao = null;
+      updateData.concluidoPorId = null;
     }
 
     return prisma.projeto.update({
