@@ -17,6 +17,8 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -1446,10 +1448,10 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
 
             {/* Navegação entre seções */}
             <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm border border-gray-200 dark:border-dark-border p-2 mb-6">
-                <nav className="flex gap-2">
+                <ScrollableRow as="nav" ariaLabel="Seções de emissão fiscal" className="gap-2">
                     <button
                         onClick={() => setActiveSection('emitir')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'emitir'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'emitir'
                             ? 'bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1461,7 +1463,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setActiveSection('nfse')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'nfse'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'nfse'
                             ? 'bg-gradient-to-r from-teal-600 to-cyan-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1473,7 +1475,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setActiveSection('historico')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'historico'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'historico'
                             ? 'bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1485,7 +1487,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setActiveSection('historicoNfse')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'historicoNfse'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'historicoNfse'
                             ? 'bg-gradient-to-r from-cyan-600 to-teal-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1497,7 +1499,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setActiveSection('operacoes')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'operacoes'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'operacoes'
                             ? 'bg-gradient-to-r from-orange-600 to-orange-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1509,7 +1511,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                     </button>
                     <button
                         onClick={() => setActiveSection('configurar')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'configurar'
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${activeSection === 'configurar'
                             ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:bg-gray-100 dark:hover:bg-dark-bg'
                             }`}
@@ -1519,7 +1521,7 @@ const EmissaoNFe: React.FC<EmissaoNFeProps> = ({ toggleSidebar }) => {
                         </svg>
                         Configurar Empresas
                     </button>
-                </nav>
+                </ScrollableRow>
             </div>
 
             {/* SEÇÃO: NFS-e Itajaí/SC (Pública v7.4) */}
