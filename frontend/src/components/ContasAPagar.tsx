@@ -4,7 +4,8 @@ import { axiosApiService } from '../services/axiosApi';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
-import { calcValorARegistrar, formatBRL, parseMoney } from '../utils/financeiroValor';
+import { calcValorARegistrar, calcValorBaseFromEfetivo, formatBRL, parseMoney } from '../utils/financeiroValor';
+import { canEditarContaFinanceiraManual } from '../utils/permissions';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -91,6 +92,8 @@ interface ContaPagar {
     dataVencimento: string;
     dataAgendamento?: string;
     valor: number;
+    valorJuros?: number;
+    valorDesconto?: number;
     valorPago?: number;
     dataPagamento?: string;
     status: 'Pendente' | 'Pago' | 'Atrasado';
@@ -174,16 +177,40 @@ function nomeColaboradorContaRh(conta: { funcionario?: { nome?: string } | null;
     return m ? m[1].trim() : null;
 }
 
+function isContaPagarManual(conta: { compraId?: string; despesaFixaId?: string } | null | undefined): boolean {
+    return Boolean(conta) && !conta?.compraId && !conta?.despesaFixaId;
+}
+
+function podeSelecionarParaUnificar(conta: ContaPagar): boolean {
+    if (conta.status !== 'Pendente' && conta.status !== 'Atrasado') return false;
+    if (conta.meioPagamento === 'CARTAO_CREDITO' || conta.cartaoCreditoId) return false;
+    const tipo = (conta as any).tipo || 'FORNECEDOR';
+    if (tipo !== 'FORNECEDOR') return false;
+    if (conta.despesaFixaId) return false;
+    return true;
+}
+
+type SugestaoUnificacaoUI = {
+    contaId: string;
+    motivos: Array<'MESMA_NOTA' | 'MESMO_FORNECEDOR' | 'VENCIMENTO_PROXIMO'>;
+    score: number;
+    detalhe: string;
+    conta: {
+        id: string;
+        descricao?: string;
+        valorParcela: number;
+        dataVencimento: string;
+        status: string;
+        fornecedorNome?: string | null;
+        numeroNF?: string | null;
+        compraId?: string | null;
+    };
+};
+
 // ==================== COMPONENT ====================
 const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva, initialContaId, onClearInitialContaId }) => {
     const { user } = useContext(AuthContext)!;
-    const userRole = user?.role?.toLowerCase();
-    const isAdminOrDev = Boolean(
-        user?.isAdmin ||
-        userRole === 'admin' ||
-        userRole === 'administrador' ||
-        userRole === 'desenvolvedor'
-    );
+    const podeEditarLancamentoManual = canEditarContaFinanceiraManual(user);
 
     const toISODate = (d: Date) => {
         const y = d.getFullYear();
@@ -260,6 +287,10 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const [novaContaCartaoId, setNovaContaCartaoId] = useState<string>('');
     const [novasObservacoes, setNovasObservacoes] = useState('');
     const [novoCredorNome, setNovoCredorNome] = useState('');
+    const [novaDescricaoEdit, setNovaDescricaoEdit] = useState('');
+    const [editValor, setEditValor] = useState('');
+    const [editJuros, setEditJuros] = useState('0');
+    const [editDesconto, setEditDesconto] = useState('0');
     
     // AlertDialog de Confirmação
     const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
@@ -293,6 +324,18 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     const [funcionariosOptions, setFuncionariosOptions] = useState<FuncionarioOption[]>([]);
     const [salvandoNovaConta, setSalvandoNovaConta] = useState(false);
 
+    // Unificação de contas
+    const [idsSelecionados, setIdsSelecionados] = useState<Set<string>>(new Set());
+    const [isUnificarModalOpen, setIsUnificarModalOpen] = useState(false);
+    const [unificarParcelas, setUnificarParcelas] = useState('1');
+    const [unificarPrimeiroVencimento, setUnificarPrimeiroVencimento] = useState(new Date().toISOString().split('T')[0]);
+    const [unificarIntervaloDias, setUnificarIntervaloDias] = useState('30');
+    const [unificarDescricao, setUnificarDescricao] = useState('');
+    const [unificarObservacoes, setUnificarObservacoes] = useState('');
+    const [sugestoesUnificacao, setSugestoesUnificacao] = useState<SugestaoUnificacaoUI[]>([]);
+    const [carregandoSugestoes, setCarregandoSugestoes] = useState(false);
+    const [salvandoUnificacao, setSalvandoUnificacao] = useState(false);
+
     const CLASSIFICACOES_CONTA_PAGAR = [
         { value: '', label: 'Selecione a classificação...' },
         { value: 'Cartão de crédito', label: 'Cartão de crédito' },
@@ -322,6 +365,13 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         [novaContaValor, novaContaJuros, novaContaDesconto]
     );
 
+    const valorARegistrarEdicao = useMemo(
+        () => calcValorARegistrar(editValor, editJuros, editDesconto),
+        [editValor, editJuros, editDesconto]
+    );
+
+    const contaEditandoEhManual = isContaPagarManual(contaSelecionada);
+
     // Handlers de Modal - Declarados antes do useEscapeKey para evitar erro de inicialização
     const handleClosePagamentoModal = () => {
         setIsPagamentoModalOpen(false);
@@ -341,11 +391,13 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         }
         setContaSelecionada(conta);
         setDataPagamento(new Date().toISOString().split('T')[0]);
-        setValorPago(conta.valor.toString());
+        const juros = conta.valorJuros ?? 0;
+        const desconto = conta.valorDesconto ?? 0;
+        setValorPago(String(calcValorBaseFromEfetivo(conta.valor, juros, desconto)));
         setObservacoesPagamento('');
         setMeioPagamento('PIX');
-        setJurosPagamento('0');
-        setDescontosPagamento('0');
+        setJurosPagamento(String(juros));
+        setDescontosPagamento(String(desconto));
         setIsPagamentoModalOpen(true);
     };
 
@@ -380,12 +432,175 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         setNovaDataVencimento('');
         setNovasObservacoes('');
         setNovoCredorNome('');
+        setNovaDescricaoEdit('');
+        setEditValor('');
+        setEditJuros('0');
+        setEditDesconto('0');
     };
 
     const handleCloseAgendamentoModal = () => {
         setIsAgendamentoModalOpen(false);
         setContaSelecionada(null);
         setDataAgendamento(new Date().toISOString().split('T')[0]);
+    };
+
+    const contasSelecionadasLista = useMemo(
+        () => contasPagar.filter((c) => idsSelecionados.has(c.id)),
+        [contasPagar, idsSelecionados]
+    );
+
+    const valorTotalSelecionado = useMemo(
+        () => contasSelecionadasLista.reduce((sum, c) => sum + (c.valor || 0), 0),
+        [contasSelecionadasLista]
+    );
+
+    const toggleSelecaoConta = (conta: ContaPagar) => {
+        if (!podeSelecionarParaUnificar(conta)) {
+            toast.error('Esta conta não pode ser unificada', {
+                description: 'Apenas contas de fornecedor em aberto (sem cartão) podem ser selecionadas.',
+            });
+            return;
+        }
+        setIdsSelecionados((prev) => {
+            const next = new Set(prev);
+            if (next.has(conta.id)) next.delete(conta.id);
+            else next.add(conta.id);
+            return next;
+        });
+    };
+
+    const toggleSelecionarTodasVisiveis = (elegiveis: ContaPagar[]) => {
+        const todosMarcados =
+            elegiveis.length > 0 && elegiveis.every((c) => idsSelecionados.has(c.id));
+        setIdsSelecionados((prev) => {
+            const next = new Set(prev);
+            if (todosMarcados) {
+                elegiveis.forEach((c) => next.delete(c.id));
+            } else {
+                elegiveis.forEach((c) => next.add(c.id));
+            }
+            return next;
+        });
+    };
+
+    const carregarSugestoesUnificacao = async (ids: string[]) => {
+        if (!ids.length) {
+            setSugestoesUnificacao([]);
+            return;
+        }
+        setCarregandoSugestoes(true);
+        try {
+            const res = await financeiroService.sugerirUnificacaoContasPagar(ids, 15);
+            if (res.success) {
+                setSugestoesUnificacao((res.data || []).filter((s) => !ids.includes(s.contaId)));
+            } else {
+                setSugestoesUnificacao([]);
+            }
+        } catch {
+            setSugestoesUnificacao([]);
+        } finally {
+            setCarregandoSugestoes(false);
+        }
+    };
+
+    const handleCloseUnificarModal = () => {
+        setIsUnificarModalOpen(false);
+        setUnificarParcelas('1');
+        setUnificarIntervaloDias('30');
+        setUnificarDescricao('');
+        setUnificarObservacoes('');
+        setSugestoesUnificacao([]);
+    };
+
+    const handleOpenUnificarModal = async () => {
+        if (idsSelecionados.size < 2) {
+            toast.error('Selecione ao menos 2 contas para unificar');
+            return;
+        }
+        const selecionadas = contasPagar.filter((c) => idsSelecionados.has(c.id));
+        const fornecedores = new Set(
+            selecionadas.map((c) => c.fornecedorId || c.fornecedorNome).filter(Boolean)
+        );
+        if (fornecedores.size > 1) {
+            toast.error('As contas devem ser do mesmo fornecedor');
+            return;
+        }
+        const datas = selecionadas.map((c) => new Date(c.dataVencimento).getTime());
+        const menor = new Date(Math.min(...datas));
+        setUnificarPrimeiroVencimento(toISODate(menor));
+        setUnificarDescricao('');
+        setIsUnificarModalOpen(true);
+        await carregarSugestoesUnificacao(Array.from(idsSelecionados));
+    };
+
+    const adicionarSugestaoSelecao = (sugestao: SugestaoUnificacaoUI) => {
+        const nextIds = Array.from(new Set([...Array.from(idsSelecionados), sugestao.contaId]));
+        setIdsSelecionados(new Set(nextIds));
+        setContasPagar((prev) => {
+            if (prev.some((c) => c.id === sugestao.contaId)) return prev;
+            return [
+                ...prev,
+                {
+                    id: sugestao.contaId,
+                    fornecedorNome: sugestao.conta.fornecedorNome || 'Fornecedor',
+                    numeroParcela: 1,
+                    descricao: sugestao.conta.descricao || 'Conta sugerida',
+                    dataVencimento: sugestao.conta.dataVencimento,
+                    valor: sugestao.conta.valorParcela,
+                    status: (sugestao.conta.status as ContaPagar['status']) || 'Pendente',
+                    compraId: sugestao.conta.compraId || undefined,
+                    tipo: 'FORNECEDOR',
+                },
+            ];
+        });
+        setSugestoesUnificacao((prev) => prev.filter((s) => s.contaId !== sugestao.contaId));
+        void carregarSugestoesUnificacao(nextIds);
+    };
+
+    const handleConfirmarUnificacao = async () => {
+        const ids = Array.from(idsSelecionados);
+        if (ids.length < 2) {
+            toast.error('Selecione ao menos 2 contas');
+            return;
+        }
+        const parcelas = parseInt(unificarParcelas, 10);
+        const intervalo = parseInt(unificarIntervaloDias, 10);
+        if (!Number.isFinite(parcelas) || parcelas < 1) {
+            toast.error('Informe um número de parcelas válido');
+            return;
+        }
+        if (!Number.isFinite(intervalo) || intervalo < 1) {
+            toast.error('Informe o intervalo de dias entre parcelas');
+            return;
+        }
+
+        setSalvandoUnificacao(true);
+        try {
+            const res = await financeiroService.unificarContasPagar({
+                contaIds: ids,
+                parcelas,
+                dataPrimeiroVencimento: unificarPrimeiroVencimento,
+                intervaloDias: intervalo,
+                descricao: unificarDescricao.trim() || undefined,
+                observacoes: unificarObservacoes.trim() || undefined,
+            });
+            if (res.success) {
+                toast.success('Contas unificadas com sucesso!', {
+                    description: res.message || `${ids.length} contas → ${parcelas} parcela(s)`,
+                });
+                setIdsSelecionados(new Set());
+                handleCloseUnificarModal();
+                await loadContasPagar();
+            } else {
+                toast.error('Erro ao unificar', { description: res.error || 'Tente novamente' });
+            }
+        } catch (error: any) {
+            toast.error('Erro ao unificar', {
+                description: error?.message || 'Erro de conexão',
+            });
+        } finally {
+            setSalvandoUnificacao(false);
+        }
     };
 
     const handleOpenAgendamentoModal = (conta: ContaPagar) => {
@@ -445,11 +660,16 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
     // Verificar se pode excluir a parcela
     const podeExcluirParcela = (conta: ContaPagar): boolean => {
-        if (!isAdminOrDev) {
+        if (!podeEditarLancamentoManual) {
             return false;
         }
 
-        // Parcela deve estar paga
+        const contaManual = isContaPagarManual(conta);
+        // Contas manuais podem ser descartadas sem estar pagas (correção de lançamento)
+        if (contaManual) {
+            return true;
+        }
+
         if (conta.status !== 'Pago') {
             return false;
         }
@@ -479,9 +699,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     };
 
     const getDeleteTooltip = (conta: ContaPagar): string => {
-        const contaManual = !conta.compraId && !conta.despesaFixaId;
-        if (contaManual) {
-            return 'Excluir conta manual';
+        if (isContaPagarManual(conta)) {
+            return 'Excluir conta manual (sem precisar pagar)';
         }
         return 'Excluir parcela com origem (somente paga e com origem removida)';
     };
@@ -618,6 +837,8 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         dataVencimento: conta.dataVencimento,
                         dataAgendamento: conta.dataAgendamento,
                         valor: conta.valorParcela || conta.valor || 0,
+                        valorJuros: conta.valorJuros ?? 0,
+                        valorDesconto: conta.valorDesconto ?? 0,
                         valorPago: conta.valorPago,
                         dataPagamento: conta.dataPagamento,
                         status: isAtrasada ? 'Atrasado' : conta.status,
@@ -942,6 +1163,14 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
             return;
         }
 
+        const tipoRh = (contaSelecionada as any).tipo === 'RH';
+        if (!tipoRh && Math.abs(valorARegistrar - contaSelecionada.valor) > 0.01) {
+            toast.error('Valor a registrar deve quitar o saldo da parcela.', {
+                description: `Saldo: R$ ${formatBRL(contaSelecionada.valor)} • Informado: R$ ${formatBRL(valorARegistrar)}`,
+            });
+            return;
+        }
+
         try {
             console.log('💳 Registrando pagamento...');
             const response = await financeiroService.pagarContaPagar(contaSelecionada.id, {
@@ -1046,12 +1275,32 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
         setNovaDataVencimento(conta.dataVencimento.split('T')[0]);
         setNovasObservacoes(conta.observacoes || '');
         setNovoCredorNome(conta.fornecedorNome || '');
+        setNovaDescricaoEdit(conta.descricao || '');
+        const juros = conta.valorJuros ?? 0;
+        const desconto = conta.valorDesconto ?? 0;
+        setEditValor(String(calcValorBaseFromEfetivo(conta.valor, juros, desconto)));
+        setEditJuros(String(juros));
+        setEditDesconto(String(desconto));
         setMeioPagamentoEdit((conta as any).meioPagamento || '');
         setCartaoCreditoIdEdit((conta as any).cartaoCreditoId || '');
         setIsAtualizarModalOpen(true);
     };
 
     const handleOpenConfirmAtualizar = () => {
+        if (isContaPagarManual(contaSelecionada)) {
+            if (!novaDescricaoEdit.trim()) {
+                toast.error('Informe a descrição da conta.');
+                return;
+            }
+            if (parseMoney(editValor) <= 0) {
+                toast.error('Informe um valor válido.');
+                return;
+            }
+            if (valorARegistrarEdicao <= 0) {
+                toast.error('Valor a registrar deve ser maior que zero (verifique juros e descontos).');
+                return;
+            }
+        }
         setConfirmAction('atualizar');
         setIsConfirmDialogOpen(true);
     };
@@ -1061,18 +1310,27 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
         try {
             console.log('✏️ Atualizando conta a pagar...');
-            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}`, {
+            const payload: Record<string, unknown> = {
                 credorNome: (novoCredorNome || '').trim() || null,
                 dataVencimento: novaDataVencimento,
                 observacoes: novasObservacoes,
                 meioPagamento: meioPagamentoEdit || null,
                 cartaoCreditoId:
                     meioPagamentoEdit === 'CARTAO_CREDITO' ? cartaoCreditoIdEdit || null : null,
-            });
+            };
+            if (isContaPagarManual(contaSelecionada)) {
+                payload.descricao = novaDescricaoEdit.trim();
+                payload.valorParcela = parseMoney(editValor);
+                payload.valorJuros = parseMoney(editJuros);
+                payload.valorDesconto = parseMoney(editDesconto);
+            }
+            const response = await axiosApiService.put<any>(`/api/contas-pagar/${contaSelecionada.id}`, payload);
 
             if (response.success) {
                 toast.success('✅ Conta atualizada com sucesso!', {
-                    description: `Novo vencimento: ${new Date(novaDataVencimento).toLocaleDateString('pt-BR')}`
+                    description: contaEditandoEhManual
+                        ? `Valor a registrar: R$ ${formatBRL(valorARegistrarEdicao)}`
+                        : `Novo vencimento: ${new Date(novaDataVencimento).toLocaleDateString('pt-BR')}`
                 });
                 handleCloseAtualizarModal();
                 // Recarregar lista
@@ -1327,6 +1585,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
     useEscapeKey(isVisualizarModalOpen, handleCloseVisualizarModal);
     useEscapeKey(isAtualizarModalOpen, handleCloseAtualizarModal);
     useEscapeKey(isAgendamentoModalOpen, handleCloseAgendamentoModal);
+    useEscapeKey(isUnificarModalOpen, handleCloseUnificarModal);
 
     if (loading) {
         return (
@@ -1660,6 +1919,37 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                 </div>
             </div>
 
+            {/* Barra de unificação */}
+            {idsSelecionados.size > 0 && (
+                <div className="sticky top-2 z-40 mb-4 rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-950/40 dark:border-indigo-800 shadow-md px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-sm text-indigo-900 dark:text-indigo-200">
+                        <span className="font-bold">{idsSelecionados.size}</span> conta(s) selecionada(s)
+                        {' · '}
+                        Total{' '}
+                        <span className="font-bold">
+                            R$ {valorTotalSelecionado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setIdsSelecionados(new Set())}
+                            className="px-3 py-2 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:underline"
+                        >
+                            Limpar seleção
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void handleOpenUnificarModal()}
+                            disabled={idsSelecionados.size < 2}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                            Unificar e parcelar
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Tabela de Contas */}
             {/* Estilos para destaque piscante da parcela selecionada */}
             <style>{`
@@ -1677,6 +1967,24 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                     <table className="w-full">
                         <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                             <tr>
+                                <th className="px-3 py-4 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider w-12">
+                                    <input
+                                        type="checkbox"
+                                        aria-label="Selecionar todas elegíveis"
+                                        checked={
+                                            contasFiltradas.filter(podeSelecionarParaUnificar).length > 0 &&
+                                            contasFiltradas
+                                                .filter(podeSelecionarParaUnificar)
+                                                .every((c) => idsSelecionados.has(c.id))
+                                        }
+                                        onChange={() =>
+                                            toggleSelecionarTodasVisiveis(
+                                                contasFiltradas.filter(podeSelecionarParaUnificar)
+                                            )
+                                        }
+                                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                </th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                     Parcela / Compra
                                 </th>
@@ -1703,7 +2011,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         <tbody className="divide-y divide-gray-200">
                             {contasFiltradas.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="px-6 py-12 text-center">
+                                    <td colSpan={8} className="px-6 py-12 text-center">
                                         <div className="flex flex-col items-center justify-center">
                                             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                                                 <CurrencyDollarIcon className="w-8 h-8 text-gray-400" />
@@ -1718,8 +2026,18 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     <tr
                                         key={conta.id}
                                         ref={(el) => { rowRefs.current[conta.id] = el; }}
-                                        className={`hover:bg-gray-50 transition-colors ${highlightedContaId === conta.id ? 'animated-highlight' : ''}`}
+                                        className={`hover:bg-gray-50 transition-colors ${highlightedContaId === conta.id ? 'animated-highlight' : ''} ${idsSelecionados.has(conta.id) ? 'bg-indigo-50/60' : ''}`}
                                     >
+                                        <td className="px-3 py-4 text-center">
+                                            <input
+                                                type="checkbox"
+                                                aria-label={`Selecionar conta ${conta.descricao}`}
+                                                disabled={!podeSelecionarParaUnificar(conta)}
+                                                checked={idsSelecionados.has(conta.id)}
+                                                onChange={() => toggleSelecaoConta(conta)}
+                                                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-30"
+                                            />
+                                        </td>
                                         <td className="px-6 py-4">
                                             <div>
                                                 <p className="font-semibold text-gray-900">Parcela {conta.numeroParcela}</p>
@@ -1808,7 +2126,7 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                                         >
                                                             <CheckCircleIcon className="w-4 h-4" />
                                                         </button>
-                                                        {isAdminOrDev && (
+                                                        {podeEditarLancamentoManual && (
                                                             <button
                                                                 onClick={() => handleOpenAtualizarModal(conta)}
                                                                 className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 transition-colors"
@@ -2101,7 +2419,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                         <div className="modal-header bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/30 dark:to-amber-900/30">
                             <div>
                                 <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Atualizar Conta a Pagar</h2>
-                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">Alterar vencimento e observações</p>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+                                    {contaEditandoEhManual
+                                        ? 'Corrigir lançamento manual: valor, juros, desconto e demais dados'
+                                        : 'Alterar vencimento e observações (valor da NF/XML permanece bloqueado)'}
+                                </p>
                             </div>
                             <button
                                 onClick={handleCloseAtualizarModal}
@@ -2121,20 +2443,24 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         <span className="text-blue-700 dark:text-blue-400 font-medium">Fornecedor:</span>
                                         <p className="text-blue-900 dark:text-blue-300 font-semibold">{contaSelecionada.fornecedorNome}</p>
                                     </div>
+                                    {!contaEditandoEhManual && (
                                     <div>
                                         <span className="text-blue-700 dark:text-blue-400 font-medium">Descrição:</span>
                                         <p className="text-blue-900 dark:text-blue-300">{contaSelecionada.descricao}</p>
                                     </div>
+                                    )}
                                     <div>
                                         <span className="text-blue-700 dark:text-blue-400 font-medium">Vencimento Atual:</span>
                                         <p className="text-blue-900 dark:text-blue-300">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
                                     </div>
+                                    {!contaEditandoEhManual && (
                                     <div>
                                         <span className="text-blue-700 dark:text-blue-400 font-medium">Valor:</span>
                                         <p className="text-blue-900 dark:text-blue-300 font-bold">
                                             R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
                                     </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -2155,6 +2481,78 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         Para contas com fornecedor cadastrado, este campo atualiza o nome do credor (contas manuais).
                                     </p>
                                 </div>
+                                {contaEditandoEhManual && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                Descrição *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={novaDescricaoEdit}
+                                                onChange={(e) => setNovaDescricaoEdit(e.target.value)}
+                                                className="input-field"
+                                                placeholder="Descrição da conta"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                Valor (R$) *
+                                            </label>
+                                            <input
+                                                type="number"
+                                                inputMode="decimal"
+                                                value={editValor}
+                                                onChange={(e) => setEditValor(e.target.value)}
+                                                min="0"
+                                                step="0.01"
+                                                className="input-field"
+                                                placeholder="0,00"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                    Juros (R$)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    inputMode="decimal"
+                                                    value={editJuros}
+                                                    onChange={(e) => setEditJuros(e.target.value)}
+                                                    min="0"
+                                                    step="0.01"
+                                                    className="input-field"
+                                                    placeholder="0,00"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
+                                                    Desconto (R$)
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    inputMode="decimal"
+                                                    value={editDesconto}
+                                                    onChange={(e) => setEditDesconto(e.target.value)}
+                                                    min="0"
+                                                    step="0.01"
+                                                    className="input-field"
+                                                    placeholder="0,00"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-300 dark:border-amber-800/60 p-4 rounded-xl">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">Valor a registrar:</span>
+                                                <span className="text-xl font-bold text-amber-800 dark:text-amber-300">R$ {formatBRL(valorARegistrarEdicao)}</span>
+                                            </div>
+                                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                                                Ajuste o lançamento sem precisar marcar a conta como paga.
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text mb-2">
                                         Nova Data de Vencimento *
@@ -2600,10 +2998,21 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                         <p className="text-blue-900">{new Date(contaSelecionada.dataVencimento).toLocaleDateString('pt-BR')}</p>
                                     </div>
                                     <div>
-                                        <span className="text-blue-700 font-medium">Valor Original:</span>
+                                        <span className="text-blue-700 font-medium">Saldo da parcela:</span>
                                         <p className="text-blue-900 font-bold">
                                             R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </p>
+                                        {(contaSelecionada.valorJuros ?? 0) > 0 || (contaSelecionada.valorDesconto ?? 0) > 0 ? (
+                                            <p className="text-xs text-blue-700 mt-1">
+                                                Base: R$ {formatBRL(calcValorBaseFromEfetivo(
+                                                    contaSelecionada.valor,
+                                                    contaSelecionada.valorJuros ?? 0,
+                                                    contaSelecionada.valorDesconto ?? 0
+                                                ))}
+                                                {(contaSelecionada.valorJuros ?? 0) > 0 ? ` + juros R$ ${formatBRL(contaSelecionada.valorJuros ?? 0)}` : ''}
+                                                {(contaSelecionada.valorDesconto ?? 0) > 0 ? ` − desconto R$ ${formatBRL(contaSelecionada.valorDesconto ?? 0)}` : ''}
+                                            </p>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
@@ -2625,20 +3034,20 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Valor Pago (R$) *
+                                        Valor base (R$) *
                                     </label>
                                     <input
                                         type="number"
                                         value={valorPago}
                                         onChange={(e) => setValorPago(e.target.value)}
                                         min="0"
-                                        max={(contaSelecionada as any).tipo === 'RH' ? undefined : contaSelecionada.valor}
                                         step="0.01"
                                         required
                                         className="select-field focus:ring-red-500 focus:border-red-500"
                                     />
                                     <p className="text-xs text-gray-500 mt-1">
-                                        Valor original: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        Saldo a quitar: R$ {contaSelecionada.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        {' '}(base + juros − descontos)
                                     </p>
                                     {(contaSelecionada as any).tipo === 'RH' && (
                                         <p className="text-xs text-amber-700 mt-1">
@@ -2748,6 +3157,174 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                 </div>
             )}
 
+            {/* Modal Unificar Contas */}
+            {isUnificarModalOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="modal-content max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="modal-header bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-900/30 dark:to-violet-900/30">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">Unificar contas a pagar</h2>
+                                <p className="text-sm text-gray-600 dark:text-dark-text-secondary mt-1">
+                                    Consolida {idsSelecionados.size} contas (R${' '}
+                                    {valorTotalSelecionado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) e gera novo parcelamento
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={handleCloseUnificarModal}
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-white/80 rounded-xl"
+                            >
+                                <XMarkIcon className="w-6 h-6" />
+                            </button>
+                        </div>
+
+                        <div className="modal-body space-y-5">
+                            <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl p-3 max-h-40 overflow-y-auto">
+                                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Contas selecionadas</p>
+                                <ul className="space-y-1 text-sm">
+                                    {contasSelecionadasLista.map((c) => (
+                                        <li key={c.id} className="flex justify-between gap-2">
+                                            <span className="truncate text-gray-800 dark:text-dark-text">
+                                                {c.descricao}
+                                                {c.compra?.numeroNF ? ` · NF ${c.compra.numeroNF}` : ''}
+                                            </span>
+                                            <span className="font-semibold whitespace-nowrap">
+                                                R$ {c.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+
+                            <div className="border border-indigo-100 dark:border-indigo-900 rounded-xl p-3 bg-indigo-50/50 dark:bg-indigo-950/20">
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">
+                                        Sugestões inteligentes
+                                    </p>
+                                    {carregandoSugestoes && (
+                                        <span className="text-xs text-indigo-600">Buscando…</span>
+                                    )}
+                                </div>
+                                <p className="text-xs text-indigo-700 dark:text-indigo-300 mb-2">
+                                    Mesma NF/compra, mesmo fornecedor ou vencimento próximo (±15 dias)
+                                </p>
+                                {sugestoesUnificacao.length === 0 && !carregandoSugestoes ? (
+                                    <p className="text-xs text-gray-500">Nenhuma sugestão adicional no momento.</p>
+                                ) : (
+                                    <ul className="space-y-2 max-h-44 overflow-y-auto">
+                                        {sugestoesUnificacao.map((s) => (
+                                            <li
+                                                key={s.contaId}
+                                                className="flex items-center justify-between gap-2 bg-white dark:bg-dark-card rounded-lg px-3 py-2 border border-indigo-100 dark:border-indigo-900"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-medium truncate">
+                                                        {s.conta.descricao || s.contaId.slice(0, 8)}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 truncate">
+                                                        {s.detalhe}
+                                                        {s.conta.numeroNF ? ` · NF ${s.conta.numeroNF}` : ''}
+                                                        {' · '}
+                                                        R${' '}
+                                                        {Number(s.conta.valorParcela).toLocaleString('pt-BR', {
+                                                            minimumFractionDigits: 2,
+                                                        })}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => adicionarSugestaoSelecao(s)}
+                                                    className="shrink-0 px-2 py-1 text-xs font-bold bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                                                >
+                                                    Incluir
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Parcelas</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={unificarParcelas}
+                                        onChange={(e) => setUnificarParcelas(e.target.value)}
+                                        className="select-field focus:ring-indigo-500 focus:border-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">1º vencimento</label>
+                                    <input
+                                        type="date"
+                                        value={unificarPrimeiroVencimento}
+                                        onChange={(e) => setUnificarPrimeiroVencimento(e.target.value)}
+                                        className="select-field focus:ring-indigo-500 focus:border-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Intervalo (dias)</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={unificarIntervaloDias}
+                                        onChange={(e) => setUnificarIntervaloDias(e.target.value)}
+                                        className="select-field focus:ring-indigo-500 focus:border-indigo-500"
+                                        disabled={parseInt(unificarParcelas, 10) <= 1}
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Descrição (opcional)</label>
+                                <input
+                                    type="text"
+                                    value={unificarDescricao}
+                                    onChange={(e) => setUnificarDescricao(e.target.value)}
+                                    placeholder="Ex.: Acordo parcelado fornecedor X"
+                                    className="input-field focus:ring-indigo-500 focus:border-indigo-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Observações</label>
+                                <textarea
+                                    value={unificarObservacoes}
+                                    onChange={(e) => setUnificarObservacoes(e.target.value)}
+                                    rows={2}
+                                    className="input-field focus:ring-indigo-500 focus:border-indigo-500"
+                                />
+                            </div>
+
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                As contas originais serão canceladas e vinculadas ao novo lançamento. O valor total é
+                                redistribuído nas parcelas informadas.
+                            </p>
+                        </div>
+
+                        <div className="modal-footer flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={handleCloseUnificarModal}
+                                className="btn-secondary"
+                                disabled={salvandoUnificacao}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleConfirmarUnificacao()}
+                                disabled={salvandoUnificacao || idsSelecionados.size < 2}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                                {salvandoUnificacao ? 'Unificando…' : 'Confirmar unificação'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* AlertDialog de Confirmação */}
             <AlertDialog open={isConfirmDialogOpen} onOpenChange={handleCloseConfirmDialog}>
                 <AlertDialogContent>
@@ -2785,6 +3362,11 @@ const ContasAPagar: React.FC<ContasAPagarProps> = ({ toggleSidebar, setAbaAtiva,
                                     <span className="text-sm mt-2 block">
                                         Novo vencimento: <span className="font-semibold">{new Date(novaDataVencimento).toLocaleDateString('pt-BR')}</span>
                                     </span>
+                                    {contaEditandoEhManual && (
+                                        <span className="text-sm mt-1 block">
+                                            Valor a registrar: <span className="font-semibold">R$ {formatBRL(valorARegistrarEdicao)}</span>
+                                        </span>
+                                    )}
                                 </>
                             )}
                         </AlertDialogDescription>
