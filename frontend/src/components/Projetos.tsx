@@ -16,6 +16,8 @@ import {
 import { ClientsIcon, CubeIcon } from '../constants';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 
 // Icons
@@ -1032,13 +1034,13 @@ const Projetos: React.FC<ProjetosProps> = ({ toggleSidebar, onNavigate, onViewBu
                         </div>
                         
                         <div className="border-b border-brand-gray-200 bg-brand-gray-50">
-                             <nav className="flex px-6 -mb-px space-x-4 overflow-x-auto">
-                                <button onClick={() => setViewModalActiveTab('overview')} className={`flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm whitespace-nowrap ${viewModalActiveTab === 'overview' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><ClipboardDocumentListIcon className="w-5 h-5"/> Visão Geral</button>
-                                <button onClick={() => setViewModalActiveTab('adminStages')} className={`flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm whitespace-nowrap ${viewModalActiveTab === 'adminStages' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><span className="text-lg">📊</span> Etapas Admin</button>
-                                <button onClick={() => setViewModalActiveTab('materials')} className={`flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm whitespace-nowrap ${viewModalActiveTab === 'materials' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><CubeIcon className="w-5 h-5"/> Materiais</button>
-                                <button onClick={() => setViewModalActiveTab('stages')} className={`flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm whitespace-nowrap ${viewModalActiveTab === 'stages' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><ViewColumnsIcon className="w-5 h-5"/> Kanban Engenharia</button>
-                                <button onClick={() => setViewModalActiveTab('qc')} className={`flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm whitespace-nowrap ${viewModalActiveTab === 'qc' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><CheckBadgeIcon className="w-5 h-5"/> Qualidade</button>
-                            </nav>
+                             <ScrollableRow as="nav" ariaLabel="Abas do projeto" className="px-6 -mb-px gap-4">
+                                <button onClick={() => setViewModalActiveTab('overview')} className={`${scrollableNavItemClasses} flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm ${viewModalActiveTab === 'overview' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><ClipboardDocumentListIcon className="w-5 h-5"/> Visão Geral</button>
+                                <button onClick={() => setViewModalActiveTab('adminStages')} className={`${scrollableNavItemClasses} flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm ${viewModalActiveTab === 'adminStages' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><span className="text-lg">📊</span> Etapas Admin</button>
+                                <button onClick={() => setViewModalActiveTab('materials')} className={`${scrollableNavItemClasses} flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm ${viewModalActiveTab === 'materials' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><CubeIcon className="w-5 h-5"/> Materiais</button>
+                                <button onClick={() => setViewModalActiveTab('stages')} className={`${scrollableNavItemClasses} flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm ${viewModalActiveTab === 'stages' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><ViewColumnsIcon className="w-5 h-5"/> Kanban Engenharia</button>
+                                <button onClick={() => setViewModalActiveTab('qc')} className={`${scrollableNavItemClasses} flex items-center gap-2 py-3 px-3 border-b-2 font-semibold text-sm ${viewModalActiveTab === 'qc' ? 'border-brand-s3e text-brand-s3e' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}><CheckBadgeIcon className="w-5 h-5"/> Qualidade</button>
+                            </ScrollableRow>
                         </div>
 
                         <div className="p-6 space-y-6 overflow-y-auto bg-brand-gray-50 flex-grow">
