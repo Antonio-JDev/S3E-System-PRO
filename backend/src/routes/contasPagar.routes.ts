@@ -27,6 +27,22 @@ router.post(
     ContasPagarController.criarContasParceladas
 );
 
+// Sugerir contas relacionadas para unificação
+router.post(
+    '/sugerir-unificacao',
+    authenticate,
+    authorize('admin', 'financeiro'),
+    ContasPagarController.sugerirUnificacao
+);
+
+// Unificar contas a pagar (cancela origens e cria parcela(s) consolidada(s))
+router.post(
+    '/unificar',
+    authenticate,
+    authorize('admin', 'financeiro'),
+    ContasPagarController.unificarContas
+);
+
 // Listar contas a pagar (com filtros)
 router.get(
     '/',
