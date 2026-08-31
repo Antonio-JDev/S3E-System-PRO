@@ -4,6 +4,8 @@ import { AuthContext } from '../contexts/AuthContext';
 import { axiosApiService } from '../services/axiosApi';
 import { configuracoesService } from '../services/configuracoesService';
 import { useWhatsAppRealtimeStatus, useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -412,7 +414,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
             {/* Tabs Container com Border Vermelha (Desenvolvedor) */}
             <div className="card-primary shadow-soft border-2 border-red-200 dark:border-red-800 mb-6">
                 <div className="border-b border-gray-200 dark:border-dark-border">
-                    <nav className="flex gap-4 px-6">
+                    <ScrollableRow as="nav" ariaLabel="Abas de logs" className="gap-4 px-6">
                         {[
                             { id: 'logs', label: '📋 Logs de Auditoria', icon: TerminalIcon },
                             { id: 'analytics', label: '📊 Analytics', icon: ChartBarIcon },
@@ -422,7 +424,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id as any)}
-                                className={`flex items-center gap-2 px-4 py-4 border-b-2 font-semibold transition-all ${
+                                className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-4 border-b-2 font-semibold transition-all ${
                                     activeTab === tab.id
                                         ? 'border-red-600 text-red-600 dark:border-red-500 dark:text-red-400'
                                         : 'border-transparent text-gray-500 dark:text-dark-text-secondary hover:text-gray-700 dark:hover:text-dark-text'
@@ -432,7 +434,7 @@ const Logs: React.FC<LogsProps> = ({ toggleSidebar }) => {
                                 {tab.label}
                             </button>
                         ))}
-                    </nav>
+                    </ScrollableRow>
                 </div>
 
                 <div className="p-6">
