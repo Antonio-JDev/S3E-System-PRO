@@ -135,8 +135,9 @@ const rolePermissions: Record<UserRole, Permission[]> = {
   desenhista_industrial: [...engenheiroEletricistaPermissions],
   engenheiro_eletricista: [...engenheiroEletricistaPermissions],
   eletricista: [
-    'view_tarefas_obra', 'view_kit', // Apenas página Tarefas da Obra e Ferramentas (kit)
-    'update_obra' // Atualizar status de tarefas
+    'view_tarefas_obra', 'view_kit', 'view_projetos',
+    'create_projeto', 'update_projeto',
+    'update_obra'
   ]
 };
 
@@ -152,6 +153,13 @@ export function hasPermission(userRole: string | undefined, permission: Permissi
   // Normalizar role: remover espaços, converter para minúsculas
   const normalizedRole = userRole.trim().toLowerCase() as UserRole;
   console.log(`🔍 hasPermission: Role original: "${userRole}" -> Normalizado: "${normalizedRole}"`);
+
+  // Gestão de Frota: todos os perfis autenticados, exceto eletricista
+  if (permission === 'view_frota') {
+    const allowed = normalizedRole !== 'eletricista';
+    console.log(`🔍 hasPermission: view_frota para "${normalizedRole}": ${allowed}`);
+    return allowed;
+  }
   
   const permissions = rolePermissions[normalizedRole];
   
