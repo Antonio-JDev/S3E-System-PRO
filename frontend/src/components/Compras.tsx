@@ -14,6 +14,8 @@ import EditarFracionamentoModal from './EditarFracionamentoModal';
 import MaterialDetailsModal, { type MaterialDetailsItem } from './modals/MaterialDetailsModal';
 import { canDelete } from '../utils/permissions';
 import AlertDialog from './ui/AlertDialog';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { axiosApiService } from '../services/axiosApi';
 import { empresaFiscalService } from '../services/empresaFiscalService';
@@ -26,6 +28,12 @@ import {
     atualizarCampoNumericoItem,
     type CompraItemEditDraft
 } from '../utils/compraItemList.util';
+import {
+    classificacaoVaiParaEstoque,
+    itemPrecisaVinculoEstoque,
+    rotuloVinculoItem,
+    classesTomVinculo,
+} from '../utils/compraMaterialMatch';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -267,6 +275,10 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
         materialId?: string; // ID do material do estoque vinculado
         materialVinculado?: any; // Dados completos do material vinculado (para exibição)
         matchAutomatico?: boolean; // Indica se foi feito match automático pelo sistema
+        matchTipo?: string | null;
+        codigoFornecedor?: string;
+        ean?: string;
+        criarNovoMaterial?: boolean;
         // Campos de fracionamento
         quantidadeFracionada?: number; // Quantidade de unidades por embalagem
         tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
@@ -405,7 +417,9 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                     ...item,
                     materialId: material.id,
                     materialVinculado: material,
-                    matchAutomatico: false
+                    matchAutomatico: false,
+                    matchTipo: 'MANUAL',
+                    criarNovoMaterial: false,
                 };
             }
             return item;
@@ -421,11 +435,34 @@ const Compras: React.FC<ComprasProps> = ({ toggleSidebar }) => {
                     ...item,
                     materialId: undefined,
                     materialVinculado: undefined,
-                    matchAutomatico: false
+                    matchAutomatico: false,
+                    matchTipo: null,
+                    criarNovoMaterial: false,
                 };
             }
             return item;
         }));
+    };
+
+    const marcarItemComoNovo = (itemIndex: number) => {
+        setPurchaseItems(prev => prev.map((item, idx) => {
+            if (idx === itemIndex) {
+                return {
+                    ...item,
+                    materialId: undefined,
+                    materialVinculado: undefined,
+                    matchAutomatico: false,
+                    matchTipo: null,
+                    criarNovoMaterial: true,
+                };
+            }
+            return item;
+        }));
+        setBuscaMaterialPorItem(prev => {
+            const novo = { ...prev };
+            delete novo[itemIndex];
+            return novo;
+        });
     };
 
     const totalProdutosCalculado = useMemo(() => {
@@ -1154,6 +1191,20 @@ const filteredPurchases = useMemo(() => {
             return;
         }
 
+        if (classificacaoVaiParaEstoque('COMPOSICAO_ESTOQUE')) {
+            const pendentes = purchaseItems.filter((it) => {
+                if (isCompraAvulsa && (it as ExtendedItem).destinoEstoque === false) return false;
+                return itemPrecisaVinculoEstoque(it as ExtendedItem);
+            });
+            if (pendentes.length > 0) {
+                toast.error('Há itens sem vínculo com o estoque', {
+                    description: `${pendentes.length} item(ns) precisam ser vinculados a um material cadastrado ou marcados como item novo. O vínculo fica salvo para as próximas compras deste fornecedor.`,
+                    duration: 7000,
+                });
+                return;
+            }
+        }
+
         try {
             // Se está editando, atualizar a compra completa
             if (purchaseToEdit) {
@@ -1216,7 +1267,10 @@ const filteredPurchases = useMemo(() => {
                     ncm: (it as any).ncm,
                     sku: (it as any).sku,
                     unidadeMedida: (it as any).unidadeMedida || 'un',
-                    materialId: (it as ExtendedItem).materialId, // ✅ Incluir materialId quando houver vinculação
+                    materialId: (it as ExtendedItem).materialId,
+                    codigoFornecedor: (it as ExtendedItem).codigoFornecedor,
+                    ean: (it as ExtendedItem).ean,
+                    criarNovoMaterial: (it as ExtendedItem).criarNovoMaterial,
                     // Campos de fracionamento
                     quantidadeFracionada: (it as any).quantidadeFracionada,
                     tipoEmbalagem: (it as any).tipoEmbalagem,
@@ -1353,16 +1407,23 @@ const filteredPurchases = useMemo(() => {
                     ncm: it.ncm || '',
                     sku: it.sku || '',
                     unidadeMedida: it.unidadeMedida || 'un',
-                    materialId: it.materialId, // ✅ Preservar materialId se vier do backend (match automático)
-                    materialVinculado: it.materialVinculado, // ✅ Dados completos do material vinculado
-                    matchAutomatico: !!it.matchAutomatico // ✅ Flag indicando match automático (não apenas se tem materialId)
+                    materialId: it.materialId,
+                    materialVinculado: it.materialVinculado,
+                    matchAutomatico: !!it.matchAutomatico,
+                    matchTipo: it.matchTipo || null,
+                    codigoFornecedor: it.codigoFornecedor || it.sku || '',
+                    ean: it.ean || '',
+                    criarNovoMaterial: false,
                 }))
             );
             
             // Log dos matches automáticos
             const matchesAutomaticos = (data.items || []).filter((it: any) => it.matchAutomatico).length;
-            if (matchesAutomaticos > 0) {
-                console.log(`🔍 ${matchesAutomaticos} item(ns) com match automático encontrado(s)`);
+            const pendentes = (data.items || []).filter((it: any) => !it.materialId).length;
+            if (matchesAutomaticos > 0 || pendentes > 0) {
+                toast.info(
+                    `${matchesAutomaticos} item(ns) vinculados automaticamente. ${pendentes} precisam de vínculo com o estoque.`
+                );
             }
 
             console.log('💰 Valores do XML:', {
@@ -1514,8 +1575,8 @@ const filteredPurchases = useMemo(() => {
     return (
         <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
-                <div className="flex items-center gap-4">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in min-w-0">
+                <div className="flex items-center gap-4 min-w-0">
                     <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
@@ -1524,29 +1585,29 @@ const filteredPurchases = useMemo(() => {
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gerencie pedidos de compra e fornecedores</p>
                     </div>
                 </div>
-                <div className="flex gap-3 flex-wrap">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={() => setIsXMLModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold`}
                     >
                         <DocumentArrowUpIcon className="w-5 h-5" />
                         Importar XML
                     </button>
                     <button
                         onClick={() => handleOpenModal(null, true)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-xl hover:from-purple-700 hover:to-purple-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Compra Avulsa
                     </button>
                     <button
                         onClick={() => navigate('/compras/nova')}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Nova Compra
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Filtros */}
@@ -2562,6 +2623,12 @@ const filteredPurchases = useMemo(() => {
                                 </div>
 
                                 {/* Lista de Itens */}
+                                {purchaseItems.length > 0 && purchaseItems.some((it) => itemPrecisaVinculoEstoque(it as ExtendedItem)) && (
+                                    <div className="mb-3 px-4 py-3 rounded-xl bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 text-sm text-orange-800 dark:text-orange-200">
+                                        {purchaseItems.filter((it) => itemPrecisaVinculoEstoque(it as ExtendedItem)).length} item(ns) precisam ser vinculados ao estoque.
+                                        O vínculo fica salvo: na próxima compra deste fornecedor o sistema casa sozinho, mesmo com nome diferente.
+                                    </div>
+                                )}
                                 {purchaseItems.length === 0 ? (
                                     <div className="text-center py-8 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
                                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -2618,22 +2685,23 @@ const filteredPurchases = useMemo(() => {
                                                                                 </p>
                                                                             )}
                                                                             {/* Indicadores de vinculação */}
-                                                                            <div className="mt-2 flex items-center gap-2">
-                                                                                {itemExtended.materialId && itemExtended.materialVinculado && !itemExtended.matchAutomatico ? (
-                                                                                    // Vinculação manual pelo usuário
-                                                                                    <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-semibold">
-                                                                                        ✅ Vinculado: {itemExtended.materialVinculado.nome}
-                                                                                    </span>
-                                                                                ) : itemExtended.matchAutomatico && itemExtended.materialVinculado ? (
-                                                                                    // Match automático encontrado pelo sistema
-                                                                                    <span className="px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300 rounded text-xs font-semibold">
-                                                                                        ⚠️ Match automático: {itemExtended.materialVinculado.nome}
-                                                                                    </span>
-                                                                                ) : (
-                                                                                    // Nenhum match - será criado novo material
-                                                                                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold">
-                                                                                        🆕 Será criado novo material
-                                                                                    </span>
+                                                                            <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                                                                {(() => {
+                                                                                    const vinculo = rotuloVinculoItem(itemExtended);
+                                                                                    return (
+                                                                                        <span className={`px-2 py-0.5 rounded text-xs font-semibold ${classesTomVinculo(vinculo.tom)}`}>
+                                                                                            {vinculo.texto}
+                                                                                        </span>
+                                                                                    );
+                                                                                })()}
+                                                                                {itemPrecisaVinculoEstoque(itemExtended) && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => marcarItemComoNovo(index)}
+                                                                                        className="text-xs text-blue-700 hover:text-blue-900 underline"
+                                                                                    >
+                                                                                        Criar como item novo
+                                                                                    </button>
                                                                                 )}
                                                                             </div>
                                                                         </div>
@@ -2924,6 +2992,15 @@ const filteredPurchases = useMemo(() => {
                                                                                 className="text-xs text-red-600 hover:text-red-800 underline"
                                                                             >
                                                                                 Remover vinculação
+                                                                            </button>
+                                                                        )}
+                                                                        {!itemExtended.materialId && !itemExtended.criarNovoMaterial && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => marcarItemComoNovo(index)}
+                                                                                className="text-xs text-blue-700 hover:text-blue-900 underline"
+                                                                            >
+                                                                                Este item ainda não existe no estoque (criar novo)
                                                                             </button>
                                                                         )}
                                                                     </div>
@@ -3558,9 +3635,8 @@ const filteredPurchases = useMemo(() => {
                                                                             ⚠️ Match automático
                                                                         </span>
                                                                     ) : (
-                                                                        // Nenhum material vinculado
-                                                                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-semibold whitespace-nowrap">
-                                                                            🆕 Novo material
+                                                                        <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300 rounded text-xs font-semibold whitespace-nowrap">
+                                                                            ⚠️ Sem vínculo
                                                                         </span>
                                                                     )}
                                                                     
