@@ -1,5 +1,6 @@
--- Bancos dedicados ao Evolution Go (GORM: auth + users), separados do app S3E e do banco `evolution` da API Node.
--- Executado na primeira inicialização do volume do Postgres (initdb).
+-- LEGADO: evogo_* no Postgres do ERP.
+-- Stacks atuais criam estes bancos no serviço postgres-evogo
+-- (docker/postgres/evogo-init/01-create-databases.sql).
 SELECT 'CREATE DATABASE evogo_auth'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'evogo_auth')\gexec
 SELECT 'CREATE DATABASE evogo_users'
