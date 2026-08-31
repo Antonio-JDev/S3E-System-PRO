@@ -12,6 +12,8 @@ export interface TarefaInterna {
   coluna: StatusTarefaInterna;
   userId?: string | null;
   user?: { id: string; name: string; email?: string } | null;
+  criadoPorId?: string | null;
+  criadoPor?: { id: string; name: string; email?: string } | null;
   prazo?: string;
   prazoDefinido?: boolean;
   createdAt: string;
@@ -35,6 +37,7 @@ export interface TarefaInternaItem {
 
 export interface TarefaInternaKanbanItem extends TarefaInterna {
   userName?: string | null;
+  criadoPorName?: string | null;
   userIds?: string[];
   userNames?: string[];
   totalItens: number;
