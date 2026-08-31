@@ -135,7 +135,7 @@ describe('ponto.service calcularMetricasRegistro (compensação atraso x extra)'
       toleranciaMinutos: 5,
       workShift: { entrada1: '07:30', saida1: '12:00', entrada2: '13:00', saida2: '17:18' },
     });
-    expect(r.minutosExtra20).toBeGreaterThanOrEqual(12);
+    expect(r.minutosExtra20).toBe(12);
   });
 
   it('em feriado não contabiliza atraso nem saída antecipada', () => {
