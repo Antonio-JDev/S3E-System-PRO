@@ -34,6 +34,15 @@ import {
   salvarComentarioConferenciaDia,
 } from '../services/rhComentarioConferencia.service';
 import {
+  obterConfigExportacaoFolhaContabil,
+  salvarConfigExportacaoFolhaContabil,
+  listarEmpresasFiscaisAtivas,
+} from '../services/folhaContabilidadeConfig.service';
+import {
+  gerarExportacaoFolhaContabil,
+  previewExportacaoFolhaContabil,
+} from '../services/folhaContabilidadeExport.service';
+import {
   limparOverrideFeriadoDia,
   salvarOverrideFeriadoDia,
 } from '../services/feriadoOverride.service';
@@ -941,6 +950,81 @@ export const RhController = {
       return res.json({ success: true, data });
     } catch (error: any) {
       return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao aprovar dia' });
+    }
+  },
+
+  /** GET /api/rh/registro-ponto?funcionarioId=&data=YYYY-MM-DD */
+  async buscarRegistroPontoDia(req: Request, res: Response) {
+    try {
+      const funcionarioId = String(req.query.funcionarioId || '').trim();
+      const data = String(req.query.data || '').trim();
+      const m = data.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!funcionarioId || !m) {
+        return res.status(400).json({ success: false, message: 'funcionarioId e data (YYYY-MM-DD) são obrigatórios' });
+      }
+      const { dataReferenciaDiaCivilUtc } = await import('../utils/datetime-sp.util');
+      const dataReferencia = dataReferenciaDiaCivilUtc(Number(m[1]), Number(m[2]), Number(m[3]));
+      const registro = await prisma.registroPonto.findUnique({
+        where: { funcionarioId_dataReferencia: { funcionarioId, dataReferencia } },
+      });
+      return res.json({ success: true, data: registro });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error?.message ?? 'Erro ao buscar registro de ponto' });
+    }
+  },
+
+  /** GET /api/rh/folha/:mes/exportar-contabilidade — XLS para contabilidade */
+  async exportarFolhaContabilidade(req: Request, res: Response) {
+    try {
+      const { mes } = req.params;
+      if (!mes) {
+        return res.status(400).json({ success: false, message: 'Parâmetro mes (YYYY-MM) é obrigatório' });
+      }
+      if (String(req.query.preview ?? '') === '1') {
+        const preview = await previewExportacaoFolhaContabil(mes);
+        return res.json({ success: true, data: preview });
+      }
+      const { buffer, avisos } = await gerarExportacaoFolhaContabil(mes);
+      const nomeArquivo = `LANCAMENTOS-FOLHA-${mes}.xls`;
+      res.setHeader('Content-Type', 'application/vnd.ms-excel');
+      res.setHeader('Content-Disposition', buildContentDisposition('attachment', nomeArquivo, 'lancamentos-folha.xls'));
+      if (avisos.length > 0) {
+        res.setHeader('X-Avisos-Exportacao', encodeURIComponent(JSON.stringify(avisos)));
+      }
+      return res.send(buffer);
+    } catch (error: any) {
+      console.error('❌ Erro ao exportar folha contábil:', error);
+      return res.status(500).json({
+        success: false,
+        message: error?.message ?? 'Erro ao gerar planilha contábil',
+      });
+    }
+  },
+
+  /** GET /api/rh/exportacao-contabilidade/config */
+  async obterConfigExportacaoContabilidade(_req: Request, res: Response) {
+    try {
+      const config = await obterConfigExportacaoFolhaContabil();
+      const empresasFiscais = await listarEmpresasFiscaisAtivas();
+      return res.json({ success: true, data: { config, empresasFiscais } });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error?.message ?? 'Erro ao carregar configuração' });
+    }
+  },
+
+  /** PUT /api/rh/exportacao-contabilidade/config */
+  async salvarConfigExportacaoContabilidade(req: Request, res: Response) {
+    try {
+      const body = req.body ?? {};
+      const config = await salvarConfigExportacaoFolhaContabil({
+        codigoEmpresaContabil: body.codigoEmpresaContabil,
+        empresaFiscalIdFolha: body.empresaFiscalIdFolha,
+        percentualHeFolhaContabil: body.percentualHeFolhaContabil,
+        rubricasFolhaContabil: body.rubricasFolhaContabil,
+      });
+      return res.json({ success: true, data: config });
+    } catch (error: any) {
+      return res.status(400).json({ success: false, message: error?.message ?? 'Erro ao salvar configuração' });
     }
   },
 };
