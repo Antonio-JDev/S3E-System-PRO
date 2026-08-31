@@ -7,6 +7,8 @@ jest.mock('../lib/prisma', () => ({
   prisma: {
     projeto: { findMany: jest.fn() },
     apontamentoOsItem: { findMany: jest.fn() },
+    eventoCalendario: { findMany: jest.fn() },
+    registroPonto: { findMany: jest.fn() },
   },
 }));
 
@@ -18,6 +20,8 @@ describe('apropriacaoOsService.obterCockpitResumoBatch', () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
+    (prisma.eventoCalendario.findMany as jest.Mock).mockResolvedValue([]);
+    (prisma.registroPonto.findMany as jest.Mock).mockResolvedValue([]);
   });
 
   afterEach(() => {
