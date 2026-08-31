@@ -1,10 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { toast } from 'sonner';
 import ModalVizualizacaoProjeto from './ModalVizualizacaoProjeto';
+import { listarUsuariosResponsavelOs } from '../utils/usuariosResponsavelOs.util';
 import ProjetosEngenhariaTable from './ProjetosEngenhariaTable';
 import OsEquipeAnalyticsModal from './OsEquipeAnalyticsModal';
 import { isAdmin, isDeveloper } from '../utils/permissions';
 import { projetosService, type Projeto, type CreateProjetoData, type UpdateProjetoData } from '../services/projetosService';
+import { ordemServicosService } from '../services/ordemServicosService';
 import { projetosEngenhariaService, type InfoAtribuicaoOs } from '../services/projetosEngenhariaService';
 import { VistoriasCelescPanel } from './os/VistoriasCelescPanel';
 import { clientesService, type Cliente } from '../services/clientesService';
@@ -14,6 +16,8 @@ import { ENDPOINTS } from '../config/api';
 import { AuthContext } from '../contexts/AuthContext';
 import ViewToggle from './ui/ViewToggle';
 import ActionsDropdown from './ui/ActionsDropdown';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses, compactNavTabClasses, compactActionBtnClasses, compactPagePaddingClasses, pageTabBarContainerClasses, mobileTabBarStripClasses } from '../utils/responsiveNav';
 import { loadViewMode, saveViewMode } from '../utils/viewModeStorage';
 import { calcularHomemHoraTotal, formatMoeda } from '../utils/apropriacaoOs';
 import {
@@ -25,6 +29,7 @@ import { getProjetoEngenhariaActionLabel } from '../utils/projetoEngenhariaUi';
 
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { serverDateToInput, formatDateDisplay } from '../utils/date';
+import { projetoMatchesBusca } from '../utils/buscaOs.util';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -116,13 +121,6 @@ interface Etapa {
     prazo: string;
 }
 
-interface QualityCheck {
-    id: string;
-    item: string;
-    status: 'Pendente' | 'Aprovado' | 'Reprovado';
-    observacoes?: string;
-}
-
 interface Anexo {
     id: string;
     nome: string;
@@ -152,7 +150,7 @@ interface OrdemServicosHubProps {
     onClearInitialProject?: () => void;
 }
 
-type ViewModalTab = 'geral' | 'materiais' | 'etapas' | 'qualidade';
+type ViewModalTab = 'geral' | 'materiais' | 'etapas' | 'cronograma';
 
 const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNavigate, onViewBudget, onViewSale, onViewClient, onViewObra, initialProjectId, initialProjectTab = 'geral', onClearInitialProject }) => {
     // ==================== AUTH ====================
@@ -168,6 +166,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const canViewKanbanTempoRelatorio = useMemo(
         () => isAdmin(user as any) || isDeveloper(user as any),
         [user]
+    );
+
+    const canRevertOsToAprovada = useMemo(
+        () => String(user?.role || '').toLowerCase() !== 'eletricista',
+        [user?.role]
     );
     
     // ==================== ESTADOS ====================
@@ -222,7 +225,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     const [viewModalActiveTab, setViewModalActiveTab] = useState<ViewModalTab>('geral');
     const [materiais, setMateriais] = useState<Material[]>([]);
     const [etapas, setEtapas] = useState<Etapa[]>([]);
-    const [qualityChecks, setQualityChecks] = useState<QualityCheck[]>([]);
     const [anexos, setAnexos] = useState<Anexo[]>([]);
     
     // Estado para extensão de prazo
@@ -607,18 +609,14 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         return base.filter(projeto => {
             if (minhasTarefasFilter && !projetoIdsComMinhasTarefas.has(projeto.id)) return false;
 
-            const matchesSearch =
-                projeto.titulo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                projeto.descricao.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                projeto.cliente?.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                projeto.id.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesSearch = projetoMatchesBusca(projeto, searchTerm, orcamentos);
 
             const matchesStatus = statusFilter === 'Todos' || projeto.status === statusFilter;
             const matchesResponsavel = responsavelFilter === 'Todos' || projeto.responsavelId === responsavelFilter;
 
             return matchesSearch && matchesStatus && matchesResponsavel;
         });
-    }, [abaAtiva, projetosListagemBase, projetosConcluidosBase, searchTerm, statusFilter, responsavelFilter, minhasTarefasFilter, projetoIdsComMinhasTarefas]);
+    }, [abaAtiva, projetosListagemBase, projetosConcluidosBase, searchTerm, statusFilter, responsavelFilter, minhasTarefasFilter, projetoIdsComMinhasTarefas, orcamentos]);
 
     // Função para gerar número OS baseado no número do orçamento vinculado
     const gerarNumeroOS = (projeto: Projeto): string => {
@@ -718,12 +716,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
             { id: '1', titulo: 'Levantamento de requisitos', descricao: 'Análise inicial', status: 'Concluído', prazo: '2025-11-05' },
             { id: '2', titulo: 'Elaboração do projeto', descricao: 'Desenho técnico', status: 'Em Andamento', prazo: '2025-11-15' },
             { id: '3', titulo: 'Aprovação do cliente', descricao: 'Validação final', status: 'A Fazer', prazo: '2025-11-20' }
-        ]);
-        
-        setQualityChecks([
-            { id: '1', item: 'Conformidade com normas NBR 5410', status: 'Pendente' },
-            { id: '2', item: 'Dimensionamento de condutores', status: 'Aprovado', observacoes: 'OK' },
-            { id: '3', item: 'Proteção contra sobrecorrente', status: 'Pendente' }
         ]);
         
         setAnexos([]);
@@ -837,15 +829,16 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     };
 
     const handleResponsavelOsChange = async (projetoId: string, responsavelId: string) => {
+        if (!responsavelId) return;
+        const projetoAtual = projetos.find((p) => p.id === projetoId);
         try {
             setResponsavelAtribuindoId(projetoId);
             const response = await projetosService.atualizar(projetoId, { responsavelId });
             if (response.success && response.data) {
                 const updated = response.data;
-                const responsavelUsuario = responsavelId
-                    ? usuariosOs.find((u) => u.id === responsavelId)
-                    : undefined;
+                const responsavelUsuario = usuariosOs.find((u) => u.id === responsavelId);
                 const merged = {
+                    ...(projetoAtual ?? {}),
                     ...updated,
                     responsavel: updated.responsavel ?? (responsavelUsuario
                         ? { id: responsavelUsuario.id, nome: responsavelUsuario.nome }
@@ -853,6 +846,8 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 };
                 setProjetos((prev) => prev.map((p) => (p.id === projetoId ? merged : p)));
                 toast.success('Responsável da OS atualizado');
+            } else {
+                toast.error(response.error || 'Não foi possível atualizar o responsável da OS');
             }
         } catch {
             toast.error('Erro ao atualizar responsável da OS');
@@ -877,9 +872,27 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         }
     };
 
+    const handleVoltarParaAprovada = useCallback(async (projeto: Projeto) => {
+        const ok = window.confirm(
+            'A OS voltará ao status Aprovada. A obra vinculada será removida e o estoque alocado será estornado. Deseja continuar?'
+        );
+        if (!ok) return;
+        try {
+            const res = await ordemServicosService.reverterStatus(projeto.id, 'APROVADO');
+            if (res.success) {
+                toast.success('OS revertida para Aprovada');
+                await loadData({ silent: true });
+            } else {
+                toast.error(res.error || 'Erro ao reverter status');
+            }
+        } catch (e: any) {
+            toast.error(e?.response?.data?.error || e?.message || 'Erro ao reverter status');
+        }
+    }, []);
+
     const buildProjetoActions = useCallback((projeto: Projeto) => {
         const atribuido = Boolean(engInfoMap[projeto.id]?.atribuido);
-        return [
+        const actions = [
             {
                 label: 'Visualizar',
                 icon: <EyeIcon className="w-4 h-4" />,
@@ -903,7 +916,16 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 variant: 'danger' as const,
             },
         ];
-    }, [engInfoMap]);
+        if (projeto.status === 'CONCLUIDO' && canRevertOsToAprovada) {
+            actions.splice(3, 0, {
+                label: 'Voltar para Aprovada',
+                icon: <span className="text-sm">↩</span>,
+                onClick: () => void handleVoltarParaAprovada(projeto),
+                variant: 'primary' as const,
+            });
+        }
+        return actions;
+    }, [engInfoMap, canRevertOsToAprovada, handleVoltarParaAprovada]);
 
     // Fechar modais com ESC
     useEscapeKey(isCreateModalOpen, () => setIsCreateModalOpen(false));
@@ -1049,13 +1071,6 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
         setTaskToEdit(null);
     };
 
-    // Quality Check
-    const handleUpdateQualityCheck = (checkId: string, newStatus: 'Aprovado' | 'Reprovado') => {
-        setQualityChecks(prev => prev.map(qc => 
-            qc.id === checkId ? { ...qc, status: newStatus } : qc
-        ));
-    };
-
     // Gerar Obra
     const handleGerarObra = async () => {
         if (!projetoToView) return;
@@ -1071,13 +1086,11 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                 
                 if (response.success) {
                     toast.success('Obra gerada com sucesso!', {
-                        description: 'Você pode acessá-la em Execução Obra'
+                        description: 'Acompanhe o cronograma e as tarefas de campo nesta OS'
                     });
                     setProjetos(prev => prev.map(p => 
                         p.id === projetoToView.id ? { ...p, status: 'Em Execução' } : p
                     ));
-                    setIsViewModalOpen(false);
-                    onNavigate('Execução Obra');
                 }
             } catch (err) {
                     toast.error('Erro ao gerar obra');
@@ -1157,10 +1170,10 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
     }
 
     return (
-        <div className="min-h-screen p-4 sm:p-8 bg-gray-50 dark:bg-dark-bg">
+        <div className={`min-h-screen ${compactPagePaddingClasses} bg-gray-50 dark:bg-dark-bg min-w-0`}>
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in">
-                <div className="flex items-center gap-4">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 animate-fade-in min-w-0">
+                <div className="flex items-center gap-4 min-w-0">
                     <button onClick={toggleSidebar} className="lg:hidden p-2 text-gray-600 dark:text-dark-text-secondary rounded-xl hover:bg-white dark:hover:bg-dark-card hover:shadow-soft">
                         <Bars3Icon className="w-6 h-6" />
                     </button>
@@ -1169,38 +1182,44 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Hub central de gerenciamento de ordens de serviço</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={handleOpenTeamModal}
-                        className="flex items-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all font-semibold shadow-soft"
+                        className={`${scrollableNavItemClasses} ${compactActionBtnClasses} flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-all font-semibold shadow-soft`}
                     >
                         <UsersIcon className="w-5 h-5" />
                         Gerenciar Equipe
                     </button>
                     <button
                         onClick={() => { loadData(); fetchProgressForProjects(projetos); }}
-                        className="flex items-center gap-2 px-4 py-3 bg-yellow-50 text-yellow-800 rounded-xl hover:bg-yellow-100 transition-all font-semibold shadow-soft dark:bg-yellow-900/25 dark:text-yellow-200 dark:hover:bg-yellow-900/40 dark:border dark:border-yellow-800/40"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-3 bg-yellow-50 text-yellow-800 rounded-xl hover:bg-yellow-100 transition-all font-semibold shadow-soft dark:bg-yellow-900/25 dark:text-yellow-200 dark:hover:bg-yellow-900/40 dark:border dark:border-yellow-800/40`}
                         title="Atualizar projetos"
                     >
                         ↻ Atualizar
                     </button>
                     <button
                         onClick={() => handleOpenCreateModal()}
-                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl hover:from-blue-700 hover:to-blue-600 transition-all shadow-medium font-semibold`}
                     >
                         <PlusIcon className="w-5 h-5" />
                         Nova Ordem De Serviço
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Abas de Navegação: Listagem | Projetos | Concluídos */}
-            <div className="bg-white dark:bg-dark-card rounded-2xl shadow-soft border border-gray-100 dark:border-dark-border mb-6">
-                <div className="flex border-b border-gray-200 dark:border-dark-border">
+            <div className={pageTabBarContainerClasses}>
+                <div className={mobileTabBarStripClasses}>
+                <ScrollableRow
+                    as="nav"
+                    ariaLabel="Abas de ordens de serviço"
+                    edgeToEdge
+                    className="lg:gap-0 lg:w-full"
+                >
                     <button
                         type="button"
                         onClick={() => setAbaAtiva('listagem')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'listagem'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'listagem'
                             ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-dark-card'
                         }`}
@@ -1223,7 +1242,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     <button
                         type="button"
                         onClick={() => setAbaAtiva('projetos')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'projetos'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'projetos'
                             ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:text-blue-600 dark:hover:text-blue-400 hover:bg-gray-50 dark:hover:bg-dark-card'
                         }`}
@@ -1241,7 +1260,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     <button
                         type="button"
                         onClick={() => setAbaAtiva('vistorias')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'vistorias'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'vistorias'
                             ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400 bg-cyan-50 dark:bg-cyan-900/20'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-gray-50 dark:hover:bg-dark-card'
                         }`}
@@ -1259,7 +1278,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     <button
                         type="button"
                         onClick={() => setAbaAtiva('concluidos')}
-                        className={`flex-1 px-6 py-4 text-center font-semibold transition-all ${abaAtiva === 'concluidos'
+                        className={`${scrollableNavItemClasses} ${compactNavTabClasses} text-center font-semibold transition-all ${abaAtiva === 'concluidos'
                             ? 'text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20'
                             : 'text-gray-600 dark:text-dark-text-secondary hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-gray-50 dark:hover:bg-dark-card'
                         }`}
@@ -1279,6 +1298,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                             )}
                         </div>
                     </button>
+                </ScrollableRow>
                 </div>
             </div>
 
@@ -1313,7 +1333,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                             <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                             <input
                                 type="text"
-                                placeholder="Buscar por nome, cliente ou ID..."
+                                placeholder="Buscar por número OS, nome, cliente..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
@@ -1514,20 +1534,23 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         <span className="text-xs text-gray-500">Cliente:</span>
                                         <span className="text-sm font-semibold text-gray-900">{projeto.cliente?.nome || 'N/A'}</span>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
+                                    <div
+                                        className="flex items-center justify-between gap-2 relative z-10"
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
                                         <span className="text-xs text-gray-500 shrink-0">Responsável:</span>
                                         <select
                                             value={projeto.responsavelId || ''}
                                             disabled={responsavelAtribuindoId === projeto.id}
-                                            onClick={(e) => e.stopPropagation()}
                                             onChange={(e) => {
                                                 e.stopPropagation();
                                                 void handleResponsavelOsChange(projeto.id, e.target.value);
                                             }}
-                                            className="text-sm font-medium text-gray-700 border border-gray-200 rounded-lg px-2 py-1 max-w-[55%] truncate bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            className="text-sm font-medium text-gray-700 border border-gray-200 rounded-lg px-2 py-1.5 max-w-[55%] truncate bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-60"
                                         >
                                             <option value="">Selecionar...</option>
-                                            {usuariosOs.map((usuario) => (
+                                            {listarUsuariosResponsavelOs(usuariosOs, projeto).map((usuario) => (
                                                 <option key={usuario.id} value={usuario.id}>
                                                     {usuario.nome}
                                                 </option>
@@ -1577,9 +1600,26 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                 </div>
 
                                 {/* Datas */}
-                                <div className="flex items-center justify-between text-xs text-gray-500 pt-4 border-t border-gray-100">
-                                    <span>Início: {formatDateDisplay(projeto.dataInicio as any)}</span>
-                                    <span className="text-gray-400">Execução física</span>
+                                <div className="flex flex-col gap-1 text-xs text-gray-500 pt-4 border-t border-gray-100">
+                                    <div className="flex items-center justify-between">
+                                        <span>Início: {formatDateDisplay(projeto.dataInicio as any)}</span>
+                                        <span className="text-gray-400">Execução física</span>
+                                    </div>
+                                    {(projeto.status === 'CONCLUIDO' || projeto.dataConclusao || projeto.dataFim) && (
+                                        <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400 font-medium">
+                                            <span>
+                                                Concluída:{' '}
+                                                {formatDateDisplay(
+                                                    (projeto.dataConclusao || projeto.dataFim) as any
+                                                ) || '—'}
+                                            </span>
+                                            {projeto.concluidoPor?.nome && (
+                                                <span className="truncate max-w-[50%] text-right" title={projeto.concluidoPor.nome}>
+                                                    por {projeto.concluidoPor.nome}
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -1594,7 +1634,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Ordem De Serviço</th>
                                 <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase">Cliente</th>
                                 <th className="px-6 py-4 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
-                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Início</th>
+                                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Início / Conclusão</th>
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
                                 <th className="px-6 py-4 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
                             </tr>
@@ -1648,6 +1688,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                                         <p className="text-sm text-gray-700">
                                             {new Date(projeto.dataInicio).toLocaleDateString('pt-BR')}
                                         </p>
+                                        {(projeto.status === 'CONCLUIDO' || projeto.dataConclusao || projeto.dataFim) && (
+                                            <p className="text-xs text-emerald-700 mt-1">
+                                                Conc.:{' '}
+                                                {new Date(
+                                                    (projeto.dataConclusao || projeto.dataFim) as string
+                                                ).toLocaleDateString('pt-BR')}
+                                                {projeto.concluidoPor?.nome
+                                                    ? ` · ${projeto.concluidoPor.nome}`
+                                                    : ''}
+                                            </p>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 text-center">
                                         <span className={`px-3 py-1 text-xs font-bold rounded-lg ${getStatusColor(projeto.status)}`}>
@@ -1896,7 +1947,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Diárias Equipe Orçadas *
+                                        Execução orçada (diárias) *
                                     </label>
                                     <input
                                         type="number"
@@ -1924,7 +1975,7 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
 
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                                        Valor Diária Equipe (R$)
+                                        Valor execução (R$/diária)
                                     </label>
                                     <input
                                         type="number"
@@ -1996,11 +2047,17 @@ const OrdemServicosHub: React.FC<OrdemServicosHubProps> = ({ toggleSidebar, onNa
                     initialTab={
                         viewModalActiveTab === 'geral' ? 'Visão Geral' :
                         viewModalActiveTab === 'materiais' ? 'Materiais' :
-                        viewModalActiveTab === 'etapas' ? 'Kanban' : 'Qualidade'
+                        viewModalActiveTab === 'etapas' ? 'Kanban' :
+                        viewModalActiveTab === 'cronograma' ? 'Cronograma & Alocação' : 'Visão Geral'
                     }
                     engenhariaAtribuicao={engenhariaAtribuicaoModal}
                     onAtribuirEngenharia={() => {
                         if (projetoToView) abrirAtribuirEngenharia(projetoToView);
+                    }}
+                    onEditOs={() => {
+                        const p = projetoToView;
+                        setIsViewModalOpen(false);
+                        if (p) handleOpenCreateModal(p);
                     }}
                 />
             )}
