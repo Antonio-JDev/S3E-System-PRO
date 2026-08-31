@@ -22,7 +22,8 @@ export type Permission =
   | 'view_nfe'
   | 'view_logs'
   | 'view_gerenciamento'
-  | 'view_kit';
+  | 'view_kit'
+  | 'view_frota';
 
 /**
  * Verifica se o usuário tem permissão para excluir registros
@@ -34,6 +35,21 @@ export const canDelete = (user: User | null | undefined): boolean => {
   if (!user.role) return false;
   const role = user.role.toLowerCase();
   return role === 'desenvolvedor' || role === 'admin' || role === 'administrador' || role === 'financeiro_faturamento';
+};
+
+/** Admin, financeiro ou desenvolvedor — corrigir/excluir lançamentos manuais no financeiro. */
+export const canEditarContaFinanceiraManual = (user: User | null | undefined): boolean => {
+  if (!user) return false;
+  if (user.isAdmin === true) return true;
+  if (!user.role) return false;
+  const role = user.role.toLowerCase();
+  return (
+    role === 'desenvolvedor' ||
+    role === 'admin' ||
+    role === 'administrador' ||
+    role === 'financeiro' ||
+    role === 'financeiro_faturamento'
+  );
 };
 
 /**
@@ -90,6 +106,11 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
     if (permission === 'view_logs') return false;
     return true;
   }
+
+  // Gestão de Frota: todos os perfis autenticados, exceto eletricista
+  if (permission === 'view_frota') {
+    return userRole !== 'eletricista';
+  }
   
   // Módulo Financeiro: apenas admin, gerente, financeiro_faturamento ou isAdmin
   if (permission === 'view_financeiro') {
@@ -112,7 +133,8 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
       'view_servicos',
       'view_financeiro',
       'view_gerenciamento',
-      'view_kit'
+      'view_kit',
+      'view_frota'
     ],
     
     // Desenhista Industrial: como engenheiro elétrico (sem Financeiro, NF-e, Frota; RH/Frota/Despesas ocultos no Gerenciamento)
@@ -176,7 +198,8 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
       'view_financeiro',
       'view_nfe',
       'view_gerenciamento',
-      'view_kit'
+      'view_kit',
+      'view_frota'
     ],
     
     // Orcamentista (legado): acesso comercial - módulo orçamentos todos podem usar
@@ -189,6 +212,22 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
       'view_servicos'
     ],
     
+    // Comprador: frota e suprimentos
+    comprador: [
+      'view_frota',
+      'view_catalogo',
+      'view_movimentacoes',
+      'view_comparacao_precos',
+      'view_obras',
+      'view_tarefas_obra',
+      'view_tarefas_internas',
+      'view_gestao_obras',
+      'view_servicos',
+      'view_vendas',
+      'view_projetos',
+      'view_kit'
+    ],
+    
     // Compras (legado): módulo compras todos podem usar
     compras: [
       'view_catalogo',
@@ -198,10 +237,11 @@ export const hasPermission = (user: User | null | undefined, permission: Permiss
       'view_tarefas_internas'
     ],
     
-    // Eletricista: apenas Tarefas da Obra e Ferramentas (seu kit)
+    // Eletricista: hub de OS + ferramentas (seu kit)
     eletricista: [
       'view_tarefas_obra',
-      'view_kit'
+      'view_kit',
+      'view_projetos'
     ],
     
     // User padrão: acesso mínimo
