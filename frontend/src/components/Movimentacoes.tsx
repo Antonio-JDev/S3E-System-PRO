@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { useSKey } from '../hooks/useSKey';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { AuthContext } from '../contexts/AuthContext';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 // ==================== ICONS ====================
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -410,22 +412,22 @@ const Movimentacoes: React.FC<MovimentacoesProps> = ({ toggleSidebar }) => {
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Controle de entradas e saídas de estoque</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={() => setIsEntradaModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl hover:from-green-700 hover:to-green-600 transition-all shadow-medium font-semibold`}
                     >
                         <ArrowDownTrayIcon className="w-5 h-5" />
                         Devolução Estoque
                     </button>
                     <button
                         onClick={() => setIsSaidaModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold"
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-xl hover:from-orange-700 hover:to-orange-600 transition-all shadow-medium font-semibold`}
                     >
                         <ArrowUpTrayIcon className="w-5 h-5" />
                         Realizar Baixa Estoque
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Error Message */}
