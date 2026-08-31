@@ -35,6 +35,7 @@ export const listarEventosCalendario = async (req: AuthRequest, res: Response): 
         status,
         tipo: typeof req.query.tipo === 'string' ? req.query.tipo : undefined,
         busca: typeof req.query.busca === 'string' ? req.query.busca : undefined,
+        projetoId: typeof req.query.projetoId === 'string' ? req.query.projetoId : undefined,
       },
       req.user
     );
@@ -113,7 +114,7 @@ export const buscarEventoCalendario = async (req: AuthRequest, res: Response): P
 
 export const criarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, custoVeiculo, equipeIds } = req.body;
+    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, projetoId, custoVeiculo, equipeIds, veiculoIds, snapWorkshift, alocarPeriodoOs } = req.body;
 
     if (!titulo?.trim()) {
       res.status(400).json({ success: false, error: 'Título é obrigatório' });
@@ -133,8 +134,12 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
         status,
         tipo,
         orcamentoId,
+        projetoId,
         custoVeiculo,
         equipeIds: Array.isArray(equipeIds) ? equipeIds : [],
+        veiculoIds: Array.isArray(veiculoIds) ? veiculoIds : [],
+        snapWorkshift: Boolean(snapWorkshift),
+        alocarPeriodoOs: alocarPeriodoOs === true,
       },
       req.user
     );
@@ -142,7 +147,7 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
     res.status(201).json({ success: true, data: evento });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar evento';
-    const statusCode = message.includes('inválid') || message.includes('não encontrado') || message.includes('Data fim') ? 400 : 500;
+    const statusCode = message.includes('inválid') || message.includes('não encontrado') || message.includes('Data fim') || message.includes('período') || message.includes('prazo') ? 400 : 500;
     console.error('Erro ao criar evento de calendário:', error);
     res.status(statusCode).json({ success: false, error: message });
   }
@@ -151,7 +156,7 @@ export const criarEventoCalendario = async (req: AuthRequest, res: Response): Pr
 export const atualizarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, custoVeiculo, equipeIds } = req.body;
+    const { titulo, descricao, dataInicio, dataFim, status, tipo, orcamentoId, projetoId, custoVeiculo, equipeIds, veiculoIds, snapWorkshift, alocarPeriodoOs } = req.body;
 
     const evento = await eventosCalendarioService.atualizar(
       id,
@@ -163,8 +168,12 @@ export const atualizarEventoCalendario = async (req: AuthRequest, res: Response)
         status,
         tipo,
         orcamentoId,
+        projetoId,
         custoVeiculo,
         equipeIds: equipeIds !== undefined ? (Array.isArray(equipeIds) ? equipeIds : []) : undefined,
+        veiculoIds: veiculoIds !== undefined ? (Array.isArray(veiculoIds) ? veiculoIds : []) : undefined,
+        snapWorkshift: snapWorkshift === undefined ? undefined : Boolean(snapWorkshift),
+        alocarPeriodoOs: alocarPeriodoOs === undefined ? undefined : alocarPeriodoOs === true,
       },
       req.user
     );
@@ -177,7 +186,7 @@ export const atualizarEventoCalendario = async (req: AuthRequest, res: Response)
     res.json({ success: true, data: evento });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao atualizar evento';
-    const statusCode = message.includes('inválid') || message.includes('não encontrado') || message.includes('Data fim') ? 400 : 500;
+    const statusCode = message.includes('inválid') || message.includes('não encontrado') || message.includes('Data fim') || message.includes('período') || message.includes('prazo') ? 400 : 500;
     console.error('Erro ao atualizar evento de calendário:', error);
     res.status(statusCode).json({ success: false, error: message });
   }
@@ -195,6 +204,33 @@ export const excluirEventoCalendario = async (req: AuthRequest, res: Response): 
   } catch (error) {
     console.error('Erro ao excluir evento de calendário:', error);
     res.status(500).json({ success: false, error: 'Erro ao excluir evento de calendário' });
+  }
+};
+
+export const confirmarEventoCalendario = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const evento = await eventosCalendarioService.confirmar(id, req.user);
+    if (!evento) {
+      res.status(404).json({ success: false, error: 'Evento não encontrado' });
+      return;
+    }
+    res.json({ success: true, data: evento });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao confirmar evento';
+    const statusCode = message.includes('Vincule') ? 400 : 500;
+    console.error('Erro ao confirmar evento de calendário:', error);
+    res.status(statusCode).json({ success: false, error: message });
+  }
+};
+
+export const listarFuncionariosAlocacaoCalendario = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const data = await eventosCalendarioService.listarFuncionariosAlocacao();
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro ao listar funcionários para alocação:', error);
+    res.status(500).json({ success: false, error: 'Erro ao listar funcionários' });
   }
 };
 
