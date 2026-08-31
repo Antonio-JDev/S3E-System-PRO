@@ -498,6 +498,52 @@ export function gerarBufferPdfConferenciaPonto(
           null,
           { bold: true },
         );
+        const extrato = (folha as { bancoHorasExtrato?: {
+          saldoInicialLiquido?: number;
+          creditosMes?: number;
+          debitosMes?: number;
+          pagamentosMes?: number;
+          saldoFinalLiquido?: number;
+          referenciaMes?: number;
+          referenciaAno?: number;
+        } }).bancoHorasExtrato;
+        if (extrato) {
+          linhaResumo(
+            `Extrato ${String(extrato.referenciaMes ?? '').padStart(2, '0')}/${extrato.referenciaAno ?? ''}`,
+            '',
+            '',
+            { bold: true },
+          );
+          linhaResumo(
+            'Saldo inicial',
+            decimalHoursToHHmm(Number(extrato.saldoInicialLiquido ?? 0)),
+            null,
+          );
+          linhaResumo(
+            '+ Créditos do mês',
+            decimalHoursToHHmm(Number(extrato.creditosMes ?? 0)),
+            null,
+          );
+          linhaResumo(
+            '− Débitos do mês',
+            decimalHoursToHHmm(Number(extrato.debitosMes ?? 0)),
+            null,
+            { color: COLOR_RED },
+          );
+          if (Number(extrato.pagamentosMes ?? 0) > 0) {
+            linhaResumo(
+              '− Pagamentos na folha',
+              decimalHoursToHHmm(Number(extrato.pagamentosMes ?? 0)),
+              null,
+            );
+          }
+          linhaResumo(
+            'Saldo final',
+            decimalHoursToHHmm(Number(extrato.saldoFinalLiquido ?? 0)),
+            null,
+            { bold: true },
+          );
+        }
         y += 4;
         doc.strokeColor('#e5e7eb').lineWidth(0.5)
           .moveTo(tableLeft, y).lineTo(tableLeft + widthAvailable, y).stroke();
