@@ -7,6 +7,8 @@ import { AuthContext } from '../contexts/AuthContext';
 import { getUploadUrl } from '../config/api';
 import { toast } from 'sonner';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 import {
     calcEntradaCaixaComDiferenca,
     calcValorARegistrar,
@@ -14,6 +16,7 @@ import {
     formatBRL,
     parseMoney,
 } from '../utils/financeiroValor';
+import { canEditarContaFinanceiraManual } from '../utils/permissions';
 import ParcelasVendaAuditoriaTable from './financeiro/ParcelasVendaAuditoriaTable';
 import {
     AlertDialog,
@@ -165,13 +168,7 @@ interface ContasAReceberProps {
 // ==================== COMPONENT ====================
 const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAtiva }) => {
     const { user } = useContext(AuthContext)!;
-    const userRole = user?.role?.toLowerCase();
-    const canManageManualReceber = Boolean(
-        user?.isAdmin ||
-        userRole === 'admin' ||
-        userRole === 'administrador' ||
-        userRole === 'desenvolvedor'
-    );
+    const canManageManualReceber = canEditarContaFinanceiraManual(user);
 
     const toISODate = (d: Date) => {
         const y = d.getFullYear();
@@ -249,6 +246,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const [editContaPagador, setEditContaPagador] = useState('');
     const [editContaDescricao, setEditContaDescricao] = useState('');
     const [editContaValor, setEditContaValor] = useState('');
+    const [editContaJuros, setEditContaJuros] = useState('0');
+    const [editContaDesconto, setEditContaDesconto] = useState('0');
     const [editContaVencimento, setEditContaVencimento] = useState(new Date().toISOString().split('T')[0]);
     const [editContaObservacoes, setEditContaObservacoes] = useState('');
     const [salvandoEdicaoConta, setSalvandoEdicaoConta] = useState(false);
@@ -536,6 +535,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         [novaContaValor, novaContaJuros, novaContaDesconto]
     );
 
+    const valorARegistrarEdicaoReceber = useMemo(
+        () => calcValorARegistrar(editContaValor, editContaJuros, editContaDesconto),
+        [editContaValor, editContaJuros, editContaDesconto]
+    );
+
     const handleOpenConfirmBaixa = () => {
         setConfirmDialogTipo('receber');
         setIsConfirmDialogOpen(true);
@@ -596,11 +600,19 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
             toast.error('Somente contas manuais podem ser editadas.');
             return;
         }
+        if (conta.status === 'Recebido' || conta.status === 'Recebido Parcial') {
+            toast.error('Não é possível alterar uma conta já recebida.');
+            return;
+        }
         setContaEditando(conta);
         setEditContaClassificacao(conta.tipoManual || 'ENTRADA');
         setEditContaPagador(conta.pagadorNome || conta.clienteNome || '');
         setEditContaDescricao(conta.projetoTitulo || '');
-        setEditContaValor(String(conta.valor ?? ''));
+        const juros = conta.valorJuros ?? 0;
+        const desconto = conta.valorDesconto ?? 0;
+        setEditContaValor(String(calcValorBaseFromEfetivo(conta.valor ?? 0, juros, desconto)));
+        setEditContaJuros(String(juros));
+        setEditContaDesconto(String(desconto));
         setEditContaVencimento(conta.dataVencimento ? new Date(conta.dataVencimento).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
         setEditContaObservacoes(conta.observacoes || '');
         setIsEditarContaModalOpen(true);
@@ -613,6 +625,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
         setEditContaPagador('');
         setEditContaDescricao('');
         setEditContaValor('');
+        setEditContaJuros('0');
+        setEditContaDesconto('0');
         setEditContaVencimento(new Date().toISOString().split('T')[0]);
         setEditContaObservacoes('');
     };
@@ -620,13 +634,19 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
     const handleSalvarEdicaoConta = async () => {
         if (!contaEditando) return;
         const descricao = editContaDescricao.trim();
-        const valor = parseFloat(String(editContaValor).replace(',', '.'));
+        const valor = parseMoney(editContaValor);
+        const juros = parseMoney(editContaJuros);
+        const desconto = parseMoney(editContaDesconto);
         if (!descricao || !editContaVencimento) {
             toast.error('Preencha descrição e data de vencimento.');
             return;
         }
         if (isNaN(valor) || valor <= 0) {
             toast.error('Informe um valor válido.');
+            return;
+        }
+        if (valorARegistrarEdicaoReceber <= 0) {
+            toast.error('Valor a registrar deve ser maior que zero (verifique juros e descontos).');
             return;
         }
 
@@ -637,6 +657,8 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                 pagadorNome: editContaPagador.trim() || undefined,
                 descricao,
                 valorParcela: valor,
+                valorJuros: juros,
+                valorDesconto: desconto,
                 dataVencimento: editContaVencimento,
                 observacoes: editContaObservacoes.trim() || undefined
             });
@@ -1181,11 +1203,11 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                         <p className="text-sm sm:text-base text-gray-500 dark:text-dark-text-secondary mt-1">Gestão de recebimentos e parcelas</p>
                     </div>
                 </div>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     {setAbaAtiva && (
                         <button
                             onClick={() => setAbaAtiva('dashboard')}
-                            className="btn-secondary flex items-center gap-2"
+                            className={`${scrollableNavItemClasses} btn-secondary flex items-center gap-2`}
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -1195,21 +1217,21 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                     )}
                     <button
                         onClick={() => setIsNovaContaModalOpen(true)}
-                        className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-xl transition-colors flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-xl transition-colors flex items-center gap-2`}
                     >
                         <CurrencyDollarIcon className="w-4 h-4" />
                         Nova Conta a Receber
                     </button>
                     <button
                         onClick={loadContasReceber}
-                        className="btn-success flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} btn-success flex items-center gap-2`}
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                         </svg>
                         Atualizar
                     </button>
-                </div>
+                </ScrollableRow>
             </header>
 
             {/* Cards de Estatísticas */}
@@ -1536,6 +1558,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                 </button>
                                                 {canManageManualReceber && conta.contaManual && (
                                                     <>
+                                                        {conta.status !== 'Recebido' && conta.status !== 'Recebido Parcial' && (
                                                         <button
                                                             onClick={() => handleOpenEditarContaModal(conta)}
                                                             className="p-2 bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-200 transition-colors"
@@ -1543,6 +1566,7 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                                         >
                                                             <PencilIcon className="w-4 h-4" />
                                                         </button>
+                                                        )}
                                                         <button
                                                             onClick={() => handleOpenConfirmExcluir(conta)}
                                                             className="p-2 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 transition-colors"
@@ -2523,6 +2547,43 @@ const ContasAReceber: React.FC<ContasAReceberProps> = ({ toggleSidebar, setAbaAt
                                         className="select-field focus:ring-cyan-500 focus:border-cyan-500"
                                     />
                                 </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Juros (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={editContaJuros}
+                                        onChange={(e) => setEditContaJuros(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Desconto (R$)</label>
+                                    <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={editContaDesconto}
+                                        onChange={(e) => setEditContaDesconto(e.target.value)}
+                                        min="0"
+                                        step="0.01"
+                                        className="select-field focus:ring-cyan-500 focus:border-cyan-500"
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                            </div>
+                            <div className="bg-cyan-50 dark:bg-cyan-950/40 border-2 border-cyan-300 dark:border-cyan-800/60 p-4 rounded-xl">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-sm font-semibold text-cyan-800 dark:text-cyan-300">Valor a registrar:</span>
+                                    <span className="text-xl font-bold text-cyan-800 dark:text-cyan-300">R$ {formatBRL(valorARegistrarEdicaoReceber)}</span>
+                                </div>
+                                <p className="text-xs text-cyan-700 dark:text-cyan-400 mt-1">
+                                    Ajuste o lançamento sem precisar receber a conta.
+                                </p>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 dark:text-dark-text-secondary mb-2">Observação</label>
