@@ -2,8 +2,8 @@
 
 ## Descrição
 
-Adiciona colunas opcionais à tabela `fornecedores` para armazenar informações retornadas
-pela BrasilAPI (CNPJ) utilizadas em faturamento e integração fiscal:
+Adiciona colunas opcionais à tabela `fornecedores` para armazenar informações
+retornadas pela BrasilAPI (CNPJ) utilizadas em faturamento e integração fiscal:
 
 - `bairro` TEXT
 - `cidade` TEXT
@@ -32,6 +32,4 @@ npx prisma migrate dev --name add_fornecedor_fields
 ## Observações
 
 - As instruções SQL usam `IF NOT EXISTS` para serem seguras em ambientes onde
-  algumas colunas já existam.
--- Após aplicar, reinicie o backend se necessário.
-
+  algumas colunas já existam. -- Após aplicar, reinicie o backend se necessário.
