@@ -16,13 +16,14 @@
 #
 # URLs: Frontend http://localhost:5173  |  API http://localhost:3001  |  EvoGo Manager http://localhost:3333/manager
 # PgAdmin: http://localhost:5050
+# Postgres ERP: localhost:5432  |  Postgres EvoGo: localhost:5433
 #
 # O Compose lê o ficheiro `.env` na raiz (interpolação + env_file nos serviços).
 # Produção: docker compose -f docker-compose.prod.yml --env-file .env up -d
 # ============================================
 
 services:
-  # PostgreSQL Database
+  # PostgreSQL do ERP (app S3E). Sem evogo_* / evolution legado.
   postgres:
     image: postgres:16-alpine
     container_name: s3e-postgres
@@ -34,18 +35,50 @@ services:
       POSTGRES_USER: ${DB_USER:-s3e_dev}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_local}
       POSTGRES_DB: ${DB_NAME:-s3e_dev}
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${DB_MAX_CONNECTIONS:-100}"
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups # Pasta para backups manuais
-      - ./docker/postgres/02-evolution-database.sql:/docker-entrypoint-initdb.d/02-evolution-database.sql:ro
-      # Bases evogo_* (Evolution Go) — criadas na 1ª inicialização do volume; ignoradas se usar só Evolution API v2 no dev
-      - ./docker/postgres/03-evolution-go-databases.sql:/docker-entrypoint-initdb.d/03-evolution-go-databases.sql:ro
     networks:
       - s3e-network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-s3e_dev} -d ${DB_NAME:-s3e_dev}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Postgres dedicado Evolution Go (evogo_auth + evogo_users).
+  postgres-evogo:
+    image: postgres:16-alpine
+    container_name: s3e-postgres-evogo
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      POSTGRES_USER: ${EVOGO_DB_USER:-evogo}
+      POSTGRES_PASSWORD: ${EVOGO_DB_PASSWORD:-dev_password_local}
+      POSTGRES_DB: evogo_users
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${EVOGO_DB_MAX_CONNECTIONS:-50}"
+    ports:
+      - "${EVOGO_DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_evogo_data_dev:/var/lib/postgresql/data
+      - ./docker/postgres/evogo-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - s3e-network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pg_isready -U \"$$POSTGRES_USER\" -d evogo_users"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,17 +99,15 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     depends_on:
-      postgres:
+      postgres-evogo:
         condition: service_healthy
     environment:
       TZ: America/Sao_Paulo
       SERVER_PORT: "8080"
       CLIENT_NAME: ${EVOLUTION_GO_CLIENT_NAME:-s3e}
       GLOBAL_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-s3e-dev-change-me}
-      # Conecta nas bases `evogo_auth` / `evogo_users` (criadas pelo
-      # `docker/postgres/03-evolution-go-databases.sql` na 1ª inicialização do volume).
-      POSTGRES_AUTH_DB: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/evogo_auth?sslmode=disable
-      POSTGRES_USERS_DB: postgresql://${DB_USER:-s3e_dev}:${DB_PASSWORD:-dev_password_local}@postgres:5432/evogo_users?sslmode=disable
+      POSTGRES_AUTH_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD:-dev_password_local}@postgres-evogo:5432/evogo_auth?sslmode=disable"
+      POSTGRES_USERS_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD:-dev_password_local}@postgres-evogo:5432/evogo_users?sslmode=disable"
       # Mantemos histórico de mensagens no CRM (backend Prisma), não na base da EvoGo.
       DATABASE_SAVE_MESSAGES: "false"
       WADEBUG: ${EVOLUTION_GO_WADEBUG:-INFO}
@@ -98,8 +129,9 @@ services:
     networks:
       - s3e-network
     healthcheck:
-      # Endpoint nativo de healthcheck da EvoGo (retorna 200 OK quando o servidor sobe).
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1" ]
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1"
       interval: 30s
       timeout: 10s
       retries: 5
@@ -245,6 +277,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_evogo_data_dev:
     driver: local
   backend_node_modules:
     driver: local
