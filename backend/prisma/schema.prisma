@@ -40,8 +40,11 @@ model User {
   notificacoes        Notificacao[]           @relation("NotificacoesUsuario")
   tasksKanbanCriadas Task[]                  @relation("TaskKanbanCriador")
   tarefasInternas     TarefaInterna[]         @relation("TarefaInternaResponsavel")
+  tarefasInternasCriadas TarefaInterna[]      @relation("TarefaInternaCriador")
   whatsappReadStates  WhatsappChatReadState[]
   projetosInicioSemEstoque Projeto[]            @relation("OsInicioSemEstoque")
+  projetosConcluidos       Projeto[]            @relation("ProjetoConcluidoPor")
+  orcamentosAprovados      Orcamento[]          @relation("OrcamentoAprovadoPor")
   apontamentosOsCriados    ApontamentoOs[]      @relation("ApontamentosOsCriados")
   apontamentosOsItens      ApontamentoOsItem[]
   contatoLeadsResponsavel  ContatoLead[]        @relation("ContatoLeadResponsavel")
@@ -265,8 +268,18 @@ model ConfiguracaoSistema {
    * { "YYYY-MM": number } — meta específica por mês (sobrepõe metaMensalVendas para aquele mês)
    */
   metasVendasPorMes       Json?
+  /// Código da empresa no sistema contábil (ex.: 329)
+  codigoEmpresaContabil   String?
+  /// Empresa fiscal usada no cabeçalho da exportação de folha contábil
+  empresaFiscalIdFolha    String?
+  /// Percentual HE na rubrica contábil: 50 | 60 | 70 | 80 | 100
+  percentualHeFolhaContabil Int?   @default(70)
+  /// De/Para de rubricas contábeis (códigos numéricos por evento)
+  rubricasFolhaContabil   Json?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
+
+  empresaFiscalFolha EmpresaFiscal? @relation("ConfigFolhaContabilEmpresa", fields: [empresaFiscalIdFolha], references: [id], onDelete: SetNull)
 
   @@map("configuracoes_sistema")
 }
@@ -423,6 +436,7 @@ model Fornecedor {
   compras     Compra[]
   contasPagar ContaPagar[]
   cotacoes    Cotacao[] // Novo: cotações do fornecedor
+  aliasesMaterial MaterialFornecedorAlias[]
 
   @@map("fornecedores")
 }
@@ -472,8 +486,35 @@ model Material {
   movimentacoes    MovimentacaoEstoque[]
   historicoPrecos  HistoricoPreco[]
   reservasProjeto  ReservaMaterialProjeto[]
+  aliasesFornecedor MaterialFornecedorAlias[]
 
   @@map("materiais")
+}
+
+// Apelidos do fornecedor (NF-e) → material canônico do estoque.
+// Permite vincular uma vez e reaproveitar nas próximas compras, mesmo com nome diferente.
+model MaterialFornecedorAlias {
+  id               String   @id @default(uuid())
+  materialId       String
+  fornecedorId     String
+  codigoFornecedor String? // cProd da NF-e (quando for código estável)
+  ean              String? // GTIN/cEAN, se válido
+  nomeOriginal     String // xProd exatamente como veio na NF
+  nomeNormalizado  String // chave de busca por nome
+  ncm              String?
+  origem           String   @default("MANUAL") // MANUAL | IMPORTACAO | HISTORICO
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        String?
+
+  material   Material   @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  fornecedor Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Cascade)
+
+  @@unique([fornecedorId, nomeNormalizado])
+  @@index([fornecedorId, codigoFornecedor])
+  @@index([ean])
+  @@index([materialId])
+  @@map("material_fornecedor_alias")
 }
 
 // Histórico de alterações de preços
@@ -621,11 +662,13 @@ model Orcamento {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   aprovedAt    DateTime?
+  aprovadoPorId String?
   recusadoAt   DateTime?
   motivoRecusa String? // Motivo da recusa (se aplicável)
 
   cliente       Cliente         @relation(fields: [clienteId], references: [id])
   empresaFiscal EmpresaFiscal?  @relation(fields: [empresaFiscalId], references: [id])
+  aprovadoPor   User?           @relation("OrcamentoAprovadoPor", fields: [aprovadoPorId], references: [id], onDelete: SetNull)
   /**
    * Quando a proposta nasceu do Funil de Atendimento (CRM)
    */
@@ -638,6 +681,7 @@ model Orcamento {
   eventosCalendario EventoCalendario[]
 
   @@index([contatoLeadId])
+  @@index([aprovadoPorId])
   @@map("orcamentos")
 }
 
@@ -659,17 +703,21 @@ model EventoCalendario {
   status       EventoStatus @default(PREVISAO)
   tipo         String       @default("REUNIAO") // OBRA | REUNIAO | VISITA
   orcamentoId  String?
+  projetoId    String?
   custoVeiculo Decimal?     @default(0) @db.Decimal(12, 2)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
   orcamento Orcamento?    @relation(fields: [orcamentoId], references: [id], onDelete: SetNull)
+  projeto   Projeto?      @relation(fields: [projetoId], references: [id], onDelete: SetNull)
   equipe    Funcionario[]
+  veiculos  Veiculo[]
 
   @@index([dataInicio, dataFim])
   @@index([status])
   @@index([tipo])
   @@index([orcamentoId])
+  @@index([projetoId])
   @@map("eventos_calendario")
 }
 
@@ -778,6 +826,7 @@ model Projeto {
   dataPrevisao         DateTime?
   dataFim              DateTime?
   dataConclusao        DateTime?
+  concluidoPorId       String?
   status               ProjetoStatus @default(PROPOSTA)
   // Indica que esta ordem de serviço não terá obra de campo (ex: desenho técnico, consultoria)
   semObra              Boolean       @default(false)
@@ -801,6 +850,7 @@ model Projeto {
   orcamento    Orcamento          @relation(fields: [orcamentoId], references: [id])
   cliente      Cliente            @relation(fields: [clienteId], references: [id])
   responsavel  User?              @relation("ProjetoResponsavel", fields: [responsavelId], references: [id])
+  concluidoPor User?              @relation("ProjetoConcluidoPor", fields: [concluidoPorId], references: [id], onDelete: SetNull)
   tasks        Task[]
   notasFiscais NotaFiscal[]
   vendas       Venda[]
@@ -816,7 +866,9 @@ model Projeto {
   iniciadoSemEstoquePor User? @relation("OsInicioSemEstoque", fields: [iniciadoSemEstoquePorId], references: [id], onDelete: SetNull)
   apontamentos         ApontamentoOs[]
   historicoReprovacoesVistoria HistoricoReprovacaoVistoria[]
+  eventosCalendario    EventoCalendario[]
 
+  @@index([concluidoPorId])
   @@map("projetos")
 }
 
@@ -1158,6 +1210,8 @@ model CompraItem {
   materialId            String?
   ferramentaId          String? // Quando classificação = FERRAMENTAS, item entra na página Ferramentas (não no estoque)
   nomeProduto           String
+  codigoFornecedor      String? // cProd da NF-e
+  ean                   String? // GTIN/cEAN da NF-e
   ncm                   String?
   quantidade            Float // Quantidade de embalagens
   valorUnit             Float // Preço por embalagem
@@ -1420,6 +1474,9 @@ model ContaPagar {
   totalParcelas   Int?
   observacoes     String?
   classificacao   String? // Impostos, TRT-ART, Serviço mão de obra, Brindes, Combustíveis e pedagios, Frete, Material de escritório, Saídas (movimentações, fluxo de caixa, DRE)
+  // Unificação de contas (várias → uma / parcelamento)
+  unificacaoGrupoId          String? // UUID compartilhado entre origens canceladas e novas parcelas
+  unificacaoContasOrigemIds  Json? // string[] — IDs das contas unificadas (nas parcelas novas)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -1440,6 +1497,7 @@ model ContaPagar {
   @@index([rhParcelamentoId])
   @@index([cartaoCreditoId])
   @@index([faturaCartaoId])
+  @@index([unificacaoGrupoId])
   @@map("contas_pagar")
 }
 
@@ -1526,6 +1584,7 @@ model EmpresaFiscal {
   nfseFila     NfseFila[] // ✅ NOVO: Fila de contingência NFS-e
   orcamentos   Orcamento[]
   vendas       Venda[]
+  configsFolhaContabil ConfiguracaoSistema[] @relation("ConfigFolhaContabilEmpresa")
 
   @@map("empresas_fiscais")
 }
@@ -1843,14 +1902,17 @@ model TarefaInterna {
   prazo         DateTime
   /// True quando o usuário definiu prazo explicitamente (UI pode escolher exibir/ocultar).
   prazoDefinido Boolean             @default(false)
+  criadoPorId   String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
-  user  User?               @relation("TarefaInternaResponsavel", fields: [userId], references: [id], onDelete: SetNull)
-  itens TarefaInternaItem[]
+  user      User?               @relation("TarefaInternaResponsavel", fields: [userId], references: [id], onDelete: SetNull)
+  criadoPor User?               @relation("TarefaInternaCriador", fields: [criadoPorId], references: [id], onDelete: SetNull)
+  itens     TarefaInternaItem[]
 
   @@index([coluna])
   @@index([userId])
+  @@index([criadoPorId])
   @@map("tarefas_internas")
 }
 
@@ -1947,6 +2009,7 @@ model Funcionario {
   beneficios                    Beneficio[]
   lancamentosFolha              LancamentoFolha[]
   bancoHorasExcessoCompetencias BancoHorasExcessoCompetencia[]
+  bancoHorasExtratosCompetencia BancoHorasExtratoCompetencia[]
   ocorrenciasPontoRh            OcorrenciaPontoRh[]
   comentariosConferenciaPonto   ComentarioConferenciaPontoRh[]
   workShiftCompensacoes         CompensacaoHorasRh[]
@@ -2019,6 +2082,36 @@ model BancoHorasExcessoCompetencia {
 
   @@unique([funcionarioId, referenciaAno, referenciaMes])
   @@map("banco_horas_excesso_competencia")
+}
+
+/// Extrato mensal do banco de horas (estilo ERP: saldo inicial → movimentos → saldo final).
+/// Compatível com import XLS no fim do mês: recalculado após import/folha/recalc.
+model BancoHorasExtratoCompetencia {
+  id                     String   @id @default(uuid())
+  funcionarioId          String
+  referenciaAno          Int
+  referenciaMes          Int
+  saldoInicialPositivas  Decimal  @default(0) @db.Decimal(12, 2)
+  saldoInicialNegativas  Decimal  @default(0) @db.Decimal(12, 2)
+  saldoInicialLiquido    Decimal  @default(0) @db.Decimal(12, 2)
+  creditosMes            Decimal  @default(0) @db.Decimal(12, 2)
+  debitosMes             Decimal  @default(0) @db.Decimal(12, 2)
+  pagamentosMes          Decimal  @default(0) @db.Decimal(12, 2)
+  saldoFinalPositivas    Decimal  @default(0) @db.Decimal(12, 2)
+  saldoFinalNegativas    Decimal  @default(0) @db.Decimal(12, 2)
+  saldoFinalLiquido      Decimal  @default(0) @db.Decimal(12, 2)
+  /// FOLHA | IMPORT_XLS | RECALC | FATURAR | ZERAR
+  origemAtualizacao      String   @default("FOLHA")
+  /// Lista de movimentos do mês (crédito/débito/pagamento) para UI/PDF
+  movimentosJson         Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  funcionario Funcionario @relation(fields: [funcionarioId], references: [id], onDelete: Cascade)
+
+  @@unique([funcionarioId, referenciaAno, referenciaMes])
+  @@index([funcionarioId, referenciaAno, referenciaMes])
+  @@map("banco_horas_extrato_competencia")
 }
 
 model LancamentoFolha {
@@ -2255,10 +2348,13 @@ model Veiculo {
   ano       Int
   status    String   @default("Ativo") // Ativo, Manutenção, Inativo
   kmAtual   Int      @default(0)
+  dataVencimentoIpva          DateTime?
+  dataVencimentoLicenciamento DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   gastos GastoVeiculo[]
+  eventosCalendario EventoCalendario[]
 
   @@map("veiculos")
 }
@@ -2272,6 +2368,7 @@ model GastoVeiculo {
   valor       Decimal  @db.Decimal(10, 2)
   data        DateTime
   km          Int? // Quilometragem no momento do gasto
+  litros      Decimal? @db.Decimal(10, 3) // Litros abastecidos (nota fiscal)
   obraId      String? // Obra relacionada (se aplicável)
   responsavel String? // Nome do responsável pelo gasto
   createdAt   DateTime @default(now())
