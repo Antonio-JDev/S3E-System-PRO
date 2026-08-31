@@ -164,20 +164,20 @@ docker run --rm odev10antonio/s3e-frontend:1.1.6 cat /usr/share/nginx/html/asset
 
 > # 📌 ATUALIZAÇÃO — Maio/2026 (Traefik + Tailscale Funnel + Evolution Go)
 >
-> A partir da versão **1.3.x** o stack mudou bastante. As seções acima
-> continuam válidas como histórico/rollback (até a v1.1.6). Para builds
-> novos use as instruções desta seção.
+> A partir da versão **1.3.x** o stack mudou bastante. As seções acima continuam
+> válidas como histórico/rollback (até a v1.1.6). Para builds novos use as
+> instruções desta seção.
 
 ## 🆕 O que mudou no stack 1.3.x
 
-| Componente             | Antes (≤ 1.1.6)                                | Agora (1.3.x)                                                                                        |
-| ---------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Reverse proxy**      | Nginx direto + portas expostas (80/3001)       | Traefik 2.10.7 (PathPrefix por Host)                                                                 |
-| **TLS / Domínio**      | `app.s3eengenharia.com.br` via hosts + IP VPN  | Tailscale Funnel `truenas.tailad9fda.ts.net` (cert *.ts.net automático)                              |
-| **WhatsApp**           | Evolution API v2 (`atendai/evolution-api`)     | **Evolution Go 0.7.1** (`evoapicloud/evolution-go`) — whatsmeow nativo                               |
-| **Mensageria**         | RabbitMQ + WAHA (Chrome headless)              | Removidos. EvoGo entrega webhook HTTP direto pro backend                                             |
-| **VITE_API_URL**       | `http://app.s3eengenharia.com.br:3001`         | `https://truenas.tailad9fda.ts.net/api`                                                              |
-| **Volumes WhatsApp**   | `whatsapp_provider_sessions_dev`               | `evolution_go_dbdata` + `evolution_go_logs`                                                          |
+| Componente           | Antes (≤ 1.1.6)                               | Agora (1.3.x)                                                            |
+| -------------------- | --------------------------------------------- | ------------------------------------------------------------------------ |
+| **Reverse proxy**    | Nginx direto + portas expostas (80/3001)      | Traefik 2.10.7 (PathPrefix por Host)                                     |
+| **TLS / Domínio**    | `app.s3eengenharia.com.br` via hosts + IP VPN | Tailscale Funnel `truenas.tailad9fda.ts.net` (cert \*.ts.net automático) |
+| **WhatsApp**         | Evolution API v2 (`atendai/evolution-api`)    | **Evolution Go 0.7.1** (`evoapicloud/evolution-go`) — whatsmeow nativo   |
+| **Mensageria**       | RabbitMQ + WAHA (Chrome headless)             | Removidos. EvoGo entrega webhook HTTP direto pro backend                 |
+| **VITE_API_URL**     | `http://app.s3eengenharia.com.br:3001`        | `https://truenas.tailad9fda.ts.net/api`                                  |
+| **Volumes WhatsApp** | `whatsapp_provider_sessions_dev`              | `evolution_go_dbdata` + `evolution_go_logs`                              |
 
 ## 🆕 Build da versão 1.3.x
 
@@ -251,13 +251,13 @@ Se retornar `https://truenas.tailad9fda.ts.net/api` o build está correto.
 
 ## 🆕 Tabela resumo 1.3.x
 
-| Componente   | Onde Configura           | Valor (produção 1.3.x)                                       |
-| ------------ | ------------------------ | ------------------------------------------------------------ |
-| **Backend**  | `.env` (runtime)         | `BACKEND_URL=https://truenas.tailad9fda.ts.net/api`          |
-| **Frontend** | Build arg (compile-time) | `VITE_API_URL=https://truenas.tailad9fda.ts.net/api`         |
-| **CORS**     | `.env` (runtime)         | `CORS_ORIGIN=https://truenas.tailad9fda.ts.net`              |
-| **EvoGo**    | `.env` (runtime)         | `WHATSAPP_PROVIDER_KIND=evolution-go`                        |
-| **EvoGo TK** | `.env` (runtime)         | `WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN=<token da instância>`   |
+| Componente   | Onde Configura           | Valor (produção 1.3.x)                                     |
+| ------------ | ------------------------ | ---------------------------------------------------------- |
+| **Backend**  | `.env` (runtime)         | `BACKEND_URL=https://truenas.tailad9fda.ts.net/api`        |
+| **Frontend** | Build arg (compile-time) | `VITE_API_URL=https://truenas.tailad9fda.ts.net/api`       |
+| **CORS**     | `.env` (runtime)         | `CORS_ORIGIN=https://truenas.tailad9fda.ts.net`            |
+| **EvoGo**    | `.env` (runtime)         | `WHATSAPP_PROVIDER_KIND=evolution-go`                      |
+| **EvoGo TK** | `.env` (runtime)         | `WHATSAPP_PROVIDER_GO_INSTANCE_TOKEN=<token da instância>` |
 
 ## 🔁 Rollback rápido (versão anterior)
 
@@ -279,8 +279,8 @@ docker compose -f docker-compose.prod.yml up -d
 
 Histórico de imagens publicadas (manter por segurança):
 
-| Versão | Stack                                            | Quando usar para rollback                                                |
-| ------ | ------------------------------------------------ | ------------------------------------------------------------------------ |
-| 1.1.6  | Nginx + Evolution v2 + WAHA + hosts manual       | Se a 1.3.x falhar e for preciso voltar ao DNS antigo (`app.s3e...`)      |
-| 1.2.x  | Traefik + Let's Encrypt + Evolution v2           | Intermediária — só serve se quiser TLS público com domínio próprio       |
-| 1.3.x  | Traefik + Tailscale Funnel + Evolution Go        | **Atual** — webhook nativo whatsmeow, sem WAHA, sem RabbitMQ             |
+| Versão | Stack                                      | Quando usar para rollback                                           |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------- |
+| 1.1.6  | Nginx + Evolution v2 + WAHA + hosts manual | Se a 1.3.x falhar e for preciso voltar ao DNS antigo (`app.s3e...`) |
+| 1.2.x  | Traefik + Let's Encrypt + Evolution v2     | Intermediária — só serve se quiser TLS público com domínio próprio  |
+| 1.3.x  | Traefik + Tailscale Funnel + Evolution Go  | **Atual** — webhook nativo whatsmeow, sem WAHA, sem RabbitMQ        |
