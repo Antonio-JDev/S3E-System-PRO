@@ -5,7 +5,12 @@ import { ContasPagarService } from './contasPagar.service';
 import { ReservaMaterialProjetoService } from './reservaMaterialProjeto.service';
 import { classificarMaterialPorNome } from '../utils/materialClassifier';
 import { gerarSKUUnico } from '../utils/skuGenerator';
-import { normalizarNomeProduto, compararNomesProdutos } from '../utils/stringUtils';
+import {
+    matchMaterial,
+    upsertAlias,
+    normalizarEan,
+    normalizarCodigoFornecedor,
+} from './materialFornecedorAlias.service';
 
 export interface CompraItemPayload {
     materialId?: string;
@@ -14,12 +19,141 @@ export interface CompraItemPayload {
     quantidade: number; // Quantidade de embalagens
     valorUnit: number; // Preço por embalagem
     unidadeMedida?: string; // Unidade de medida do produto (ex: 'un', 'm', 'kg')
+    codigoFornecedor?: string;
+    sku?: string;
+    ean?: string;
+    /** Só cria Material novo quando o usuário confirma que o item ainda não existe no estoque */
+    criarNovoMaterial?: boolean;
     // Campos de fracionamento
     quantidadeFracionada?: number; // Quantidade de unidades por embalagem
     tipoEmbalagem?: string; // "CAIXA", "PACOTE", etc.
     unidadeEmbalagem?: string; // "cx", "pct", etc.
     /** false = item segue destinoTipo da compra (obra/OS); true = apenas estoque */
     destinoEstoque?: boolean;
+}
+
+function identificadoresItemNf(item: CompraItemPayload) {
+    return {
+        codigoFornecedor: normalizarCodigoFornecedor(item.codigoFornecedor || item.sku),
+        ean: normalizarEan(item.ean),
+    };
+}
+
+async function aprenderAlias(
+    tx: any,
+    params: {
+        materialId: string;
+        fornecedorId: string;
+        nomeProduto: string;
+        codigoFornecedor?: string | null;
+        ean?: string | null;
+        ncm?: string | null;
+        origem?: string;
+    }
+) {
+    await upsertAlias(tx, {
+        materialId: params.materialId,
+        fornecedorId: params.fornecedorId,
+        nomeOriginal: params.nomeProduto,
+        codigoFornecedor: params.codigoFornecedor,
+        ean: params.ean,
+        ncm: params.ncm,
+        origem: params.origem || 'IMPORTACAO',
+    });
+}
+
+async function criarMaterialCanonico(
+    tx: any,
+    params: {
+        nomeProduto: string;
+        ncm?: string | null;
+        valorUnit: number;
+        fornecedorId: string;
+        temFracionamento?: boolean;
+        quantidadeFracionada?: number;
+        tipoEmbalagem?: string;
+        precoUnitarioCalculado?: number | null;
+        precoEmbalagem?: number | null;
+        numeroNF?: string;
+    }
+) {
+    const skuGerado = await gerarSKUUnico(tx, params.ncm || null);
+    const categoriaClassificada = classificarMaterialPorNome(params.nomeProduto, params.ncm || undefined);
+    const materialData: any = {
+        nome: params.nomeProduto,
+        sku: skuGerado,
+        tipo: 'Material Elétrico',
+        categoria: categoriaClassificada,
+        descricao: params.nomeProduto,
+        ncm: params.ncm ? String(params.ncm) : null,
+        unidadeMedida: 'un',
+        preco: params.temFracionamento ? params.precoUnitarioCalculado : params.valorUnit,
+        estoque: 0,
+        estoqueMinimo: 5,
+        localizacao: 'Almoxarifado',
+        fornecedorId: params.fornecedorId,
+        ativo: true,
+    };
+    if (params.temFracionamento) {
+        materialData.quantidadePorEmbalagem = params.quantidadeFracionada;
+        materialData.tipoEmbalagem = params.tipoEmbalagem || 'CAIXA';
+        materialData.precoEmbalagem = params.precoEmbalagem;
+        materialData.precoUnitario = params.precoUnitarioCalculado;
+    }
+    return tx.material.create({ data: materialData });
+}
+
+async function resolverMaterialNoRecebimento(
+    tx: any,
+    item: {
+        id: string;
+        materialId?: string | null;
+        nomeProduto: string;
+        ncm?: string | null;
+        codigoFornecedor?: string | null;
+        ean?: string | null;
+    },
+    fornecedorId: string,
+): Promise<string> {
+    if (item.materialId) {
+        await aprenderAlias(tx, {
+            materialId: item.materialId,
+            fornecedorId,
+            nomeProduto: item.nomeProduto,
+            codigoFornecedor: item.codigoFornecedor,
+            ean: item.ean,
+            ncm: item.ncm,
+            origem: 'IMPORTACAO',
+        });
+        return item.materialId;
+    }
+
+    const match = await matchMaterial(tx, {
+        fornecedorId,
+        nomeProduto: item.nomeProduto,
+        codigoFornecedor: item.codigoFornecedor,
+        ean: item.ean,
+    });
+    if (!match) {
+        throw new Error(
+            `Item "${item.nomeProduto}" não está vinculado ao estoque. Vincule a um material existente ou marque como item novo antes de receber.`
+        );
+    }
+
+    await tx.compraItem.update({
+        where: { id: item.id },
+        data: { materialId: match.material.id },
+    });
+    await aprenderAlias(tx, {
+        materialId: match.material.id,
+        fornecedorId,
+        nomeProduto: item.nomeProduto,
+        codigoFornecedor: item.codigoFornecedor,
+        ean: item.ean,
+        ncm: item.ncm,
+        origem: 'IMPORTACAO',
+    });
+    return match.material.id;
 }
 
 export interface CompraPayload {
@@ -624,190 +758,136 @@ export class ComprasService {
                 };
             }
 
-            // 0. CRIAR MATERIALS AUTOMATICAMENTE para itens novos (COMPOSICAO_ESTOQUE e demais)
+            // 0. Vincular itens ao material canônico (alias do fornecedor). Não cria SKU novo sozinho.
             console.log('🔍 Processando items da compra...');
-            const itemsComMaterialId: Array<{
-                materialId: string;
+            const itemsProcessados: Array<{
+                materialId: string | null;
                 nomeProduto: string;
                 ncm: string | null;
                 quantidade: number;
                 valorUnit: number;
                 valorTotal: number;
+                codigoFornecedor?: string | null;
+                ean?: string | null;
                 quantidadeFracionada?: number;
                 tipoEmbalagem?: string;
                 unidadeEmbalagem?: string;
+                destinoEstoque?: boolean;
             }> = [];
             
             // Contadores para resumo
             let materiaisCriados = 0;
             let materiaisIncrementados = 0;
             
+            const exigirVinculo = status === 'Recebido';
+            
             for (const item of items) {
-                let materialId = item.materialId;
+                let materialId = item.materialId || null;
+                const idsNf = identificadoresItemNf(item);
                 
-                // ✅ PROCESSAR FRACIONAMENTO
                 const temFracionamento = (item as any).quantidadeFracionada && (item as any).quantidadeFracionada > 0;
-                let quantidadeTotalUnidades = item.quantidade; // Quantidade de embalagens por padrão
                 let precoUnitarioCalculado: number | null = null;
                 let precoEmbalagem: number | null = null;
                 
                 if (temFracionamento) {
-                    quantidadeTotalUnidades = item.quantidade * (item as any).quantidadeFracionada;
                     precoEmbalagem = item.valorUnit;
                     precoUnitarioCalculado = item.valorUnit / (item as any).quantidadeFracionada;
-                    console.log(`📦 Item fracionado: ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} × ${(item as any).quantidadeFracionada} un = ${quantidadeTotalUnidades} unidades`);
-                    console.log(`💰 Preço embalagem: R$ ${precoEmbalagem.toFixed(2)} | Preço unitário: R$ ${precoUnitarioCalculado.toFixed(4)}`);
+                    console.log(`📦 Item fracionado: ${item.quantidade} ${(item as any).tipoEmbalagem || 'embalagens'} × ${(item as any).quantidadeFracionada} un`);
                 }
-                
-                // Se não tem materialId, tentar fazer match automático ou criar Material
+
                 if (!materialId) {
-                    console.log(`🔍 Item sem materialId: "${item.nomeProduto}". Buscando match...`);
-                    
-                    // ✅ PRIORIDADE 1: Se o payload trouxer explicitamente um materialId (usuário vinculou no frontend)
-                    // Isso já foi verificado acima, então seguimos para match automático
-                    
-                    // ✅ PRIORIDADE 2: Match automático usando NOME normalizado
-                    let material: { id: string; preco: number | null } | null = null;
-                    
-                    // Buscar todos os materiais existentes e comparar nomes normalizados
-                    const todosMateriais = await tx.material.findMany({
-                        select: { id: true, nome: true, preco: true }
+                    const match = await matchMaterial(tx, {
+                        fornecedorId: fornecedor.id,
+                        nomeProduto: item.nomeProduto,
+                        codigoFornecedor: idsNf.codigoFornecedor,
+                        ean: idsNf.ean,
                     });
-                    
-                    // Normalizar o nome do item da compra
-                    const nomeItemNormalizado = normalizarNomeProduto(item.nomeProduto);
-                    
-                    // Buscar material com nome normalizado igual
-                    const materiaisMatch = todosMateriais.filter(m => 
-                        compararNomesProdutos(m.nome, item.nomeProduto)
-                    );
-                    
-                    if (materiaisMatch.length === 1) {
-                        // Encontrado exatamente um match - usar esse material
-                        material = { id: materiaisMatch[0].id, preco: materiaisMatch[0].preco };
-                        console.log(`✅ Match automático encontrado: "${materiaisMatch[0].nome}" (ID: ${material.id})`);
+                    if (match) {
+                        materialId = match.material.id;
+                        console.log(`✅ Match ${match.tipo}: "${item.nomeProduto}" → ${match.material.nome}`);
                         materiaisIncrementados++;
-                    } else if (materiaisMatch.length > 1) {
-                        // Múltiplos matches (ambiguidade) - não fazer match automático
-                        console.log(`⚠️ Múltiplos matches encontrados para "${item.nomeProduto}". Não será feito match automático.`);
-                    } else {
-                        // Nenhum match encontrado
-                        console.log(`❌ Nenhum match encontrado para "${item.nomeProduto}". Será criado novo material.`);
                     }
-                    
-                    // Se não encontrou, CRIAR novo Material
-                    if (!material) {
-                        console.log(`✨ Criando novo Material: "${item.nomeProduto}"`);
-                        // Gerar SKU único e aleatório
-                        const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
-                        
-                        // Classificar categoria automaticamente baseado no nome do produto
-                        const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
-                        
-                        // Preparar dados do material com fracionamento
-                        const materialData: any = {
-                            nome: item.nomeProduto, // ✅ Nome real do produto do XML
-                            sku: skuGerado, // ✅ SKU único e aleatório gerado (NCM usado apenas como referência no SKU)
-                            tipo: 'Material Elétrico', // ✅ Tipo padrão
-                            categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
-                            descricao: item.nomeProduto, // ✅ Usar nome do produto ao invés de texto genérico
-                            ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM do XML preservado integralmente (NÃO alterado, apenas salvo)
-                            unidadeMedida: 'un',
-                            preco: temFracionamento ? precoUnitarioCalculado : item.valorUnit, // ✅ Se fracionado, usar preço unitário
-                            estoque: 0, // Será atualizado depois se status = Recebido
-                            estoqueMinimo: 5,
-                            localizacao: 'Almoxarifado', // ✅ Localização padrão
-                            fornecedorId: fornecedor.id,
-                            ativo: true
-                        };
-                        
-                        // ✅ Adicionar campos de fracionamento se houver
-                        if (temFracionamento) {
-                            materialData.quantidadePorEmbalagem = (item as any).quantidadeFracionada;
-                            materialData.tipoEmbalagem = (item as any).tipoEmbalagem || 'CAIXA';
-                            materialData.precoEmbalagem = precoEmbalagem;
-                            materialData.precoUnitario = precoUnitarioCalculado;
-                        }
-                        
-                        material = await tx.material.create({
-                            data: materialData
-                        });
-                        console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
-                        materiaisCriados++;
-                    } else {
-                        console.log(`🔗 Material existente encontrado: ${material.id}`);
-                        // Se o material já existia e não foi contado como incrementado (porque não foi match automático, mas foi vinculado manualmente)
-                        if (!materialId) {
-                            materiaisIncrementados++;
-                        }
-                        
-                        // Preparar dados de atualização
+                } else {
+                    materiaisIncrementados++;
+                }
+
+                if (!materialId && item.criarNovoMaterial) {
+                    const material = await criarMaterialCanonico(tx, {
+                        nomeProduto: item.nomeProduto,
+                        ncm: item.ncm,
+                        valorUnit: item.valorUnit,
+                        fornecedorId: fornecedor.id,
+                        temFracionamento,
+                        quantidadeFracionada: (item as any).quantidadeFracionada,
+                        tipoEmbalagem: (item as any).tipoEmbalagem,
+                        precoUnitarioCalculado,
+                        precoEmbalagem,
+                    });
+                    materialId = material.id;
+                    materiaisCriados++;
+                    console.log(`🆕 Material criado por confirmação do usuário: ${material.id}`);
+                }
+
+                if (!materialId && exigirVinculo) {
+                    throw new Error(
+                        `Item "${item.nomeProduto}" não está vinculado ao estoque. Vincule a um material existente ou marque como item novo.`
+                    );
+                }
+
+                if (materialId) {
+                    await aprenderAlias(tx, {
+                        materialId,
+                        fornecedorId: fornecedor.id,
+                        nomeProduto: item.nomeProduto,
+                        codigoFornecedor: idsNf.codigoFornecedor,
+                        ean: idsNf.ean,
+                        ncm: item.ncm,
+                        origem: item.materialId ? 'MANUAL' : 'IMPORTACAO',
+                    });
+
+                    const materialAtual = await tx.material.findUnique({
+                        where: { id: materialId },
+                        select: { preco: true, ncm: true },
+                    });
+                    if (materialAtual) {
                         const updateData: any = {};
-                        let needsUpdate = false;
-                        
-                        // ✅ Atualizar informações de fracionamento se houver
                         if (temFracionamento) {
                             updateData.quantidadePorEmbalagem = (item as any).quantidadeFracionada;
                             updateData.tipoEmbalagem = (item as any).tipoEmbalagem || 'CAIXA';
                             updateData.precoEmbalagem = precoEmbalagem;
                             updateData.precoUnitario = precoUnitarioCalculado;
-                            needsUpdate = true;
-                            console.log(`📦 Fracionamento atualizado: ${(item as any).quantidadeFracionada} un/${(item as any).tipoEmbalagem || 'CAIXA'}`);
                         }
-                        
-                        // Atualizar preço se necessário
                         const precoParaUsar = temFracionamento ? precoUnitarioCalculado : item.valorUnit;
-                        if (material.preco !== null && material.preco !== precoParaUsar) {
+                        if (materialAtual.preco !== precoParaUsar) {
                             updateData.preco = precoParaUsar;
                             updateData.fornecedorId = fornecedor.id;
-                            needsUpdate = true;
-                            console.log(`💰 Preço atualizado: R$ ${material.preco} → R$ ${precoParaUsar}`);
-                        } else if (material.preco === null) {
-                            updateData.preco = precoParaUsar;
-                            updateData.fornecedorId = fornecedor.id;
-                            needsUpdate = true;
-                            console.log(`💰 Preço definido: R$ ${precoParaUsar}`);
                         }
-                        
-                        // Atualizar NCM se o material não tem NCM e o item tem
-                        const materialNcm = (material as any).ncm;
-                        if (item.ncm && !materialNcm) {
+                        if (item.ncm && !materialAtual.ncm) {
                             updateData.ncm = String(item.ncm);
                             updateData.fornecedorId = fornecedor.id;
-                            needsUpdate = true;
-                            console.log(`🏷️ NCM atualizado: ${String(item.ncm)}`);
                         }
-                        
-                        // Executar atualização se necessário
-                        if (needsUpdate) {
-                            await tx.material.update({
-                                where: { id: material.id },
-                                data: updateData
-                            });
+                        if (Object.keys(updateData).length > 0) {
+                            await tx.material.update({ where: { id: materialId }, data: updateData });
                         }
                     }
-                    
-                    if (!material) {
-                        throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
-                    }
-                    
-                    materialId = material.id;
+                } else {
+                    console.log(`⚠️ Item pendente de vínculo: "${item.nomeProduto}"`);
                 }
-                
-                if (materialId) {
-                    itemsComMaterialId.push({
-                        materialId,
-                        nomeProduto: item.nomeProduto,
-                        ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado)
-                        quantidade: item.quantidade, // Quantidade de embalagens
-                        valorUnit: item.valorUnit, // Preço por embalagem
-                        valorTotal: item.quantidade * item.valorUnit,
-                        // ✅ Campos de fracionamento
-                        quantidadeFracionada: (item as any).quantidadeFracionada,
-                        tipoEmbalagem: (item as any).tipoEmbalagem,
-                        unidadeEmbalagem: item.unidadeEmbalagem
-                    });
-                }
+
+                itemsProcessados.push({
+                    materialId,
+                    nomeProduto: item.nomeProduto,
+                    ncm: item.ncm ? String(item.ncm) : null,
+                    quantidade: item.quantidade,
+                    valorUnit: item.valorUnit,
+                    valorTotal: item.quantidade * item.valorUnit,
+                    codigoFornecedor: idsNf.codigoFornecedor,
+                    ean: idsNf.ean,
+                    quantidadeFracionada: (item as any).quantidadeFracionada,
+                    tipoEmbalagem: (item as any).tipoEmbalagem,
+                    unidadeEmbalagem: item.unidadeEmbalagem,
+                    destinoEstoque: (item as CompraItemPayload).destinoEstoque !== false,
+                });
             }
             
             // 1. Criar compra com items (agora todos com materialId)
@@ -857,17 +937,18 @@ export class ComprasService {
                     empresaCompradoraNome: data.empresaCompradoraNome || null, // ✅ NOVO: Nome da empresa compradora
                     empresaCompradoraCNPJ: data.empresaCompradoraCNPJ || null, // ✅ NOVO: CNPJ da empresa compradora
                     items: {
-                        create: itemsComMaterialId.map(item => ({
+                        create: itemsProcessados.map(item => ({
                             materialId: item.materialId,
                             nomeProduto: item.nomeProduto,
                             ncm: item.ncm,
                             quantidade: item.quantidade,
                             valorUnit: item.valorUnit,
                             valorTotal: item.valorTotal,
-                            destinoEstoque: (item as CompraItemPayload).destinoEstoque !== false,
-                            // ✅ Campos de fracionamento
-                            quantidadeFracionada: (item as any).quantidadeFracionada || null,
-                            tipoEmbalagem: (item as any).tipoEmbalagem || null,
+                            codigoFornecedor: item.codigoFornecedor || null,
+                            ean: item.ean || null,
+                            destinoEstoque: item.destinoEstoque !== false,
+                            quantidadeFracionada: item.quantidadeFracionada || null,
+                            tipoEmbalagem: item.tipoEmbalagem || null,
                             unidadeEmbalagem: item.unidadeEmbalagem || null
                         }))
                     }
@@ -1243,83 +1324,11 @@ export class ComprasService {
                     console.log('📦 Mudança para "Recebido" - Criando Materials e dando entrada no estoque...');
                 
                 for (const item of compra.items) {
-                    let materialIdFinal = item.materialId;
-                    
-                    // Se item não tem materialId, tentar fazer match automático ou criar Material
-                    if (!materialIdFinal) {
-                        console.log(`🔍 Item sem material vinculado: "${item.nomeProduto}". Buscando match...`);
-                        
-                        // ✅ PRIORIDADE 1: Se o payload trouxer explicitamente um materialId (usuário vinculou no frontend)
-                        // Isso já foi verificado acima, então seguimos para match automático
-                        
-                        // ✅ PRIORIDADE 2: Match automático usando NOME normalizado
-                        let material: { id: string } | null = null;
-                        
-                        // Buscar todos os materiais existentes e comparar nomes normalizados
-                        const todosMateriais = await tx.material.findMany({
-                            select: { id: true, nome: true }
-                        });
-                        
-                        // Normalizar o nome do item da compra
-                        const nomeItemNormalizado = normalizarNomeProduto(item.nomeProduto);
-                        
-                        // Buscar material com nome normalizado igual
-                        const materiaisMatch = todosMateriais.filter(m => 
-                            compararNomesProdutos(m.nome, item.nomeProduto)
-                        );
-                        
-                        if (materiaisMatch.length === 1) {
-                            // Encontrado exatamente um match - usar esse material
-                            material = { id: materiaisMatch[0].id };
-                            console.log(`✅ Match automático encontrado: "${materiaisMatch[0].nome}" (ID: ${material.id})`);
-                            materiaisIncrementados++;
-                        } else if (materiaisMatch.length > 1) {
-                            // Múltiplos matches (ambiguidade) - não fazer match automático
-                            console.log(`⚠️ Múltiplos matches encontrados para "${item.nomeProduto}". Não será feito match automático.`);
-                        } else {
-                            // Nenhum match encontrado
-                            console.log(`❌ Nenhum match encontrado para "${item.nomeProduto}". Será criado novo material.`);
-                        }
-                        
-                        // Criar novo Material se não encontrou match
-                        if (!material) {
-                            // Gerar SKU único e aleatório
-                            const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
-                            
-                            // Classificar categoria automaticamente baseado no nome do produto
-                            const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
-                            
-                            material = await tx.material.create({
-                                data: {
-                                    nome: item.nomeProduto, // ✅ Campo obrigatório - salvar nome exatamente como veio
-                                    sku: skuGerado, // ✅ Campo obrigatório e único
-                                    tipo: 'Produto', // ✅ Campo obrigatório
-                                    categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
-                                    descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
-                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML
-                                    unidadeMedida: 'UN', // Valor padrão, CompraItem não tem unidadeMedida
-                                    preco: item.valorUnit,
-                                    estoque: 0,
-                                    estoqueMinimo: 5,
-                                    ativo: true
-                                }
-                            });
-                            console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
-                            materiaisCriados++;
-                        }
-                        
-                        if (!material) {
-                            throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
-                        }
-                        
-                        materialIdFinal = material.id;
-                        
-                        // Atualizar CompraItem com o materialId
-                        await tx.compraItem.update({
-                            where: { id: item.id },
-                            data: { materialId: material.id }
-                        });
-                    }
+                    const materialIdFinal = await resolverMaterialNoRecebimento(
+                        tx,
+                        item as any,
+                        compra.fornecedorId,
+                    );
                     
                     // ✅ Dar entrada no estoque (considerando fracionamento)
                     if (materialIdFinal) {
@@ -1516,67 +1525,11 @@ export class ComprasService {
                 }
                 
                 for (const item of itensSelecionadosEstoque) {
-                    let materialIdFinal = item.materialId;
-                    
-                    // Se item não tem materialId, criar Material automaticamente
-                    if (!materialIdFinal) {
-                        console.log(`🆕 Item sem material vinculado: "${item.nomeProduto}". Criando...`);
-                        
-                        // Tentar encontrar material existente
-                        let material: { id: string } | null = null;
-                        if (item.ncm) {
-                            material = await tx.material.findFirst({
-                                where: { sku: String(item.ncm) }
-                            });
-                        }
-                        
-                        // ✅ CORREÇÃO: Buscar por nome exato
-                        if (!material) {
-                            material = await tx.material.findFirst({
-                                where: { 
-                                    descricao: item.nomeProduto.trim() // Nome completo e exato
-                                }
-                            });
-                        }
-                        
-                        // Criar novo Material se não encontrou
-                        if (!material) {
-                            // Gerar SKU único e aleatório
-                            const skuGerado = await gerarSKUUnico(tx, item.ncm || null);
-                            
-                            // Classificar categoria automaticamente baseado no nome do produto
-                            const categoriaClassificada = classificarMaterialPorNome(item.nomeProduto, item.ncm || undefined);
-                            
-                            material = await tx.material.create({
-                                data: {
-                                    nome: item.nomeProduto,
-                                    sku: skuGerado, // ✅ SKU único gerado (NCM usado apenas como referência)
-                                    tipo: 'Produto',
-                                    categoria: categoriaClassificada, // ✅ Categoria classificada automaticamente
-                                    descricao: `Produto importado via XML - NF ${compra.numeroNF}`,
-                                    ncm: item.ncm ? String(item.ncm) : null, // ✅ NCM preservado do XML (NÃO alterado) // ✅ NCM preservado do XML (NÃO alterado)
-                                    unidadeMedida: 'UN',
-                                    preco: item.valorUnit,
-                                    estoque: 0,
-                                    estoqueMinimo: 5,
-                                    ativo: true
-                                }
-                            });
-                            console.log(`✅ Material criado: ${material.id} (SKU: ${skuGerado})`);
-                        }
-                        
-                        if (!material) {
-                            throw new Error(`Não foi possível criar ou encontrar material para: ${item.nomeProduto}`);
-                        }
-                        
-                        materialIdFinal = material.id;
-                        
-                        // Atualizar CompraItem com o materialId
-                        await tx.compraItem.update({
-                            where: { id: item.id },
-                            data: { materialId: material.id }
-                        });
-                    }
+                    const materialIdFinal = await resolverMaterialNoRecebimento(
+                        tx,
+                        item as any,
+                        compra.fornecedorId,
+                    );
                     
                     // ✅ CORREÇÃO: Dar entrada no estoque usando a transação existente
                     if (materialIdFinal) {
@@ -1867,6 +1820,18 @@ export class ComprasService {
                     await tx.compraItem.update({
                         where: { id: item.id },
                         data: { materialId: materialIdFinal }
+                    });
+                }
+
+                if (materialIdFinal) {
+                    await aprenderAlias(tx, {
+                        materialId: materialIdFinal,
+                        fornecedorId: compra.fornecedorId,
+                        nomeProduto: item.nomeProduto,
+                        codigoFornecedor: (item as any).codigoFornecedor,
+                        ean: (item as any).ean,
+                        ncm: item.ncm,
+                        origem: associacao.criarNovo ? 'MANUAL' : 'MANUAL',
                     });
                 }
 
