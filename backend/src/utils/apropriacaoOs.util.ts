@@ -20,17 +20,43 @@ export interface DadosPlanejamentoOs {
   precoVendaOrcamento?: number | null;
 }
 
+export interface LinhaCustoCalendarioResumo {
+  eventoId: string;
+  data: string;
+  funcionarioId: string;
+  funcionarioNome: string;
+  cargo: string;
+  horasJornada: number;
+  horasExtras: number;
+  totalHoras: number;
+  modoCusto: string;
+  valorUnitario: number;
+  custoDia: number;
+  status: string;
+}
+
 export interface ResultadoOsCalculado extends TotaisApropriacao {
   horasEngenhariaOrcadas: number;
   diariasEquipeOrcadas: number;
   homemHoraOrcado: number;
   homemHoraRealizado: number;
   custoOrcado: number;
+  /** Custo F1 (apontamento) × taxas genéricas da OS */
+  custoApontamento: number;
+  /** Custo de eventos VALIDO do calendário × taxas do Funcionario */
+  custoCalendario: number;
+  /** Custo de eventos PREVISAO (ocupação futura / projetado) */
+  custoCalendarioPrevisto: number;
+  /** custoApontamento + custoCalendario (somente confirmado) */
   custoRealizado: number;
+  /** custoRealizado + custoCalendarioPrevisto */
+  custoProjetado: number;
   valorFechado: number;
   resultado: number;
   estouroHorasEngenharia: boolean;
   estouroDiariasEquipe: boolean;
+  /** Detalhe pessoa × dia (calendário confirmado) */
+  calendarioLinhas: LinhaCustoCalendarioResumo[];
 }
 
 export function calcularHomemHoraTotal(
@@ -62,9 +88,18 @@ export function calcularTotaisApropriacao(
   };
 }
 
+export interface TotaisCalendarioOs {
+  custoCalendario: number;
+  custoCalendarioPrevisto?: number;
+  horasEngenharia: number;
+  diariasEquipe: number;
+  linhas?: LinhaCustoCalendarioResumo[];
+}
+
 export function calcularResultadoOs(
   projeto: DadosPlanejamentoOs,
-  totais: TotaisApropriacao
+  totais: TotaisApropriacao,
+  calendario?: TotaisCalendarioOs,
 ): ResultadoOsCalculado {
   const horasEngenhariaOrcadas = Number(projeto.horasEngenhariaOrcadas) || 0;
   const diariasEquipeOrcadas = Number(projeto.diariasEquipeOrcadas) || 0;
@@ -73,9 +108,20 @@ export function calcularResultadoOs(
 
   const custoOrcado =
     horasEngenhariaOrcadas * valorHora + diariasEquipeOrcadas * valorDiaria;
-  const custoRealizado =
+  const custoApontamento =
     totais.horasEngenhariaRealizadas * valorHora +
     totais.diariasEquipeRealizadas * valorDiaria;
+  const custoCalendario = Number(calendario?.custoCalendario) || 0;
+  const custoCalendarioPrevisto = Number(calendario?.custoCalendarioPrevisto) || 0;
+  const custoRealizado = custoApontamento + custoCalendario;
+  const custoProjetado = custoRealizado + custoCalendarioPrevisto;
+
+  const horasEngenhariaRealizadas = round2(
+    totais.horasEngenhariaRealizadas + (Number(calendario?.horasEngenharia) || 0),
+  );
+  const diariasEquipeRealizadas = round2(
+    totais.diariasEquipeRealizadas + (Number(calendario?.diariasEquipe) || 0),
+  );
 
   const valorFechado =
     Number(projeto.valorTotal) > 0
@@ -85,24 +131,25 @@ export function calcularResultadoOs(
   return {
     horasEngenhariaOrcadas,
     diariasEquipeOrcadas,
-    ...totais,
+    horasEngenhariaRealizadas,
+    diariasEquipeRealizadas,
     homemHoraOrcado: round2(
       calcularHomemHoraTotal(horasEngenhariaOrcadas, diariasEquipeOrcadas)
     ),
     homemHoraRealizado: round2(
-      calcularHomemHoraTotal(
-        totais.horasEngenhariaRealizadas,
-        totais.diariasEquipeRealizadas
-      )
+      calcularHomemHoraTotal(horasEngenhariaRealizadas, diariasEquipeRealizadas)
     ),
     custoOrcado: round2(custoOrcado),
+    custoApontamento: round2(custoApontamento),
+    custoCalendario: round2(custoCalendario),
+    custoCalendarioPrevisto: round2(custoCalendarioPrevisto),
     custoRealizado: round2(custoRealizado),
+    custoProjetado: round2(custoProjetado),
     valorFechado: round2(valorFechado),
     resultado: round2(valorFechado - custoRealizado),
-    estouroHorasEngenharia:
-      totais.horasEngenhariaRealizadas > horasEngenhariaOrcadas,
-    estouroDiariasEquipe:
-      totais.diariasEquipeRealizadas > diariasEquipeOrcadas,
+    estouroHorasEngenharia: horasEngenhariaRealizadas > horasEngenhariaOrcadas,
+    estouroDiariasEquipe: diariasEquipeRealizadas > diariasEquipeOrcadas,
+    calendarioLinhas: calendario?.linhas ?? [],
   };
 }
 
