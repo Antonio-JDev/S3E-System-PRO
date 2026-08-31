@@ -254,6 +254,51 @@ select:focus {
 }
 *::-webkit-scrollbar-thumb:hover { background: var(--s3e-scrollbar-thumb-hover); }
 
+@layer utilities {
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scroll-touch {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  .mobile-nav-scroll {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .mobile-nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-tab-bar-strip::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1.75rem;
+    pointer-events: none;
+    background: linear-gradient(to left, rgb(255 255 255), transparent);
+  }
+
+  html.dark .mobile-tab-bar-strip::after {
+    background: linear-gradient(to left, rgb(30 41 59), transparent);
+  }
+
+  .mobile-tab-bar-strip--on-dark::after {
+    background: linear-gradient(to left, #0a1a2f, transparent);
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    5. DARK MODE — superfícies, tipografia, forms (via tokens)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -617,6 +662,18 @@ html.dark body,
   @apply inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-orange-100 dark:bg-orange-900/20 text-orange-800 dark:text-[#FBBF24] ring-1 ring-orange-200 dark:ring-dark-border hover:bg-orange-200 dark:hover:bg-dark-hover transition-colors;
 }
 
+@media (max-width: 479px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-success,
+  .btn-danger,
+  .btn-warning,
+  .btn-info,
+  .btn-ghost {
+    @apply px-3 py-2 text-xs;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    7. FORMS
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -678,7 +735,7 @@ html.dark body,
 }
 
 .modal-header {
-  @apply p-6 border-b border-gray-200 dark:border-dark-border flex items-start justify-between gap-4;
+  @apply relative p-4 sm:p-6 pr-12 sm:pr-6 border-b border-gray-200 dark:border-dark-border;
 }
 
 .modal-body {
@@ -693,4 +750,25 @@ html.dark body,
 .message-emoji-jumbo img {
   margin-left: 0.04em;
   margin-right: 0.04em;
+}
+
+/* Sonner — toast de sucesso com feedback verde no dark mode */
+.dark [data-sonner-toast][data-type="success"] {
+  background-color: rgb(5 150 105) !important;
+  border-color: rgb(52 211 153) !important;
+  color: rgb(255 255 255) !important;
+}
+
+.dark [data-sonner-toast][data-type="success"] [data-description] {
+  color: rgb(209 250 229) !important;
+}
+
+.dark [data-sonner-toast][data-type="success"] [data-close-button] {
+  background-color: rgb(4 120 87) !important;
+  border-color: rgb(52 211 153) !important;
+  color: rgb(255 255 255) !important;
+}
+
+.dark [data-sonner-toast][data-type="success"] [data-icon] {
+  color: rgb(255 255 255) !important;
 }
