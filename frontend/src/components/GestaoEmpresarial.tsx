@@ -20,6 +20,7 @@ import { formatDatePtBrInSaoPaulo, formatDateTimePtBrInSaoPaulo, nowYmdInSaoPaul
 import BIDashboard from './BIDashboard';
 import ResumoAdministrativo from './ResumoAdministrativo';
 import { DollarSign, Minus, Plus } from 'lucide-react';
+import RhFolhaToolbar from './rh/RhFolhaToolbar';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -474,9 +475,10 @@ const DashboardView: React.FC = () => {
 // ==================== RH VIEW ====================
 const RHView: React.FC = () => {
     const authRh = useAuth();
-    const podeEditarFeriado =
-        authRh.user?.role?.toLowerCase() === 'admin' ||
-        authRh.user?.role?.toLowerCase() === 'desenvolvedor';
+    const roleRh = authRh.user?.role?.toLowerCase() ?? '';
+    const podeEditarFeriado = roleRh === 'admin' || roleRh === 'desenvolvedor';
+    const podeEditarConfigContabil =
+        roleRh === 'admin' || roleRh === 'desenvolvedor' || roleRh === 'financeiro';
     const [activeTab, setActiveTab] = useState<'funcionarios' | 'estoque'>('funcionarios');
     const [funcionarios, setFuncionarios] = useState<any[]>([]);
     const [metricas, setMetricas] = useState<{
@@ -574,8 +576,32 @@ const RHView: React.FC = () => {
     const [pontoImportAno, setPontoImportAno] = useState(String(new Date().getFullYear()));
     const [pontoImportMes, setPontoImportMes] = useState(String(new Date().getMonth() + 1));
     const [pontoImportBusy, setPontoImportBusy] = useState(false);
+    const [exportContabilBusy, setExportContabilBusy] = useState(false);
+    const [configContabilAberta, setConfigContabilAberta] = useState(false);
+    const [configContabil, setConfigContabil] = useState<{
+        codigoEmpresaContabil: string | null;
+        empresaFiscalIdFolha: string | null;
+        percentualHeFolhaContabil: number;
+        rubricasFolhaContabil: Record<string, number>;
+        empresaFiscal: { id: string; razaoSocial: string; cnpj: string } | null;
+    } | null>(null);
+    const [empresasFiscaisContabil, setEmpresasFiscaisContabil] = useState<
+        Array<{ id: string; razaoSocial: string; cnpj: string; nomeFantasia?: string | null }>
+    >([]);
+    const [salvandoConfigContabil, setSalvandoConfigContabil] = useState(false);
     const [sincronizarParcelaBusy, setSincronizarParcelaBusy] = useState(false);
-    const pontoFileInputRef = useRef<HTMLInputElement>(null);
+
+    const RUBRICA_LABELS_CONTABIL: Record<string, string> = {
+        heConfiguravel: 'Horas extras (rubrica configurável)',
+        he100: 'Horas extras 100%',
+        noturno: 'Adicional noturno',
+        periculosidade: 'Periculosidade',
+        dsrFaltas: 'DSR / faltas',
+        ajudaCusto: 'Ajuda de custo',
+        adiantamento: 'Adiantamento',
+        diasFaltas: 'Dias de faltas',
+        faltasParciais: 'Faltas parciais',
+    };
 
     // Estados para dialog de confirmação de exclusão
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -1782,10 +1808,7 @@ const RHView: React.FC = () => {
         }
     };
 
-    const handleImportarPontoArquivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        if (!file) return;
+    const processarImportPontoArquivo = async (file: File) => {
         setPontoImportBusy(true);
         try {
             const ano = parseInt(pontoImportAno, 10);
@@ -1835,7 +1858,7 @@ const RHView: React.FC = () => {
                     description:
                         description +
                         (st.naoEncontrados.length === 0 && st.ignorados === 0
-                            ? '\nConfira se a aba é \"Registro de Presenca\", se há linha 1..31 e cabeçalho Namero/NOME, e se cada funcionário tem o mesmo código no cadastro (campo Código no relógio de ponto).'
+                            ? '\nConfira se a aba é "Registro de Presenca", se há linha 1..31 e cabeçalho Namero/NOME, e se cada funcionário tem o mesmo código no cadastro (campo Código no relógio de ponto).'
                             : ''),
                     duration: 14000,
                 });
@@ -1853,6 +1876,82 @@ const RHView: React.FC = () => {
             setPontoImportBusy(false);
         }
     };
+
+    const carregarConfigContabil = async () => {
+        if (!podeEditarConfigContabil) return;
+        try {
+            const resp = await rhService.obterConfigExportacaoContabilidade();
+            const payload = (resp as { data?: { config?: typeof configContabil; empresasFiscais?: typeof empresasFiscaisContabil } }).data ?? resp;
+            const inner = (payload as { config?: typeof configContabil; empresasFiscais?: typeof empresasFiscaisContabil });
+            setConfigContabil(inner.config ?? (payload as typeof configContabil));
+            setEmpresasFiscaisContabil(inner.empresasFiscais ?? []);
+        } catch (err) {
+            console.error(err);
+            toast.error('Erro ao carregar configuração contábil');
+        }
+    };
+
+    useEffect(() => {
+        if (configContabilAberta && podeEditarConfigContabil && !configContabil) {
+            void carregarConfigContabil();
+        }
+    }, [configContabilAberta, podeEditarConfigContabil, configContabil]);
+
+    const handleSalvarConfigContabil = async () => {
+        if (!configContabil) return;
+        setSalvandoConfigContabil(true);
+        try {
+            const resp = await rhService.salvarConfigExportacaoContabilidade({
+                codigoEmpresaContabil: configContabil.codigoEmpresaContabil || null,
+                empresaFiscalIdFolha: configContabil.empresaFiscalIdFolha || null,
+                percentualHeFolhaContabil: Number(configContabil.percentualHeFolhaContabil ?? 70),
+                rubricasFolhaContabil: configContabil.rubricasFolhaContabil,
+            });
+            if (resp && typeof resp === 'object' && 'success' in resp && resp.success === false) {
+                toast.error((resp as { error?: string; message?: string }).error ?? 'Erro ao salvar');
+                return;
+            }
+            toast.success('Configuração contábil salva');
+            setConfigContabil(null);
+            await carregarConfigContabil();
+        } catch (err: unknown) {
+            toast.error(err instanceof Error ? err.message : 'Erro ao salvar configuração');
+        } finally {
+            setSalvandoConfigContabil(false);
+        }
+    };
+
+    const handleGerarPlanilhaContabilidade = async () => {
+        if (!rhCompetencia) return;
+        setExportContabilBusy(true);
+        try {
+            const previewResp = await rhService.previewExportacaoFolhaContabilidade(rhCompetencia);
+            const preview = (previewResp as { data?: { avisos?: string[] } }).data ?? previewResp;
+            const avisos = (preview as { avisos?: string[] }).avisos ?? [];
+            if (avisos.length > 0) {
+                toast.warning('Exportação com avisos', {
+                    description: avisos.slice(0, 4).join('\n'),
+                    duration: 10000,
+                });
+            }
+            const blob = await rhService.exportarFolhaContabilidade(rhCompetencia);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `LANCAMENTOS-FOLHA-${rhCompetencia}.xls`;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast.success('Planilha gerada com sucesso');
+        } catch (err: unknown) {
+            toast.error('Erro ao gerar planilha contábil', {
+                description: err instanceof Error ? err.message : undefined,
+            });
+        } finally {
+            setExportContabilBusy(false);
+        }
+    };
+
+    const handleImportarPontoViaToolbar = processarImportPontoArquivo;
 
     const handleAdicionarLancamentoFolha = async () => {
         if (!funcionarioFolha || !folhaDetalhada?.referencia) return;
@@ -2574,75 +2673,131 @@ const RHView: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Seletor de competência (mês/ano) */}
-                    <div className="bg-white dark:bg-dark-card border border-gray-200 dark:border-dark-border rounded-xl p-4 mb-6 flex items-center gap-4">
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Competência:</label>
-                        <input
-                            type="month"
-                            className="px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100"
-                            value={rhCompetencia}
-                            onChange={(e) => setRhCompetencia(e.target.value)}
-                        />
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                            Selecione o mês/ano para visualizar folhas e importações
-                        </span>
-                    </div>
-
-                    <div className="card-primary border-2 border-dashed border-emerald-200 bg-emerald-50/50 dark:bg-emerald-950/20 dark:border-emerald-800 mb-6">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">Importar presença do relógio</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                            Envie <strong>.xls</strong> ou <strong>.xlsx</strong> (aba &quot;Registro de Presença&quot;). O backend usa{' '}
-                            <strong>SheetJS (xlsx)</strong> em <code className="text-xs bg-white/80 dark:bg-black/30 px-1 rounded">ponto-import.parser</code>, depois grava em{' '}
-                            <em>RegistroPonto</em>. Cada colaborador precisa do <strong>código no relógio</strong> cadastrado.
-                        </p>
-                        <div className="flex flex-wrap gap-4 items-end">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Ano (opcional)</label>
-                                <input
-                                    type="number"
-                                    className="w-28 px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card"
-                                    value={pontoImportAno}
-                                    onChange={(ev) => setPontoImportAno(ev.target.value)}
-                                    min={2000}
-                                    max={2100}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Mês 1–12 (opcional)</label>
-                                <input
-                                    type="number"
-                                    className="w-24 px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card"
-                                    value={pontoImportMes}
-                                    onChange={(ev) => setPontoImportMes(ev.target.value)}
-                                    min={1}
-                                    max={12}
-                                />
-                            </div>
-                            <input
-                                ref={pontoFileInputRef}
-                                type="file"
-                                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                className="hidden"
-                                onChange={handleImportarPontoArquivo}
-                            />
-                            <button
-                                type="button"
-                                disabled={pontoImportBusy}
-                                onClick={() => pontoFileInputRef.current?.click()}
-                                className="btn-success inline-flex items-center gap-2 disabled:opacity-60"
-                            >
-                                {pontoImportBusy ? (
-                                    <>Processando…</>
-                                ) : (
-                                    <>
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                        </svg>
-                                        Selecionar arquivo e importar
-                                    </>
-                                )}
-                            </button>
-                        </div>
+                    {/* Competência, importação de ponto e exportação contábil — painel único */}
+                    <div className="mb-6">
+                    <RhFolhaToolbar
+                        competencia={rhCompetencia}
+                        onCompetenciaChange={setRhCompetencia}
+                        importAno={pontoImportAno}
+                        importMes={pontoImportMes}
+                        onImportAnoChange={setPontoImportAno}
+                        onImportMesChange={setPontoImportMes}
+                        importandoPonto={pontoImportBusy}
+                        onImportarPonto={handleImportarPontoViaToolbar}
+                        exportandoContabil={exportContabilBusy}
+                        onGerarPlanilhaContabilidade={handleGerarPlanilhaContabilidade}
+                        configAberta={configContabilAberta}
+                        onToggleConfig={() => setConfigContabilAberta((v) => !v)}
+                        configPanel={
+                            podeEditarConfigContabil
+                                ? configContabil
+                                    ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                                            Código empresa (contabilidade)
+                                        </label>
+                                        <input
+                                            value={configContabil.codigoEmpresaContabil ?? ''}
+                                            onChange={(e) =>
+                                                setConfigContabil({
+                                                    ...configContabil,
+                                                    codigoEmpresaContabil: e.target.value,
+                                                })
+                                            }
+                                            placeholder="Ex.: 329"
+                                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                                            Percentual HE na exportação
+                                        </label>
+                                        <select
+                                            value={String(configContabil.percentualHeFolhaContabil ?? 70)}
+                                            onChange={(e) =>
+                                                setConfigContabil({
+                                                    ...configContabil,
+                                                    percentualHeFolhaContabil: parseInt(e.target.value, 10),
+                                                })
+                                            }
+                                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg"
+                                        >
+                                            {[50, 60, 70, 80, 100].map((p) => (
+                                                <option key={p} value={p}>
+                                                    {p}%
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                                            Empresa fiscal (cabeçalho razão social / CNPJ)
+                                        </label>
+                                        <select
+                                            value={configContabil.empresaFiscalIdFolha ?? ''}
+                                            onChange={(e) =>
+                                                setConfigContabil({
+                                                    ...configContabil,
+                                                    empresaFiscalIdFolha: e.target.value || null,
+                                                })
+                                            }
+                                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg"
+                                        >
+                                            <option value="">Padrão (1ª empresa fiscal ativa)</option>
+                                            {empresasFiscaisContabil.map((ef) => (
+                                                <option key={ef.id} value={ef.id}>
+                                                    {ef.razaoSocial} — {ef.cnpj}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                                            De/Para rubricas contábeis
+                                        </p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                            {Object.keys(RUBRICA_LABELS_CONTABIL).map((key) => (
+                                                <div key={key}>
+                                                    <label className="block text-[10px] text-gray-500 dark:text-gray-400 mb-0.5">
+                                                        {RUBRICA_LABELS_CONTABIL[key]}
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        value={configContabil.rubricasFolhaContabil?.[key] ?? ''}
+                                                        onChange={(e) =>
+                                                            setConfigContabil({
+                                                                ...configContabil,
+                                                                rubricasFolhaContabil: {
+                                                                    ...(configContabil.rubricasFolhaContabil ?? {}),
+                                                                    [key]: parseInt(e.target.value, 10) || 0,
+                                                                },
+                                                            })
+                                                        }
+                                                        className="w-full px-2 py-1.5 rounded border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-bg text-xs"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="md:col-span-2 flex justify-end">
+                                        <button
+                                            type="button"
+                                            disabled={salvandoConfigContabil}
+                                            onClick={() => void handleSalvarConfigContabil()}
+                                            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                                        >
+                                            {salvandoConfigContabil ? 'Salvando…' : 'Salvar configuração'}
+                                        </button>
+                                    </div>
+                                </div>
+                                    )
+                                    : configContabilAberta ? (
+                                <p className="text-sm text-gray-500 dark:text-gray-400 py-2">Carregando configuração…</p>
+                            ) : null
+                                : undefined
+                        }
+                    />
                     </div>
 
                     {/* Tabela de Funcionários */}
