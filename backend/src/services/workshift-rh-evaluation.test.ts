@@ -30,6 +30,22 @@ jest.mock('./bancoHorasExcesso.service', () => ({
   sincronizarExcessoCompetencia: jest.fn().mockResolvedValue(undefined),
 }));
 
+jest.mock('./bancoHorasExtrato.service', () => ({
+  sincronizarExtratoBancoHorasCompetencia: jest.fn().mockResolvedValue(null),
+  sincronizarExtratosAposImportXls: jest.fn().mockResolvedValue(0),
+}));
+
+jest.mock('./rhComentarioConferencia.service', () => ({
+  metricasAvaliacaoDeRegistro: jest.fn().mockReturnValue({
+    minutosAtraso: 0,
+    minutosHorasDevidas: 0,
+    minutosExtra: 0,
+    minutosFaltaIntegral: 0,
+  }),
+  reaplicarBancoAvaliacaoAposMudancaMetricas: jest.fn().mockResolvedValue(undefined),
+  sincronizarBancoAvaliacoesCompetencia: jest.fn().mockResolvedValue(undefined),
+}));
+
 import { prisma } from '../lib/prisma';
 import { upsertPorFuncionario } from './configuracaoPonto.service';
 import { recalcularMetricasFuncionario } from './ponto.service';
@@ -240,6 +256,7 @@ describe('workshift-rh-evaluation — A/B/P/D', () => {
 describe('workshift-rh-evaluation — troca de workshift isolada', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    p.comentarioConferenciaPontoRh.findMany.mockResolvedValue([]);
   });
 
   /**
