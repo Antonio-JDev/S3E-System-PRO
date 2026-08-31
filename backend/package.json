@@ -21,7 +21,8 @@
     "resetar:orcamentos": "npx tsx src/scripts/resetarOrcamentos.ts",
     "corrigir:datas": "npx tsx src/scripts/corrigirDatasContasPagar.ts",
     "gerar:skus-cotacoes": "npx tsx src/scripts/gerarSKUsCotacoes.ts",
-    "backfill:orcamentista": "npx tsx src/scripts/backfill-orcamentista-nome.ts"
+    "backfill:orcamentista": "npx tsx src/scripts/backfill-orcamentista-nome.ts",
+    "backfill:alias-fornecedor": "npx tsx src/scripts/backfillMaterialFornecedorAlias.ts"
   },
   "keywords": [
     "api",
