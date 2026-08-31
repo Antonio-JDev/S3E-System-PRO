@@ -143,7 +143,7 @@ export function NotificationBell({ onNotificationIr, collapsed = false }: Notifi
   const tipoLabel = (tipo: string) => {
     switch (tipo) {
       case 'kanban_ordem_servico': return 'Ordem de Serviço';
-      case 'kanban_obras': return 'Execução Obra';
+      case 'kanban_obras': return 'Ordem de Serviço';
       case 'financeiro': return 'Financeiro';
       default: return tipo;
     }
