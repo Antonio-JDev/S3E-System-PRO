@@ -1,3 +1,5 @@
+import { dataHoraEmBrasilia } from './datetime-sp.util';
+
 export interface WorkShiftTemplate {
   nome: string;
   entrada1: string;
@@ -54,6 +56,30 @@ export function jornadaMinutosPorDia(shift: {
   const p1 = Math.max(0, diffMinutosHora(shift.entrada1, shift.saida1));
   const p2 = Math.max(0, diffMinutosHora(shift.entrada2, shift.saida2));
   return p1 + p2;
+}
+
+const DEFAULT_WORKSHIFT = { entrada1: '07:30', saida2: '17:30' } as const;
+
+function civilYmdEmBrasilia(dia: Date): { ano: number; mes: number; d: number } {
+  const partes = dia
+    .toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo', hour12: false })
+    .slice(0, 10)
+    .split('-');
+  return { ano: Number(partes[0]), mes: Number(partes[1]), d: Number(partes[2]) };
+}
+
+/** Aplica a faixa da workshift (entrada1–saida2) ao dia civil em Brasília. */
+export function snapWorkshiftAoDia(
+  dia: Date,
+  shift?: { entrada1?: string | null; saida2?: string | null } | null,
+): { dataInicio: Date; dataFim: Date } {
+  const entrada = (shift?.entrada1 || DEFAULT_WORKSHIFT.entrada1).trim();
+  const saida = (shift?.saida2 || DEFAULT_WORKSHIFT.saida2).trim();
+  const { ano, mes, d } = civilYmdEmBrasilia(dia);
+  return {
+    dataInicio: dataHoraEmBrasilia(ano, mes, d, entrada),
+    dataFim: dataHoraEmBrasilia(ano, mes, d, saida),
+  };
 }
 
 export function calculateMonthlyTotal(
