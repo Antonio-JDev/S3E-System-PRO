@@ -29,7 +29,14 @@ describe('ContasPagarController.atualizarConta', () => {
 
   it('faz parse de dataVencimento YYYY-MM-DD e chama service', async () => {
     (ContasPagarService.atualizarConta as jest.Mock).mockResolvedValue({ id: 'cp-1' });
-    req.body = { credorNome: 'Credor', dataVencimento: '2026-04-28', observacoes: 'obs' };
+    req.body = {
+      credorNome: 'Credor',
+      dataVencimento: '2026-04-28',
+      observacoes: 'obs',
+      valorParcela: 1000,
+      valorJuros: 10,
+      valorDesconto: 50,
+    };
 
     await ContasPagarController.atualizarConta(req as Request, res as Response);
 
@@ -39,6 +46,9 @@ describe('ContasPagarController.atualizarConta', () => {
         credorNome: 'Credor',
         observacoes: 'obs',
         dataVencimento: expect.any(Date),
+        valorParcela: 1000,
+        valorJuros: 10,
+        valorDesconto: 50,
       })
     );
     expect(res.json).toHaveBeenCalledWith(
