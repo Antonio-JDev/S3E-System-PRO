@@ -6,6 +6,7 @@
 import {
   parseMoney,
   calcValorARegistrar,
+  calcValorBaseFromEfetivo,
   calcAbateParcela,
   calcAbateParcelaFromBase,
   validarValoresFinanceiros,
@@ -35,6 +36,16 @@ describe('financeiroValor.util', () => {
 
     it('arredonda em 2 casas decimais', () => {
       expect(calcValorARegistrar(10.333, 0.001, 0)).toBe(10.33);
+    });
+  });
+
+  describe('calcValorBaseFromEfetivo', () => {
+    it('reconstrói a base a partir do líquido', () => {
+      expect(calcValorBaseFromEfetivo(960, 10, 50)).toBe(1000);
+    });
+
+    it('sem juros/desconto, base = líquido', () => {
+      expect(calcValorBaseFromEfetivo(500, 0, 0)).toBe(500);
     });
   });
 
