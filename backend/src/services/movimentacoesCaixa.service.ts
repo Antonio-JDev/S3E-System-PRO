@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma';
 import { ContaStatus, VendaStatus } from '../types/index';
-import { calcAbateParcela } from '../utils/financeiroValor.util';
+import { calcAbateParcela, calcValorBaseFromEfetivo } from '../utils/financeiroValor.util';
 
 export interface MovimentacaoCaixaItem {
   id: string;
@@ -218,7 +218,11 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
         : temFornecedorOuCredor
           ? `${temFornecedorOuCredor} - ${c.descricao}`
           : c.descricao;
-    const valor = valorEfetivo(c.valorParcela, (c as any).valorJuros, (c as any).valorDesconto);
+    const jurosP = (c as any).valorJuros ?? 0;
+    const descontoP = (c as any).valorDesconto ?? 0;
+    // valorParcela já é líquido (base + juros − desconto); metadados servem só para exibição
+    const valor = c.valorParcela;
+    const valorBase = calcValorBaseFromEfetivo(c.valorParcela, jurosP, descontoP);
     return {
       id: c.id,
       tipo: 'SAIDA',
@@ -226,9 +230,9 @@ export async function listarMovimentacoes(filtros?: MovimentacoesCaixaFiltros): 
       descricao,
       categoria,
       valor,
-      valorBase: c.valorParcela,
-      valorJuros: (c as any).valorJuros ?? 0,
-      valorDesconto: (c as any).valorDesconto ?? 0,
+      valorBase,
+      valorJuros: jurosP,
+      valorDesconto: descontoP,
       meioPagamento: c.meioPagamento ? labelMeioPagamento(c.meioPagamento) : null,
       origem: 'conta_pagar',
       referenciaId: c.id,
