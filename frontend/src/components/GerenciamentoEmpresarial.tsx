@@ -24,6 +24,8 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from './ui/alert-dialog';
+import ScrollableRow from './ui/ScrollableRow';
+import { scrollableNavItemClasses } from '../utils/responsiveNav';
 
 /** Fecha o modal/dialog ao pressionar Escape */
 function useEscapeKey(onClose: () => void, isActive: boolean) {
@@ -660,12 +662,12 @@ const RHView: React.FC = () => {
         <>
         <div className="space-y-6">
             {/* Header RH */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <h2 className="text-2xl font-bold text-gray-900">Recursos Humanos</h2>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={() => setIsValeModalOpen(true)}
-                        className="btn-secondary flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} btn-secondary flex items-center gap-2`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -674,22 +676,22 @@ const RHView: React.FC = () => {
                     </button>
                     <button
                         onClick={handleAbrirModalNovo}
-                        className="btn-success flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} btn-success flex items-center gap-2`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                         </svg>
                         Adicionar Funcionário
                     </button>
-                </div>
+                </ScrollableRow>
             </div>
 
             {/* Tabs de Navegação */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-2 mb-6">
-                <div className="flex gap-2">
+                <ScrollableRow className="gap-2">
                     <button
                         onClick={() => setActiveTab('funcionarios')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
                             activeTab === 'funcionarios'
                                 ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-md'
                                 : 'text-gray-600 hover:bg-gray-50'
@@ -700,7 +702,7 @@ const RHView: React.FC = () => {
                     </button>
                     <button
                         onClick={() => setActiveTab('estoque')}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
+                        className={`${scrollableNavItemClasses} flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition-all ${
                             activeTab === 'estoque'
                                 ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-md'
                                 : 'text-gray-600 hover:bg-gray-50'
@@ -711,7 +713,7 @@ const RHView: React.FC = () => {
                         </svg>
                         Estoque de Recursos Humanos
                     </button>
-                </div>
+                </ScrollableRow>
             </div>
 
             {activeTab === 'funcionarios' && (
@@ -2376,12 +2378,12 @@ const CarrosView: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <h2 className="text-2xl font-bold text-gray-900">Gestão de Frota</h2>
-                <div className="flex gap-3">
+                <ScrollableRow className="w-full sm:w-auto justify-start sm:justify-end">
                     <button
                         onClick={() => setIsGastoModalOpen(true)}
-                        className="btn-secondary flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} btn-secondary flex items-center gap-2`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -2390,14 +2392,14 @@ const CarrosView: React.FC = () => {
                     </button>
                     <button
                         onClick={() => setIsVeiculoModalOpen(true)}
-                        className="btn-success flex items-center gap-2"
+                        className={`${scrollableNavItemClasses} btn-success flex items-center gap-2`}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                         </svg>
                         Adicionar Veículo
                     </button>
-                </div>
+                </ScrollableRow>
             </div>
 
             {/* Métricas Frota */}
