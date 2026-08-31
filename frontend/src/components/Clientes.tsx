@@ -8,6 +8,9 @@ import {
 } from '../types';
 import { axiosApiService } from '../services/axiosApi';
 import { ENDPOINTS } from '../config/api';
+import ScrollableRow from './ui/ScrollableRow';
+import { ModalDetailHeader } from './ui/ModalDetailHeader';
+import { scrollableNavItemClasses, compactNavTabClasses, mobileTabBarStripClasses, modalOverlayPaddingClasses } from '../utils/responsiveNav';
 
 // Icons
 const Bars3Icon = (props: React.SVGProps<SVGSVGElement>) => (
@@ -499,22 +502,20 @@ const Clientes: React.FC<ClientesProps> = ({ toggleSidebar }) => {
             )}
             
             {clientToView && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-                        <div className="p-6 border-b border-brand-gray-200 flex justify-between items-start">
-                            <div>
-                                <h2 className="text-2xl font-bold text-brand-gray-900">{clientToView.name}</h2>
-                                <p className="text-sm text-brand-gray-500">{clientToView.document || 'Documento não informado'}</p>
-                            </div>
-                            <button onClick={handleCloseViewModal} className="p-1 rounded-full text-brand-gray-400 hover:bg-brand-gray-100"><XMarkIcon className="w-6 h-6"/></button>
-                        </div>
-                        
-                        <div className="border-b border-brand-gray-200">
-                             <nav className="flex px-6 -mb-px space-x-6">
-                                <button onClick={() => setActiveTab('details')} className={`py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'details' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Detalhes</button>
-                                <button onClick={() => setActiveTab('sales')} className={`py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'sales' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Vendas</button>
-                                <button onClick={() => setActiveTab('service')} className={`py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'service' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Atendimento</button>
-                            </nav>
+                <div className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ${modalOverlayPaddingClasses}`}>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                        <ModalDetailHeader
+                            onClose={handleCloseViewModal}
+                            title={clientToView.name}
+                            subtitle={clientToView.document || 'Documento não informado'}
+                        />
+
+                        <div className={`shrink-0 px-3 sm:px-6 ${mobileTabBarStripClasses}`}>
+                             <ScrollableRow as="nav" ariaLabel="Abas do cliente" edgeToEdge className="gap-4 -mb-px">
+                                <button onClick={() => setActiveTab('details')} className={`${scrollableNavItemClasses} ${compactNavTabClasses} py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'details' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Detalhes</button>
+                                <button onClick={() => setActiveTab('sales')} className={`${scrollableNavItemClasses} ${compactNavTabClasses} py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'sales' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Vendas</button>
+                                <button onClick={() => setActiveTab('service')} className={`${scrollableNavItemClasses} ${compactNavTabClasses} py-3 px-1 border-b-2 font-semibold text-sm ${activeTab === 'service' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-brand-gray-500 hover:text-brand-gray-700'}`}>Atendimento</button>
+                            </ScrollableRow>
                         </div>
                         
                         <div className="p-6 space-y-6 overflow-y-auto">
