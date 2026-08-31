@@ -50,6 +50,13 @@ class ApropriacaoOsService {
     );
   }
 
+  async atualizar(projetoId: string, apontamentoId: string, payload: CriarApontamentoPayload) {
+    return axiosApiService.patch<ApontamentoOs>(
+      `${ENDPOINTS.PROJETOS}/${projetoId}/apontamentos/${apontamentoId}`,
+      payload
+    );
+  }
+
   async obterResumo(projetoId: string) {
     return axiosApiService.get<ResultadoOsCalculado>(
       `${ENDPOINTS.PROJETOS}/${projetoId}/apropriacao/resumo`
