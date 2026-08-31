@@ -115,19 +115,19 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
 
   return (
     <div
-      className={`rounded-2xl border-2 p-6 shadow-soft bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 ${
+      className={`rounded-xl border bg-white dark:bg-dark-card p-5 ${
         estouro.estourou
           ? 'border-red-300 dark:border-red-700'
-          : 'border-blue-200 dark:border-blue-800'
+          : 'border-gray-200 dark:border-dark-border'
       }`}
     >
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white">Prazo e estimativa</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Prazo e estimativa</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {calcularDiasEstimadosTexto(diariasOrcadas, projeto.dataInicio, projeto.dataPrevisao)}
             {' · '}
-            Custo de tempo: <strong>{formatMoeda(custoOrcado)}</strong>
+            Custo de tempo: <strong className="text-gray-800 dark:text-gray-200">{formatMoeda(custoOrcado)}</strong>
           </p>
         </div>
         {canEdit && (
@@ -135,7 +135,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
             type="button"
             onClick={() => (editing ? void handleSave() : setEditing(true))}
             disabled={saving || loading}
-            className="px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {editing ? (saving ? 'Salvando...' : 'Salvar') : 'Editar'}
           </button>
@@ -143,7 +143,7 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
       </div>
 
       {editing && canEdit && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4 p-4 bg-white/70 dark:bg-dark-card/50 rounded-xl border border-blue-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4 p-4 bg-gray-50 dark:bg-dark-bg/50 rounded-lg border border-gray-200 dark:border-dark-border">
           <label className="text-xs font-medium text-gray-600">
             Data limite
             <input
@@ -227,9 +227,9 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
               {diasCorridos} / {diariasOrcadas || '—'}
             </span>
           </div>
-          <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${estouro.motivo === 'dias_corridos' ? 'bg-red-500' : 'bg-blue-500'}`}
+              className={`h-full transition-all ${estouro.motivo === 'dias_corridos' ? 'bg-red-500' : 'bg-blue-600'}`}
               style={{ width: `${pctDiasCorridos}%` }}
             />
           </div>
@@ -241,9 +241,9 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
               {formatQuantidade(diariasRealizadas, 'd')} / {formatQuantidade(diariasOrcadas, 'd')}
             </span>
           </div>
-          <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${estouro.motivo === 'diarias' ? 'bg-red-500' : 'bg-emerald-500'}`}
+              className={`h-full transition-all ${estouro.motivo === 'diarias' ? 'bg-red-500' : 'bg-blue-600'}`}
               style={{ width: `${pctDiarias}%` }}
             />
           </div>
@@ -251,14 +251,14 @@ const OsPrazoEstimadoCard: React.FC<OsPrazoEstimadoCardProps> = ({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="text-gray-600 dark:text-gray-400">
+        <span className="text-gray-500 dark:text-gray-400">
           Data limite:{' '}
-          <strong className="text-blue-700 dark:text-blue-400">
+          <strong className="text-gray-900 dark:text-white">
             {formatDateDisplay(projeto.dataPrevisao as string) || '—'}
           </strong>
         </span>
         {estouro.estourou && (
-          <span className="text-xs font-bold text-red-700 bg-red-100 px-2 py-1 rounded-md">
+          <span className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md">
             Estouro de prazo
           </span>
         )}
