@@ -20,7 +20,9 @@
 # 3. Fora da LAN: Tailscale (IP 100.74.201.62) — NÃO use Funnel público
 # 4. docker compose -f docker-compose.prod.yml --env-file .env up -d
 # 5. Frontend: rebuild se mudar URL (--build-arg VITE_API_URL=http://app.s3eengenharia.com.br)
-# 6. EvoGo DB (volume postgres antigo): CREATE DATABASE evogo_auth; evogo_users;
+# 6. Postgres EvoGo dedicado (`postgres-evogo`): evogo_auth + evogo_users
+#    Cutover a partir do Postgres do ERP: ./docker/postgres/migrate-evogo-to-dedicated.sh
+#    Sessão WhatsApp: volume evolution_go_dbdata (NÃO apagar)
 # ============================================
 
 services:
@@ -44,6 +46,7 @@ services:
     networks:
       - traefik
 
+  # Postgres do ERP (só s3e_producao). Sem evogo_* / evolution legado.
   postgres:
     image: postgres:16-alpine
     container_name: s3e-postgres-prod
@@ -55,15 +58,50 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${DB_MAX_CONNECTIONS:-150}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
-      - ./docker/postgres/02-evolution-database.sql:/docker-entrypoint-initdb.d/02-evolution-database.sql:ro
-      - ./docker/postgres/03-evolution-go-databases.sql:/docker-entrypoint-initdb.d/03-evolution-go-databases.sql:ro
     networks:
       - traefik
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Postgres dedicado Evolution Go (evogo_auth + evogo_users). Isola max_connections do ERP.
+  postgres-evogo:
+    image: postgres:16-alpine
+    container_name: s3e-postgres-evogo-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      # Defina EVOGO_DB_USER / EVOGO_DB_PASSWORD no .env (evite ${A:-${B}} — quebra linter YAML).
+      POSTGRES_USER: ${EVOGO_DB_USER:-evogo}
+      POSTGRES_PASSWORD: ${EVOGO_DB_PASSWORD}
+      # DB default; o init cria também evogo_auth.
+      POSTGRES_DB: evogo_users
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=${EVOGO_DB_MAX_CONNECTIONS:-100}"
+    volumes:
+      - postgres_evogo_data:/var/lib/postgresql/data
+      - ./docker/postgres/evogo-init:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups
+    networks:
+      - traefik
+    healthcheck:
+      # $$POSTGRES_USER = variável do container (env_file/.environment), não interpolação Compose.
+      test:
+        - CMD-SHELL
+        - "pg_isready -U \"$$POSTGRES_USER\" -d evogo_users"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -95,8 +133,9 @@ services:
       SERVER_PORT: "8080"
       CLIENT_NAME: ${EVOLUTION_GO_CLIENT_NAME:-s3e}
       GLOBAL_API_KEY: ${WHATSAPP_PROVIDER_API_KEY:-}
-      POSTGRES_AUTH_DB: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/evogo_auth?sslmode=disable
-      POSTGRES_USERS_DB: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/evogo_users?sslmode=disable
+      # Senha obrigatória no .env como EVOGO_DB_PASSWORD (mesmo valor do postgres-evogo).
+      POSTGRES_AUTH_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD}@postgres-evogo:5432/evogo_auth?sslmode=disable"
+      POSTGRES_USERS_DB: "postgresql://${EVOGO_DB_USER:-evogo}:${EVOGO_DB_PASSWORD}@postgres-evogo:5432/evogo_users?sslmode=disable"
       DATABASE_SAVE_MESSAGES: "false"
       WADEBUG: ${EVOLUTION_GO_WADEBUG:-INFO}
       LOGTYPE: console
@@ -113,7 +152,7 @@ services:
       - evolution_go_logs:/app/logs
       - "/etc/localtime:/etc/localtime:ro"
     depends_on:
-      postgres:
+      postgres-evogo:
         condition: service_healthy
     networks:
       - traefik
@@ -127,7 +166,9 @@ services:
       - "traefik.http.middlewares.s3e-evogo-strip.stripprefix.prefixes=/manager"
       - "traefik.http.services.s3e-evogo.loadbalancer.server.port=8080"
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1" ]
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://127.0.0.1:8080/server/ok >/dev/null 2>&1 || exit 1"
       interval: 30s
       timeout: 10s
       retries: 5
@@ -284,6 +325,8 @@ volumes:
   postgres_data:
     name: apps_postgres_data
     external: true
+  postgres_evogo_data:
+    driver: local
   backend_uploads:
     name: apps_backend_uploads
     external: true
