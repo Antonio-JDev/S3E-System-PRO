@@ -11,6 +11,7 @@ import {
 } from '../services/projetos.service';
 import { KitDisponibilidadeService } from '../services/kitDisponibilidade.service';
 import { entrarNaFilaSeAplicavel } from '../services/vistoriaCelesc.service';
+import { alterouCamposPlanejamentoOs } from '../utils/projetosUpdatePlanejamento.util';
 
 /** GET /api/projetos/busca?q=&limit=20 — busca OS para compra avulsa e vínculos */
 export const buscarProjetos = async (req: Request, res: Response): Promise<void> => {
@@ -150,6 +151,9 @@ export const getProjetos = async (req: Request, res: Response): Promise<void> =>
         },
         responsavel: {
           select: { id: true, name: true, setor: true, role: true }
+        },
+        concluidoPor: {
+          select: { id: true, name: true }
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -159,6 +163,9 @@ export const getProjetos = async (req: Request, res: Response): Promise<void> =>
       ...p,
       responsavel: p.responsavel
         ? { id: p.responsavel.id, nome: p.responsavel.name, setor: p.responsavel.setor, role: p.responsavel.role }
+        : null,
+      concluidoPor: p.concluidoPor
+        ? { id: p.concluidoPor.id, nome: p.concluidoPor.name }
         : null,
     }));
 
@@ -224,6 +231,12 @@ export const getProjetoById = async (req: Request, res: Response): Promise<void>
         },
         notasFiscais: {
           orderBy: { dataEmissao: 'desc' }
+        },
+        responsavel: {
+          select: { id: true, name: true, setor: true, role: true }
+        },
+        concluidoPor: {
+          select: { id: true, name: true }
         }
       }
     });
@@ -238,7 +251,15 @@ export const getProjetoById = async (req: Request, res: Response): Promise<void>
 
     res.json({
       success: true,
-      data: projeto
+      data: {
+        ...projeto,
+        responsavel: projeto.responsavel
+          ? { id: projeto.responsavel.id, nome: projeto.responsavel.name, setor: projeto.responsavel.setor, role: projeto.responsavel.role }
+          : null,
+        concluidoPor: projeto.concluidoPor
+          ? { id: projeto.concluidoPor.id, nome: projeto.concluidoPor.name }
+          : null,
+      }
     });
   } catch (error) {
     console.error('Erro ao buscar projeto:', error);
@@ -541,9 +562,7 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    if (!isConcluido && Object.keys(data).some((k) =>
-      ['responsavelId', 'dataInicio', 'dataPrevisao', 'horasEngenhariaOrcadas', 'diariasEquipeOrcadas'].includes(k)
-    )) {
+    if (!isConcluido && alterouCamposPlanejamentoOs(data)) {
       const merged: CamposPlanejamentoOsInput = {
         responsavelId:
           data.responsavelId !== undefined
@@ -606,9 +625,10 @@ export const updateProjeto = async (req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     console.error('Erro ao atualizar projeto:', error);
-    res.status(500).json({ 
+    const message = error instanceof Error ? error.message : 'Erro ao atualizar projeto';
+    res.status(400).json({
       success: false,
-      error: 'Erro ao atualizar projeto' 
+      error: message,
     });
   }
 };
@@ -676,12 +696,11 @@ export const reverterProjetoStatus = async (req: Request, res: Response): Promis
     const { status } = req.body as { status: string };
     const user = (req as any).user;
     const role = String(user?.role || '').toLowerCase();
-    const isAdminUser = user?.isAdmin === true;
 
-    if (role !== 'desenvolvedor' && role !== 'admin' && role !== 'administrador' && !isAdminUser) {
+    if (role === 'eletricista') {
       res.status(403).json({
         success: false,
-        error: 'Apenas administradores podem reverter o status da ordem de serviço.',
+        error: 'Eletricistas não podem reverter o status da ordem de serviço.',
       });
       return;
     }
@@ -1442,5 +1461,48 @@ export const getProjetosCockpitResumo = async (req: Request, res: Response): Pro
   } catch (error) {
     console.error('Erro ao buscar cockpit-resumo em lote:', error);
     res.status(500).json({ success: false, error: 'Erro ao buscar resumo do cockpit' });
+  }
+};
+
+/** GET /api/projetos/:id/alocacao-ponto?data=YYYY-MM-DD */
+export const getAlocacaoPontoOs = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const data = typeof req.query.data === 'string' ? req.query.data : undefined;
+    const { obterAlocacaoPontoOs } = await import('../services/horasCustoContabil.service');
+    const resultado = await obterAlocacaoPontoOs(id, data);
+    if (!resultado) {
+      res.status(404).json({ success: false, error: 'Ordem de serviço não encontrada' });
+      return;
+    }
+    res.json({ success: true, data: resultado });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao buscar alocação/ponto';
+    const statusCode = message.includes('inválid') ? 400 : 500;
+    console.error('Erro ao buscar alocação-ponto da OS:', error);
+    res.status(statusCode).json({ success: false, error: message });
+  }
+};
+
+/** GET /api/projetos/relatorios/horas-custo-contabil.csv?competencia=YYYY-MM&projetoId= */
+export const getHorasCustoContabilCsv = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const competencia = String(req.query.competencia || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(competencia)) {
+      res.status(400).json({ success: false, error: 'Parâmetro competencia é obrigatório (YYYY-MM)' });
+      return;
+    }
+    const projetoId = typeof req.query.projetoId === 'string' ? req.query.projetoId : undefined;
+    const { gerarLinhasHorasCustoContabil, linhasParaCsv } = await import('../services/horasCustoContabil.service');
+    const linhas = await gerarLinhasHorasCustoContabil({ competencia, projetoId });
+    const csv = linhasParaCsv(linhas);
+    const suffix = projetoId ? `-${projetoId.slice(0, 8)}` : '';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="horas-custo-contabil-${competencia}${suffix}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao gerar CSV contábil';
+    console.error('Erro ao gerar CSV horas-custo-contabil:', error);
+    res.status(message.includes('Competência') ? 400 : 500).json({ success: false, error: message });
   }
 };
