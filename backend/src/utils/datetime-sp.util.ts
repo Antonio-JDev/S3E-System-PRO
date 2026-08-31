@@ -66,6 +66,43 @@ export function chaveDiaUtc(d: Date): string {
   return `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
+export function chaveDiaCivil(ano: number, mes: number, dia: number): string {
+  return `${ano}-${pad2(mes)}-${pad2(dia)}`;
+}
+
+/** Dia civil atual em Brasília (America/Sao_Paulo). */
+export function ymdCivilBrasilia(ref: Date = new Date()): { ano: number; mes: number; dia: number } {
+  const s = ref.toLocaleString('en-CA', { timeZone: 'America/Sao_Paulo', hour12: false });
+  const [ano, mes, dia] = s.slice(0, 10).split('-').map(Number);
+  return { ano, mes, dia };
+}
+
+/** Admissão salva como Date UTC (input YYYY-MM-DD → meio-dia/meia-noite UTC). */
+export function ymdDeDataAdmissao(dataAdmissao: Date | string | null | undefined): string | null {
+  if (!dataAdmissao) return null;
+  const d = dataAdmissao instanceof Date ? dataAdmissao : new Date(dataAdmissao);
+  if (Number.isNaN(d.getTime())) return null;
+  return chaveDiaCivil(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/**
+ * Falta / débito de jornada só após a admissão e até o dia civil de hoje (Brasília).
+ * Dias futuros e pré-admissão não entram no banco nem na dívida do mês.
+ */
+export function diaElegivelParaFalta(
+  ano: number,
+  mes: number,
+  dia: number,
+  opts?: { dataAdmissao?: Date | string | null; agora?: Date },
+): boolean {
+  const hoje = ymdCivilBrasilia(opts?.agora);
+  const chave = chaveDiaCivil(ano, mes, dia);
+  if (chave > chaveDiaCivil(hoje.ano, hoje.mes, hoje.dia)) return false;
+  const adm = ymdDeDataAdmissao(opts?.dataAdmissao);
+  if (adm && chave < adm) return false;
+  return true;
+}
+
 const DIAS_SEMANA_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'] as const;
 
 export function labelDiaSemana(dow: number): string {
