@@ -14,11 +14,30 @@ jest.mock('../lib/prisma', () => ({
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    comentarioConferenciaPontoRh: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   },
 }));
 
 jest.mock('./bancoHorasExcesso.service', () => ({
   sincronizarExcessoCompetencia: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('./bancoHorasExtrato.service', () => ({
+  sincronizarExtratoBancoHorasCompetencia: jest.fn().mockResolvedValue(null),
+  sincronizarExtratosAposImportXls: jest.fn().mockResolvedValue(0),
+}));
+
+jest.mock('./rhComentarioConferencia.service', () => ({
+  metricasAvaliacaoDeRegistro: jest.fn().mockReturnValue({
+    minutosAtraso: 0,
+    minutosHorasDevidas: 0,
+    minutosExtra: 0,
+    minutosFaltaIntegral: 0,
+  }),
+  reaplicarBancoAvaliacaoAposMudancaMetricas: jest.fn().mockResolvedValue(undefined),
+  sincronizarBancoAvaliacoesCompetencia: jest.fn().mockResolvedValue(undefined),
 }));
 
 const p = prisma as unknown as {
@@ -28,6 +47,7 @@ const p = prisma as unknown as {
   };
   funcionario: { findUnique: jest.Mock };
   registroPonto: { findMany: jest.Mock; update: jest.Mock };
+  comentarioConferenciaPontoRh: { findMany: jest.Mock };
 };
 
 describe('configuracaoPonto.service', () => {
@@ -43,6 +63,7 @@ describe('configuracaoPonto.service', () => {
       permitirHorasExtras100: false,
     });
     p.registroPonto.findMany.mockResolvedValue([]);
+    p.comentarioConferenciaPontoRh.findMany.mockResolvedValue([]);
   });
 
   it('buscarPorFuncionario delega ao Prisma', async () => {
