@@ -33,6 +33,7 @@ import CidadeAutocomplete from '../components/ui/CidadeAutocomplete';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import ModalItensKit from '../components/ModalItensKit';
 import { AuthContext } from '../contexts/AuthContext';
+import BotaoWhatsAppCliente from '../components/BotaoWhatsAppCliente';
 import {
     AlertDialog,
     AlertDialogAction,
@@ -2851,6 +2852,10 @@ const EditarOrcamentoPage: React.FC<EditarOrcamentoPageProps> = ({ toggleSidebar
                             Atualize as informações do orçamento
                         </p>
                     </div>
+                    <BotaoWhatsAppCliente
+                        telefone={clientes.find((c) => c.id === formState.clienteId)?.telefone}
+                        nome={clientes.find((c) => c.id === formState.clienteId)?.nome}
+                    />
                 </div>
 
                 {error && (
