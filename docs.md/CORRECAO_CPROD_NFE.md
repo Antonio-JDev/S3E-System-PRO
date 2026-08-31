@@ -1,6 +1,7 @@
 # 🔧 Correção Campo cProd NF-e - Guia de Aplicação Docker
 
 ## 📋 **Problema Resolvido**
+
 - ❌ Campo `<cProd>` vazio na NF-e para itens de cotação
 - ❌ XML inválido resultante
 - ❌ Falha na emissão de NF-e
@@ -8,6 +9,7 @@
 ## ✅ **Solução Implementada**
 
 ### **1. Adição de Campo SKU às Cotações**
+
 ```sql
 ALTER TABLE "cotacoes" ADD COLUMN "sku" TEXT;
 CREATE UNIQUE INDEX "cotacoes_sku_key" ON "cotacoes"("sku");
@@ -15,16 +17,18 @@ CREATE INDEX "cotacoes_sku_idx" ON "cotacoes"("sku");
 ```
 
 ### **2. Lógica Robusta para cProd**
+
 ```typescript
 // Prioridades para geração do código do produto:
 1. SKU do material (estoque físico)
-2. SKU da cotação (banco frio)  
+2. SKU da cotação (banco frio)
 3. COT- + ID da cotação
 4. COT- + nome formatado da cotação
 5. COT- + ID do item (fallback)
 ```
 
 ### **3. Geração Automática de SKU**
+
 - ✅ Cotações novas: SKU gerado automaticamente
 - ✅ Cotações existentes: Script para popular SKUs
 - ✅ Formato padrão: `COT-XXX` (6 caracteres)
@@ -32,6 +36,7 @@ CREATE INDEX "cotacoes_sku_idx" ON "cotacoes"("sku");
 ## 🚀 **Instruções para Aplicar no Docker**
 
 ### **Passo 1: Reconstruir Backend**
+
 ```bash
 # Parar containers
 docker-compose down
@@ -44,6 +49,7 @@ docker-compose up -d
 ```
 
 ### **Passo 2: Aplicar Migration**
+
 ```bash
 # Aplicar migration do campo SKU
 docker-compose exec backend npx prisma db push
@@ -53,12 +59,14 @@ docker-compose exec backend npx prisma db pull
 ```
 
 ### **Passo 3: Gerar SKUs para Cotações Existentes**
+
 ```bash
 # Executar script de geração de SKUs
 docker-compose exec backend npm run gerar:skus-cotacoes
 ```
 
 ### **Passo 4: Verificar Funcionamento**
+
 ```bash
 # Ver logs do backend
 docker-compose logs backend -f
@@ -77,6 +85,7 @@ curl -X POST http://localhost:3001/api/cotacoes \
 ## 🔍 **Validações**
 
 ### **1. Verificar Campo SKU Criado**
+
 ```sql
 -- Conectar ao PostgreSQL do container
 \d cotacoes
@@ -85,32 +94,38 @@ curl -X POST http://localhost:3001/api/cotacoes \
 ```
 
 ### **2. Verificar SKUs Gerados**
+
 ```sql
 SELECT nome, sku FROM cotacoes WHERE sku IS NOT NULL LIMIT 10;
 ```
 
 ### **3. Testar NF-e com Cotação**
+
 1. Criar orçamento com item de cotação
-2. Gerar venda do orçamento  
+2. Gerar venda do orçamento
 3. Emitir NF-e da venda
 4. Verificar campo `<cProd>` preenchido no XML
 
 ## ⚠️ **Pontos de Atenção**
 
 ### **1. Backup antes da Migration**
+
 ```bash
 # Fazer backup do banco antes de aplicar
 docker-compose exec postgres pg_dump -U postgres s3e_portfolio_dev > backup_pre_sku.sql
 ```
 
 ### **2. Monitorar Logs Durante Script**
+
 ```bash
 # Acompanhar execução do script
 docker-compose logs backend -f | grep "SKU Cotações"
 ```
 
 ### **3. Rollback se Necessário**
+
 Se algo der errado:
+
 ```bash
 # Remover campo SKU se necessário
 docker-compose exec backend npx prisma db push --schema=schema_backup.prisma
@@ -119,6 +134,7 @@ docker-compose exec backend npx prisma db push --schema=schema_backup.prisma
 ## 📊 **Estatísticas Esperadas**
 
 Após aplicação completa:
+
 - ✅ **100% das cotações** com SKU único
 - ✅ **0 campos cProd vazios** na NF-e
 - ✅ **XMLs válidos** para todos os tipos de item
@@ -127,6 +143,7 @@ Após aplicação completa:
 ## 🎯 **Testes Recomendados**
 
 ### **1. Teste Cotação Nova**
+
 ```javascript
 // Criar cotação via API
 POST /api/cotacoes
@@ -139,6 +156,7 @@ POST /api/cotacoes
 ```
 
 ### **2. Teste NF-e com Cotação**
+
 ```javascript
 // 1. Criar orçamento com item do banco frio
 // 2. Gerar venda do orçamento
@@ -151,6 +169,7 @@ POST /api/cotacoes
 ```
 
 ### **3. Teste Kit Unificado**
+
 ```javascript
 // 1. Criar orçamento com kit customizado
 // 2. Incluir itens de cotação no kit
@@ -161,18 +180,21 @@ POST /api/cotacoes
 ## 🔧 **Troubleshooting**
 
 ### **Erro: "sku does not exist in type"**
+
 ```bash
 # Regenerar cliente Prisma
 docker-compose exec backend npx prisma generate
 ```
 
 ### **Erro: "duplicate key value violates unique constraint"**
+
 ```bash
 # Limpar SKUs duplicados manualmente
 docker-compose exec backend npx prisma db seed
 ```
 
 ### **Campo cProd ainda vazio**
+
 ```bash
 # Verificar logs do nfe.service.ts
 docker-compose logs backend | grep "cProd Fix"
@@ -181,7 +203,7 @@ docker-compose logs backend | grep "cProd Fix"
 ## ✅ **Checklist Final**
 
 - [ ] Migration aplicada com sucesso
-- [ ] Cliente Prisma regenerado  
+- [ ] Cliente Prisma regenerado
 - [ ] Script de SKUs executado
 - [ ] Cotações existentes com SKU
 - [ ] Cotações novas gerando SKU automaticamente
@@ -194,6 +216,7 @@ docker-compose logs backend | grep "cProd Fix"
 ## 📝 **Resumo das Alterações**
 
 ### **Arquivos Modificados:**
+
 - ✅ `prisma/schema.prisma` - Campo SKU adicionado
 - ✅ `nfe.service.ts` - Lógica robusta para cProd
 - ✅ `cotacoesController.ts` - Geração automática de SKU
@@ -201,6 +224,7 @@ docker-compose logs backend | grep "cProd Fix"
 - ✅ `package.json` - Script para popular SKUs
 
 ### **Arquivos Criados:**
+
 - ✅ `migrations/20260303195800_add_sku_to_cotacoes/` - Migration SQL
 - ✅ `scripts/gerarSKUsCotacoes.ts` - Script de população
 - ✅ `docs.md/CORRECAO_CPROD_NFE.md` - Este guia
