@@ -1,6 +1,17 @@
 import { WORK_SHIFT_TEMPLATES_44H, calculateMonthlyTotal, calculateTimeDifference, jornadaMinutosPorDia } from './workshift.util';
 
 describe('workshift.util', () => {
+  it('calcula 8h48 na jornada S3E 07:30/17:18', () => {
+    expect(
+      jornadaMinutosPorDia({
+        entrada1: '07:30',
+        saida1: '12:00',
+        entrada2: '13:00',
+        saida2: '17:18',
+      }),
+    ).toBe(528);
+  });
+
   it('calcula minutos de jornada diária corretamente', () => {
     const minutos = jornadaMinutosPorDia({
       entrada1: '08:00',
