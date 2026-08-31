@@ -377,6 +377,41 @@ export const rhService = {
     async aprovarDiaDivida(diaId: string) {
         return await axiosApiService.post(`/api/rh/divida-horas/dia/${diaId}/aprovar`, {});
     },
+
+    async obterConfigExportacaoContabilidade() {
+        return await axiosApiService.get<{
+            config: {
+                codigoEmpresaContabil: string | null;
+                empresaFiscalIdFolha: string | null;
+                percentualHeFolhaContabil: number;
+                rubricasFolhaContabil: Record<string, number>;
+                empresaFiscal: { id: string; razaoSocial: string; cnpj: string } | null;
+            };
+            empresasFiscais: Array<{ id: string; razaoSocial: string; cnpj: string; nomeFantasia?: string | null }>;
+        }>('/api/rh/exportacao-contabilidade/config');
+    },
+
+    async salvarConfigExportacaoContabilidade(data: {
+        codigoEmpresaContabil?: string | null;
+        empresaFiscalIdFolha?: string | null;
+        percentualHeFolhaContabil?: number;
+        rubricasFolhaContabil?: Record<string, number>;
+    }) {
+        return await axiosApiService.put('/api/rh/exportacao-contabilidade/config', data);
+    },
+
+    async previewExportacaoFolhaContabilidade(mes: string) {
+        return await axiosApiService.get<{
+            totalColaboradores: number;
+            colaboradoresComDados: number;
+            avisos: string[];
+        }>(`/api/rh/folha/${mes}/exportar-contabilidade`, { preview: '1' });
+    },
+
+    /** Download XLS layout LANÇAMENTOS FOLHA para contabilidade */
+    async exportarFolhaContabilidade(mes: string) {
+        return await axiosApiService.getBlob(`/api/rh/folha/${mes}/exportar-contabilidade`);
+    },
 };
 
 // ========== BENEFÍCIOS ==========
@@ -450,6 +485,8 @@ export const veiculosService = {
         ano: number;
         status?: string;
         kmAtual?: number;
+        dataVencimentoIpva?: string;
+        dataVencimentoLicenciamento?: string;
     }) {
         return await axiosApiService.post('/api/veiculos', data);
     },
@@ -461,6 +498,8 @@ export const veiculosService = {
         ano: number;
         status?: string;
         kmAtual?: number;
+        dataVencimentoIpva?: string | null;
+        dataVencimentoLicenciamento?: string | null;
     }>) {
         return await axiosApiService.put(`/api/veiculos/${id}`, data);
     },
@@ -471,6 +510,18 @@ export const veiculosService = {
     
     async obterMetricas() {
         return await axiosApiService.get('/api/veiculos/metricas');
+    },
+
+    async obterConsumo(id: string) {
+        return await axiosApiService.get(`/api/veiculos/${id}/consumo`);
+    },
+
+    async obterAlertasIpva(mes?: number, ano?: number) {
+        const params = new URLSearchParams();
+        if (mes != null) params.set('mes', String(mes));
+        if (ano != null) params.set('ano', String(ano));
+        const q = params.toString();
+        return await axiosApiService.get(`/api/veiculos/alertas-ipva${q ? `?${q}` : ''}`);
     }
 };
 
@@ -492,6 +543,7 @@ export const gastosVeiculoService = {
         valor: number;
         data: string;
         km?: number;
+        litros?: number;
         obraId?: string;
         responsavel?: string;
     }) {
@@ -504,6 +556,7 @@ export const gastosVeiculoService = {
         valor: number;
         data: string;
         km?: number;
+        litros?: number;
         obraId?: string;
         responsavel?: string;
     }>) {
