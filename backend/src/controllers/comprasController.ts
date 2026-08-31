@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { XMLParser } from 'fast-xml-parser';
 import { ComprasService, CompraPayload } from '../services/compras.service';
-import { compararNomesProdutos } from '../utils/stringUtils';
+import { matchMaterial, normalizarEan, normalizarCodigoFornecedor } from '../services/materialFornecedorAlias.service';
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_'
@@ -409,25 +409,17 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
       valorUnit: number;
       valorTotal: number;
       sku?: string;
+      codigoFornecedor?: string;
+      ean?: string;
       materialId?: string;
     }> = [];
-    // ✅ NOVO: Buscar todos os materiais existentes para match automático
-    const todosMateriais = await prisma.material.findMany({
-      select: { 
-        id: true, 
-        nome: true, 
-        sku: true, 
-        unidadeMedida: true, 
-        preco: true, 
-        valorVenda: true,
-        estoque: true,
-        categoria: true,
-        ncm: true,
-        descricao: true,
-        imagemUrl: true // ✅ Incluir imagem para aparecer no match automático
-      }
-    });
-    console.log(`🔍 Buscando match automático para ${todosMateriais.length} materiais existentes...`);
+
+    const cnpjEmit = String(nfe.emit?.CNPJ || '').replace(/\D/g, '');
+    let fornecedorId: string | undefined;
+    if (cnpjEmit) {
+      const fornecedores = await prisma.fornecedor.findMany({ select: { id: true, cnpj: true } });
+      fornecedorId = fornecedores.find((f) => String(f.cnpj || '').replace(/\D/g, '') === cnpjEmit)?.id;
+    }
 
     const det = Array.isArray(nfe.det) ? nfe.det : nfe.det ? [nfe.det] : [];
     for (const item of det) {
@@ -437,29 +429,17 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
         const ncmString = ncmValue ? String(ncmValue) : '';
         
         const nomeProduto = item.prod.xProd || '';
-        
-        // ✅ NOVO: Tentar fazer match automático por nome normalizado
-        let materialId: string | undefined = undefined;
-        let materialMatch: any = null;
-        
-        if (nomeProduto) {
-          const materiaisMatch = todosMateriais.filter(m => 
-            compararNomesProdutos(m.nome, nomeProduto)
-          );
-          
-          if (materiaisMatch.length === 1) {
-            // Match exato encontrado
-            materialId = materiaisMatch[0].id;
-            materialMatch = materiaisMatch[0];
-            console.log(`✅ Match automático encontrado: "${nomeProduto}" → Material ID: ${materialId}`);
-          } else if (materiaisMatch.length > 1) {
-            // Múltiplos matches - não vincular automaticamente, deixar usuário escolher
-            console.log(`⚠️ Múltiplos matches encontrados para "${nomeProduto}" (${materiaisMatch.length}). Usuário deve escolher manualmente.`);
-          } else {
-            // Nenhum match encontrado
-            console.log(`🆕 Nenhum match encontrado para "${nomeProduto}". Será criado novo material.`);
-          }
-        }
+        const codigoFornecedor = normalizarCodigoFornecedor(item.prod.cProd ? String(item.prod.cProd) : null);
+        const ean = normalizarEan(item.prod.cEAN || item.prod.cEANTrib);
+
+        const match = await matchMaterial(prisma as any, {
+          fornecedorId,
+          nomeProduto,
+          codigoFornecedor,
+          ean,
+        });
+        const materialId = match?.material.id;
+        const materialMatch = match?.material || null;
         
         // Extrair unidade de medida do XML (uCom = unidade comercial, uTrib = unidade tributável)
         const unidadeMedida = item.prod.uCom || item.prod.uTrib || 'un';
@@ -502,13 +482,15 @@ export const parseXML = async (req: Request, res: Response): Promise<void> => {
           quantidade: parseFloat(item.prod.qCom || '0'),
           valorUnit: parseFloat(item.prod.vUnCom || '0'),
           valorTotal: parseFloat(item.prod.vProd || '0'),
-          sku: item.prod.cProd || item.prod.cEAN || item.prod.cEANTrib || undefined,
+          sku: codigoFornecedor || ean || undefined,
+          codigoFornecedor: codigoFornecedor || undefined,
+          ean: ean || undefined,
           unidadeMedida: unidadeMedidaNormalizada,
-          materialId, // ✅ ID do material se match automático encontrado
-          precisaConversao: precisaConversao, // Flag para indicar que precisa conversão KM -> m
+          materialId,
+          precisaConversao: precisaConversao,
+          matchTipo: match?.tipo || null,
         };
         
-        // Adicionar campos extras apenas se existirem (para o frontend)
         if (materialMatch) {
           (itemData as any).materialVinculado = materialMatch;
           (itemData as any).matchAutomatico = !!materialId;
